@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.ui;
 
 import android.app.Activity;
 import android.content.res.ColorStateList;
@@ -11,6 +11,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.util.List;
+import org.pimalaya.R;
 
 /**
  * The page the app shows one item on: a scroll of sections, each one

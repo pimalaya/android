@@ -18,7 +18,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.pimalaya.MainActivity;
-import org.pimalaya.PillField;
 import org.pimalaya.R;
 import org.pimalaya.calendar.PhoneCalendars;
 import org.pimalaya.client.Account;
@@ -31,6 +30,7 @@ import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.sync.BackgroundCheck;
+import org.pimalaya.ui.PillField;
 
 /**
  * The connection wizard behind the auth panel: the email (or server)

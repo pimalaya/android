@@ -106,6 +106,13 @@ import org.pimalaya.sync.SyncRunner;
 import org.pimalaya.sync.SyncScope;
 import org.pimalaya.sync.SyncStamps;
 import org.pimalaya.sync.SyncSteps;
+import org.pimalaya.ui.Avatar;
+import org.pimalaya.ui.DeletedItemsPage;
+import org.pimalaya.ui.FilterPage;
+import org.pimalaya.ui.LinkedSection;
+import org.pimalaya.ui.ListHeader;
+import org.pimalaya.ui.SyncDock;
+import org.pimalaya.ui.Ui;
 
 /**
  * Single-activity host walking the app's screens through a ViewFlipper.
@@ -141,8 +148,8 @@ public class MainActivity extends Activity {
     public static final int PANEL_FILES = 9;
     private static final int PANEL_AUTH = 20;
     public static final int PANEL_ACCOUNT = 21;
-    static final int PANEL_FILTER = 22;
-    static final int PANEL_DELETED = 23;
+    public static final int PANEL_FILTER = 22;
+    public static final int PANEL_DELETED = 23;
 
     /**
      * The domain the app opens on, and the one every flow that finishes
@@ -2226,7 +2233,7 @@ public class MainActivity extends Activity {
      * the loop runs replans them, which is how a pass or a step
      * reaches a loop under way.
      */
-    void fillMail() {
+    public void fillMail() {
         replanBodies = true;
         if (filling || !foreground || syncing || !wifi()) {
             return;
@@ -3097,7 +3104,7 @@ public class MainActivity extends Activity {
      * form out onto every replica.
      */
     /** The merged contact row holding a card of this key, null for none. */
-    Group contactGroupOf(String linkId) {
+    public Group contactGroupOf(String linkId) {
         return contactsList.groupOf(linkId);
     }
 
@@ -3106,7 +3113,7 @@ public class MainActivity extends Activity {
      * occurrence, read off the store on the io executor; {@code gone} runs
      * when the store holds it no more.
      */
-    void openEvent(String collection, String linkId, Runnable gone) {
+    public void openEvent(String collection, String linkId, Runnable gone) {
         io.execute(
                 () -> {
                     EventStore.StoredCalendar calendar = null;
@@ -3416,7 +3423,7 @@ public class MainActivity extends Activity {
      * auth config options), so long names and emails never wrap into
      * one unreadable line.
      */
-    CharSequence bookLabel(String name, String email) {
+    public CharSequence bookLabel(String name, String email) {
         android.text.SpannableString label = new android.text.SpannableString(name + "\n" + email);
         int start = name.length() + 1;
         label.setSpan(
@@ -3773,7 +3780,7 @@ public class MainActivity extends Activity {
     }
 
     /** Fades the bar's title in or out as a large title leaves or returns. */
-    void showBarTitle(boolean shown) {
+    public void showBarTitle(boolean shown) {
         if (screen == PANEL_CONTACTS && contactsList.isSelectionMode()
                 || screen == PANEL_MAIL && mailList.isSelectionMode()) {
             return;
@@ -3782,7 +3789,7 @@ public class MainActivity extends Activity {
     }
 
     /** The large title heading one list. */
-    ListHeader headerOf(int panel) {
+    public ListHeader headerOf(int panel) {
         if (panel == PANEL_MAIL) {
             return mailList.header();
         }
@@ -3826,7 +3833,7 @@ public class MainActivity extends Activity {
      * the width animates between the two while the label fades, so the
      * button itself shrinks rather than only losing its text.
      */
-    void foldFab(boolean folded) {
+    public void foldFab(boolean folded) {
         if (folded == fabFolded) {
             return;
         }
@@ -3968,7 +3975,7 @@ public class MainActivity extends Activity {
      * What the filter page lists for Files: the device's folders under the
      * device, and each account that is on with its attachments collection.
      */
-    List<FilterPage.Account> filesRoster() {
+    public List<FilterPage.Account> filesRoster() {
         List<FilterPage.Account> roster = new ArrayList<>();
         List<PimdirCollections.Stored> folders = files.folders();
         if (!folders.isEmpty()) {
@@ -3994,7 +4001,7 @@ public class MainActivity extends Activity {
      * calendars when one is newly ticked. What they untick is hidden and
      * synced no more, its stored items kept.
      */
-    void applyFilter(PimDomain domain, MergedFilter kept, MergedFilter ticks) {
+    public void applyFilter(PimDomain domain, MergedFilter kept, MergedFilter ticks) {
         Map<String, List<String>> taken = new LinkedHashMap<>();
         if (domain != null) {
             for (FilterPage.Account account : filterRoster(domain)) {
@@ -4132,7 +4139,7 @@ public class MainActivity extends Activity {
      * account's and the on-device book as an account of its own. An account
      * holding none is left out, having nothing to tick.
      */
-    List<FilterPage.Account> filterRoster(PimDomain domain) {
+    public List<FilterPage.Account> filterRoster(PimDomain domain) {
         List<String> emails = new ArrayList<>();
         for (AccountEntry account : accounts) {
             if (account.covers(domain) && AccountActivation.enabled(this, account.email)) {

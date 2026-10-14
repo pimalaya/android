@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.ui;
 
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
@@ -23,6 +23,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import org.pimalaya.MainActivity;
+import org.pimalaya.R;
 
 /**
  * The sync dock, on top of the bottom navigation (activity_main.xml): what
@@ -38,44 +40,44 @@ import java.util.List;
  * progress, a row per account and the pass's last lines, kept in memory
  * for the pass under way only.
  */
-final class SyncDock {
+public final class SyncDock {
     /** One account of the pass, as the sheet lists it. */
-    static final class Row {
-        static final int RUNNING = 0;
-        static final int NEXT = 1;
-        static final int DONE = 2;
+    public static final class Row {
+        public static final int RUNNING = 0;
+        public static final int NEXT = 1;
+        public static final int DONE = 2;
 
-        String account;
+        public String account;
 
         /** What it is on while running; the domain or nothing otherwise. */
-        String line;
+        public String line;
 
-        int state;
+        public int state;
     }
 
     /** What the dock says of a pass, or of why one waits. */
-    static final class Pass {
+    public static final class Pass {
         /** The first line: the account, or what runs before one is reached. */
-        String title;
+        public String title;
 
         /** The second line, the domain then the step; null for none. */
-        String line;
+        public String line;
 
         /**
          * The bar at {@code done} of {@code total}, a total of zero running
          * it indeterminate and one below zero hiding it.
          */
-        int done;
+        public int done;
 
-        int total;
+        public int total;
 
         /** How far the pass is through its accounts (*1 of 2*); null for one. */
-        String count;
+        public String count;
 
         /** Whether the pass downloads older mail, the glyph then standing for the spinner. */
-        boolean download;
+        public boolean download;
 
-        List<Row> rows = List.of();
+        public List<Row> rows = List.of();
     }
 
     /** The lines the sheet keeps of a pass. */
@@ -118,26 +120,26 @@ final class SyncDock {
     /** The download glyph's pulse while the background download shows. */
     private ObjectAnimator pulse;
 
-    SyncDock(MainActivity host) {
+    public SyncDock(MainActivity host) {
         this.host = host;
         dock = host.findViewById(R.id.sync_dock);
         dock.setOnClickListener(view -> open());
     }
 
     /** Says whether a list is the screen, where the dock shows (main thread). */
-    void onList(boolean shown) {
+    public void onList(boolean shown) {
         onList = shown;
         render();
     }
 
     /** A pass starts: the last one's lines go. */
-    void started() {
+    public void started() {
         log.clear();
         logVersion++;
     }
 
     /** Shows what a pass is on. */
-    void pass(Pass pass) {
+    public void pass(Pass pass) {
         this.pass = pass;
         render();
     }
@@ -146,7 +148,7 @@ final class SyncDock {
      * Ends the pass, the dock then saying what downloads in the background,
      * if anything; the sheet closes.
      */
-    void synced() {
+    public void synced() {
         pass = null;
         if (sheet != null) {
             sheet.dismiss();
@@ -158,7 +160,7 @@ final class SyncDock {
      * Keeps a line of the pass for the sheet, at its time, the last
      * {@link #LOG} only; a line repeating the last one is dropped.
      */
-    void log(String line) {
+    public void log(String line) {
         if (!log.isEmpty() && log.peekFirst()[1].equals(line)) {
             return;
         }
@@ -173,7 +175,7 @@ final class SyncDock {
     }
 
     /** Says older mail is downloading in the background, while no pass runs. */
-    void filling(boolean shown) {
+    public void filling(boolean shown) {
         if (shown == fill) {
             return;
         }
@@ -190,7 +192,7 @@ final class SyncDock {
      * How many bodies the background download landed of those it planned,
      * the dock's bar while it shows, none for a plan of none.
      */
-    void filled(int landed, int planned) {
+    public void filled(int landed, int planned) {
         fillLanded = landed;
         fillPlanned = planned;
         if (fill) {

@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.ui;
 
 import static org.junit.Assert.assertEquals;
 

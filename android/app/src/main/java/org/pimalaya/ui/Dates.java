@@ -1,10 +1,11 @@
-package org.pimalaya;
+package org.pimalaya.ui;
 
 import android.content.Context;
 import android.text.format.DateFormat;
 
 import java.util.Calendar;
 import java.util.Date;
+import org.pimalaya.R;
 
 /**
  * How the app words a moment: which day it was, how far it is from now,

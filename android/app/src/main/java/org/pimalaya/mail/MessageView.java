@@ -19,8 +19,6 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import org.pimalaya.Avatar;
-import org.pimalaya.Dates;
 import org.pimalaya.MainActivity;
 import org.pimalaya.OpenedFiles;
 import org.pimalaya.R;
@@ -32,6 +30,8 @@ import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.file.FileActions;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.ItemLinks;
+import org.pimalaya.ui.Avatar;
+import org.pimalaya.ui.Dates;
 
 import java.util.ArrayList;
 import java.util.List;

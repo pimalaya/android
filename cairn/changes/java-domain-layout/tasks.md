@@ -24,8 +24,8 @@ Paths are relative to android/. Every step ends with `:app:assembleDebug :app:te
 - [x] contact
 - [x] mail
 - [x] account
-- [ ] ui
-- [ ] shell (org.pimalaya: components, composition root)
+- [x] ui
+- [x] shell (nothing left to move: the nine root classes)
 - [ ] OfflineEngine renamed ContactEngine
 
 ## Phase 2: dependency direction
@@ -87,3 +87,5 @@ Logic found in Java that belongs to Rust, collected while moving.
 - contact: LocalBook ("On this device") is cross-domain (FileStore, FilesList, BackgroundCheck): account or pimdir. Birthdays is contact (ContactsList only). Contact screens reach into ~25 MainActivity members (openGroup, mergeReplicas, openMerged, importContacts...: the phase 4 ContactEditor). Public for tests: BookEntry ctor (AccountsTest), PimdirContacts.Indexed + list (DeletedItemsTest, e2e).
 - mail: MailStore.typed/changed/likePattern are pimdir plumbing (ItemLinks, DeletedItems, FileStore 8 calls); MailDate.toStamp used by PimdirSummary; MailEngine.SCRATCH, withFlag, DELETED pulled into pimdir. MailBodies/MailFill scheduling driven from MainActivity: SyncCoordinator. E2e mail tests stay in root with the harness (about 50 harness members otherwise). Public for tests: MailEngine.SEEN/FLAGGED/Deletion/stageFlag/stageDelete, MailStore.trashOf/holdsBody/source/storedSource/restateFromBody/StoredMessage ctor + seen/flagged/hasAttachment/objectHash, MailWindow.since, MailReader + Read, MailSubmit, MailPoison, MailOwed.key, MailBodies.ATTEMPTS, MessageView.linkIntent. res/layout/panel_compose.xml inflates org.pimalaya.mail.RecipientField (device check: compose screen opens).
 - account: two layers in one package. PimDomain, AccountEntry, AccountCredential, SecureStore, AccountActivation, Accounts are vocabulary and credential plumbing used by pimdir, sync, phone and every domain (the Rust `account` is likewise cross-cutting and low); OnboardingFlow, OauthFlow, AccountSettings are screens over every domain (~30 MainActivity members widened). Phase 2: account sits low (below sync), the setup and settings screens move to a package above the domains (decide its name then). Public for tests: AccountEntry.empty/connection/with, AccountConnection + baseUrl, OnboardingFlow.submissionUrl/asUser/endpointUrl (E2eTarget), FakeAndroidKeyStore.KEYS.
+- ui: Ui, Sections, Chips, PillField, ListHeader, CardSections, Avatar, Dates, SyncDock are shared widgets (they import only R, MainActivity, Domains). FilterPage (account, mail, pimdir, sync), DeletedItemsPage (account, client, contact, pimdir, sync) and LinkedSection (contact, mail, pimdir) are cross-domain pages driven by MainActivity (43 to 62 `host.` uses each): they go above the domains with the setup screens, not in ui.
+- shell: org.pimalaya holds exactly the nine components and app classes.

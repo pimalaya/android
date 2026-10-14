@@ -9,13 +9,13 @@ import java.net.InetAddress;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.MainActivity;
-import org.pimalaya.PillField;
 import org.pimalaya.R;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.OauthSession;
 import org.pimalaya.client.OauthTokens;
 import org.pimalaya.client.Transport;
 import org.pimalaya.client.ServerMetadata;
+import org.pimalaya.ui.PillField;
 
 /**
  * The connection flow's OAuth 2.0 grants: the shipped Google and

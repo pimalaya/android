@@ -23,9 +23,9 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.R;
-import org.pimalaya.Sections;
-import org.pimalaya.Ui;
 import org.pimalaya.client.Cards;
+import org.pimalaya.ui.Sections;
+import org.pimalaya.ui.Ui;
 
 /**
  * The contact edit form, settings-style like the system apps: one

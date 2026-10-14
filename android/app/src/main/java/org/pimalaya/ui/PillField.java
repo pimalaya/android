@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.ui;
 
 import android.text.InputType;
 import android.text.method.PasswordTransformationMethod;
@@ -6,6 +6,8 @@ import android.view.Gravity;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
+import org.pimalaya.MainActivity;
+import org.pimalaya.R;
 
 /**
  * A round text field with its name as the placeholder: a pill 56dp

@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.ui;
 
 import android.app.AlertDialog;
 import android.text.format.DateUtils;
@@ -13,6 +13,8 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 
+import org.pimalaya.MainActivity;
+import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
@@ -42,7 +44,7 @@ import java.util.TimeZone;
  * waits for the server; neither offers anything. Above the list, what the
  * retained items hold and the button that frees it, confirmed first.
  */
-final class DeletedItemsPage {
+public final class DeletedItemsPage {
     /** Rows shown at first and added by each "Show more". */
     private static final int SHOWN = 100;
 
@@ -55,11 +57,11 @@ final class DeletedItemsPage {
     /** The screen the page was raised over, restored on the way out. */
     private int cameFrom = MainActivity.PANEL_MAIL;
 
-    DeletedItemsPage(MainActivity host) {
+    public DeletedItemsPage(MainActivity host) {
         this.host = host;
     }
 
-    void setUp() {
+    public void setUp() {
         host.findViewById(R.id.deleted_back).setOnClickListener(view -> leave());
         host.findViewById(R.id.deleted_free).setOnClickListener(view -> confirmFree());
         ListView list = host.findViewById(R.id.deleted_list);
@@ -76,7 +78,7 @@ final class DeletedItemsPage {
     }
 
     /** Opens the page over the drawer. */
-    void open() {
+    public void open() {
         cameFrom = host.screen;
         rows = new ArrayList<>();
         shown = SHOWN;
@@ -87,7 +89,7 @@ final class DeletedItemsPage {
     }
 
     /** Closes the page onto the drawer it was opened over. */
-    void leave() {
+    public void leave() {
         host.closeOverlay(MainActivity.PANEL_DELETED);
         host.screen = cameFrom;
         host.applyChrome(cameFrom);

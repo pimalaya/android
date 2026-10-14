@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.ui;
 
 import android.app.AlertDialog;
 import android.content.res.ColorStateList;
@@ -16,6 +16,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
+import org.pimalaya.MainActivity;
+import org.pimalaya.R;
 import org.pimalaya.contact.Group;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.ItemLinks;
@@ -41,7 +43,7 @@ public final class LinkedSection {
     /** The dialog a tap in it closes before opening the other item. */
     private AlertDialog opening;
 
-    LinkedSection(MainActivity host) {
+    public LinkedSection(MainActivity host) {
         this.host = host;
     }
 

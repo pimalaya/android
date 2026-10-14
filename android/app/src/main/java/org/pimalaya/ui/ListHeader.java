@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.ui;
 
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -11,6 +11,9 @@ import android.widget.ListView;
 import android.widget.TextView;
 
 import java.util.function.Consumer;
+import org.pimalaya.Domains;
+import org.pimalaya.MainActivity;
+import org.pimalaya.R;
 
 /**
  * A list's large title: the domain's name over a supporting line,
@@ -110,7 +113,7 @@ public final class ListHeader {
     }
 
     /** Whether the bar should carry the title, the large one being gone. */
-    boolean scrolled() {
+    public boolean scrolled() {
         return scrolled;
     }
 

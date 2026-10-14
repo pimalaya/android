@@ -1,10 +1,11 @@
-package org.pimalaya;
+package org.pimalaya.ui;
 
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.InsetDrawable;
+import org.pimalaya.R;
 
 /**
  * The coloured disc a list row leads with, shared by the three domains.

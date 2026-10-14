@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.ui;
 
 import android.content.res.ColorStateList;
 import android.util.TypedValue;
@@ -10,6 +10,8 @@ import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.pimalaya.MainActivity;
+import org.pimalaya.R;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.mail.MailOffline;
 import org.pimalaya.pimdir.DefaultCollection;
@@ -33,14 +35,14 @@ import org.pimalaya.sync.MergedFilter;
  * "Set as default" ({@link DefaultCollection}). A mailbox offers "Download"
  * instead, which keeps it whole offline ({@link MailOffline}).
  */
-final class FilterPage {
+public final class FilterPage {
     /** One account and its collections, as the page lists them. */
-    static final class Account {
-        final String email;
+    public static final class Account {
+        public final String email;
         final String label;
-        final List<PimdirCollections.Stored> collections;
+        public final List<PimdirCollections.Stored> collections;
 
-        Account(String email, String label, List<PimdirCollections.Stored> collections) {
+        public Account(String email, String label, List<PimdirCollections.Stored> collections) {
             this.email = email;
             this.label = label;
             this.collections = collections;
@@ -69,11 +71,11 @@ final class FilterPage {
     /** The list screen the page was raised over, restored on the way out. */
     private int cameFrom = MainActivity.PANEL_MAIL;
 
-    FilterPage(MainActivity host) {
+    public FilterPage(MainActivity host) {
         this.host = host;
     }
 
-    void setUp() {
+    public void setUp() {
         host.findViewById(R.id.filter_back).setOnClickListener(view -> leave());
         host.findViewById(R.id.filter_reset)
                 .setOnClickListener(
@@ -86,7 +88,7 @@ final class FilterPage {
     }
 
     /** Opens the page over the list of {@code domain}. */
-    void open(PimDomain domain) {
+    public void open(PimDomain domain) {
         this.domain = domain;
         this.files = false;
         this.cameFrom = host.screen;
@@ -98,7 +100,7 @@ final class FilterPage {
     }
 
     /** Opens the page over the Files tab. */
-    void openFiles() {
+    public void openFiles() {
         this.domain = null;
         this.files = true;
         this.cameFrom = host.screen;
@@ -129,7 +131,7 @@ final class FilterPage {
     }
 
     /** Closes the page onto the list it was opened over. */
-    void leave() {
+    public void leave() {
         domain = null;
         draft = null;
         host.closeOverlay(MainActivity.PANEL_FILTER);

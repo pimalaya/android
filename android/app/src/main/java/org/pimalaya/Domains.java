@@ -8,7 +8,7 @@ package org.pimalaya;
  * the one place that says which four and in what order. Files is a tab and
  * not a {@link PimDomain}: no account connects it.
  */
-final class Domains {
+public final class Domains {
     /** The list screens, in the order the bottom navigation offers them. */
     static final int[] PANELS = {
         MainActivity.PANEL_MAIL,
@@ -32,7 +32,7 @@ final class Domains {
     }
 
     /** One tab's name, which its large title reads. */
-    static int titleOf(int panel) {
+    public static int titleOf(int panel) {
         switch (panel) {
             case MainActivity.PANEL_MAIL:
                 return R.string.mail_title;

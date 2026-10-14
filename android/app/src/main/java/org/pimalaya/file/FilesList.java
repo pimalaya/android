@@ -19,10 +19,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import org.pimalaya.Avatar;
-import org.pimalaya.CardSections;
-import org.pimalaya.Chips;
-import org.pimalaya.ListHeader;
 import org.pimalaya.MainActivity;
 import org.pimalaya.OpenedFiles;
 import org.pimalaya.R;
@@ -31,6 +27,10 @@ import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.sync.MergedFilter;
+import org.pimalaya.ui.Avatar;
+import org.pimalaya.ui.CardSections;
+import org.pimalaya.ui.Chips;
+import org.pimalaya.ui.ListHeader;
 
 /**
  * The Files screen: one card per file collection the filter shows, the

@@ -20,11 +20,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.IntConsumer;
-import org.pimalaya.Avatar;
 import org.pimalaya.MainActivity;
-import org.pimalaya.PillField;
 import org.pimalaya.R;
-import org.pimalaya.Sections;
 import org.pimalaya.calendar.PhoneCalendars;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
@@ -39,6 +36,9 @@ import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.FirstSync;
 import org.pimalaya.sync.MergedFilter;
 import org.pimalaya.sync.SyncStamps;
+import org.pimalaya.ui.Avatar;
+import org.pimalaya.ui.PillField;
+import org.pimalaya.ui.Sections;
 
 /**
  * The full-screen account settings controller behind the drawer: one

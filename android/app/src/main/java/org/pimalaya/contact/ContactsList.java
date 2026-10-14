@@ -7,15 +7,15 @@ import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import org.pimalaya.Avatar;
-import org.pimalaya.CardSections;
-import org.pimalaya.Chips;
-import org.pimalaya.ListHeader;
 import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.sync.MergedFilter;
+import org.pimalaya.ui.Avatar;
+import org.pimalaya.ui.CardSections;
+import org.pimalaya.ui.Chips;
+import org.pimalaya.ui.ListHeader;
 
 /**
  * The contacts screen: the merged list grouped into one card per

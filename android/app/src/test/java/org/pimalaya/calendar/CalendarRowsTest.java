@@ -15,9 +15,9 @@ import android.provider.CalendarContract.Colors;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.pimalaya.Avatar;
 import org.pimalaya.account.Accounts;
 import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.ui.Avatar;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
