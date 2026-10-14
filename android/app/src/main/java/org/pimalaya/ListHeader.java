@@ -27,7 +27,7 @@ import java.util.function.Consumer;
 public final class ListHeader {
     private final MainActivity host;
     private final int panel;
-    final View view;
+    public final View view;
     final ListView list;
 
     /** Whether the large title is scrolled out of sight. */
@@ -160,7 +160,7 @@ public final class ListHeader {
      * The week's card, shown under its month line and its number, for the
      * caller to fill; the arrows and the number are the caller's to wire.
      */
-    LinearLayout week(CharSequence month, CharSequence number) {
+    public LinearLayout week(CharSequence month, CharSequence number) {
         view.findViewById(R.id.header_week).setVisibility(View.VISIBLE);
         ((TextView) view.findViewById(R.id.header_month)).setText(month);
         ((TextView) view.findViewById(R.id.header_week_number)).setText(number);

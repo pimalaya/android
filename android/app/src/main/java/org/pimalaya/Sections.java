@@ -24,18 +24,18 @@ import java.util.List;
  * action to each header and a warning to a diverged row, which is what
  * the two extra parameters are for; a reader passes null for both.
  */
-final class Sections {
+public final class Sections {
     private final Activity activity;
     private final LinearLayout container;
     private final Ui ui;
 
     /** The accent the headers are drawn in, also used by the callers. */
-    final int accentColor;
+    public final int accentColor;
 
     private final int labelColor;
     private final int dividerColor;
 
-    Sections(Activity activity, LinearLayout container) {
+    public Sections(Activity activity, LinearLayout container) {
         this.activity = activity;
         this.container = container;
         this.ui = new Ui(activity);
@@ -45,7 +45,7 @@ final class Sections {
     }
 
     /** Empties the page, before a render fills it again. */
-    void clear() {
+    public void clear() {
         container.removeAllViews();
     }
 
@@ -55,7 +55,7 @@ final class Sections {
      * section vanishes unless the caller keeps it, as a card of its
      * label alone. A title of 0 draws the card without a header.
      */
-    void section(int title, int icon, List<View> items, View action, boolean keepEmpty) {
+    public void section(int title, int icon, List<View> items, View action, boolean keepEmpty) {
         if (items.isEmpty() && !keepEmpty) {
             return;
         }
@@ -129,7 +129,7 @@ final class Sections {
      * reader's page wants; a non-null one makes it a tappable item with
      * the platform's own ripple.
      */
-    View row(CharSequence title, CharSequence subtitle, View trailing, Runnable onClick) {
+    public View row(CharSequence title, CharSequence subtitle, View trailing, Runnable onClick) {
         TextView titleView = new TextView(activity);
         titleView.setText(title);
         titleView.setTextColor(ui.resolveColor(android.R.attr.textColorPrimary));
@@ -173,7 +173,7 @@ final class Sections {
      * round: the value reads first and the property names itself under
      * it, which is how a read-only page is scanned.
      */
-    View value(CharSequence value, int label) {
+    public View value(CharSequence value, int label) {
         return row(value, activity.getString(label), null, null);
     }
 

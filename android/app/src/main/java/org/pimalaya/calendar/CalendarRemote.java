@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.calendar;
 
 import android.accounts.Account;
 import android.content.ContentProviderOperation;
@@ -34,8 +34,9 @@ import java.util.function.IntConsumer;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.CalendarMapping.Row;
-import org.pimalaya.CalendarMapping.Write;
+import org.pimalaya.Accounts;
+import org.pimalaya.calendar.CalendarMapping.Row;
+import org.pimalaya.calendar.CalendarMapping.Write;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.EventViews;
 import org.pimalaya.client.PimalayaException;

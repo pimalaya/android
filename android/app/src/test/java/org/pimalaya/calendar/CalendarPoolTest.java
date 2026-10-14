@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.calendar;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -12,6 +12,7 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.Event;

@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.calendar;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -15,6 +15,8 @@ import android.provider.CalendarContract.Colors;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.Accounts;
+import org.pimalaya.Avatar;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;

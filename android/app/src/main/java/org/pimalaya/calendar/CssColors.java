@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.calendar;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;

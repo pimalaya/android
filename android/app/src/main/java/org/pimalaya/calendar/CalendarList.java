@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.calendar;
 
 import android.content.Context;
 import android.content.res.ColorStateList;
@@ -14,6 +14,14 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 
+import org.pimalaya.Avatar;
+import org.pimalaya.CardSections;
+import org.pimalaya.Chips;
+import org.pimalaya.Dates;
+import org.pimalaya.ListHeader;
+import org.pimalaya.MainActivity;
+import org.pimalaya.PimDomain;
+import org.pimalaya.R;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
 import org.pimalaya.sync.MergedFilter;
@@ -47,7 +55,7 @@ import java.util.concurrent.Executors;
  * 15:00 for a reader in Paris, and a Graph event stored in UTC at the
  * reader's hour.
  */
-final class CalendarList {
+public final class CalendarList {
     /** Seconds in a day, the threshold a length is told in days past. */
     private static final long DAY = 86400;
 
@@ -73,7 +81,7 @@ final class CalendarList {
     /** Whether the Default chip narrows the agenda to the shown accounts' default calendars. */
     private boolean defaultOnly;
 
-    CalendarList(MainActivity host, EventStore store) {
+    public CalendarList(MainActivity host, EventStore store) {
         this.host = host;
         this.store = store;
     }
@@ -106,7 +114,7 @@ final class CalendarList {
         }
     }
 
-    void setUp() {
+    public void setUp() {
         ListView list = host.findViewById(R.id.calendar_list);
         header = new ListHeader(host, list, MainActivity.PANEL_CALENDAR);
         header.empty(host.findViewById(R.id.calendar_empty));
@@ -157,7 +165,7 @@ final class CalendarList {
      * week and its object stay the same, so a reload after a sync expands
      * only what the sync changed.
      */
-    void reload() {
+    public void reload() {
         // NOTE: the shown week alone, since the agenda never lists past it
         // and moving the week clears a picked day, and a day more either
         // side: the bridge compares the window with each start as written,
@@ -458,7 +466,7 @@ final class CalendarList {
         return text;
     }
 
-    ListHeader header() {
+    public ListHeader header() {
         return header;
     }
 

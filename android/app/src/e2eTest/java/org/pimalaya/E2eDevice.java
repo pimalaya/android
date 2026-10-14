@@ -11,6 +11,8 @@ import android.net.NetworkInfo;
 
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.pimalaya.calendar.CalendarEngine;
+import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.file.FileStore;

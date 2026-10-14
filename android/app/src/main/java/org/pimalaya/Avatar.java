@@ -43,7 +43,7 @@ public final class Avatar {
      * instead moved every disc two pixels off that axis and pulled the
      * text after it.
      */
-    static Drawable disc(Context context, int color) {
+    public static Drawable disc(Context context, int color) {
         GradientDrawable circle = new GradientDrawable();
         circle.setShape(GradientDrawable.OVAL);
         circle.setColor(color);
@@ -56,7 +56,7 @@ public final class Avatar {
      * The colour behind a named thing: the one it declares when that
      * parses, the hue derived from its name otherwise.
      */
-    static int colorOf(String declared, String name) {
+    public static int colorOf(String declared, String name) {
         if (declared != null && !declared.isEmpty()) {
             try {
                 // NOTE: CalDAV writes the alpha last (#RRGGBBAA, Apple's

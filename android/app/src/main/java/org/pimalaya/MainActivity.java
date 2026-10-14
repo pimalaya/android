@@ -38,6 +38,11 @@ import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.json.JSONObject;
+import org.pimalaya.calendar.CalendarEngine;
+import org.pimalaya.calendar.CalendarList;
+import org.pimalaya.calendar.CalendarRows;
+import org.pimalaya.calendar.EventStore;
+import org.pimalaya.calendar.EventView;
 import org.pimalaya.client.Cards;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Addressbook;
@@ -95,10 +100,10 @@ public class MainActivity extends Activity {
     static final int PANEL_ADVANCED = 2;
     static final int PANEL_SOURCE = 3;
     static final int PANEL_MAIL = 4;
-    static final int PANEL_CALENDAR = 5;
+    public static final int PANEL_CALENDAR = 5;
     static final int PANEL_COMPOSE = 6;
     static final int PANEL_MESSAGE = 7;
-    static final int PANEL_EVENT_VIEW = 8;
+    public static final int PANEL_EVENT_VIEW = 8;
     public static final int PANEL_FILES = 9;
     private static final int PANEL_AUTH = 20;
     static final int PANEL_ACCOUNT = 21;
@@ -144,7 +149,7 @@ public class MainActivity extends Activity {
 
     /** The shared backend client, the single-thread io executor, the
      *  main-thread handler and the theme helper. */
-    final PimalayaClient client = new PimalayaClient();
+    public final PimalayaClient client = new PimalayaClient();
     public final ExecutorService io = Executors.newSingleThreadExecutor();
 
     /**
@@ -156,8 +161,8 @@ public class MainActivity extends Activity {
      */
     final ExecutorService interactive = Executors.newSingleThreadExecutor();
 
-    final Handler main = new Handler(Looper.getMainLooper());
-    final Ui ui = new Ui(this);
+    public final Handler main = new Handler(Looper.getMainLooper());
+    public final Ui ui = new Ui(this);
 
     SecureStore store;
     CardStore base;
@@ -200,12 +205,12 @@ public class MainActivity extends Activity {
     private final DeletedItemsPage deletedPage = new DeletedItemsPage(this);
 
     /** The calendar side of the store, and the agenda over it. */
-    EventStore events;
+    public EventStore events;
 
-    CalendarList calendarList;
+    public CalendarList calendarList;
 
     /** The reader one agenda row opens onto. */
-    EventView eventView;
+    public EventView eventView;
 
     /** The mail side of the store, and the merged list over it. */
     public MailStore mail;
@@ -313,7 +318,7 @@ public class MainActivity extends Activity {
     EditSession edit = new EditSession();
 
     /** The screen currently shown: a flipper panel, or an overlay. */
-    int screen = PANEL_ROOT;
+    public int screen = PANEL_ROOT;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -694,7 +699,7 @@ public class MainActivity extends Activity {
      * Gates a conflict form's save FAB, a contact's or a calendar entry's:
      * the save itself once nothing awaits review, else the error disc.
      */
-    void gateSave(boolean ready, int icon, int description) {
+    public void gateSave(boolean ready, int icon, int description) {
         android.widget.ImageButton fab = findViewById(R.id.fab);
         if (ready) {
             fab.setBackgroundTintList(null);
@@ -863,7 +868,7 @@ public class MainActivity extends Activity {
      * Toggles an auth continue FAB between its arrow and an on-disc
      * loader, the button disabled while loading.
      */
-    void setAuthLoading(int buttonId, int progressId, boolean loading) {
+    public void setAuthLoading(int buttonId, int progressId, boolean loading) {
         View button = findViewById(buttonId);
         if (button instanceof android.widget.ImageButton) {
             setFabEnabled(buttonId, !loading);
@@ -933,7 +938,7 @@ public class MainActivity extends Activity {
     }
 
     /** Black or white, whichever reads on the accent colour. */
-    int accentContrast() {
+    public int accentContrast() {
         int accent = resolveColor(android.R.attr.colorAccent);
         return android.graphics.Color.luminance(accent) > 0.5f
                 ? android.graphics.Color.BLACK
@@ -1931,7 +1936,7 @@ public class MainActivity extends Activity {
      * wired yet, so a refresh relists. One report carries a whole
      * calendar's objects, so this is one round trip per calendar.
      */
-    void syncCalendars() {
+    public void syncCalendars() {
         if (syncing) {
             return;
         }
@@ -1981,7 +1986,7 @@ public class MainActivity extends Activity {
     }
 
     /** A calendar driver that only stages, on the same terms. */
-    CalendarEngine calendarEngine(String email) {
+    public CalendarEngine calendarEngine(String email) {
         return new CalendarEngine(pimdir, client, null, null, accountIdOf(email), null);
     }
 
@@ -3717,7 +3722,7 @@ public class MainActivity extends Activity {
     }
 
     /** Retitles the bar, for a page whose own edits change its title. */
-    void updateBarTitle(String title) {
+    public void updateBarTitle(String title) {
         ((TextView) findViewById(R.id.bar_title)).setText(title);
     }
 
@@ -3913,7 +3918,7 @@ public class MainActivity extends Activity {
     }
 
     /** One domain's filter, as it was last left. */
-    MergedFilter filterOf(PimDomain domain) {
+    public MergedFilter filterOf(PimDomain domain) {
         return filters.computeIfAbsent(domain, key -> MergedFilter.of(this, key));
     }
 
@@ -4147,7 +4152,7 @@ public class MainActivity extends Activity {
      * The default collection of every account a domain's filter shows: what
      * the Default chip narrows a list to ({@link DefaultCollection}).
      */
-    java.util.Set<String> shownDefaults(PimDomain domain) {
+    public java.util.Set<String> shownDefaults(PimDomain domain) {
         String kind = domain == PimDomain.CALENDAR ? PimdirSummary.CALENDAR : PimdirSummary.CONTACT;
         List<PimdirCollections.Stored> collections = collectionsOf(domain);
         java.util.Set<String> emails = new java.util.LinkedHashSet<>();
@@ -4165,12 +4170,12 @@ public class MainActivity extends Activity {
     }
 
     /** Navigates forward: the panels slide in from the right. */
-    void show(int panel) {
+    public void show(int panel) {
         show(panel, false);
     }
 
     /** Navigates back: the panels slide in from the left. */
-    void showBack(int panel) {
+    public void showBack(int panel) {
         show(panel, true);
     }
 
@@ -4685,7 +4690,7 @@ public class MainActivity extends Activity {
      * full (often long, e.g. a server body) message stays on screen and
      * scrolls until acknowledged.
      */
-    void showError(Exception error, int fallback) {
+    public void showError(Exception error, int fallback) {
         new AlertDialog.Builder(this)
                 .setTitle(R.string.error_title)
                 .setMessage(message(error, fallback))

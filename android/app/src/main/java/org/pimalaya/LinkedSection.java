@@ -49,7 +49,7 @@ public final class LinkedSection {
      * that cannot be linked (a contact not saved yet, a message still in an
      * outbox). Drawn empty while the read runs.
      */
-    void section(Sections sections, ItemLinks.Endpoint self, Runnable refresh) {
+    public void section(Sections sections, ItemLinks.Endpoint self, Runnable refresh) {
         if (self == null) {
             return;
         }

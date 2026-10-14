@@ -507,7 +507,7 @@ public class CardStore extends SQLiteOpenHelper {
      * {@link #resourceName(String, String)}, and what the binding ends up
      * holding is whatever the push assigns.
      */
-    static String rowHandle(String uri, String id) {
+    public static String rowHandle(String uri, String id) {
         return uri != null && !uri.isEmpty() ? uri : PimdirStorage.provisionalOf(id);
     }
 

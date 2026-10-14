@@ -20,7 +20,7 @@ Paths are relative to android/. Every step ends with `:app:assembleDebug :app:te
 - [x] sync
 - [x] phone
 - [x] file
-- [ ] calendar
+- [x] calendar
 - [ ] contact
 - [ ] mail
 - [ ] account
@@ -83,3 +83,4 @@ Logic found in Java that belongs to Rust, collected while moving.
 - sync: RemotePass and SyncRunner reach into every domain (16 and 11 root classes): the phase 3 SyncCoordinator. PimdirEngine is the base of three engines in other packages, so its mutate*/offline/result/clock are public. TokenRenewal is credential plumbing (account). MergedFilter is a persisted view filter used by list screens (ui or per-domain). SyncSteps formats R strings for MainActivity only (ui). Public for tests: AccountEntry.of, AccountCredential.oauth, PimdirEngine.mutateCopy, PimdirEngine.Clock + listed, RemotePass.MailPass.sent (e2e), FakeAndroidKeyStore.install. Tests left in root: BackgroundCheckTest, MergedFilterTest.
 - phone: PhoneQueue.start builds OfflineEngine and calls CalendarEngine.phonePass while both engines call PhoneQueue.written: a cycle; its ctor already takes Consumer passes, so the wiring of start() moves to the root. SyncRunner -> PhoneMirror is a sync -> phone back edge.
 - file: FilesList.STAGED read by pimdir/CacheSweep (belongs in FileStore); PimdirDb -> FileStore.reconcileRoles on open. FilesList and FileActions reach into MainActivity fields (io, files, mail, postAlive, dp...): screens need a host object, not the activity. Public for tests: MailStore.forget/accountIdOf/saveSource (FileStoreTest), FileStore.partKey/attachmentsOf (AutomaticReferencesTest).
+- calendar: EventStore and EventView call CardStore.rowHandle (store plumbing, pimdir). CalendarList and EventView reach into ~20 MainActivity members. Public for tests (e2e): Zones + utc, EventStore.StoredCalendar.name, StoredEvent.handle/ical. DefaultCollectionTest lives in calendar (EventStore fixture). E2eCalendarTest stays in root with the harness.

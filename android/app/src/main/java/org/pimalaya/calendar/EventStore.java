@@ -1,10 +1,11 @@
-package org.pimalaya;
+package org.pimalaya.calendar;
 
 import android.content.Context;
 import android.database.Cursor;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.CardStore;
 
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.Event;
@@ -52,7 +53,7 @@ public final class EventStore {
     private final PimdirCollections collections;
     private final PimdirAccount accounts;
 
-    EventStore(Context context, PimdirDb store) {
+    public EventStore(Context context, PimdirDb store) {
         this.items = new PimdirItems(store);
         this.storage = new PimdirStorage(store);
         this.collections = new PimdirCollections(store, context);
@@ -88,21 +89,21 @@ public final class EventStore {
     }
 
     /** Drops one account's calendars and their events. */
-    void forget(String accountEmail) {
+    public void forget(String accountEmail) {
         collections.replace(accountEmail, PimdirSummary.CALENDAR, List.of());
     }
 
     /** One stored calendar, with the account it belongs to. */
     public static final class StoredCalendar {
         /** The backend's own address, what a listing round asks for. */
-        final String url;
+        public final String url;
 
         public final String accountEmail;
 
         /** The namespaced collection id, what the store keys items by. */
         public final String id;
 
-        final String name;
+        public final String name;
         final String color;
 
         /** Whether its source names it the account's default calendar. */
@@ -149,7 +150,7 @@ public final class EventStore {
     /** One stored calendar object, still iCalendar text. */
     public static final class StoredEvent {
         /** The collection id of the calendar holding it. */
-        final String collectionId;
+        public final String collectionId;
 
         public final String id;
 
@@ -158,9 +159,9 @@ public final class EventStore {
          * bound it under, or the provisional handle a create waits under
          * until a push assigns one (SYNC §2).
          */
-        final String handle;
+        public final String handle;
 
-        final String ical;
+        public final String ical;
 
         /** The server's validator, empty when it sent none. */
         final String etag;
@@ -188,7 +189,7 @@ public final class EventStore {
         }
     }
 
-    List<StoredEvent> loadEvents() {
+    public List<StoredEvent> loadEvents() {
         List<StoredEvent> events = new ArrayList<>();
         Set<String> conflicted = conflicted();
         try (Cursor cursor =

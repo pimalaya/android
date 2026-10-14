@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.calendar;
 
 import android.content.ContentProvider;
 import android.content.ContentProviderOperation;

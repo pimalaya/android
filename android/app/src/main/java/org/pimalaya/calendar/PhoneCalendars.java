@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.calendar;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -17,7 +17,7 @@ import java.util.Set;
  * the phone like its siblings. Keyed by collection id, the app's own state
  * about collections pimdir has no column for, like the books' switches.
  */
-final class PhoneCalendars {
+public final class PhoneCalendars {
     private static final String PREFS = "phone-calendars";
 
     /** The addresses whose calendars the phone shows. */
@@ -37,7 +37,7 @@ final class PhoneCalendars {
     }
 
     /** Whether the phone shows the account's calendar. */
-    static boolean shown(Context context, String account, String calendar) {
+    public static boolean shown(Context context, String account, String calendar) {
         return read(context, ACCOUNTS).contains(account) && !read(context, OFF).contains(calendar);
     }
 
@@ -45,7 +45,7 @@ final class PhoneCalendars {
      * The setup's choice for the account: on, its calendars show on the
      * phone, those kept off before staying off.
      */
-    static void setAccount(Context context, String account, boolean on) {
+    public static void setAccount(Context context, String account, boolean on) {
         Set<String> accounts = read(context, ACCOUNTS);
         if (on) {
             accounts.add(account);
@@ -60,7 +60,7 @@ final class PhoneCalendars {
      * show, the account comes with that calendar alone, its {@code siblings}
      * kept off.
      */
-    static void set(
+    public static void set(
             Context context,
             String account,
             String calendar,
@@ -80,7 +80,7 @@ final class PhoneCalendars {
     }
 
     /** Drops what was kept of an account that is gone. */
-    static void forget(Context context, String account, Collection<String> calendars) {
+    public static void forget(Context context, String account, Collection<String> calendars) {
         Set<String> accounts = read(context, ACCOUNTS);
         Set<String> off = read(context, OFF);
         accounts.remove(account);

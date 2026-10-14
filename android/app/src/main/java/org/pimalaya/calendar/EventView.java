@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.calendar;
 
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
@@ -20,6 +20,11 @@ import android.widget.TextView;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.CardStore;
+import org.pimalaya.Dates;
+import org.pimalaya.MainActivity;
+import org.pimalaya.R;
+import org.pimalaya.Sections;
 import org.pimalaya.client.EventDetail;
 import org.pimalaya.client.EventMerge;
 import org.pimalaya.client.EventSplit;
@@ -75,7 +80,7 @@ import java.util.function.Consumer;
  * a row of its own section, so no side is ever dropped unseen. Saving
  * stages the resolution on the binding that conflicted.
  */
-final class EventView {
+public final class EventView {
     /** What an event's STATUS may be (RFC 5545 3.8.1.11). */
     private static final String[] EVENT_STATUS = {"", "TENTATIVE", "CONFIRMED", "CANCELLED"};
 
@@ -270,14 +275,14 @@ final class EventView {
     /** The conflicts the user has reviewed, by id, which clears their glyph. */
     private final Set<Integer> reviewed = new HashSet<>();
 
-    EventView(MainActivity host) {
+    public EventView(MainActivity host) {
         this.host = host;
         this.sections =
                 new Sections(host, (LinearLayout) host.findViewById(R.id.event_view_page));
     }
 
     /** What the bar calls the entry: its summary, else its kind. */
-    String title() {
+    public String title() {
         String summary = value("summary");
         return summary.isEmpty()
                 ? host.getString(CalendarList.componentName(component()))
@@ -302,7 +307,7 @@ final class EventView {
      * whichever zone each reader is in, which no server or other client
      * takes as meant.
      */
-    void compose(EventStore.StoredCalendar calendar) {
+    public void compose(EventStore.StoredCalendar calendar) {
         String uid = UUID.randomUUID().toString();
         ZoneId zone = ZoneId.systemDefault();
         LocalDateTime start =
@@ -335,7 +340,7 @@ final class EventView {
     }
 
     /** Opens the page on one agenda row, in conflict mode when it is conflicted. */
-    void open(
+    public void open(
             Occurrence occurrence,
             EventStore.StoredEvent event,
             EventStore.StoredCalendar calendar) {
@@ -498,7 +503,7 @@ final class EventView {
     }
 
     /** Whether the page may write its entry back: read, on a calendar taking writes. */
-    boolean editable() {
+    public boolean editable() {
         return readable() && writes();
     }
 
@@ -550,7 +555,7 @@ final class EventView {
      * Gates the save: live outside conflict mode, and in it once every
      * conflict has been reviewed.
      */
-    void gate() {
+    public void gate() {
         host.gateSave(settled(), R.drawable.ic_save, R.string.event_save);
     }
 
@@ -749,7 +754,7 @@ final class EventView {
     }
 
     /** The bar's add: every property this component does not have yet. */
-    void addField() {
+    public void addField() {
         addField(0);
     }
 
@@ -1406,7 +1411,7 @@ final class EventView {
      * <p>On an occurrence of a series it first asks which occurrences
      * the edit is for.
      */
-    void save() {
+    public void save() {
         if (detail == null) {
             host.toast(host.getString(R.string.event_unreadable));
             return;
@@ -1591,7 +1596,7 @@ final class EventView {
      * Asks before deleting: an entry is one tap from being gone. On an
      * occurrence of a series, the question is which occurrences.
      */
-    void confirmDelete() {
+    public void confirmDelete() {
         if (!writes()) {
             host.toast(host.getString(R.string.event_read_only));
             return;

@@ -22,7 +22,7 @@ import java.util.Date;
  * <em>Yesterday</em>, not nine hours ago, and no amount of configuring a
  * duration formatter produces that.
  */
-final class Dates {
+public final class Dates {
     /** How close to now counts as now, in milliseconds. */
     private static final long JUST_NOW = 60 * 1000L;
 
@@ -61,7 +61,7 @@ final class Dates {
      * <p>One unit and never two, because these label a column that is
      * scanned rather than read, and "1 month, 3 days ago" is a sentence.
      */
-    static String relative(Context context, long stamp) {
+    public static String relative(Context context, long stamp) {
         long span = stamp - System.currentTimeMillis();
         if (Math.abs(span) < JUST_NOW) {
             return context.getString(R.string.date_now);
@@ -87,7 +87,7 @@ final class Dates {
      * <p>An all-day entry is on a day: reading a birthday as five hours
      * ago because the day started this morning would be nonsense.
      */
-    static String relativeDays(Context context, long stamp) {
+    public static String relativeDays(Context context, long stamp) {
         long days = daysBetween(startOfDay(System.currentTimeMillis()), startOfDay(stamp));
         if (days == 0) {
             return context.getString(R.string.date_today);
@@ -98,7 +98,7 @@ final class Dates {
     }
 
     /** The exact date and time, in the reader's own locale and zone. */
-    static String full(Context context, long stamp) {
+    public static String full(Context context, long stamp) {
         if (stamp <= 0) {
             return "";
         }
@@ -109,7 +109,7 @@ final class Dates {
     }
 
     /** The date alone, as the device spells it. */
-    static String date(Context context, long stamp) {
+    public static String date(Context context, long stamp) {
         return DateFormat.getMediumDateFormat(context).format(new Date(stamp));
     }
 

@@ -38,7 +38,7 @@ import org.pimalaya.phone.PhoneMirror;
  */
 public final class Accounts {
     /** Matches android:accountType in res/xml/authenticator.xml. */
-    static final String TYPE = "org.pimalaya";
+    public static final String TYPE = "org.pimalaya";
 
     /**
      * An address as a release log may name it: its domain alone, which
@@ -120,7 +120,7 @@ public final class Accounts {
      * calendars off the phone: the caller runs their phone pass first. Book
      * accounts are left alone.
      */
-    static void reconcileCalendars(Context context, Set<String> addresses) {
+    public static void reconcileCalendars(Context context, Set<String> addresses) {
         AccountManager manager = AccountManager.get(context);
 
         for (Account account : manager.getAccountsByType(TYPE)) {
@@ -238,12 +238,12 @@ public final class Accounts {
     }
 
     /** The address whose calendars the account holds, null for a book's account. */
-    static String calendarAddress(Context context, Account account) {
+    public static String calendarAddress(Context context, Account account) {
         return AccountManager.get(context).getUserData(account, DATA_CALENDARS);
     }
 
     /** The account holding the address's calendars, or null before reconcile. */
-    static Account findCalendars(Context context, String address) {
+    public static Account findCalendars(Context context, String address) {
         AccountManager manager = AccountManager.get(context);
         for (Account account : manager.getAccountsByType(TYPE)) {
             if (address.equals(manager.getUserData(account, DATA_CALENDARS))) {
@@ -254,7 +254,7 @@ public final class Accounts {
     }
 
     /** Every calendar account, whichever address it holds. */
-    static List<Account> calendarAccounts(Context context) {
+    public static List<Account> calendarAccounts(Context context) {
         AccountManager manager = AccountManager.get(context);
         List<Account> accounts = new ArrayList<>();
         for (Account account : manager.getAccountsByType(TYPE)) {

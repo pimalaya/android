@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.calendar;
 
 import org.pimalaya.client.EventTime;
 
@@ -36,7 +36,7 @@ import java.util.Map;
  * database cannot name, the object's own {@code VTIMEZONE} answers on
  * the native side, which hands its offset over with the time.
  */
-final class Zones {
+public final class Zones {
     /**
      * Windows zone names, as Exchange and Outlook write them in a
      * {@code TZID}, and the IANA zone each stands for: the default
@@ -379,7 +379,7 @@ final class Zones {
     }
 
     /** An instant as a UTC {@code YYYYMMDDTHHMMSSZ} stamp. */
-    static String utc(long instant) {
+    public static String utc(long instant) {
         LocalDateTime moment =
                 Instant.ofEpochMilli(instant).atOffset(ZoneOffset.UTC).toLocalDateTime();
         return stamp(moment, false) + "Z";

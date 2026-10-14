@@ -19,7 +19,7 @@ import java.util.function.IntConsumer;
  */
 public final class Chips {
     /** Adds one chip to {@code row}, calling {@code onToggle} with each new state. */
-    static void add(
+    public static void add(
             MainActivity host, LinearLayout row, int label, int icon, Consumer<Boolean> onToggle) {
         TextView chip = chip(host, row, label, icon);
         chip.setOnClickListener(

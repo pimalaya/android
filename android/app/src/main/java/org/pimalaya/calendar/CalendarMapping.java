@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.calendar;
 
 import android.provider.CalendarContract.Attendees;
 import android.provider.CalendarContract.Events;

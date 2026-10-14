@@ -10,7 +10,7 @@ import android.widget.EditText;
  * screens (MainActivity, ContactForm, the extracted flows) so the
  * resolution logic exists once.
  */
-final class Ui {
+public final class Ui {
     private final Context context;
 
     Ui(Context context) {
@@ -18,14 +18,14 @@ final class Ui {
     }
 
     /** Resolves a theme attribute to its referenced resource id. */
-    int resolveAttr(int attr) {
+    public int resolveAttr(int attr) {
         TypedValue value = new TypedValue();
         context.getTheme().resolveAttribute(attr, value, true);
         return value.resourceId;
     }
 
     /** Resolves a theme colour attribute to an ARGB int. */
-    int resolveColor(int attr) {
+    public int resolveColor(int attr) {
         TypedValue value = new TypedValue();
         context.getTheme().resolveAttribute(attr, value, true);
         if (value.resourceId != 0) {

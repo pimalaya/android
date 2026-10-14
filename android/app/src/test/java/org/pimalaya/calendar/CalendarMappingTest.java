@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.calendar;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -21,8 +21,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.pimalaya.CalendarMapping.Row;
-import org.pimalaya.CalendarMapping.Write;
+import org.pimalaya.calendar.CalendarMapping.Row;
+import org.pimalaya.calendar.CalendarMapping.Write;
 import org.pimalaya.client.EventViews;
 import org.robolectric.RobolectricTestRunner;
 

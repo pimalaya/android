@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.calendar;
 
 import android.accounts.Account;
 import android.content.ContentProviderOperation;
@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.pimalaya.Accounts;
+import org.pimalaya.Avatar;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.PimdirCollections;
@@ -222,7 +224,7 @@ public final class CalendarRows {
     }
 
     /** The account's {@code Calendars} rows, by collection id ({@code _SYNC_ID}). */
-    static Map<String, Row> rows(Context context, Account account) {
+    public static Map<String, Row> rows(Context context, Account account) {
         Map<String, Row> rows = new LinkedHashMap<>();
         try (Cursor cursor =
                 context.getContentResolver()

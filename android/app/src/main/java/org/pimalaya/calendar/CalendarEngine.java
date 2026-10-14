@@ -1,10 +1,11 @@
-package org.pimalaya;
+package org.pimalaya.calendar;
 
 import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Event;
 import org.pimalaya.client.EventDelta;
