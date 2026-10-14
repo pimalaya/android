@@ -20,7 +20,6 @@ import android.widget.TextView;
 import android.widget.ViewFlipper;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -54,6 +53,7 @@ import org.pimalaya.file.FileStore;
 import org.pimalaya.file.FilesList;
 import org.pimalaya.file.OpenedCopies;
 import org.pimalaya.filter.FilterPage;
+import org.pimalaya.filter.Filters;
 import org.pimalaya.link.LinkedSection;
 import org.pimalaya.mail.MailList;
 import org.pimalaya.mail.MailParts;
@@ -162,11 +162,8 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     /** The background run this activity last reloaded after. */
     private long reloadedRun;
 
-    /** Each domain's filter, read once from where it was last left. */
-    private final Map<PimDomain, MergedFilter> filters = new java.util.EnumMap<>(PimDomain.class);
-
     /** The filter page over a list. */
-    private final FilterPage filterPage = new FilterPage(this);
+    private FilterPage filterPage;
 
     /** The deleted items page, raised from the drawer. */
     private final DeletedItemsPage deletedPage = new DeletedItemsPage(this);
@@ -190,15 +187,12 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     /** The Files list, and what a file offers wherever it shows. */
     public FilesList filesList;
 
-    public FileActions fileActions;
+    FileActions fileActions;
 
     /** References between items, and the Linked card every item page shows. */
     public ItemLinks links;
 
-    public LinkedSection linked;
-
-    /** The Files list's filter, which no account connects as a domain. */
-    private MergedFilter filesFilter;
+    LinkedSection linked;
 
     /** The reader one message row opens onto. */
     public MessageView messageView;
@@ -272,8 +266,9 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         form = new ContactForm(this);
         editor = new ContactEditor(this, contactParts, form, this::reloadContacts);
         contactsList = new ContactsList(this, contactParts, editor, this::syncContacts);
-        fileActions = new FileActions(this);
-        filesList = new FilesList(this);
+        // NOTE: a save into a folder reads the Files list again; the list
+        // is built after the reader, so the callback reads the field late.
+        fileActions = new FileActions(this, files, () -> filesList.reload());
         linked = new LinkedSection(this);
         // NOTE: the entry page shows the Linked card, so it is built after
         // it; the agenda binds itself into the page it opens rows onto.
@@ -287,6 +282,15 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         messageView = new MessageView(this, mailParts, sync, fileActions, linked);
         mailList = new MailList(this, mail, sync, messageView);
         compose = new MessageCompose(this, mailParts, messageView, mailList);
+        // NOTE: the Files list opens a file's message in the reader and
+        // shows the Linked card, so it is built after both.
+        filesList = new FilesList(this, files, fileActions, messageView, linked);
+        // NOTE: Apply reloads the four lists, so the page is built after them.
+        filterPage =
+                new FilterPage(
+                        this,
+                        new Filters(this, passes, sync, mail, files, accounts),
+                        this::filterChanged);
         // NOTE: the two flows reference each other (grants land back in
         // the wizard), so one side binds late.
         oauth = new OauthFlow(this);
@@ -1327,11 +1331,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         }
     }
 
-    /** Resumes the fill and the body step ({@link SyncCoordinator#fillMail}). */
-    public void fillMail() {
-        sync.fillMail();
-    }
-
     /** Runs a store-wide write while no sync runs ({@link SyncCoordinator#underSyncLock}). */
     public void underSyncLock(int failed, Runnable write) {
         sync.underSyncLock(failed, write);
@@ -1643,8 +1642,8 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         button.setImageTintList(
                 android.content.res.ColorStateList.valueOf(
                         (panel == PANEL_FILES
-                                        ? filesFilter().isActive()
-                                        : domain != null && filterOf(domain).isActive())
+                                        ? MergedFilter.files(this).isActive()
+                                        : domain != null && MergedFilter.of(this, domain).isActive())
                                 ? ui.resolveColor(android.R.attr.colorAccent)
                                 : ui.resolveColor(android.R.attr.textColorPrimary)));
     }
@@ -1668,81 +1667,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         filterPage.open(domainOf(screen) == null ? PimDomain.CONTACTS : domainOf(screen));
     }
 
-    /** One domain's filter, as it was last left. */
-    public MergedFilter filterOf(PimDomain domain) {
-        return filters.computeIfAbsent(domain, key -> MergedFilter.of(this, key));
-    }
-
-    /** The Files list's filter, as it was last left. */
-    public MergedFilter filesFilter() {
-        if (filesFilter == null) {
-            filesFilter = MergedFilter.files(this);
-        }
-        return filesFilter;
-    }
-
-    /**
-     * What the filter page lists for Files: the device's folders under the
-     * device, and each account that is on with its attachments collection.
-     */
-    public List<FilterPage.Account> filesRoster() {
-        List<FilterPage.Account> roster = new ArrayList<>();
-        List<PimdirCollections.Stored> folders = files.folders();
-        if (!folders.isEmpty()) {
-            roster.add(
-                    new FilterPage.Account(
-                            LocalBook.ACCOUNT, getString(R.string.files_on_device), folders));
-        }
-        for (PimdirCollections.Stored held : files.attachmentCollections()) {
-            if (AccountActivation.enabled(this, held.accountEmail)) {
-                roster.add(
-                        new FilterPage.Account(held.accountEmail, held.accountEmail, List.of(held)));
-            }
-        }
-        return roster;
-    }
-
     /** A filter changed: the lists and the bar's filter icon follow. */
-    /**
-     * Keeps the filter page's ticks ({@code ticks}) in {@code kept}, the
-     * filter of {@code domain} (null for the Files tab), and syncs what they
-     * newly take: the first step of each mailbox never listed, a later pull
-     * catching up one listed before; a pass over the books or the
-     * calendars when one is newly ticked. What they untick is hidden and
-     * synced no more, its stored items kept.
-     */
-    public void applyFilter(PimDomain domain, MergedFilter kept, MergedFilter ticks) {
-        Map<String, List<String>> taken = new LinkedHashMap<>();
-        if (domain != null) {
-            for (FilterPage.Account account : filterRoster(domain)) {
-                for (PimdirCollections.Stored collection : account.collections) {
-                    if (!kept.accepts(account.email, collection.id)
-                            && ticks.accepts(account.email, collection.id)) {
-                        taken.computeIfAbsent(account.email, email -> new ArrayList<>())
-                                .add(collection.id);
-                    }
-                }
-            }
-        }
-        kept.apply(ticks);
-        sync.replanBodies();
-        filterChanged();
-        if (taken.isEmpty()) {
-            return;
-        }
-        switch (domain) {
-            case MAIL:
-                sync.firstOfMailboxes(taken);
-                break;
-            case CALENDAR:
-                syncCalendars();
-                break;
-            default:
-                syncRemote();
-                break;
-        }
-    }
-
     public void filterChanged() {
         contactsList.reRender();
         calendarList.reload();
@@ -1753,40 +1678,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     /** One domain's collections as the store holds them ({@link SyncPasses#collectionsOf}). */
     public List<PimdirCollections.Stored> collectionsOf(PimDomain domain) {
         return passes.collectionsOf(domain);
-    }
-
-    /**
-     * What the filter page lists for a domain: every account that is on and
-     * covers it, each with its collections, the outbox among a mail
-     * account's and the on-device book as an account of its own. An account
-     * holding none is left out, having nothing to tick.
-     */
-    public List<FilterPage.Account> filterRoster(PimDomain domain) {
-        List<String> emails = new ArrayList<>();
-        for (AccountEntry account : accounts) {
-            if (account.covers(domain) && AccountActivation.enabled(this, account.email)) {
-                emails.add(account.email);
-            }
-        }
-        List<PimdirCollections.Stored> collections =
-                domain == PimDomain.MAIL
-                        ? mail.loadMailboxes(emails)
-                        : collectionsOf(domain);
-
-        List<FilterPage.Account> roster = new ArrayList<>();
-        for (String email : emails) {
-            List<PimdirCollections.Stored> own = new ArrayList<>();
-            for (PimdirCollections.Stored collection : collections) {
-                if (collection.accountEmail.equals(email)) {
-                    own.add(collection);
-                }
-            }
-            if (!own.isEmpty()) {
-                String label = LocalBook.is(email) ? getString(R.string.local_book) : email;
-                roster.add(new FilterPage.Account(email, label, own));
-            }
-        }
-        return roster;
     }
 
     /** Navigates forward: the panels slide in from the right. */
@@ -1972,7 +1863,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                     // selection then takes over.
                     contactsList.updateSelectionUi();
                 };
-        contacts.fab = () -> editor.addContact(filterOf(PimDomain.CONTACTS));
+        contacts.fab = () -> editor.addContact(MergedFilter.of(this, PimDomain.CONTACTS));
         contacts.systemBack =
                 () -> {
                     if (contactsList.isSearchOpen()) {

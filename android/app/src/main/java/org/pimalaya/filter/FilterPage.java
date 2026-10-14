@@ -10,7 +10,6 @@ import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
@@ -18,6 +17,8 @@ import org.pimalaya.mail.MailOffline;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.ui.Host;
+import org.pimalaya.ui.Panels;
 
 /**
  * A list's filter page: each account with a checkbox, its collections
@@ -28,7 +29,7 @@ import org.pimalaya.pimdir.PimdirSummary;
  * is not listed here. Unticking an account folds its collections away, each
  * keeping its own box for when the account is ticked again. The ticks are a
  * draft until Apply, which keeps them and syncs what they newly take
- * ({@link MainActivity#applyFilter}); closing the page drops them.
+ * ({@link Filters#apply}); closing the page drops them.
  *
  * <p>On calendars and address books, the account's default collection says
  * so, and a writable one of an account whose source names no default offers
@@ -37,12 +38,12 @@ import org.pimalaya.pimdir.PimdirSummary;
  */
 public final class FilterPage {
     /** One account and its collections, as the page lists them. */
-    public static final class Account {
-        public final String email;
+    static final class Account {
+        final String email;
         final String label;
-        public final List<PimdirCollections.Stored> collections;
+        final List<PimdirCollections.Stored> collections;
 
-        public Account(String email, String label, List<PimdirCollections.Stored> collections) {
+        Account(String email, String label, List<PimdirCollections.Stored> collections) {
             this.email = email;
             this.label = label;
             this.collections = collections;
@@ -57,7 +58,13 @@ public final class FilterPage {
         }
     }
 
-    private final MainActivity host;
+    private final Host host;
+
+    /** The rosters the page lists and what Apply runs. */
+    private final Filters filters;
+
+    /** Runs once a filter changed: the lists and the bar's filter icon follow. */
+    private final Runnable filterChanged;
 
     /** The domain on the page, null while it is closed. */
     private PimDomain domain;
@@ -69,10 +76,12 @@ public final class FilterPage {
     private MergedFilter draft;
 
     /** The list screen the page was raised over, restored on the way out. */
-    private int cameFrom = MainActivity.PANEL_MAIL;
+    private int cameFrom = Panels.MAIL;
 
-    public FilterPage(MainActivity host) {
+    public FilterPage(Host host, Filters filters, Runnable filterChanged) {
         this.host = host;
+        this.filters = filters;
+        this.filterChanged = filterChanged;
     }
 
     public void setUp() {
@@ -94,9 +103,9 @@ public final class FilterPage {
         this.cameFrom = host.screen;
         ((TextView) host.findViewById(R.id.filter_title))
                 .setText(host.getString(R.string.filter_title_of, host.getString(domain.label)));
-        draft = host.filterOf(domain).draft();
+        draft = MergedFilter.of(host, domain).draft();
         render();
-        host.openOverlay(MainActivity.PANEL_FILTER);
+        host.openOverlay(Panels.FILTER);
     }
 
     /** Opens the page over the Files tab. */
@@ -108,9 +117,9 @@ public final class FilterPage {
                 .setText(
                         host.getString(
                                 R.string.filter_title_of, host.getString(R.string.files_title)));
-        draft = host.filesFilter().draft();
+        draft = MergedFilter.files(host).draft();
         render();
-        host.openOverlay(MainActivity.PANEL_FILTER);
+        host.openOverlay(Panels.FILTER);
     }
 
     /** The filter on the page, a draft until applied. */
@@ -120,21 +129,21 @@ public final class FilterPage {
 
     /**
      * Keeps the page's ticks and closes it: the lists follow, and what the
-     * ticks newly take syncs ({@link MainActivity#applyFilter}).
+     * ticks newly take syncs ({@link Filters#apply}).
      */
     private void apply() {
-        MergedFilter kept = files ? host.filesFilter() : host.filterOf(domain);
+        MergedFilter kept = files ? MergedFilter.files(host) : MergedFilter.of(host, domain);
         PimDomain applied = files ? null : domain;
         MergedFilter ticks = draft;
         leave();
-        host.applyFilter(applied, kept, ticks);
+        filters.apply(applied, kept, ticks, filterChanged);
     }
 
     /** Closes the page onto the list it was opened over. */
     public void leave() {
         domain = null;
         draft = null;
-        host.closeOverlay(MainActivity.PANEL_FILTER);
+        host.closeOverlay(Panels.FILTER);
         host.screen = cameFrom;
         host.applyChrome(cameFrom);
     }
@@ -142,7 +151,7 @@ public final class FilterPage {
     /** A default chosen: the page and the lists behind it follow. */
     private void changed() {
         render();
-        host.filterChanged();
+        filterChanged.run();
     }
 
     private void render() {
@@ -153,7 +162,7 @@ public final class FilterPage {
         boolean defaults = !files && !mail;
         String kind = domain == PimDomain.CALENDAR ? PimdirSummary.CALENDAR : PimdirSummary.CONTACT;
 
-        for (Account account : files ? host.filesRoster() : host.filterRoster(domain)) {
+        for (Account account : files ? filters.filesRoster() : filters.roster(domain)) {
             List<String> ids = account.ids();
             MergedFilter.Tick tick = filter.tick(account.email, ids);
             content.addView(
@@ -200,8 +209,8 @@ public final class FilterPage {
                 content.addView(
                         row(
                                 mail
-                                        ? host.mail.mailboxLabel(collection)
-                                        : files ? host.files.label(collection) : collection.name,
+                                        ? filters.mail.mailboxLabel(collection)
+                                        : files ? filters.files.label(collection) : collection.name,
                                 detail,
                                 host.dp(24),
                                 ticked ? MergedFilter.Tick.ON : MergedFilter.Tick.OFF,
@@ -239,13 +248,13 @@ public final class FilterPage {
                 .setMessage(
                         host.getString(
                                 R.string.filter_download_message,
-                                host.mail.mailboxLabel(collection)))
+                                filters.mail.mailboxLabel(collection)))
                 .setPositiveButton(
                         R.string.filter_download,
                         (dialog, which) -> {
                             MailOffline.setWhole(host, collection.id, true);
                             render();
-                            host.fillMail();
+                            filters.sync.fillMail();
                         })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();

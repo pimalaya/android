@@ -47,7 +47,10 @@ public class LayeringTest {
                     "ui", "account", CLIENT)),
             Map.entry("setup", Set.of("sync", "mail", "calendar", "contact", "phone",
                     "pimdir", "ui", "account", CLIENT)),
-            Map.entry("filter", Set.of("mail", "pimdir", "account")),
+            // NOTE: filter reaches ui for the page's Host and Panels, sync
+            // because Apply runs what newly ticked collections take, file
+            // for the Files roster; all of them sit below the page.
+            Map.entry("filter", Set.of("sync", "mail", "file", "pimdir", "ui", "account")),
             Map.entry("trash", Set.of("contact", "pimdir", "account", CLIENT)),
             Map.entry("link", Set.of("mail", "contact", "ui", "pimdir")));
 
@@ -63,13 +66,13 @@ public class LayeringTest {
             // CalendarParts, each other, the Linked card and Host. The four
             // mail screens left in step 13: they reach MailParts, MailSync
             // (the coordinator), each other, FileActions, the Linked card
-            // and Host.
-            Map.entry("file/FileActions.java", Set.of(ROOT)),
-            Map.entry("file/FilesList.java", Set.of(ROOT)),
+            // and Host. The two file screens left in step 14: they reach
+            // FileStore, each other, the reader as FilesList.Origins, the
+            // Linked card and Host. The filter page left in step 15: it
+            // reaches Filters, the shared MergedFilter and Host.
             Map.entry("setup/AccountSettings.java", Set.of(ROOT)),
             Map.entry("setup/OauthFlow.java", Set.of(ROOT)),
             Map.entry("setup/OnboardingFlow.java", Set.of(ROOT)),
-            Map.entry("filter/FilterPage.java", Set.of(ROOT)),
             Map.entry("trash/DeletedItemsPage.java", Set.of(ROOT)),
             Map.entry("link/LinkedSection.java", Set.of(ROOT)));
 

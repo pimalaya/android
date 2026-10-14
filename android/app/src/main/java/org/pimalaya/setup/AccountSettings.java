@@ -547,7 +547,7 @@ public final class AccountSettings {
                 calendars.add(calendar);
             }
         }
-        MergedFilter filter = host.filterOf(PimDomain.CALENDAR);
+        MergedFilter filter = MergedFilter.of(host, PimDomain.CALENDAR);
         boolean permitted = PhoneMirror.CALENDAR.granted(host);
         for (PimdirCollections.Stored calendar : calendars) {
             LinearLayout item = new LinearLayout(host);

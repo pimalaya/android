@@ -17,10 +17,10 @@ import java.io.OutputStream;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.ui.Host;
 
 /**
  * What can be done with one file, wherever it is shown: open it, share it,
@@ -46,15 +46,22 @@ public final class FileActions {
     /** The request code of the export document picker ({@link #exported}). */
     public static final int REQUEST_EXPORT = 6;
 
-    private final MainActivity host;
+    private final Host host;
+
+    private final FileStore files;
+
+    /** Runs once a save put a file into a folder: the Files list reads again. */
+    private final Runnable changed;
 
     /** The file an export waits on the document picker for, null for none. */
     private String exportPath;
 
     private String exportName;
 
-    public FileActions(MainActivity host) {
+    public FileActions(Host host, FileStore files, Runnable changed) {
         this.host = host;
+        this.files = files;
+        this.changed = changed;
     }
 
     /** Keeps a waiting export across the activity's recreation. */
@@ -206,7 +213,7 @@ public final class FileActions {
     public void saveToFolder(FileStore.StoredFile file, Source source) {
         host.io.execute(
                 () -> {
-                    List<PimdirCollections.Stored> folders = host.files.folders();
+                    List<PimdirCollections.Stored> folders = files.folders();
                     host.postAlive(
                             () -> {
                                 CharSequence[] labels = new CharSequence[folders.size() + 1];
@@ -249,14 +256,14 @@ public final class FileActions {
                 () -> {
                     int said;
                     try {
-                        String target = folder == null ? host.files.createFolder(name) : folder;
+                        String target = folder == null ? files.createFolder(name) : folder;
                         if (target == null) {
                             host.postAlive(
                                     () -> host.toast(host.getString(R.string.files_folder_exists)));
                             return;
                         }
                         said =
-                                host.files.save(target, file, source.read())
+                                files.save(target, file, source.read())
                                         ? R.string.attachment_saved
                                         : R.string.files_already_saved;
                     } catch (Exception error) {
@@ -266,7 +273,7 @@ public final class FileActions {
                     host.postAlive(
                             () -> {
                                 host.toast(host.getString(said, name));
-                                host.filesList.reload();
+                                changed.run();
                             });
                 });
     }

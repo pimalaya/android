@@ -27,6 +27,7 @@ import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.file.FileActions;
 import org.pimalaya.file.FileStore;
+import org.pimalaya.file.FilesList;
 import org.pimalaya.file.OpenedCopies;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.MailDate;
@@ -57,7 +58,7 @@ import java.util.Set;
  * read receipt the sender did not ask permission for, and a script in a
  * message has no business running.
  */
-public final class MessageView {
+public final class MessageView implements FilesList.Origins {
     /** How wide a badge row may run: the reader's own inner width. */
     private static final int CARD_INSET = 32;
 
@@ -392,6 +393,7 @@ public final class MessageView {
      * out ({@link #fileOf(MailStore.StoredMessage, FileStore.StoredFile)}),
      * refused when its message is gone.
      */
+    @Override
     public java.io.File fileOf(FileStore.Origin origin, FileStore.StoredFile file) {
         MailStore.StoredMessage message =
                 origin == null
@@ -404,6 +406,7 @@ public final class MessageView {
     }
 
     /** Opens the message a file came from in the reader. */
+    @Override
     public void openOrigin(FileStore.Origin origin) {
         host.io.execute(
                 () -> {
