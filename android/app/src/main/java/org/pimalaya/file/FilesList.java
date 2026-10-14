@@ -9,7 +9,6 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.BaseAdapter;
 import android.widget.ListView;
 import android.widget.TextView;
 
@@ -31,6 +30,7 @@ import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Linked;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
+import org.pimalaya.ui.SectionsAdapter;
 
 /**
  * The Files screen: one card per file collection the filter shows, the
@@ -71,8 +71,8 @@ public final class FilesList {
     /** The Linked card a file's sheet opens. */
     private final Linked<ItemLinks.Endpoint> linked;
 
-    private final Adapter adapter = new Adapter();
     private final CardSections<Row> sections = new CardSections<>();
+    private final Adapter adapter = new Adapter();
 
     /** What tapping a folder's header does, by the header's label. */
     private final Map<String, PimdirCollections.Stored> folderHeaders = new HashMap<>();
@@ -614,30 +614,9 @@ public final class FilesList {
         return host.getString(R.string.size_megabytes, bytes / (1024 * 1024));
     }
 
-    private final class Adapter extends BaseAdapter {
-        @Override
-        public int getCount() {
-            return sections.size();
-        }
-
-        @Override
-        public Object getItem(int position) {
-            return sections.row(position);
-        }
-
-        @Override
-        public long getItemId(int position) {
-            return position;
-        }
-
-        @Override
-        public int getViewTypeCount() {
-            return 2;
-        }
-
-        @Override
-        public int getItemViewType(int position) {
-            return sections.isHeader(position) ? 1 : 0;
+    private final class Adapter extends SectionsAdapter<Row> {
+        Adapter() {
+            super(sections);
         }
 
         @Override
@@ -647,11 +626,7 @@ public final class FilesList {
         }
 
         @Override
-        public View getView(int position, View recycled, ViewGroup parent) {
-            if (sections.isHeader(position)) {
-                return sections.headerView(position, recycled, parent);
-            }
-
+        protected View rowView(int position, View recycled, ViewGroup parent) {
             View view = recycled;
             if (view == null) {
                 view = LayoutInflater.from(host).inflate(R.layout.item_event, parent, false);

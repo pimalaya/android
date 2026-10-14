@@ -8,7 +8,6 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.BaseAdapter;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -29,6 +28,7 @@ import org.pimalaya.ui.Dates;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
+import org.pimalaya.ui.SectionsAdapter;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -72,8 +72,8 @@ public final class CalendarList {
 
     /** The pull-down's sync of the calendars. */
     private final Runnable pull;
-    private final Adapter adapter = new Adapter();
     private final CardSections<Row> sections = new CardSections<>();
+    private final Adapter adapter = new Adapter();
 
     /** The rows on screen, one per occurrence, earliest first. */
     private final List<Row> rows = new ArrayList<>();
@@ -618,30 +618,9 @@ public final class CalendarList {
                 : R.string.event_component_event;
     }
 
-    private final class Adapter extends BaseAdapter {
-        @Override
-        public int getCount() {
-            return sections.size();
-        }
-
-        @Override
-        public Object getItem(int position) {
-            return sections.row(position);
-        }
-
-        @Override
-        public long getItemId(int position) {
-            return position;
-        }
-
-        @Override
-        public int getViewTypeCount() {
-            return 2;
-        }
-
-        @Override
-        public int getItemViewType(int position) {
-            return sections.isHeader(position) ? 1 : 0;
+    private final class Adapter extends SectionsAdapter<Row> {
+        Adapter() {
+            super(sections);
         }
 
         @Override
@@ -650,11 +629,7 @@ public final class CalendarList {
         }
 
         @Override
-        public View getView(int position, View recycled, ViewGroup parent) {
-            if (sections.isHeader(position)) {
-                return sections.headerView(position, recycled, parent);
-            }
-
+        protected View rowView(int position, View recycled, ViewGroup parent) {
             View view = recycled;
             if (view == null) {
                 view = LayoutInflater.from(host).inflate(R.layout.item_event, parent, false);

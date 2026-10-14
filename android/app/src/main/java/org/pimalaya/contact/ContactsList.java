@@ -21,6 +21,7 @@ import org.pimalaya.ui.Chips;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
+import org.pimalaya.ui.SectionsAdapter;
 import org.pimalaya.ui.Ui;
 
 /**
@@ -55,8 +56,8 @@ public final class ContactsList {
      *  the adapter. */
     private List<Group> sortedContacts = new ArrayList<>();
 
-    private final Adapter adapter = new Adapter();
     private final CardSections<Group> sections = new CardSections<>();
+    private final Adapter adapter = new Adapter();
     private ListHeader header;
 
     /** Multi-select state, keyed by merged group. */
@@ -287,38 +288,13 @@ public final class ContactsList {
     }
 
     /** Recycling adapter for the contacts list. */
-    private final class Adapter extends android.widget.BaseAdapter {
-        @Override
-        public int getCount() {
-            return sections.size();
+    private final class Adapter extends SectionsAdapter<Group> {
+        Adapter() {
+            super(sections);
         }
 
         @Override
-        public Object getItem(int position) {
-            return sections.row(position);
-        }
-
-        @Override
-        public long getItemId(int position) {
-            return position;
-        }
-
-        @Override
-        public int getViewTypeCount() {
-            return 2;
-        }
-
-        @Override
-        public int getItemViewType(int position) {
-            return sections.isHeader(position) ? 1 : 0;
-        }
-
-        @Override
-        public View getView(int position, View convertView, android.view.ViewGroup parent) {
-            if (sections.isHeader(position)) {
-                return sections.headerView(position, convertView, parent);
-            }
-
+        protected View rowView(int position, View convertView, android.view.ViewGroup parent) {
             View row =
                     convertView != null
                             ? convertView
