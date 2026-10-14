@@ -13,7 +13,6 @@ import org.pimalaya.client.EventMerge;
 import org.pimalaya.client.EventRef;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.Transport;
-import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
@@ -246,16 +245,9 @@ public final class CalendarEngine extends PimdirEngine {
         return !PimdirStorage.isPhoneCollection(collection);
     }
 
-    /**
-     * A write to a calendar reaches the phone's calendar within a second
-     * ({@link PhoneQueue}); a write to the phone collection is a phone
-     * pass's own, pushed by that pass.
-     */
     @Override
     protected void staged(String collection) {
-        if (!PimdirStorage.isPhoneCollection(collection)) {
-            PhoneQueue.calendarWritten(pimdir.context(), collection);
-        }
+        CalendarStager.staged(pimdir, collection);
     }
 
     @Override

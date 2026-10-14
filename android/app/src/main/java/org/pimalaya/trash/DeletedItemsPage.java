@@ -20,12 +20,12 @@ import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
-import org.pimalaya.contact.ContactEngine;
+import org.pimalaya.contact.ContactStager;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.DeletedItems;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;
-import org.pimalaya.pimdir.PimdirEngine;
+import org.pimalaya.pimdir.Stager;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -253,19 +253,16 @@ public final class DeletedItemsPage {
                     Exception failure = null;
                     DeletedItems.Refusal refusal = null;
                     try {
-                        PimdirEngine engine;
+                        Stager engine;
                         switch (row.kind) {
                             case PimdirSummary.MAIL:
-                                engine = host.mailEngine(email);
+                                engine = host.mailStager();
                                 break;
                             case PimdirSummary.CONTACT:
-                                engine =
-                                        new ContactEngine(
-                                                host.base, host.pimdir, host.client, null, null,
-                                                null);
+                                engine = new ContactStager(host.pimdir, host.client);
                                 break;
                             default:
-                                engine = host.calendarEngine(email);
+                                engine = host.calendarStager();
                         }
                         store().restore(engine, row, target);
                     } catch (DeletedItems.RefusedException refused) {

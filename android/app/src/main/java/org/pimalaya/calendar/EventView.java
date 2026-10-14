@@ -389,7 +389,7 @@ public final class EventView {
                     () -> {
                         Exception failure = null;
                         try {
-                            host.calendarEngine(calendar.accountEmail)
+                            host.calendarStager()
                                     .mutateEdit(settled.collection, settled.handle, ical, null, "");
                         } catch (Exception error) {
                             Log.w("pimalaya", "event merge failed: " + event.id, error);
@@ -1509,7 +1509,7 @@ public final class EventView {
                 () -> {
                     Exception failure = null;
                     try {
-                        CalendarEngine engine = host.calendarEngine(collection.accountEmail);
+                        CalendarStager engine = host.calendarStager();
                         String source = target.ical;
                         String into = collection.id;
                         String handle = target.handle;
@@ -1680,7 +1680,7 @@ public final class EventView {
                 () -> {
                     Exception failure = null;
                     try {
-                        CalendarEngine engine = host.calendarEngine(collection.accountEmail);
+                        CalendarStager engine = host.calendarStager();
                         String left = null;
                         if (!"all".equals(scope)) {
                             String source =

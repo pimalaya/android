@@ -31,7 +31,7 @@ public class ContactEngineServeTest {
     private static final String BOOK = "https://dav.example.com/books/b1/";
 
     private CardStore store;
-    private ContactEngine engine;
+    private ContactStager engine;
 
     @Before
     public void setUp() {
@@ -46,7 +46,7 @@ public class ContactEngineServeTest {
 
         // No account (storage yields only) and no context (no phone
         // spoke): the shape the mutate driver runs with.
-        engine = new ContactEngine(store, pimdir, new PimalayaClient(), null, null, null);
+        engine = new ContactStager(pimdir, new PimalayaClient());
     }
 
     @Test

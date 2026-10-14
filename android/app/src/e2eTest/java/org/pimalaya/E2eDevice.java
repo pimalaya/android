@@ -16,7 +16,7 @@ import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SecureStore;
 import org.pimalaya.account.SyncScope;
-import org.pimalaya.calendar.CalendarEngine;
+import org.pimalaya.calendar.CalendarStager;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.PimalayaClient;
@@ -26,6 +26,7 @@ import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.mail.MailEngine;
 import org.pimalaya.mail.MailReader;
+import org.pimalaya.mail.MailStager;
 import org.pimalaya.mail.MailState;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.mail.MailSubmit;
@@ -294,8 +295,8 @@ final class E2eDevice {
     }
 
     /** A calendar driver that only stages, as the event editor's is. */
-    CalendarEngine calendarStager(String email) {
-        return new CalendarEngine(pimdir, client, null, null, mail.accountIdOf(email), null);
+    CalendarStager calendarStager(String email) {
+        return new CalendarStager(pimdir, client);
     }
 
     /** A scope taking one account whole. */
@@ -409,12 +410,13 @@ final class E2eDevice {
     }
 
     /** A driver that only stages, as the reader's and the composer's are. */
-    MailEngine stager(String email) {
-        return new MailEngine(pimdir, client, null, mail.accountIdOf(email));
+    MailStager stager(String email) {
+        return new MailStager(pimdir, client);
     }
 
     MailReader reader(String email) {
-        return new MailReader(mail, files, client, stager(email));
+        return new MailReader(
+                mail, files, client, new MailEngine(pimdir, client, null, mail.accountIdOf(email)));
     }
 
     MailSubmit submitter(String email) {

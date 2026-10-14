@@ -260,7 +260,7 @@ public final class MessageCompose {
                 () -> {
                     Exception failure = null;
                     try {
-                        new MailSubmit(host.client, host.mail, host.mailEngine(sender.email))
+                        new MailSubmit(host.client, host.mail, host.mailStager())
                                 .queue(draft);
                     } catch (Exception error) {
                         Log.w("pimalaya", "compose failed: " + AccountEntry.redacted(sender.email), error);

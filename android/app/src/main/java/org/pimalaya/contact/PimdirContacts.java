@@ -59,12 +59,12 @@ public final class PimdirContacts {
      * delete go through, as pimdir mutations (SYNC §7), never as direct row
      * edits.
      */
-    private final ContactEngine stager;
+    private final ContactStager stager;
 
     public PimdirContacts(PimdirDb store) {
         this.store = store;
         this.items = new PimdirItems(store);
-        this.stager = new ContactEngine(null, store, new PimalayaClient(), null, null, null);
+        this.stager = new ContactStager(store, new PimalayaClient());
     }
 
     /** One displayable replica: the card plus its summary. */

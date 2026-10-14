@@ -21,12 +21,12 @@ import org.junit.runner.RunWith;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
-import org.pimalaya.contact.ContactEngine;
+import org.pimalaya.contact.ContactStager;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.mail.MailEngine;
+import org.pimalaya.mail.MailStager;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.DeletedItems;
-import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirBlobs;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
@@ -70,8 +70,8 @@ public class DeletedItemsTest {
         }
     }
 
-    private ContactEngine engine() {
-        return new ContactEngine(null, pimdir, new PimalayaClient(), null, null, null);
+    private ContactStager engine() {
+        return new ContactStager(pimdir, new PimalayaClient());
     }
 
     private static String vcard(String uid, String name) {
@@ -224,9 +224,8 @@ public class DeletedItemsTest {
         return store.collectionOf(EMAIL, "INBOX");
     }
 
-    private MailEngine mailEngine() {
-        return new MailEngine(
-                pimdir, new PimalayaClient(), null, new PimdirAccount(context).idOf(EMAIL));
+    private MailStager mailEngine() {
+        return new MailStager(pimdir, new PimalayaClient());
     }
 
     /** Files one message bound and agreed, then has its server delete it. */

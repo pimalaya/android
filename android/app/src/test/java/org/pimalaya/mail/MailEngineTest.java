@@ -17,7 +17,6 @@ import org.junit.runner.RunWith;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
-import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.pimdir.PimdirEngine;
@@ -44,7 +43,7 @@ public class MailEngineTest {
 
     private PimdirDb pimdir;
     private MailStore store;
-    private MailEngine engine;
+    private MailStager engine;
     private String collection;
 
     @Before
@@ -57,12 +56,7 @@ public class MailEngineTest {
 
         // No account: the shape a driver that only stages runs with, which
         // is every action in the reader and the composer.
-        engine =
-                new MailEngine(
-                        pimdir,
-                        new PimalayaClient(),
-                        null,
-                        new PimdirAccount(context).idOf(EMAIL));
+        engine = new MailStager(pimdir, new PimalayaClient());
 
         // One message the sync has already reconciled: bound, and agreed at
         // a flag set the server also holds.

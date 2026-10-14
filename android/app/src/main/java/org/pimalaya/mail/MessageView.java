@@ -619,7 +619,7 @@ public final class MessageView {
                             continue;
                         }
                         try {
-                            host.mailEngine(message.accountEmail).stageFlag(message, flag, add);
+                            host.mailStager().stageFlag(message, flag, add);
                         } catch (Exception error) {
                             Log.w("pimalaya", "message flag failed: " + message.id, error);
                             if (failure == null) {
@@ -719,7 +719,7 @@ public final class MessageView {
      *
      * <p>A delete is a pimdir mutation like any other action, so the list
      * shows its outcome at once and the sync carries it out as staged:
-     * what is staged ({@link MailEngine#stageDelete}) is what the toast
+     * what is staged ({@link MailStager#stageDelete}) is what the toast
      * says.
      *
      * <p>Unless the account records no trash and is a JMAP one, which RFC
@@ -752,11 +752,11 @@ public final class MessageView {
         host.io.execute(
                 () -> {
                     Exception failure = null;
-                    MailEngine.Deletion first = null;
+                    MailStager.Deletion first = null;
                     for (MailStore.StoredMessage message : staged) {
                         try {
-                            MailEngine.Deletion deletion =
-                                    host.mailEngine(message.accountEmail).stageDelete(message);
+                            MailStager.Deletion deletion =
+                                    host.mailStager().stageDelete(message);
                             if (first == null) {
                                 first = deletion;
                             }
@@ -769,7 +769,7 @@ public final class MessageView {
                     }
 
                     Exception error = failure;
-                    MailEngine.Deletion deletion = first;
+                    MailStager.Deletion deletion = first;
                     host.postAlive(
                             () -> {
                                 if (error != null) {
@@ -783,7 +783,7 @@ public final class MessageView {
                                                             R.plurals.messages_deleted,
                                                             staged.size(),
                                                             staged.size()));
-                                } else if (deletion != MailEngine.Deletion.WITHDRAWN) {
+                                } else if (deletion != MailStager.Deletion.WITHDRAWN) {
                                     host.toast(deletedOf(staged.get(0), deletion));
                                 }
                                 host.mailList.reload();
@@ -793,7 +793,7 @@ public final class MessageView {
     }
 
     /** What deleting one message did, as its toast says. */
-    private String deletedOf(MailStore.StoredMessage message, MailEngine.Deletion deletion) {
+    private String deletedOf(MailStore.StoredMessage message, MailStager.Deletion deletion) {
         switch (deletion) {
             case MOVED:
                 return host.getString(

@@ -8,6 +8,7 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 import org.pimalaya.mail.MailEngine;
+import org.pimalaya.mail.MailStager;
 import org.pimalaya.mail.MailStore;
 
 import java.util.List;
@@ -100,7 +101,7 @@ public class E2eMailWriteTest extends E2eCase {
 
         assertEquals(
                 "a move into the trash",
-                MailEngine.Deletion.MOVED,
+                MailStager.Deletion.MOVED,
                 phone.stager(address).stageDelete(listed));
         assertNull("gone from its mailbox at once", phone.message(collection, subject("deleted")));
         MailStore.StoredMessage moving = phone.message(trash, subject("deleted"));
@@ -148,8 +149,8 @@ public class E2eMailWriteTest extends E2eCase {
                     return there != null && !phone.owes(trash, there.id);
                 });
         MailStore.StoredMessage inTrash = phone.message(trash, subject("deleted"));
-        MailEngine.Deletion erased = phone.stager(address).stageDelete(inTrash);
-        assertEquals("a delete for good", MailEngine.Deletion.ERASED, erased);
+        MailStager.Deletion erased = phone.stager(address).stageDelete(inTrash);
+        assertEquals("a delete for good", MailStager.Deletion.ERASED, erased);
         assertNull("gone at once", phone.message(trash, subject("deleted")));
         pass(phone, trash);
 

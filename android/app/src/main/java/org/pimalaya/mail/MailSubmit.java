@@ -29,9 +29,9 @@ public final class MailSubmit {
     private final MailStore mail;
 
     /** The sender's driver, staging the sent copy. */
-    private final MailEngine engine;
+    private final MailStager engine;
 
-    public MailSubmit(PimalayaClient client, MailStore mail, MailEngine engine) {
+    public MailSubmit(PimalayaClient client, MailStore mail, MailStager engine) {
         this.client = client;
         this.mail = mail;
         this.engine = engine;

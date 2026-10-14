@@ -24,7 +24,6 @@ import org.pimalaya.client.Card;
 import org.pimalaya.client.CardDelta;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.Transport;
-import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -324,7 +323,7 @@ public final class ContactEngine extends PimdirEngine {
             return false;
         }
 
-        mutateEdit(url, conflict.getString("handle"), resolution.optString("vcard"));
+        ContactStager.edit(this, url, conflict.getString("handle"), resolution.optString("vcard"));
         return true;
     }
 
@@ -357,37 +356,12 @@ public final class ContactEngine extends PimdirEngine {
         if (!remote.isNull("revision")) {
             offline.setConflictRevision(collection, handle, remote.getString("revision"));
         }
-        mutateEdit(collection, handle, merged);
+        ContactStager.edit(this, collection, handle, merged);
     }
 
-    /**
-     * Stages a content edit on one card through the engine (the next sync
-     * pushes it); editing a conflicted placement resolves it.
-     *
-     * <p>The summary and the key come off the document itself, so a
-     * rename moves the card in the list rather than leaving it where the
-     * old name put it.
-     */
-    public void mutateEdit(String url, String handle, String vcard) throws JSONException {
-        JSONObject index = Cards.indexCard(vcard);
-        mutateEdit(
-                url,
-                handle,
-                vcard,
-                index.optJSONObject("summary"),
-                index.optString("sortKey"));
-    }
-
-    /**
-     * A write to a book reaches the phone's contacts within a second
-     * ({@link PhoneQueue}); a write to the phone collection is a phone
-     * pass's own conflict resolution, pushed by that pass.
-     */
     @Override
     protected void staged(String collection) {
-        if (!CardStore.isPhoneCollection(collection)) {
-            PhoneQueue.written(pimdir.context(), collection);
-        }
+        ContactStager.staged(pimdir, collection);
     }
 
     @Override

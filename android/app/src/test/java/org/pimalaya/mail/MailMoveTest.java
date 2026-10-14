@@ -167,8 +167,8 @@ public class MailMoveTest {
         assertEquals("{}", reply);
     }
 
-    private MailEngine stager() {
-        return new MailEngine(pimdir, new PimalayaClient(), null, accountId);
+    private MailStager stager() {
+        return new MailStager(pimdir, new PimalayaClient());
     }
 
     private String scalar(String sql, String... args) {
@@ -273,7 +273,7 @@ public class MailMoveTest {
         file(trash, named("7", "Old"));
         MailStore.markExpungesOne(context, accountId, false);
 
-        assertEquals(MailEngine.Deletion.MARKED, stager().stageDelete(rowIn("Trash")));
+        assertEquals(MailStager.Deletion.MARKED, stager().stageDelete(rowIn("Trash")));
 
         // No UIDPLUS: an EXPUNGE would take every marked message, so the row
         // stays, saying so, rather than leaving and coming back.
@@ -288,7 +288,7 @@ public class MailMoveTest {
         file(trash, named("7", "Old"));
         MailStore.markExpungesOne(context, accountId, true);
 
-        assertEquals(MailEngine.Deletion.ERASED, stager().stageDelete(rowIn("Trash")));
+        assertEquals(MailStager.Deletion.ERASED, stager().stageDelete(rowIn("Trash")));
         assertNull(rowIn("Trash"));
     }
 

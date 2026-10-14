@@ -278,7 +278,7 @@ public final class DeletedItems {
      * body, its link id being the handle its last mailbox gave it, which names
      * nothing in another one.
      */
-    public void restore(PimdirEngine engine, Row row, String target)
+    public void restore(Stager engine, Row row, String target)
             throws RefusedException, JSONException {
         if (row.waiting()) {
             throw new RefusedException(Refusal.WAITING);

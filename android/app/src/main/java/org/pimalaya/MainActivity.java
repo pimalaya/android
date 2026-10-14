@@ -41,9 +41,9 @@ import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SecureStore;
 import org.pimalaya.account.SyncScope;
-import org.pimalaya.calendar.CalendarEngine;
 import org.pimalaya.calendar.CalendarList;
 import org.pimalaya.calendar.CalendarRows;
+import org.pimalaya.calendar.CalendarStager;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.EventView;
 import org.pimalaya.client.Cards;
@@ -63,6 +63,7 @@ import org.pimalaya.contact.EditSession;
 import org.pimalaya.contact.Entry;
 import org.pimalaya.contact.Group;
 import org.pimalaya.contact.ContactEngine;
+import org.pimalaya.contact.ContactStager;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.contact.VcfTransfer;
 import org.pimalaya.file.FileActions;
@@ -78,6 +79,7 @@ import org.pimalaya.mail.MailList;
 import org.pimalaya.mail.MailOffline;
 import org.pimalaya.mail.MailOwed;
 import org.pimalaya.mail.MailPool;
+import org.pimalaya.mail.MailStager;
 import org.pimalaya.mail.MailState;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.mail.MailTally;
@@ -2009,9 +2011,14 @@ public class MainActivity extends Host {
         return new MailEngine(pimdir, client, null, accountIdOf(email));
     }
 
+    /** A mail driver that only stages, on the same terms. */
+    public MailStager mailStager() {
+        return new MailStager(pimdir, client);
+    }
+
     /** A calendar driver that only stages, on the same terms. */
-    public CalendarEngine calendarEngine(String email) {
-        return new CalendarEngine(pimdir, client, null, null, accountIdOf(email), null);
+    public CalendarStager calendarStager() {
+        return new CalendarStager(pimdir, client);
     }
 
     /**
@@ -3183,8 +3190,8 @@ public class MainActivity extends Host {
             // conflict. The toast is the tap's only visible outcome, so
             // without it the vanishing flag reads as a bug.
             try {
-                new ContactEngine(base, pimdir, client, null, null, null)
-                        .mutateEdit(replica.book.url, handle, resolution.optString("vcard"));
+                new ContactStager(pimdir, client)
+                        .edit(replica.book.url, handle, resolution.optString("vcard"));
             } catch (Exception error) {
                 showError(error, R.string.save_failed);
                 return;

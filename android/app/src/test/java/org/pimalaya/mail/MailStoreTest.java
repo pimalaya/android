@@ -595,9 +595,7 @@ public class MailStoreTest {
 
         // A flag change staged and not pushed yet owes the server something,
         // so a collection leaves it.
-        MailEngine engine =
-                new MailEngine(
-                        pimdir, new org.pimalaya.client.PimalayaClient(), null, accountId);
+        MailStager engine = new MailStager(pimdir, new org.pimalaya.client.PimalayaClient());
         String collection = store.collectionOf(ONE, "INBOX");
         engine.mutateFlags(collection, "kept", new JSONArray().put(MailEngine.FLAGGED));
 

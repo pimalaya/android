@@ -95,8 +95,7 @@ public final class ContactWriter {
      * replica resolves it).
      */
     private void saveFanOut(JSONObject model) throws JSONException {
-        ContactEngine engine =
-                new ContactEngine(host.base, host.pimdir, host.client, null, null, null);
+        ContactStager engine = new ContactStager(host.pimdir, host.client);
         java.util.Set<String> staged = new java.util.HashSet<>();
 
         for (Entry entry : host.edit.replicas) {
@@ -114,7 +113,7 @@ public final class ContactWriter {
                     && host.cardIndex(vcard).optString("hash").equals(entry.hash)) {
                 continue;
             }
-            engine.mutateEdit(
+            engine.edit(
                     entry.book.url,
                     PimdirStorage.rowHandle(entry.card.uri, entry.card.id),
                     vcard);
@@ -131,8 +130,8 @@ public final class ContactWriter {
     private void saveConflictResolution(JSONObject model) throws JSONException {
         Entry replica = host.edit.replicas.get(0);
         String resolved = Cards.applyCard(host.edit.vcard, model);
-        new ContactEngine(host.base, host.pimdir, host.client, null, null, null)
-                .mutateEdit(
+        new ContactStager(host.pimdir, host.client)
+                .edit(
                         replica.book.url,
                         PimdirStorage.rowHandle(replica.card.uri, replica.card.id),
                         resolved);
@@ -148,8 +147,8 @@ public final class ContactWriter {
 
         String vcard = Cards.applyCard(survivor.card.vcard, model);
         if (!host.cardIndex(vcard).optString("hash").equals(survivor.hash)) {
-            new ContactEngine(host.base, host.pimdir, host.client, null, null, null)
-                    .mutateEdit(
+            new ContactStager(host.pimdir, host.client)
+                    .edit(
                             survivor.book.url,
                             PimdirStorage.rowHandle(survivor.card.uri, survivor.card.id),
                             vcard);
