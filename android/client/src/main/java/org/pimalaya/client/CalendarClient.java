@@ -102,12 +102,12 @@ public class CalendarClient {
      * iCalendar text. A patch through the object's concrete syntax
      * tree, so everything the edit does not name survives untouched.
      *
-     * <p>{@code edit} is a JSON object of the properties to set; an
-     * absent key is left alone and a present empty one removes its
-     * property. Pure computation, no transport.
+     * <p>{@code edit} names the properties to set; a null one is left
+     * alone and a present empty one removes its property. Pure
+     * computation, no transport.
      */
-    public static String writeEvent(String ical, String edit) {
-        String written = Native.writeEvent(ical, edit).trim();
+    public static String writeEvent(String ical, EventEdit edit) {
+        String written = Native.writeEvent(ical, edit.toJson().toString()).trim();
 
         // NOTE: the reply is the object itself, so an error has to be
         // told apart from a body. It is: no calendar object opens with
@@ -165,8 +165,8 @@ public class CalendarClient {
      * the edit's {@code uid} carrying the edit from it on. Pure
      * computation, no transport.
      */
-    public static EventSplit splitEvent(String ical, String edit) {
-        return EventSplit.from(Replies.object(Native.splitEvent(ical, edit)));
+    public static EventSplit splitEvent(String ical, EventEdit edit) {
+        return EventSplit.from(Replies.object(Native.splitEvent(ical, edit.toJson().toString())));
     }
 
     /**
@@ -175,8 +175,8 @@ public class CalendarClient {
      * before it. Returns the object left, or null when nothing is and the
      * entry itself goes. Pure computation, no transport.
      */
-    public static String removeEvent(String ical, String edit) {
-        String left = Native.removeEvent(ical, edit).trim();
+    public static String removeEvent(String ical, EventEdit edit) {
+        String left = Native.removeEvent(ical, edit.toJson().toString()).trim();
 
         // NOTE: an object is the bridge's error shape here too, for the
         // same reason it is in writeEvent.

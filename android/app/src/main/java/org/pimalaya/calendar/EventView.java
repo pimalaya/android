@@ -17,17 +17,18 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import org.json.JSONException;
-import org.json.JSONObject;
 import org.pimalaya.R;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.DateEdit;
 import org.pimalaya.client.EventConflictKind;
 import org.pimalaya.client.EventDetail;
 import org.pimalaya.client.EventDraft;
+import org.pimalaya.client.EventEdit;
 import org.pimalaya.client.EventMerge;
+import org.pimalaya.client.EventScope;
 import org.pimalaya.client.EventSide;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.EventTimeKind;
@@ -49,6 +50,7 @@ import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -110,6 +112,7 @@ public final class EventView {
      */
     private static final class Field {
         final String key;
+        final EventEdit.Field text;
         final int section;
         final int label;
         final Kind kind;
@@ -117,6 +120,7 @@ public final class EventView {
 
         Field(String key, int section, int label, Kind kind, String... components) {
             this.key = key;
+            this.text = textOf(key);
             this.section = section;
             this.label = label;
             this.kind = kind;
@@ -147,16 +151,12 @@ public final class EventView {
     private static final String JOURNAL = EventDetail.JOURNAL;
 
     /** Which occurrences a change applies to, as the bridge names them. */
-    private static final String[] SCOPES = {"this", "following", "all"};
+    private static final EventScope[] SCOPES = {
+        EventScope.THIS, EventScope.FOLLOWING, EventScope.ALL,
+    };
 
     /** The dates a page edits, as the bridge's edit object keys them. */
     private static final String[] DATES = {"start", "end", "due", "completed"};
-
-    /** The text fields, likewise. */
-    private static final String[] TEXTS = {
-        "summary", "description", "location", "url", "status", "categories", "priority",
-        "percentComplete",
-    };
 
     /**
      * Every property the page can edit, in the order its sections draw
@@ -268,7 +268,10 @@ public final class EventView {
     private boolean creating;
 
     /** The working values, keyed as the bridge's edit object keys them. */
-    private JSONObject model = new JSONObject();
+    private final Map<EventEdit.Field, String> model = new EnumMap<>(EventEdit.Field.class);
+
+    /** Whether the entry is all-day, as the page has it now. */
+    private boolean allDay;
 
     /** The working dates, each with the zone it is in; absent when unset. */
     private final Map<String, EventTime> times = new HashMap<>();
@@ -278,7 +281,7 @@ public final class EventView {
      * changed: a date it does not touch keeps its line byte for byte, and
      * an edit of a whole series moves only the dates that moved.
      */
-    private JSONObject opened = new JSONObject();
+    private final Map<EventEdit.Field, String> opened = new EnumMap<>(EventEdit.Field.class);
 
     private final Map<String, EventTime> openedTimes = new HashMap<>();
 
@@ -307,7 +310,7 @@ public final class EventView {
 
     /** What the bar calls the entry: its summary, else its kind. */
     public String title() {
-        String summary = value("summary");
+        String summary = value(EventEdit.Field.SUMMARY);
         return summary.isEmpty()
                 ? host.getString(CalendarList.componentName(component()))
                 : summary;
@@ -537,19 +540,20 @@ public final class EventView {
         this.creating = creating;
         this.detail = detailOf(event);
 
-        model = new JSONObject();
+        model.clear();
+        allDay = false;
         times.clear();
         revealed.clear();
         if (detail != null) {
-            put("summary", detail.summary());
-            put("description", detail.description());
-            put("location", detail.location());
-            put("url", detail.url());
-            put("status", detail.status());
-            put("categories", detail.categories());
-            put("priority", detail.priority());
-            put("percentComplete", detail.percentComplete());
-            put("allDay", detail.allDay());
+            put(EventEdit.Field.SUMMARY, detail.summary());
+            put(EventEdit.Field.DESCRIPTION, detail.description());
+            put(EventEdit.Field.LOCATION, detail.location());
+            put(EventEdit.Field.URL, detail.url());
+            put(EventEdit.Field.STATUS, detail.status());
+            put(EventEdit.Field.CATEGORIES, detail.categories());
+            put(EventEdit.Field.PRIORITY, detail.priority());
+            put(EventEdit.Field.PERCENT_COMPLETE, detail.percentComplete());
+            allDay = detail.allDay();
             times.put("start", detail.start());
             times.put("end", detail.end());
             times.put("due", detail.due());
@@ -561,7 +565,8 @@ public final class EventView {
                 occurrenceDates();
             }
         }
-        opened = copy(model);
+        opened.clear();
+        opened.putAll(model);
         openedTimes.clear();
         openedTimes.putAll(times);
 
@@ -774,7 +779,7 @@ public final class EventView {
         boolean set =
                 field.kind == Kind.DATE
                         ? times.get(field.key) != null
-                        : !value(field.key).isEmpty();
+                        : !value(field.text).isEmpty();
         return set || revealed.contains(field.key) || conflictOn(field.key) != null;
     }
 
@@ -894,7 +899,7 @@ public final class EventView {
 
     private View row(Field field) {
         CharSequence shown =
-                field.kind == Kind.DATE ? moment(times.get(field.key)) : value(field.key);
+                field.kind == Kind.DATE ? moment(times.get(field.key)) : value(field.text);
         return sections.row(
                 host.getString(field.label),
                 shown.length() == 0 ? host.getString(R.string.event_unset) : shown,
@@ -959,7 +964,7 @@ public final class EventView {
     private void editText(Field field) {
         boolean longText = field.kind == Kind.LONG_TEXT;
         EditText input = new EditText(host);
-        input.setText(value(field.key));
+        input.setText(value(field.text));
         input.setInputType(
                 longText
                         ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
@@ -974,7 +979,7 @@ public final class EventView {
 
     private void editNumber(Field field) {
         EditText input = new EditText(host);
-        input.setText(value(field.key));
+        input.setText(value(field.text));
         input.setHint(
                 "priority".equals(field.key)
                         ? R.string.event_priority_hint
@@ -993,7 +998,7 @@ public final class EventView {
     private void typed(Field field, EditText input) {
         EventMerge.Conflict conflicted = conflictOn(field.key);
         if (conflicted == null) {
-            dialog(field.label, input, () -> put(field.key, input.getText().toString().trim()));
+            dialog(field.label, input, () -> put(field.text, input.getText().toString().trim()));
             return;
         }
 
@@ -1013,7 +1018,7 @@ public final class EventView {
                         }
                     }
                     reviewed.add(conflicted.id());
-                    put(field.key, typed);
+                    put(field.text, typed);
                 });
     }
 
@@ -1030,7 +1035,7 @@ public final class EventView {
                 .setItems(
                         labels,
                         (dialog, which) -> {
-                            put(field.key, options[which]);
+                            put(field.text, options[which]);
                             render();
                         })
                 .setNegativeButton(android.R.string.cancel, null)
@@ -1128,7 +1133,7 @@ public final class EventView {
      */
     private void toggleAllDay() {
         boolean allDay = !allDay();
-        put("allDay", allDay);
+        this.allDay = allDay;
 
         for (String key : new String[] {"start", "end", "due"}) {
             EventTime current = times.get(key);
@@ -1319,16 +1324,13 @@ public final class EventView {
             return;
         }
 
+        EventEdit.Field text = textOf(one.field());
         if (List.of(DATES).contains(one.field())) {
             times.put(one.field(), choice.time());
             openedTimes.put(one.field(), choice.time());
-        } else if (List.of(TEXTS).contains(one.field())) {
-            put(one.field(), choice.value());
-            try {
-                opened.put(one.field(), choice.value());
-            } catch (JSONException error) {
-                Log.w("pimalaya", "event field failed: " + one.field(), error);
-            }
+        } else if (text != null) {
+            put(text, choice.value());
+            opened.put(text, choice.value());
         }
     }
 
@@ -1397,28 +1399,26 @@ public final class EventView {
 
     // ---- the model --------------------------------------------------------
 
-    private void put(String key, Object value) {
-        try {
-            model.put(key, value);
-        } catch (JSONException error) {
-            Log.w("pimalaya", "event field failed: " + key, error);
-        }
+    private void put(EventEdit.Field key, String value) {
+        model.put(key, value);
     }
 
-    private String value(String key) {
-        return model.optString(key);
+    private String value(EventEdit.Field key) {
+        return Objects.toString(model.get(key), "");
     }
 
     private boolean allDay() {
-        return model.optBoolean("allDay");
+        return allDay;
     }
 
-    private static JSONObject copy(JSONObject values) {
-        try {
-            return new JSONObject(values.toString());
-        } catch (JSONException error) {
-            return new JSONObject();
+    /** The text field the bridge's edit object keys {@code key}, null for any other key. */
+    private static EventEdit.Field textOf(String key) {
+        for (EventEdit.Field text : EventEdit.Field.values()) {
+            if (text.wire().equals(key)) {
+                return text;
+            }
         }
+        return null;
     }
 
     /**
@@ -1446,37 +1446,57 @@ public final class EventView {
      * line's {@code TZID} and {@code VALUE}; one in a zone the object may
      * not define brings that zone's {@code VTIMEZONE}.
      */
-    private JSONObject edited() throws JSONException {
-        JSONObject edit = new JSONObject();
-        for (String key : TEXTS) {
-            if (!value(key).equals(opened.optString(key))) {
-                edit.put(key, value(key));
+    private EventEdit edited() {
+        Map<EventEdit.Field, String> texts = new EnumMap<>(EventEdit.Field.class);
+        for (EventEdit.Field key : EventEdit.Field.values()) {
+            if (!value(key).equals(Objects.toString(opened.get(key), ""))) {
+                texts.put(key, value(key));
             }
         }
 
-        for (String key : DATES) {
-            EventTime now = times.get(key);
-            EventTime was = openedTimes.get(key);
+        Map<EventEdit.DateField, DateEdit> dates = new EnumMap<>(EventEdit.DateField.class);
+        String vtimezone = null;
+        for (EventEdit.DateField key : EventEdit.DateField.values()) {
+            EventTime now = times.get(key.wire());
+            EventTime was = openedTimes.get(key.wire());
             if (same(now, was)) {
                 continue;
             }
 
-            JSONObject date = new JSONObject();
-            date.put("time", now == null ? "" : now.time());
+            String time = now == null ? "" : now.time();
             if (now != null && (was == null || !sameZone(now, was))) {
-                date.put("kind", now.kind().wire());
-                date.put("tzid", now.tzid());
                 ZoneId zone =
                         EventTimeKind.ZONED.equals(now.kind()) ? Zones.zoneOf(now.tzid()) : null;
-                if (zone != null && !edit.has("vtimezone")) {
-                    edit.put("vtimezone", Zones.vtimezone(zone, Zones.instant(now)));
+                if (zone != null && vtimezone == null) {
+                    vtimezone = Zones.vtimezone(zone, Zones.instant(now));
                 }
+                dates.put(key, new DateEdit(time, now.kind(), now.tzid()));
+            } else {
+                dates.put(key, new DateEdit(time, null, null));
             }
-            edit.put(key, date);
         }
 
-        edit.put("stamp", now());
-        return edit;
+        return EventEdit.of(texts, dates, vtimezone, now());
+    }
+
+    /**
+     * Whether an edit changes anything beyond the stamp every save
+     * carries: a field, or a date with the zone it may bring.
+     */
+    private static boolean beyondStamp(EventEdit edit) {
+        return edit.summary() != null
+                || edit.description() != null
+                || edit.location() != null
+                || edit.url() != null
+                || edit.status() != null
+                || edit.categories() != null
+                || edit.priority() != null
+                || edit.start() != null
+                || edit.end() != null
+                || edit.due() != null
+                || edit.completed() != null
+                || edit.percentComplete() != null
+                || edit.vtimezone() != null;
     }
 
     private static boolean same(EventTime left, EventTime right) {
@@ -1526,7 +1546,7 @@ public final class EventView {
         // NOTE: a resolution with nothing edited beside it is one of the
         // whole object, so there is no occurrence to ask about.
         if (creating || !series() || merge != null && !changed()) {
-            save("all");
+            save(EventScope.ALL);
             return;
         }
         scope(
@@ -1537,11 +1557,7 @@ public final class EventView {
 
     /** Whether the page edited anything beyond the stamp every save carries. */
     private boolean changed() {
-        try {
-            return edited().length() > 1;
-        } catch (JSONException error) {
-            return true;
-        }
+        return beyondStamp(edited());
     }
 
     /**
@@ -1551,8 +1567,8 @@ public final class EventView {
      * carries it, as every calendar backend's does: offering it where one did
      * not would stage a change the server never sees.
      */
-    private void scope(int title, boolean one, Consumer<String> then) {
-        List<String> scopes = new ArrayList<>();
+    private void scope(int title, boolean one, Consumer<EventScope> then) {
+        List<EventScope> scopes = new ArrayList<>();
         List<String> labels = new ArrayList<>();
         int[] names = {
             R.string.event_scope_this, R.string.event_scope_following, R.string.event_scope_all,
@@ -1583,20 +1599,11 @@ public final class EventView {
      * which is what settles it; a resolution with nothing edited beside it
      * is staged as it is.
      */
-    private void save(String scope) {
-        JSONObject edit;
-        boolean changed;
-        try {
-            JSONObject edits = edited();
-            changed = edits.length() > 1;
-            edit = scoped(edits, scope);
-        } catch (JSONException error) {
-            host.showError(error, R.string.event_save_failed);
-            return;
-        }
-
-        String edited = edit.toString();
-        String uid = edit.optString("uid");
+    private void save(EventScope scope) {
+        EventEdit edits = edited();
+        boolean changed = beyondStamp(edits);
+        EventEdit edited = scoped(edits, scope);
+        String uid = edited.uid() == null ? "" : edited.uid();
         EventStore.StoredEvent target = event;
         EventStore.StoredCalendar collection = calendar;
         boolean isNew = creating;
@@ -1646,16 +1653,18 @@ public final class EventView {
      * instance it is, the instant a split ends the series before, and the
      * new series' UID.
      */
-    private JSONObject scoped(JSONObject edit, String scope) throws JSONException {
-        edit.put("scope", scope);
+    private EventEdit scoped(EventEdit edit, EventScope scope) {
+        String recurrenceId = null;
+        String recurrenceInstant = null;
         if (series()) {
-            edit.put("recurrenceId", occurrence.recurrenceId().time());
-            edit.put("recurrenceInstant", Zones.utc(Zones.instant(occurrence.recurrenceId())));
+            recurrenceId = occurrence.recurrenceId().time();
+            recurrenceInstant = Zones.utc(Zones.instant(occurrence.recurrenceId()));
         }
-        if ("following".equals(scope)) {
-            edit.put("uid", UUID.randomUUID().toString());
+        String uid = null;
+        if (scope == EventScope.FOLLOWING) {
+            uid = UUID.randomUUID().toString();
         }
-        return edit;
+        return edit.scoped(scope, recurrenceId, recurrenceInstant, uid);
     }
 
     /**
@@ -1672,7 +1681,7 @@ public final class EventView {
                     R.string.event_scope_delete,
                     AccountClient.writesExdates(calendar.url),
                     scope -> {
-                        if ("all".equals(scope) && merge != null) {
+                        if (scope == EventScope.ALL && merge != null) {
                             confirmWhole();
                         } else {
                             delete(scope);
@@ -1695,7 +1704,7 @@ public final class EventView {
                         merge != null
                                 ? R.string.event_delete_conflict_confirm
                                 : R.string.event_delete_confirm)
-                .setPositiveButton(R.string.event_delete, (dialog, which) -> delete("all"))
+                .setPositiveButton(R.string.event_delete, (dialog, which) -> delete(EventScope.ALL))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
@@ -1717,25 +1726,17 @@ public final class EventView {
      * conflicted, as a save is; the whole entry is removed there too,
      * which the engine gates on the revision the conflict recorded.
      */
-    private void delete(String scope) {
+    private void delete(EventScope scope) {
         if (creating) {
             host.showBack(Panels.CALENDAR);
             return;
         }
-        if (!"all".equals(scope) && !settled()) {
+        if (scope != EventScope.ALL && !settled()) {
             host.toast(host.getString(R.string.contact_diverged_pending));
             return;
         }
 
-        String edit;
-        try {
-            JSONObject stamped = new JSONObject();
-            stamped.put("stamp", now());
-            edit = scoped(stamped, scope).toString();
-        } catch (JSONException error) {
-            host.showError(error, R.string.event_delete_failed);
-            return;
-        }
+        EventEdit edit = scoped(EventEdit.of(Map.of(), Map.of(), null, now()), scope);
 
         EventStore.StoredEvent target = event;
         EventStore.StoredCalendar collection = calendar;

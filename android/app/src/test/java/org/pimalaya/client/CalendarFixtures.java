@@ -1,5 +1,7 @@
 package org.pimalaya.client;
 
+import java.util.Map;
+
 /**
  * Crafted calendar objects the calendar pins run through the real bridge,
  * one per shape a reply can take: each time kind, a zone the object
@@ -120,8 +122,12 @@ final class CalendarFixtures {
 
     /** {@code ical} with the edit JSON written, stamped at {@code stamp}. */
     static String edited(String ical, String edit, String stamp) {
-        return CalendarClient.writeEvent(
-                ical, "{" + edit + (edit.isEmpty() ? "" : ",") + "\"stamp\":\"" + stamp + "\"}");
+        // NOTE: the bridge itself, the edit being the literal JSON these
+        // fixtures are written in; EventEditTest pins the typed edits on it.
+        return Native.writeEvent(
+                        ical,
+                        "{" + edit + (edit.isEmpty() ? "" : ",") + "\"stamp\":\"" + stamp + "\"}")
+                .trim();
     }
 
     /** The same, on the occurrence of the 12th alone. */
@@ -137,5 +143,12 @@ final class CalendarFixtures {
         return "{\"scope\":\"following\",\"recurrenceId\":\""
                 + id
                 + "\",\"uid\":\"n\",\"summary\":\"Later\",\"stamp\":\"20260201T100000Z\"}";
+    }
+
+    /** {@link #following} as the typed edit the entry page builds. */
+    static EventEdit followingEdit(String id) {
+        return EventEdit.of(
+                        Map.of(EventEdit.Field.SUMMARY, "Later"), Map.of(), null, "20260201T100000Z")
+                .scoped(EventScope.FOLLOWING, id, null, "n");
     }
 }

@@ -1,6 +1,8 @@
 package org.pimalaya.calendar;
 
 import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.EventEdit;
+import org.pimalaya.client.EventScope;
 import org.pimalaya.client.EventSide;
 import org.pimalaya.client.EventSides;
 import org.pimalaya.client.EventSplit;
@@ -27,8 +29,8 @@ final class EventWrites {
      * conflict it settles with the sides picked.
      */
     record Save(
-            String scope,
-            String edited,
+            EventScope scope,
+            EventEdit edited,
             String uid,
             EventStore.StoredEvent target,
             EventStore.StoredCalendar calendar,
@@ -45,8 +47,8 @@ final class EventWrites {
      * is when nothing was edited beside it.
      */
     void save(Save save) throws Exception {
-        String scope = save.scope();
-        String edited = save.edited();
+        EventScope scope = save.scope();
+        EventEdit edited = save.edited();
         String uid = save.uid();
         EventStore.StoredEvent target = save.target();
         EventStore.StoredCalendar collection = save.calendar();
@@ -71,7 +73,7 @@ final class EventWrites {
         // shows needs the recurrence expansion, which
         // happens at render time against the window being
         // shown, so there is nothing to write here.
-        if ("following".equals(scope)) {
+        if (scope == EventScope.FOLLOWING) {
             EventSplit split = CalendarClient.splitEvent(source, edited);
             if (split.series() != null) {
                 engine.mutateAdd(
@@ -108,15 +110,15 @@ final class EventWrites {
      * conflict mode both are staged on the binding that conflicted.
      */
     void delete(
-            String scope,
-            String edit,
+            EventScope scope,
+            EventEdit edit,
             EventStore.StoredEvent target,
             EventStore.StoredCalendar collection,
             EventStore.StoredConflict settling,
             Map<Integer, EventSide> chosen)
             throws Exception {
         String left = null;
-        if (!"all".equals(scope)) {
+        if (scope != EventScope.ALL) {
             String source =
                     settling == null
                             ? target.ical

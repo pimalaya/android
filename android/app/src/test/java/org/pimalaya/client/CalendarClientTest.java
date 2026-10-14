@@ -16,6 +16,7 @@ import static org.pimalaya.client.CalendarFixtures.ZONED;
 import static org.pimalaya.client.CalendarFixtures.edited;
 import static org.pimalaya.client.CalendarFixtures.editedTwelfth;
 import static org.pimalaya.client.CalendarFixtures.following;
+import static org.pimalaya.client.CalendarFixtures.followingEdit;
 import static org.pimalaya.client.CalendarFixtures.weekly;
 import static org.pimalaya.client.ReplyShape.assertMirrors;
 import static org.pimalaya.client.ReplyShape.elements;
@@ -498,7 +499,7 @@ public class CalendarClientTest {
         JSONObject reply = new JSONObject(raw);
         assertEquals(
                 new EventSplit(reply.getString("master"), reply.getString("series")),
-                CalendarClient.splitEvent(ZONED, following("20260112T090000")));
+                CalendarClient.splitEvent(ZONED, followingEdit("20260112T090000")));
 
         String first = weekly("");
         assertEquals(
@@ -506,7 +507,7 @@ public class CalendarClientTest {
                         new JSONObject(Native.splitEvent(first, following("20260105T090000")))
                                 .getString("master"),
                         null),
-                CalendarClient.splitEvent(first, following("20260105T090000")));
+                CalendarClient.splitEvent(first, followingEdit("20260105T090000")));
     }
 
     @Test

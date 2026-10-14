@@ -15,6 +15,9 @@ import org.pimalaya.client.Calendar;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.DateEdit;
+import org.pimalaya.client.EventEdit;
+import org.pimalaya.client.EventScope;
 import org.pimalaya.client.EventSides;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
@@ -171,19 +174,21 @@ public class EventWritesTest {
     @Test
     public void followingStagesTheNewSeriesThenTheShortenedOne() throws Exception {
         EventStore.StoredEvent target = series();
-        String edited =
-                new JSONObject()
-                        .put("scope", "following")
-                        .put("recurrenceId", "20260119T090000")
-                        .put("start", new JSONObject().put("time", "20260119T100000"))
-                        .put("end", new JSONObject().put("time", "20260119T110000"))
-                        .put("uid", "s-2")
-                        .put("stamp", STAMP)
-                        .toString();
+        EventEdit edited =
+                EventEdit.of(
+                                Map.of(),
+                                Map.of(
+                                        EventEdit.DateField.START,
+                                        new DateEdit("20260119T100000", null, null),
+                                        EventEdit.DateField.END,
+                                        new DateEdit("20260119T110000", null, null)),
+                                null,
+                                STAMP)
+                        .scoped(EventScope.FOLLOWING, "20260119T090000", null, "s-2");
 
         writes.save(
                 new EventWrites.Save(
-                        "following", edited, "s-2", target, calendar, false, true, null,
+                        EventScope.FOLLOWING, edited, "s-2", target, calendar, false, true, null,
                         Map.of()));
 
         assertEquals(
@@ -205,16 +210,14 @@ public class EventWritesTest {
                         PimdirStorage.rowHandle(null, id),
                         entry("New", "20260101T000000Z"),
                         "");
-        String edited =
-                new JSONObject()
-                        .put("scope", "all")
-                        .put("summary", "Lunch")
-                        .put("stamp", STAMP)
-                        .toString();
+        EventEdit edited =
+                EventEdit.of(Map.of(EventEdit.Field.SUMMARY, "Lunch"), Map.of(), null, STAMP)
+                        .scoped(EventScope.ALL, null, null, null);
 
         writes.save(
                 new EventWrites.Save(
-                        "all", edited, "", target, calendar, true, true, null, Map.of()));
+                        EventScope.ALL, edited, "", target, calendar, true, true, null,
+                        Map.of()));
 
         assertEquals(List.of("add " + calendar.id + " " + id), client.staged);
         assertTrue(stored(id).ical.contains("SUMMARY:Lunch\r\n"));
@@ -230,12 +233,14 @@ public class EventWritesTest {
         String resolved =
                 CalendarClient.resolveEvent(
                         new EventSides(settling.base, settling.local, settling.remote), Map.of());
-        String edited = new JSONObject().put("scope", "all").put("stamp", STAMP).toString();
+        EventEdit edited =
+                EventEdit.of(Map.of(), Map.of(), null, STAMP)
+                        .scoped(EventScope.ALL, null, null, null);
 
         writes.save(
                 new EventWrites.Save(
-                        "all", edited, "", stored("e.ics"), calendar, false, false, settling,
-                        Map.of()));
+                        EventScope.ALL, edited, "", stored("e.ics"), calendar, false, false,
+                        settling, Map.of()));
 
         assertEquals(List.of("edit " + settling.collection + " raw-7"), client.staged);
         assertEquals(resolved, client.bodies.get(0));
@@ -245,14 +250,11 @@ public class EventWritesTest {
     @Test
     public void deletingOneOccurrenceStagesAnEditOfTheSeries() throws Exception {
         EventStore.StoredEvent target = series();
-        String edit =
-                new JSONObject()
-                        .put("stamp", STAMP)
-                        .put("scope", "this")
-                        .put("recurrenceId", "20260119T090000")
-                        .toString();
+        EventEdit edit =
+                EventEdit.of(Map.of(), Map.of(), null, STAMP)
+                        .scoped(EventScope.THIS, "20260119T090000", null, null);
 
-        writes.delete("this", edit, target, calendar, null, Map.of());
+        writes.delete(EventScope.THIS, edit, target, calendar, null, Map.of());
 
         assertEquals(List.of("edit " + calendar.id + " " + target.handle), client.staged);
         assertTrue(stored("s.ics").ical.contains("EXDATE"));
@@ -261,9 +263,11 @@ public class EventWritesTest {
     @Test
     public void deletingAllRemovesTheEntry() throws Exception {
         EventStore.StoredEvent target = series();
-        String edit = new JSONObject().put("stamp", STAMP).put("scope", "all").toString();
+        EventEdit edit =
+                EventEdit.of(Map.of(), Map.of(), null, STAMP)
+                        .scoped(EventScope.ALL, null, null, null);
 
-        writes.delete("all", edit, target, calendar, null, Map.of());
+        writes.delete(EventScope.ALL, edit, target, calendar, null, Map.of());
 
         assertEquals(List.of("remove " + calendar.id + " " + target.handle), client.staged);
     }
@@ -274,9 +278,11 @@ public class EventWritesTest {
                 phoneConflict(
                         entry("Planning", "20260201T100000Z"),
                         entry("Retro", "20260201T110000Z"));
-        String edit = new JSONObject().put("stamp", STAMP).put("scope", "all").toString();
+        EventEdit edit =
+                EventEdit.of(Map.of(), Map.of(), null, STAMP)
+                        .scoped(EventScope.ALL, null, null, null);
 
-        writes.delete("all", edit, stored("e.ics"), calendar, settling, Map.of());
+        writes.delete(EventScope.ALL, edit, stored("e.ics"), calendar, settling, Map.of());
 
         assertEquals(List.of("remove " + settling.collection + " raw-7"), client.staged);
         assertTrue(EventStore.conflictsOf(storage, settling.collection).isEmpty());

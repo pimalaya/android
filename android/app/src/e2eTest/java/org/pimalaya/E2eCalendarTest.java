@@ -4,11 +4,11 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-import org.json.JSONObject;
 import org.junit.Test;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.Zones;
 import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.EventEdit;
 import org.pimalaya.client.Flags;
 import org.robolectric.ParameterizedRobolectricTestRunner;
 
@@ -17,6 +17,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** A calendar listed, and an event created, edited and deleted on the phone. */
@@ -75,10 +76,11 @@ public class E2eCalendarTest extends E2eCase {
         String edited =
                 CalendarClient.writeEvent(
                         created.ical,
-                        new JSONObject()
-                                .put("summary", subject("edited"))
-                                .put("stamp", Zones.utc(System.currentTimeMillis()))
-                                .toString());
+                        EventEdit.of(
+                                Map.of(EventEdit.Field.SUMMARY, subject("edited")),
+                                Map.of(),
+                                null,
+                                Zones.utc(System.currentTimeMillis())));
         phone.calendarStager(address).mutateEdit(calendar.id, created.handle, edited, null, "");
         assertEquals("edited at once", 1, phone.events(calendar.id, subject("edited")).size());
         settles(
