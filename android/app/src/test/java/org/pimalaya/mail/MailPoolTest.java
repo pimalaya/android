@@ -236,7 +236,7 @@ public class MailPoolTest {
         store.replaceMailboxes(EMAIL, roster);
         List<String> collections = new ArrayList<>();
         for (Mailbox mailbox : MailEngine.ordered(roster)) {
-            collections.add(store.collectionOf(EMAIL, mailbox.name));
+            collections.add(store.collectionOf(EMAIL, mailbox.name()));
         }
         return collections;
     }

@@ -46,6 +46,14 @@ final class Json {
         }
     }
 
+    static long longInteger(JSONObject object, String key) {
+        try {
+            return object.getLong(key);
+        } catch (JSONException error) {
+            throw new PimalayaException("Unreadable bridge reply: " + error.getMessage());
+        }
+    }
+
     static String optString(JSONObject object, String key) {
         return object.isNull(key) ? null : object.optString(key);
     }

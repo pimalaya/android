@@ -10,11 +10,14 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Description;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.MessageBody;
+import org.pimalaya.client.MessageSource;
+import org.pimalaya.client.MessageSources;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirBlobs;
@@ -315,7 +318,7 @@ public class MailEngine extends PimdirEngine {
      * ceiling), null when fewer lie below it and the mailbox is whole there.
      */
     String floor(String collection, String before, int count) {
-        return clients.mail().mailFloor(session, mailboxOf(collection), before, count);
+        return clients.mail().floor(session, mailboxOf(collection), before, count).floor();
     }
 
     /**
@@ -324,7 +327,7 @@ public class MailEngine extends PimdirEngine {
      * fewer.
      */
     List<String> newest(String collection, int count) {
-        return clients.mail().mailNewest(session, mailboxOf(collection), null, count);
+        return clients.mail().floor(session, mailboxOf(collection), null, count).dates();
     }
 
     /**
@@ -403,8 +406,8 @@ public class MailEngine extends PimdirEngine {
     public static List<Mailbox> ordered(List<Mailbox> mailboxes) {
         List<Mailbox> ordered = new ArrayList<>(mailboxes);
         ordered.sort(
-                java.util.Comparator.comparingInt((Mailbox mailbox) -> rank(mailbox.role))
-                        .thenComparing(mailbox -> mailbox.name, String.CASE_INSENSITIVE_ORDER));
+                java.util.Comparator.comparingInt((Mailbox mailbox) -> rank(mailbox.role()))
+                        .thenComparing(mailbox -> mailbox.name(), String.CASE_INSENSITIVE_ORDER));
         return ordered;
     }
 
@@ -1117,7 +1120,7 @@ public class MailEngine extends PimdirEngine {
             file.delete();
             return null;
         }
-        JSONObject described;
+        Description described;
         try {
             described = clients.mail().describeMessage(file);
         } catch (RuntimeException unreadable) {
@@ -1127,7 +1130,7 @@ public class MailEngine extends PimdirEngine {
         } finally {
             MailPoison.end(pimdir.context(), key);
         }
-        String hash = described.getString("hash");
+        String hash = described.hash();
         // NOTE: pinned before it is moved in and until the write naming it
         // has returned (download), so no collector unlinks it meanwhile.
         PimdirItems.pin(pimdir, hash);
@@ -1139,18 +1142,16 @@ public class MailEngine extends PimdirEngine {
             return null;
         }
 
-        JSONObject summary = described.optJSONObject("summary");
+        JSONObject summary = described.summary();
         if (summary != null) {
             summaries.put(row.linkId, summary);
         }
-        if (described.isNull("attachments")) {
+        if (described.attachments() == null) {
             // NOTE: stored all the same; a body the parser cannot read
             // has no parts to record, and its reader says so.
             Log.w("pimalaya", "parts not read: " + collection + " " + handle);
         } else {
-            attachments.put(
-                    row.linkId,
-                    MailClient.attachmentsOf(described.optJSONArray("attachments")));
+            attachments.put(row.linkId, described.attachments());
         }
 
         JSONObject item = new JSONObject();
@@ -1158,7 +1159,7 @@ public class MailEngine extends PimdirEngine {
         item.put("linkId", row.linkId);
         item.put("sortKey", row.sortKey);
         item.put("hash", hash);
-        item.put("persisted", described.getLong("size"));
+        item.put("persisted", described.size());
         return item;
     }
 
@@ -1246,19 +1247,12 @@ public class MailEngine extends PimdirEngine {
      */
     protected Map<String, File> sources(
             MailSession on, String mailbox, List<String> handles, File dir) {
-        JSONObject reply = clients.mail().fetchMessageSources(on, mailbox, handles, dir);
+        MessageSources reply = clients.mail().fetchSources(on, mailbox, handles, dir);
         Map<String, File> files = new HashMap<>();
-        JSONArray read = reply.optJSONArray("items");
-        for (int index = 0; read != null && index < read.length(); index++) {
-            JSONObject item = read.optJSONObject(index);
-            if (item != null) {
-                files.put(item.optString("id"), new File(item.optString("path")));
-            }
+        for (MessageSource item : reply.items()) {
+            files.put(item.id(), new File(item.path()));
         }
-        JSONArray missing = reply.optJSONArray("gone");
-        for (int index = 0; missing != null && index < missing.length(); index++) {
-            gone.add(missing.optString(index));
-        }
+        gone.addAll(reply.gone());
         return files;
     }
 
@@ -1477,9 +1471,9 @@ public class MailEngine extends PimdirEngine {
         for (Mailbox mailbox : mailboxes) {
             listed.add(
                     new PimdirCollections.Stored(
-                            PimdirAccount.collectionId(accountId, mailbox.name),
+                            PimdirAccount.collectionId(accountId, mailbox.name()),
                             accountEmail,
-                            mailbox.name,
+                            mailbox.name(),
                             null,
                             null));
         }

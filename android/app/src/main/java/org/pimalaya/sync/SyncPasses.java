@@ -669,7 +669,7 @@ public final class SyncPasses {
             for (Mailbox mailbox : MailEngine.ordered(mailboxes)) {
                 // NOTE: a pass scoped to the filter skips what it hides. The
                 // roster above is still read, so the filter keeps offering it.
-                String collection = mail.collectionOf(account.email, mailbox.name);
+                String collection = mail.collectionOf(account.email, mailbox.name());
                 if (!scope.collection(account.email, collection)) {
                     continue;
                 }
@@ -830,7 +830,7 @@ public final class SyncPasses {
             // every one of them.
             MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
             for (Mailbox mailbox : MailEngine.ordered(mailboxes)) {
-                String collection = mail.collectionOf(account.email, mailbox.name);
+                String collection = mail.collectionOf(account.email, mailbox.name());
                 if (only != null || filter.chosen(collection)) {
                     collections.add(collection);
                 }

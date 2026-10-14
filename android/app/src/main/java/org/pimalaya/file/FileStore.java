@@ -178,23 +178,23 @@ public final class FileStore {
                 PimdirDb.setRole(db, collection);
             }
             for (MessageBody.Attachment attachment : attachments) {
-                String linkId = partKey(messageLinkId, attachment.part);
+                String linkId = partKey(messageLinkId, attachment.part());
                 if (items.knows(db, collection, linkId)) {
                     // NOTE: a reference unlinked by hand comes back with the
                     // body, the stand-in being the attachment.
                     reference(db, messageLinkId, linkId);
                     continue;
                 }
-                insert(db, collection, linkId, attachment.name, null, PimdirItems.META);
+                insert(db, collection, linkId, attachment.name(), null, PimdirItems.META);
                 PimdirSummary.write(
                         db,
                         collection,
                         linkId,
                         summary(
-                                attachment.name,
-                                attachment.mime.isEmpty() ? null : attachment.mime,
-                                attachment.size,
-                                attachment.part),
+                                attachment.name(),
+                                attachment.mime().isEmpty() ? null : attachment.mime(),
+                                attachment.size(),
+                                attachment.part()),
                         true);
                 reference(db, messageLinkId, linkId);
             }

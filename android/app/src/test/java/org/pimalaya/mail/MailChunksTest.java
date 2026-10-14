@@ -317,7 +317,7 @@ public class MailChunksTest {
                                 new Mailbox("Archive", "")));
         List<String> names = new ArrayList<>();
         for (Mailbox mailbox : ordered) {
-            names.add(mailbox.name);
+            names.add(mailbox.name());
         }
         assertEquals(
                 List.of(

@@ -1,7 +1,6 @@
 package org.pimalaya.client;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import org.json.JSONArray;
@@ -19,15 +18,9 @@ public class MailClient {
      * mark, in one round.
      */
     public List<Mailbox> listMailboxes(MailSession session) {
-        JSONArray reply =
-                Replies.array(on(session, open -> Native.listMailboxes(open.transport(), open.handle())));
-
-        List<Mailbox> mailboxes = new ArrayList<>(reply.length());
-        for (int index = 0; index < reply.length(); index++) {
-            JSONObject mailbox = Json.object(reply, index);
-            mailboxes.add(new Mailbox(Json.string(mailbox, "name"), mailbox.optString("role")));
-        }
-        return mailboxes;
+        return Mailbox.list(
+                Replies.array(
+                        on(session, open -> Native.listMailboxes(open.transport(), open.handle()))));
     }
 
     /**
@@ -70,43 +63,22 @@ public class MailClient {
 
     /**
      * The floor of a mailbox's next chunk (a number of messages, never a
-     * span of time): the oldest {@code Date} among its {@code count} newest
-     * messages dated before {@code before}, null for no ceiling. Null when
-     * fewer than {@code count} dated messages lie below the ceiling: the
-     * mailbox is whole below it.
+     * span of time) and the {@code Date}s of its {@code count} newest
+     * messages by {@code Date} dated before {@code before}, null for no
+     * ceiling ({@link FloorReply}).
      */
-    public String mailFloor(MailSession session, String mailbox, String before, int count) {
-        JSONObject reply = floorReply(session, mailbox, before, count);
-        return reply.isNull("floor") ? null : reply.optString("floor", null);
-    }
-
-    /**
-     * The {@code Date}s of a mailbox's {@code count} newest messages by
-     * {@code Date} dated before {@code before} (null for no ceiling),
-     * newest first: the {@link #mailFloor} read, its floor the last of them
-     * when there are {@code count}, fewer when the mailbox is whole below
-     * the ceiling.
-     */
-    public List<String> mailNewest(MailSession session, String mailbox, String before, int count) {
-        JSONArray dates = floorReply(session, mailbox, before, count).optJSONArray("dates");
-        List<String> newest = new ArrayList<>();
-        for (int index = 0; dates != null && index < dates.length(); index++) {
-            newest.add(dates.optString(index));
-        }
-        return newest;
-    }
-
-    private JSONObject floorReply(MailSession session, String mailbox, String before, int count) {
-        return Replies.object(
-                on(
-                        session,
-                        open ->
-                                Native.mailFloor(
-                                        open.transport(),
-                                        open.handle(),
-                                        mailbox,
-                                        before == null ? "" : before,
-                                        count)));
+    public FloorReply floor(MailSession session, String mailbox, String before, int count) {
+        return FloorReply.from(
+                Replies.object(
+                        on(
+                                session,
+                                open ->
+                                        Native.mailFloor(
+                                                open.transport(),
+                                                open.handle(),
+                                                mailbox,
+                                                before == null ? "" : before,
+                                                count))));
     }
 
     /**
@@ -139,26 +111,26 @@ public class MailClient {
 
     /**
      * Reads some messages of a mailbox whole into files of {@code dir}, one
-     * per message, as the bytes the server holds: {@code {items, gone}},
-     * each item {@code {id, path, size}}, a message gone (deleted since it
-     * was listed) left out of the items and named by its id in
-     * {@code gone}, one not handed over left out of both. Gmail, Graph and
-     * IMAP read them in batches, JMAP names their blobs in one
-     * {@code Email/get} and downloads them one after another.
+     * per message, as the bytes the server holds ({@link MessageSources}),
+     * a message gone (deleted since it was listed) left out of the items
+     * and named by its id in {@code gone}, one not handed over left out of
+     * both. Gmail, Graph and IMAP read them in batches, JMAP names their
+     * blobs in one {@code Email/get} and downloads them one after another.
      */
-    public JSONObject fetchMessageSources(
+    public MessageSources fetchSources(
             MailSession session, String mailbox, List<String> ids, File dir) {
         String asked = new JSONArray(ids).toString();
-        return Replies.object(
-                on(
-                        session,
-                        open ->
-                                Native.fetchMessageSources(
-                                        open.transport(),
-                                        open.handle(),
-                                        mailbox,
-                                        asked,
-                                        dir.getAbsolutePath())));
+        return MessageSources.from(
+                Replies.object(
+                        on(
+                                session,
+                                open ->
+                                        Native.fetchMessageSources(
+                                                open.transport(),
+                                                open.handle(),
+                                                mailbox,
+                                                asked,
+                                                dir.getAbsolutePath()))));
     }
 
     /**
@@ -182,7 +154,7 @@ public class MailClient {
      * of a message the store already holds.
      */
     public MessageBody parseMessage(byte[] source) {
-        return message(Replies.object(Native.parseMessage(source)));
+        return MessageBody.from(Replies.object(Native.parseMessage(source)));
     }
 
     /**
@@ -190,53 +162,16 @@ public class MailClient {
      * read by the bridge: the message never crosses onto the Java heap.
      */
     public MessageBody parseMessage(File source) {
-        return message(Replies.object(Native.parseMessageFile(source.getAbsolutePath())));
+        return MessageBody.from(Replies.object(Native.parseMessageFile(source.getAbsolutePath())));
     }
 
     /**
      * What the store files of one message read into {@code source}, read
-     * once by the bridge: {@code {hash, size, summary, attachments}}, the
-     * content hash the object store names it by ({@code sha256-128}), the
-     * summary io-pimdir derives from it (null where it yields none) and its
-     * attachments as {@link #attachmentsOf} reads them (null when the
-     * parser cannot read it). No body crosses the boundary.
+     * once by the bridge ({@link Description}). No body crosses the
+     * boundary.
      */
-    public JSONObject describeMessage(File source) {
-        return Replies.object(Native.describeMessage(source.getAbsolutePath()));
-    }
-
-    /** A {@code parseMessage} reply as what a reader draws. */
-    private static MessageBody message(JSONObject reply) {
-        // NOTE: optString and not the null-returning helper beside it:
-        // every one of these fields is always serialised, and a reader
-        // must never be handed a null to render.
-        return new MessageBody(
-                reply.optString("subject"),
-                reply.optString("from"),
-                reply.optString("fromAddress"),
-                reply.optString("to"),
-                reply.optString("cc"),
-                reply.optString("date"),
-                reply.optString("kind"),
-                reply.optString("body"),
-                attachmentsOf(reply.optJSONArray("attachments")),
-                reply.optBoolean("attachmentMark"));
-    }
-
-    /** The attachments a parse or a description lists, each {@code {name, mime, size, part}}. */
-    public static List<MessageBody.Attachment> attachmentsOf(JSONArray listed) {
-        List<MessageBody.Attachment> attachments =
-                new ArrayList<>(listed == null ? 0 : listed.length());
-        for (int index = 0; listed != null && index < listed.length(); index++) {
-            JSONObject attachment = Json.object(listed, index);
-            attachments.add(
-                    new MessageBody.Attachment(
-                            attachment.optString("name"),
-                            attachment.optString("mime"),
-                            attachment.optLong("size"),
-                            attachment.optString("part")));
-        }
-        return attachments;
+    public Description describeMessage(File source) {
+        return Description.from(Replies.object(Native.describeMessage(source.getAbsolutePath())));
     }
 
     /**
@@ -376,18 +311,15 @@ public class MailClient {
     public static MailSession openMail(Account account) {
         Transport transport = new Transport();
         try {
-            JSONObject reply =
-                    Replies.object(
-                            Native.openMailSession(
-                                    transport,
-                                    account.baseUrl,
-                                    account.login,
-                                    account.password));
-            return new MailSession(
-                    account,
-                    transport,
-                    MailSession.handleOf(reply),
-                    reply.optBoolean("expungesOne", true));
+            Opened opened =
+                    Opened.from(
+                            Replies.object(
+                                    Native.openMailSession(
+                                            transport,
+                                            account.baseUrl,
+                                            account.login,
+                                            account.password)));
+            return new MailSession(account, transport, opened.handle(), opened.expungesOne());
         } catch (RuntimeException failure) {
             transport.close();
             throw failure;

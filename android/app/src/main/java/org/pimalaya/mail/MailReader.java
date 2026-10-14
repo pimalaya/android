@@ -1,7 +1,7 @@
 package org.pimalaya.mail;
 
-import org.json.JSONObject;
 import org.pimalaya.R;
+import org.pimalaya.client.Description;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MessageBody;
@@ -84,7 +84,7 @@ public final class MailReader {
         if (!message.pending) {
             synchronized (engine.locks.store) {
                 files.recordAttachments(
-                        mail.accountIdOf(message.accountEmail), message.id, read.body.attachments);
+                        mail.accountIdOf(message.accountEmail), message.id, read.body.attachments());
             }
         }
         return read;
@@ -117,14 +117,13 @@ public final class MailReader {
                 throw new IllegalStateException(
                         engine.context().getString(R.string.message_failed));
             }
-            JSONObject described = client.describeMessage(file);
+            Description described = client.describeMessage(file);
             // NOTE: the listing read the summary without the body; the body
             // just stored restates it. One writer: a fill or body step may be
             // writing beside this open.
             synchronized (engine.locks.store) {
-                mail.saveSource(message.collection, message.id, described.optString("hash"), file);
-                mail.restateFromBody(
-                        message.collection, message.id, described.optJSONObject("summary"));
+                mail.saveSource(message.collection, message.id, described.hash(), file);
+                mail.restateFromBody(message.collection, message.id, described.summary());
             }
             File stored = mail.sourceFile(message);
             if (stored == null) {

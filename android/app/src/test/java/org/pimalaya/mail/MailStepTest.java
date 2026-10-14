@@ -174,7 +174,7 @@ public class MailStepTest {
                         new Mailbox("INBOX", "inbox"),
                         new Mailbox("Clients", ""),
                         new Mailbox("TRASH", "trash")))) {
-            collections.add(store.collectionOf(EMAIL, mailbox.name));
+            collections.add(store.collectionOf(EMAIL, mailbox.name()));
         }
         return collections;
     }

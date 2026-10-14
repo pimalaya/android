@@ -180,8 +180,8 @@ public final class MailStore {
         SQLiteDatabase db = store.getWritableDatabase();
         for (Mailbox mailbox : mailboxes) {
             Map<String, Object> values = new HashMap<>();
-            values.put("collection", PimdirAccount.collectionId(account, mailbox.name));
-            values.put("role", ROLES.contains(mailbox.role) ? mailbox.role : null);
+            values.put("collection", PimdirAccount.collectionId(account, mailbox.name()));
+            values.put("role", ROLES.contains(mailbox.role()) ? mailbox.role() : null);
             PimdirSql.Bound bound = PimdirSql.bind("SET_COLLECTION_ROLE", values);
             db.execSQL(bound.sql, bound.args);
         }
@@ -192,17 +192,17 @@ public final class MailStore {
         // account that keeps its inbox alone, so is every other mailbox.
         List<String> quiet = new ArrayList<>();
         for (Mailbox mailbox : mailboxes) {
-            if (!MailBodies.downloads(mailbox.role, false)
-                    || (inboxOnly && !"inbox".equals(mailbox.role))) {
-                quiet.add(PimdirAccount.collectionId(account, mailbox.name));
+            if (!MailBodies.downloads(mailbox.role(), false)
+                    || (inboxOnly && !"inbox".equals(mailbox.role()))) {
+                quiet.add(PimdirAccount.collectionId(account, mailbox.name()));
             }
         }
         MergedFilter.of(context, PimDomain.MAIL).quiet(quiet);
 
         String trash = "";
         for (Mailbox mailbox : mailboxes) {
-            if (Mailbox.TRASH.equals(mailbox.role)) {
-                trash = mailbox.name;
+            if (Mailbox.TRASH.equals(mailbox.role())) {
+                trash = mailbox.name();
                 break;
             }
         }

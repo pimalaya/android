@@ -104,7 +104,7 @@ public class E2eMailListTest extends E2eCase {
 
         MessageBody body =
                 phone.reader(address).read(listed, () -> phone.passes.openMail(account)).body;
-        assertTrue("the body as sent: " + body.body, body.body.contains("The body of " + tag));
+        assertTrue("the body as sent: " + body.body(), body.body().contains("The body of " + tag));
         assertTrue("stored", phone.mail.holdsBody(listed));
 
         MessageBody again =
@@ -115,7 +115,7 @@ public class E2eMailListTest extends E2eCase {
                                     throw new AssertionError("a stored message reached the network");
                                 })
                         .body;
-        assertEquals("read back from the store", body.body, again.body);
+        assertEquals("read back from the store", body.body(), again.body());
 
         // NOTE: the reader marks it read once the body arrived, a store write.
         phone.stager(address).stageFlag(listed, Flags.Marker.SEEN, true);

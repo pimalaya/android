@@ -102,7 +102,7 @@ public class FileStoreTest {
             db.endTransaction();
         }
         mail.saveSource(inbox, linkId, source);
-        files.recordAttachments(accountId, linkId, client.parseMessage(source).attachments);
+        files.recordAttachments(accountId, linkId, client.parseMessage(source).attachments());
         return source;
     }
 
@@ -170,7 +170,7 @@ public class FileStoreTest {
         files.recordAttachments(
                 accountId,
                 "m1",
-                client.parseMessage(SOURCE.getBytes(StandardCharsets.UTF_8)).attachments);
+                client.parseMessage(SOURCE.getBytes(StandardCharsets.UTF_8)).attachments());
 
         assertEquals(2, scalar("SELECT count(*) FROM items WHERE link_id LIKE 'part:%'"));
         assertEquals(2, scalar("SELECT count(*) FROM item_reference"));

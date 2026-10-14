@@ -456,8 +456,8 @@ public class StorePerformanceTest {
         MailReader.Read read = reader.read(message, () -> null);
 
         assertTrue(read.fetched);
-        assertEquals("Opened", read.body.subject);
-        assertEquals(1, read.body.attachments.size());
+        assertEquals("Opened", read.body.subject());
+        assertEquals(1, read.body.attachments().size());
         java.io.File stored = store.sourceFile(message);
         assertEquals(
                 "the bridge hashes as the store names its blobs",

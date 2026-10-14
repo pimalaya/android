@@ -515,8 +515,8 @@ public final class MessageView implements FilesList.Origins {
                 MailReply.replyAll(
                         message.accountEmail,
                         message.fromAddress,
-                        body != null ? body.to : null,
-                        body != null ? body.cc : null);
+                        body != null ? body.to() : null,
+                        body != null ? body.cc() : null);
 
         MessageCompose.Prefill prefill = new MessageCompose.Prefill();
         prefill.from = message.accountEmail;
@@ -555,9 +555,9 @@ public final class MessageView implements FilesList.Origins {
         text.append("Date: ").append(when(message)).append('\n');
         text.append("Subject: ").append(message.subject).append('\n');
         if (body != null) {
-            text.append("To: ").append(body.to).append('\n');
-            if (!body.cc.isEmpty()) {
-                text.append("Cc: ").append(body.cc).append('\n');
+            text.append("To: ").append(body.to()).append('\n');
+            if (!body.cc().isEmpty()) {
+                text.append("Cc: ").append(body.cc()).append('\n');
             }
             text.append('\n').append(plain(body));
         }
@@ -567,12 +567,12 @@ public final class MessageView implements FilesList.Origins {
 
     /** The message's text, an HTML body read down to what it says. */
     private static String plain(MessageBody body) {
-        if (MessageBody.HTML.equals(body.kind)) {
-            return android.text.Html.fromHtml(body.body, android.text.Html.FROM_HTML_MODE_COMPACT)
+        if (MessageBody.HTML.equals(body.kind())) {
+            return android.text.Html.fromHtml(body.body(), android.text.Html.FROM_HTML_MODE_COMPACT)
                     .toString()
                     .trim();
         }
-        return body.body.trim();
+        return body.body().trim();
     }
 
     /** When the message was sent, as a quote's intro says it. */
@@ -827,21 +827,21 @@ public final class MessageView implements FilesList.Origins {
     /** Fills the header in from the fetch, then shows the body. */
     private void render(MessageBody message) {
         loaded = message;
-        if (!message.to.isEmpty()) {
+        if (!message.to().isEmpty()) {
             TextView recipients = host.findViewById(R.id.message_view_recipients);
             recipients.setText(recipients(message));
             recipients.setVisibility(View.VISIBLE);
         }
 
-        long stamp = MailDate.toStamp(message.date);
+        long stamp = MailDate.toStamp(message.date());
         if (stamp > 0) {
             date(stamp);
         }
 
-        if (MessageBody.HTML.equals(message.kind)) {
-            body(html(message.body));
-        } else if (MessageBody.PLAIN.equals(message.kind)) {
-            body(text(message.body));
+        if (MessageBody.HTML.equals(message.kind())) {
+            body(html(message.body()));
+        } else if (MessageBody.PLAIN.equals(message.kind())) {
+            body(text(message.body()));
         } else {
             state(host.getString(R.string.message_no_content));
         }
@@ -849,10 +849,10 @@ public final class MessageView implements FilesList.Origins {
 
     /** Who the message went to, Cc included when it carries one. */
     private String recipients(MessageBody message) {
-        String to = host.getString(R.string.message_to, message.to);
-        return message.cc.isEmpty()
+        String to = host.getString(R.string.message_to, message.to());
+        return message.cc().isEmpty()
                 ? to
-                : to + "\n" + host.getString(R.string.message_cc, message.cc);
+                : to + "\n" + host.getString(R.string.message_cc, message.cc());
     }
 
     /** Shows one view as the body, in place of whatever was there. */

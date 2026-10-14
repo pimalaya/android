@@ -1,7 +1,5 @@
 package org.pimalaya.client;
 
-import org.json.JSONObject;
-
 /**
  * One account's live mail connection: the sockets, and the native session
  * that has already greeted and authenticated over them.
@@ -130,10 +128,5 @@ public final class MailSession implements AutoCloseable {
             transport.close();
             transport = null;
         }
-    }
-
-    /** The handle a bridge reply names, or a failure. */
-    static long handleOf(JSONObject reply) {
-        return reply.optLong("handle");
     }
 }

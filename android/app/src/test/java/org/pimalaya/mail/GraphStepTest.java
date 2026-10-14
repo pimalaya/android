@@ -195,7 +195,7 @@ public class GraphStepTest {
                                 new Mailbox("Sent Items", "sent"),
                                 new Mailbox("Projets", ""),
                                 new Mailbox("Deleted Items", "trash")))) {
-            collections.add(store.collectionOf(EMAIL, mailbox.name));
+            collections.add(store.collectionOf(EMAIL, mailbox.name()));
         }
         return collections;
     }
