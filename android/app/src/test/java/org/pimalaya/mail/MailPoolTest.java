@@ -17,6 +17,7 @@ import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.sync.WorkerPool;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -252,10 +253,10 @@ public class MailPoolTest {
     }
 
     /** One pass over the collections on a pool of {@code size}, the failing one refused. */
-    private MailPool.Outcome pass(
+    private WorkerPool.Outcome pass(
             List<String> collections, int size, List<Session> opened, String failing) {
-        try (MailPool<Session> pool =
-                new MailPool<>(
+        try (WorkerPool<Session> pool =
+                new WorkerPool<>(
                         size,
                         null,
                         () -> {
@@ -264,13 +265,19 @@ public class MailPoolTest {
                                 opened.add(session);
                             }
                             return session;
-                        })) {
+                        },
+                        null)) {
             return pool.run(
                     EMAIL,
                     collections,
-                    session -> new Server(session, failing),
-                    MailEngine::sync,
-                    null);
+                    (session, collection, remote) -> {
+                        MailEngine engine = new Server(session, failing);
+                        try {
+                            engine.sync(collection);
+                        } finally {
+                            remote.addAndGet(engine.remoteSoFar());
+                        }
+                    });
         }
     }
 
@@ -281,7 +288,7 @@ public class MailPoolTest {
 
         long sequential = 12 * 2 * LATENCY_MS;
         List<Session> opened = new ArrayList<>();
-        MailPool.Outcome outcome = pass(collections, 4, opened, null);
+        WorkerPool.Outcome outcome = pass(collections, 4, opened, null);
 
         assertTrue(outcome.failures.isEmpty());
         for (String collection : collections) {
@@ -337,10 +344,10 @@ public class MailPoolTest {
         List<String> collections = ordered(roster(4));
         String failing = store.collectionOf(EMAIL, "Folder 1");
 
-        MailPool.Outcome outcome = pass(collections, 3, new ArrayList<>(), failing);
+        WorkerPool.Outcome outcome = pass(collections, 3, new ArrayList<>(), failing);
 
         assertEquals(1, outcome.failures.size());
-        assertEquals(failing, outcome.failures.get(0).collection);
+        assertEquals(failing, outcome.failures.get(0).key);
         assertTrue(outcome.failure().getMessage().contains("the server refused"));
         for (String collection : collections) {
             assertEquals(collection.equals(failing) ? 0 : SIZE, stored(collection));
@@ -352,9 +359,9 @@ public class MailPoolTest {
         List<String> collections = ordered(roster(0));
         Session mine = new Session();
         List<Session> opened = new ArrayList<>();
-        MailPool.Outcome outcome;
-        try (MailPool<Session> pool =
-                new MailPool<>(
+        WorkerPool.Outcome outcome;
+        try (WorkerPool<Session> pool =
+                new WorkerPool<>(
                         4,
                         mine,
                         () -> {
@@ -363,14 +370,20 @@ public class MailPoolTest {
                                 opened.add(session);
                             }
                             return session;
-                        })) {
+                        },
+                        null)) {
             outcome =
                     pool.run(
                             EMAIL,
                             collections,
-                            session -> new Server(session, null),
-                            MailEngine::sync,
-                            null);
+                            (session, collection, remote) -> {
+                                MailEngine engine = new Server(session, null);
+                                try {
+                                    engine.sync(collection);
+                                } finally {
+                                    remote.addAndGet(engine.remoteSoFar());
+                                }
+                            });
         }
         assertEquals("three mailboxes, three workers", 3, outcome.sessions);
         assertEquals("the caller's session serves one, two more opened", 2, opened.size());

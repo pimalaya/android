@@ -36,7 +36,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <p>The transport it reads and writes on is the caller's, opened once
  * for the pass and closed with it: an account's calendars run side by
- * side ({@link CalendarPool}), each worker on a transport of its own that
+ * side ({@code WorkerPool}), each worker on a transport of its own that
  * every round of its calendars shares.
  *
  * <p>Incremental listing is not wired: CalDAV's ctag and sync-token
@@ -47,6 +47,15 @@ import java.util.concurrent.locks.ReentrantLock;
  * cost too.
  */
 public final class CalendarEngine extends PimdirEngine {
+    /**
+     * Calendars an account syncs at once.
+     *
+     * <p>Three workers on every backend: an account rarely has more calendars
+     * than that worth waiting on, a CalDAV worker is a connection of its own,
+     * and Graph and Google count requests per user.
+     */
+    public static final int WORKERS = 3;
+
     private final Account account;
 
     /** The pass's sockets; null on a driver that only stages. */

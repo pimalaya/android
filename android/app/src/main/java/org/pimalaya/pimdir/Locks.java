@@ -10,7 +10,7 @@ public final class Locks {
      * The store's one writer: every storage yield of every driver (a load,
      * a lookup, a write) is answered holding it.
      *
-     * <p>A pass runs an account's mailboxes side by side ({@link MailPool}),
+     * <p>A pass runs an account's mailboxes side by side ({@code WorkerPool}),
      * each on its own engine and session, and only their network is meant
      * to overlap: one SQLite writer, a page's write landing whole before the
      * next one starts, as when the mailboxes ran one after another.

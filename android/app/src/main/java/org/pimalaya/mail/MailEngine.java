@@ -40,7 +40,7 @@ import java.util.UUID;
  * mailboxes inside one login, where a WebDAV collection is one request
  * each. The engine, on the other hand, reconciles one collection at a time.
  * The two meet in the session: a pass runs an account's mailboxes on a few
- * sessions side by side ({@link MailPool}), each answering the listings of
+ * sessions side by side ({@code WorkerPool}), each answering the listings of
  * the mailboxes its worker takes in turn, so a sync costs a handful of
  * connections per account rather than one per mailbox, and waits on the
  * network for a few mailboxes at once rather than one after another.
@@ -82,6 +82,43 @@ public class MailEngine extends PimdirEngine {
 
     /** Messages one step of the background fill widens a mailbox by. */
     public static final int FILL_CHUNK = 500;
+
+    /** Graph sessions an account runs at once: HTTP requests, nothing held. */
+    static final int GRAPH = 4;
+
+    /** JMAP sessions an account runs at once: HTTP requests, nothing held. */
+    static final int JMAP = 4;
+
+    /** IMAP sessions an account runs at once: a connection and a login each. */
+    static final int IMAP = 3;
+
+    /**
+     * Gmail sessions an account runs at once: the account is one listing,
+     * read once per run, and its metadata batches spread over the sessions
+     * under one pacing bucket.
+     */
+    static final int GMAIL = 2;
+
+    /**
+     * How many sessions one account of this backend runs at once.
+     *
+     * <p>The size is the backend's: four for Graph and JMAP, which are HTTP
+     * requests and nothing else; three for IMAP, each worker its own connection
+     * and login; two for Gmail, whose reads are paced across the whole process
+     * anyway, so more workers would only queue on the same bucket.
+     */
+    public static int sessionsOf(Account account) {
+        if (PimalayaClient.isGraph(account)) {
+            return GRAPH;
+        }
+        if (PimalayaClient.isJmap(account)) {
+            return JMAP;
+        }
+        if (PimalayaClient.isGoogle(account)) {
+            return GMAIL;
+        }
+        return IMAP;
+    }
 
     /** The account's live connection; null on a driver that only stages,
      *  whose mutations reach no server. */

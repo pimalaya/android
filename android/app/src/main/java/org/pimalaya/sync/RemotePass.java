@@ -12,7 +12,6 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SecureStore;
 import org.pimalaya.account.SyncScope;
 import org.pimalaya.calendar.CalendarEngine;
-import org.pimalaya.calendar.CalendarPool;
 import org.pimalaya.calendar.CalendarRows;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.MailSession;
@@ -23,7 +22,6 @@ import org.pimalaya.client.SubmissionUncertain;
 import org.pimalaya.client.Transport;
 import org.pimalaya.mail.MailBodies;
 import org.pimalaya.mail.MailEngine;
-import org.pimalaya.mail.MailPool;
 import org.pimalaya.mail.MailStep;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.mail.MailTally;
@@ -268,7 +266,7 @@ public final class RemotePass {
      * lets a staged marker or a staged delete survive it.
      *
      * <p>The mailboxes then run side by side on the account's pool
-     * ({@link MailPool}), in the pass's order, the inbox first: the wait is
+     * ({@link WorkerPool}), in the pass's order, the inbox first: the wait is
      * the network's, mailbox after mailbox, and a few sessions wait on a few
      * mailboxes at once. The caller's session is the pool's first, so the
      * walk, the drain before it and the first worker share one connection.
@@ -309,31 +307,42 @@ public final class RemotePass {
         // NOTE: how many there are before the first lands, so the bar fills
         // from the first count rather than from the first mailbox.
         progress.collections(PimDomain.MAIL, 0, collections.size());
-        MailPool.Outcome outcome;
-        try (MailPool<MailSession> pool =
-                new MailPool<>(
-                        MailPool.sizeOf(account.server(PimDomain.MAIL)),
+        AtomicInteger landed = new AtomicInteger();
+        WorkerPool.Outcome outcome;
+        try (WorkerPool<MailSession> pool =
+                new WorkerPool<>(
+                        MailEngine.sessionsOf(account.server(PimDomain.MAIL)),
                         session,
-                        () -> openMail(account))) {
+                        () -> openMail(account),
+                        MailSession::join)) {
             outcome =
                     pool.run(
-                            account.email,
+                            "mail pass " + account.email,
                             collections,
-                            worker -> new MailEngine(pimdir, client, worker, accountId),
-                            MailEngine::sync,
-                            (done, total) ->
-                                    progress.collections(PimDomain.MAIL, done, total));
+                            (worker, collection, remote) -> {
+                                MailEngine engine =
+                                        new MailEngine(pimdir, client, worker, accountId);
+                                try {
+                                    engine.sync(collection);
+                                } finally {
+                                    remote.addAndGet(engine.remoteSoFar());
+                                    progress.collections(
+                                            PimDomain.MAIL,
+                                            landed.incrementAndGet(),
+                                            collections.size());
+                                }
+                            });
         }
         // NOTE: a mailbox the server refuses to open is skipped, unless every
         // one is (MailEngine.refused): the next roster drops it if it is gone.
         Exception failure = null;
         Exception refusal = null;
-        for (MailPool.Failure failed : outcome.failures) {
+        for (WorkerPool.Failure failed : outcome.failures) {
             if (MailEngine.refused(failed.error)) {
-                Log.w("pimalaya", "mailbox refused, skipped: " + failed.collection, failed.error);
+                Log.w("pimalaya", "mailbox refused, skipped: " + failed.key, failed.error);
                 refusal = refusal == null ? failed.error : refusal;
             } else {
-                Log.w("pimalaya", "mail sync failed: " + failed.collection, failed.error);
+                Log.w("pimalaya", "mail sync failed: " + failed.key, failed.error);
                 failure = failure == null ? failed.error : failure;
             }
         }
@@ -533,11 +542,11 @@ public final class RemotePass {
             AtomicInteger landed = new AtomicInteger();
             PimdirEngine.Progress alone = alone(running);
             Exception failure;
-            try (CalendarPool<Transport> pool =
-                    new CalendarPool<>(CalendarPool.SIZE, transport, Transport::new)) {
-                CalendarPool.Outcome outcome =
+            try (WorkerPool<Transport> pool =
+                    new WorkerPool<>(CalendarEngine.WORKERS, transport, Transport::new, null)) {
+                WorkerPool.Outcome outcome =
                         pool.run(
-                                account.email,
+                                "calendar pass " + account.email,
                                 calendars,
                                 (worker, collection, remote) -> {
                                     running.incrementAndGet();
@@ -568,8 +577,8 @@ public final class RemotePass {
                                                 calendars.size());
                                     }
                                 });
-                for (CalendarPool.Failure failed : outcome.failures) {
-                    Log.w("pimalaya", "calendar sync failed: " + failed.collection, failed.error);
+                for (WorkerPool.Failure failed : outcome.failures) {
+                    Log.w("pimalaya", "calendar sync failed: " + failed.key, failed.error);
                 }
                 failure = outcome.failure();
             }

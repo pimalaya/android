@@ -79,7 +79,6 @@ import org.pimalaya.mail.MailFill;
 import org.pimalaya.mail.MailList;
 import org.pimalaya.mail.MailOffline;
 import org.pimalaya.mail.MailOwed;
-import org.pimalaya.mail.MailPool;
 import org.pimalaya.mail.MailStager;
 import org.pimalaya.mail.MailState;
 import org.pimalaya.mail.MailStore;
@@ -105,6 +104,7 @@ import org.pimalaya.sync.RemotePass;
 import org.pimalaya.sync.SyncRunner;
 import org.pimalaya.sync.SyncStamps;
 import org.pimalaya.sync.SyncSteps;
+import org.pimalaya.sync.WorkerPool;
 import org.pimalaya.trash.DeletedItemsPage;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.Host;
@@ -304,7 +304,7 @@ public class MainActivity extends Host {
     private volatile boolean filling;
 
     /** The fill's and the body step's session pools, by account; touched on the io thread only. */
-    private final Map<String, MailPool<MailSession>> fillPools = new HashMap<>();
+    private final Map<String, WorkerPool<MailSession>> fillPools = new HashMap<>();
 
     /** Whether the fill is done or failed for the loop under way; on the io thread. */
     private boolean fillStopped;
@@ -2304,7 +2304,7 @@ public class MainActivity extends Host {
                 AccountEntry account = mailAccount(accountEmail);
                 return account == null
                         ? 1
-                        : MailPool.sizeOf(account.server(PimDomain.MAIL));
+                        : MailEngine.sessionsOf(account.server(PimDomain.MAIL));
             }
 
             @Override
@@ -2507,7 +2507,7 @@ public class MainActivity extends Host {
         if (account == null) {
             return List.of();
         }
-        MailPool<MailSession> pool = fillPool(account);
+        WorkerPool<MailSession> pool = fillPool(account);
 
         Map<String, List<MailBodies.Row>> byCollection = new java.util.LinkedHashMap<>();
         for (MailBodies.Row row : rows) {
@@ -2526,22 +2526,22 @@ public class MainActivity extends Host {
 
         String accountId = accountIdOf(account.email);
         List<MailBodies.Row> failed = Collections.synchronizedList(new ArrayList<>());
-        MailPool.Outcome outcome =
+        WorkerPool.Outcome outcome =
                 pool.run(
-                        "bodies " + account.email,
+                        "mail pass bodies " + account.email,
                         keys,
-                        session -> {
+                        (session, key, remote) -> {
                             MailEngine engine = new MailEngine(pimdir, client, session, accountId);
                             engine.tally = bodiesTally;
-                            return engine;
-                        },
-                        (engine, key) -> {
-                            List<MailBodies.Row> job = jobs.get(key);
-                            failed.addAll(engine.download(job.get(0).collection, job));
-                        },
-                        null);
-        for (MailPool.Failure failure : outcome.failures) {
-            failed.addAll(jobs.get(failure.collection));
+                            try {
+                                List<MailBodies.Row> job = jobs.get(key);
+                                failed.addAll(engine.download(job.get(0).collection, job));
+                            } finally {
+                                remote.addAndGet(engine.remoteSoFar());
+                            }
+                        });
+        for (WorkerPool.Failure failure : outcome.failures) {
+            failed.addAll(jobs.get(failure.key));
         }
         if (!failed.isEmpty()) {
             fillPools.remove(account.email);
@@ -2572,40 +2572,46 @@ public class MainActivity extends Host {
 
     /**
      * Runs {@code step} over mailboxes, on the io thread: each account's on
-     * its pool ({@link MailPool}), side by side and in the order given,
+     * its pool ({@link WorkerPool}), side by side and in the order given,
      * every account at once, on connections the fill keeps open between its
      * steps. Answers the first failure, every one logged under
      * {@code failed}; one mailbox failing leaves the others going.
      */
-    private Exception listAll(List<MailStore.Edge> edges, MailPool.Step step, String failed) {
+    private Exception listAll(List<MailStore.Edge> edges, MailboxStep step, String failed) {
         Map<String, List<String>> byAccount = new java.util.LinkedHashMap<>();
         for (MailStore.Edge edge : edges) {
             byAccount.computeIfAbsent(edge.accountEmail, email -> new ArrayList<>())
                     .add(edge.collection);
         }
 
-        List<java.util.concurrent.Callable<MailPool.Outcome>> runs = new ArrayList<>();
+        List<java.util.concurrent.Callable<WorkerPool.Outcome>> runs = new ArrayList<>();
         for (Map.Entry<String, List<String>> entry : byAccount.entrySet()) {
             AccountEntry account = mailAccount(entry.getKey());
             if (account == null) {
                 continue;
             }
-            MailPool<MailSession> held = fillPool(account);
+            WorkerPool<MailSession> held = fillPool(account);
             String accountId = accountIdOf(account.email);
             runs.add(
                     () ->
                             held.run(
-                                    account.email,
+                                    "mail pass " + account.email,
                                     entry.getValue(),
-                                    session -> new MailEngine(pimdir, client, session, accountId),
-                                    step,
-                                    null));
+                                    (session, collection, remote) -> {
+                                        MailEngine engine =
+                                                new MailEngine(pimdir, client, session, accountId);
+                                        try {
+                                            step.run(engine, collection);
+                                        } finally {
+                                            remote.addAndGet(engine.remoteSoFar());
+                                        }
+                                    }));
         }
 
         Exception first = null;
-        for (MailPool.Outcome outcome : MailPool.together(runs)) {
-            for (MailPool.Failure failure : outcome.failures) {
-                Log.w("pimalaya", failed + failure.collection, failure.error);
+        for (WorkerPool.Outcome outcome : WorkerPool.together(runs)) {
+            for (WorkerPool.Failure failure : outcome.failures) {
+                Log.w("pimalaya", failed + failure.key, failure.error);
             }
             if (first == null) {
                 first = outcome.failure();
@@ -2614,15 +2620,21 @@ public class MainActivity extends Host {
         return first;
     }
 
+    /** What a run does to one mailbox: a pass, a widening by a chunk. */
+    private interface MailboxStep {
+        void run(MailEngine engine, String collection) throws Exception;
+    }
+
     /** An account's pool for the fill and the body step; on the io thread. */
-    private MailPool<MailSession> fillPool(AccountEntry account) {
-        MailPool<MailSession> pool = fillPools.get(account.email);
+    private WorkerPool<MailSession> fillPool(AccountEntry account) {
+        WorkerPool<MailSession> pool = fillPools.get(account.email);
         if (pool == null) {
             pool =
-                    new MailPool<>(
-                            MailPool.sizeOf(account.server(PimDomain.MAIL)),
+                    new WorkerPool<>(
+                            MailEngine.sessionsOf(account.server(PimDomain.MAIL)),
                             null,
-                            () -> openMail(account));
+                            () -> openMail(account),
+                            MailSession::join);
             fillPools.put(account.email, pool);
         }
         return pool;
@@ -2630,7 +2642,7 @@ public class MainActivity extends Host {
 
     /** Closes the connections the fill and the body step kept; on the io thread. */
     private void closeFillPools() {
-        for (MailPool<MailSession> pool : fillPools.values()) {
+        for (WorkerPool<MailSession> pool : fillPools.values()) {
             pool.close();
         }
         fillPools.clear();

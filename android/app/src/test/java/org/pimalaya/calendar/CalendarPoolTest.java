@@ -23,6 +23,7 @@ import org.pimalaya.client.Transport;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirEngine;
+import org.pimalaya.sync.WorkerPool;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -250,12 +251,12 @@ public class CalendarPoolTest {
     }
 
     /** One pass over the calendars on a pool of {@code size}. */
-    private CalendarPool.Outcome pass(
+    private WorkerPool.Outcome pass(
             Server server, List<String> collections, int size, List<Transport> opened) {
         Transport first = new Transport();
         opened.add(first);
-        try (CalendarPool<Transport> pool =
-                new CalendarPool<>(
+        try (WorkerPool<Transport> pool =
+                new WorkerPool<>(
                         size,
                         first,
                         () -> {
@@ -264,7 +265,8 @@ public class CalendarPoolTest {
                                 opened.add(transport);
                             }
                             return transport;
-                        })) {
+                        },
+                        null)) {
             return pool.run(
                     email,
                     collections,
@@ -300,7 +302,7 @@ public class CalendarPoolTest {
     public void aFirstSyncOfThreeCalendarsTakesAFractionOfTheTime() {
         Server before = new Server(Reads.ONE_BY_ONE);
         List<String> collections = threeCalendars(before);
-        CalendarPool.Outcome sequential = pass(before, collections, 1, new ArrayList<>());
+        WorkerPool.Outcome sequential = pass(before, collections, 1, new ArrayList<>());
         Map<String, String> wanted = stored();
         assertEquals(3 * SIZE, wanted.size());
         assertEquals("a listing and an event a request", 3 * (1 + SIZE), before.requests.get());
@@ -309,7 +311,7 @@ public class CalendarPoolTest {
         Server now = new Server(Reads.BATCHED);
         collections = threeCalendars(now);
         List<Transport> opened = new ArrayList<>();
-        CalendarPool.Outcome outcome = pass(now, collections, CalendarPool.SIZE, opened);
+        WorkerPool.Outcome outcome = pass(now, collections, CalendarEngine.WORKERS, opened);
 
         assertTrue(outcome.failures.isEmpty());
         assertEquals("the same entries", wanted, stored());
@@ -336,7 +338,7 @@ public class CalendarPoolTest {
         Server server = new Server(Reads.LISTED);
         List<String> collections = threeCalendars(server);
 
-        pass(server, collections, CalendarPool.SIZE, new ArrayList<>());
+        pass(server, collections, CalendarEngine.WORKERS, new ArrayList<>());
 
         assertEquals("one listing a calendar, nothing else", 3, server.requests.get());
         assertEquals(0, server.bodiesRead.get());
@@ -348,7 +350,7 @@ public class CalendarPoolTest {
         // and the others, bound at their revision, are left as they were.
         server.calendars.get("msgraph://example/work")
                 .put("work-7", new String[] {"ck2", ical("work-7", "Moved")});
-        pass(server, collections, CalendarPool.SIZE, new ArrayList<>());
+        pass(server, collections, CalendarEngine.WORKERS, new ArrayList<>());
 
         assertEquals(0, server.bodiesRead.get());
         bodies = stored();
@@ -361,13 +363,13 @@ public class CalendarPoolTest {
     public void aBatchedPassReadsOnlyWhatChanged() {
         Server server = new Server(Reads.BATCHED);
         List<String> collections = threeCalendars(server);
-        pass(server, collections, CalendarPool.SIZE, new ArrayList<>());
+        pass(server, collections, CalendarEngine.WORKERS, new ArrayList<>());
         assertEquals(3 * SIZE, server.bodiesRead.get());
 
         server.calendars.get("msgraph://example/home")
                 .put("home-3", new String[] {"ck2", ical("home-3", "Moved")});
         server.requests.set(0);
-        pass(server, collections, CalendarPool.SIZE, new ArrayList<>());
+        pass(server, collections, CalendarEngine.WORKERS, new ArrayList<>());
 
         assertEquals("one listing a calendar and one read", 3 + 1, server.requests.get());
         assertEquals(3 * SIZE + 1, server.bodiesRead.get());
@@ -380,9 +382,9 @@ public class CalendarPoolTest {
         List<String> collections = threeCalendars(server);
         String failing = collections.get(1);
 
-        CalendarPool.Outcome outcome;
-        try (CalendarPool<Transport> pool =
-                new CalendarPool<>(CalendarPool.SIZE, null, Transport::new)) {
+        WorkerPool.Outcome outcome;
+        try (WorkerPool<Transport> pool =
+                new WorkerPool<>(CalendarEngine.WORKERS, null, Transport::new, null)) {
             outcome =
                     pool.run(
                             email,
@@ -396,7 +398,7 @@ public class CalendarPoolTest {
         }
 
         assertEquals(1, outcome.failures.size());
-        assertEquals(failing, outcome.failures.get(0).collection);
+        assertEquals(failing, outcome.failures.get(0).key);
         assertEquals(2 * SIZE, stored().size());
     }
 }
