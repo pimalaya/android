@@ -20,7 +20,6 @@ import android.widget.TextView;
 import android.widget.ViewFlipper;
 import java.net.URL;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -100,7 +99,9 @@ import org.pimalaya.setup.OnboardingFlow;
 import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.FirstSync;
 import org.pimalaya.pimdir.PimdirEngine;
+import org.pimalaya.sync.SyncCoordinator;
 import org.pimalaya.sync.SyncPasses;
+import org.pimalaya.sync.SyncProgress;
 import org.pimalaya.sync.SyncStamps;
 import org.pimalaya.sync.SyncSteps;
 import org.pimalaya.sync.WorkerPool;
@@ -126,7 +127,7 @@ import org.pimalaya.ui.SyncDock;
  * every replica. Accounts live behind the drawer the bar's logo opens;
  * syncs are manual, from there or from the pull-down.
  */
-public class MainActivity extends Host {
+public class MainActivity extends Host implements SyncCoordinator.Screens {
     // NOTE: everything from contacts to event is the content flipper's
     // child indexes, in the order activity_main.xml includes them; auth
     // and account are whole-frame overlays sliding over it, bar included
@@ -204,6 +205,9 @@ public class MainActivity extends Host {
 
     /** The contacts inside it. */
     public PimdirContacts contacts;
+
+    /** The app's foreground sync, one pass at a time. */
+    private SyncCoordinator sync;
 
     /** Every remote and phone pass, behind the sync dock. */
     SyncPasses passes;
@@ -287,14 +291,6 @@ public class MainActivity extends Host {
     /** The accounts drawer, opened by the contacts burger. */
     private androidx.drawerlayout.widget.DrawerLayout drawer;
 
-    /**
-     * The shared sync state: true while a sync runs. Every UI element
-     * that reflects it (the lists' sync dock, the drawer's sync row)
-     * subscribes through {@link #observeSync}, and {@link #setSyncing}
-     * pushes the flag to all of them at once.
-     */
-    private volatile boolean syncing;
-
     /** Whether the activity is in the foreground: the background fill runs only then. */
     private volatile boolean foreground;
 
@@ -319,14 +315,15 @@ public class MainActivity extends Host {
     /** The sync dock over the lists' bottom navigation (built in onCreate). */
     private SyncDock dock;
 
+    /** The dock's model of a pass, which the passes report into (built in onCreate). */
+    private SyncProgress syncProgress;
+
     /**
      * The body step's count over the loop under way, every account's
      * summed: the sync dock's bar while older mail downloads.
      */
     private final MailTally bodiesTally =
             new MailTally((landed, planned) -> postAlive(() -> dock.filled(landed, planned)));
-
-    private final List<java.util.function.Consumer<Boolean>> syncObservers = new ArrayList<>();
 
     /** The pool's loader and bridge grouping (built in onCreate). */
     public ContactPool pool;
@@ -378,11 +375,13 @@ public class MainActivity extends Host {
         eventView = new EventView(this);
         messageView = new MessageView(this);
         compose = new MessageCompose(this);
-        passes =
-                new SyncPasses(
+        sync =
+                new SyncCoordinator(
                         this,
                         new SyncPasses.Parts(pimdir, base, store, mail, events, client),
-                        syncObserver());
+                        this);
+        passes = sync.passes();
+        syncProgress = sync.progress();
         // NOTE: the two flows reference each other (grants land back in
         // the wizard), so one side binds late.
         oauth = new OauthFlow(this);
@@ -958,7 +957,7 @@ public class MainActivity extends Host {
         App.of(this).state.onScreen = true;
         afterBackgroundRun();
         phoneReturn();
-        if (App.of(this).state.backgroundRunning && !syncing) {
+        if (App.of(this).state.backgroundRunning && !isSyncing()) {
             showBackgroundDock();
         }
 
@@ -1004,7 +1003,7 @@ public class MainActivity extends Host {
         }
         getSystemService(android.app.NotificationManager.class).cancelAll();
         long ran = App.of(this).state.backgroundRan;
-        if (ran == reloadedRun || syncing) {
+        if (ran == reloadedRun || isSyncing()) {
             return;
         }
         reloadedRun = ran;
@@ -1039,7 +1038,7 @@ public class MainActivity extends Host {
             return;
         }
         mailList.redrawFooter();
-        if (!syncing) {
+        if (!isSyncing()) {
             dock.synced();
         }
         afterBackgroundRun();
@@ -1370,68 +1369,13 @@ public class MainActivity extends Host {
         return screen == PANEL_CONTACTS;
     }
 
-    /**
-     * The passes' hooks into this activity's presentation: the loader
-     * dialog's detail line, and the in-memory account cache a token
-     * refresh must keep current (mutated on the main thread the drawer
-     * reads it from).
-     */
-    private SyncPasses.Progress syncObserver() {
-        return new SyncPasses.Progress() {
-            @Override
-            public void step(PimDomain domain, int stage, int count) {
-                syncStep(domain, stage, count);
-            }
-
-            @Override
-            public void advance(PimDomain domain, int stage, int done, int total) {
-                syncAdvance(domain, stage, done, total);
-            }
-
-            @Override
-            public void account(String email) {
-                syncAccount(email);
-            }
-
-            @Override
-            public void collections(PimDomain domain, int done, int total) {
-                syncCollections(domain, done, total);
-            }
-
-            @Override
-            public void accountRefreshed(AccountEntry updated) {
-                main.post(
-                        () -> {
-                            accounts.removeIf(entry -> entry.email.equals(updated.email));
-                            accounts.add(updated);
-                        });
-            }
-        };
-    }
-
-    /** Pushes the sync flag to every subscribed element (the lists'
-     *  sync dock, the drawer's inert sync row). */
-    /**
-     * Starts a pass: takes the process's sync lock, turning the pass down
-     * while a background run holds it, whose dock already says so.
-     */
+    /** Starts a pass ({@link SyncCoordinator#startSync}). */
     private boolean startSync() {
-        if (!pimdir.locks().takeSync()) {
-            return false;
-        }
-        resetSyncPlan();
-        setSyncing(true);
-        return true;
+        return sync.startSync();
     }
 
     private void setSyncing(boolean value) {
-        if (syncing && !value) {
-            pimdir.locks().releaseSync();
-        }
-        syncing = value;
-        for (java.util.function.Consumer<Boolean> observer : syncObservers) {
-            observer.accept(value);
-        }
+        sync.setSyncing(value);
     }
 
     /**
@@ -1444,13 +1388,7 @@ public class MainActivity extends Host {
         mailList.redrawFooter();
         if (active) {
             getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-            synchronized (passState) {
-                syncLine = "";
-                syncDetail = null;
-            }
-            dock.started();
-            dock.log(getString(R.string.sync_line_starting));
-            renderSyncDock();
+            syncProgress.started();
             return;
         }
         getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -1458,236 +1396,6 @@ public class MainActivity extends Host {
         // NOTE: an account connected while this pass ran owes its first
         // sync to the tab it landed on, which the pass kept from starting.
         main.post(() -> firstSyncIfOwed(screen));
-    }
-
-    /**
-     * Draws the pass on the dock (main thread): the account, or that the
-     * pass is starting before it reaches one, then the domain and the step,
-     * how far it is through its accounts, and a row per account for the
-     * sheet.
-     */
-    private void renderSyncDock() {
-        if (!syncing) {
-            return;
-        }
-        SyncDock.Pass pass = new SyncDock.Pass();
-        synchronized (passState) {
-            pass.title = syncAccount == null ? getString(R.string.sync_line_starting) : syncAccount;
-            // NOTE: the domain only where the pass runs several (the
-            // drawer's), a list's own pass being its tab's domain already.
-            String domain = syncFill ? getString(R.string.mail_filling) : syncLine;
-            Set<String> domains = new HashSet<>();
-            for (String section : syncPlan.keySet()) {
-                domains.add(section.substring(0, section.indexOf('\n')));
-            }
-            if (syncDetail != null && !syncFill && domains.size() <= 1) {
-                pass.line = syncDetail;
-            } else if (!domain.isEmpty()) {
-                pass.line =
-                        syncDetail == null
-                                ? domain
-                                : getString(R.string.sync_line_account, domain, syncDetail);
-            }
-            // NOTE: indeterminate until something is counted: a first Gmail
-            // chunk can take seconds before its first mailbox lands.
-            pass.done = syncShown;
-            pass.total = syncShown > 0 ? 1000 : 0;
-            pass.download = syncFill;
-            int of = syncPlan.size();
-            if (of > 1 && !syncReached.isEmpty()) {
-                pass.count =
-                        getString(R.string.sync_dock_count, Math.min(syncReached.size(), of), of);
-            }
-            pass.rows = syncRows(pass.line);
-        }
-        dock.pass(pass);
-    }
-
-    /**
-     * The pass's sections as the sheet lists them (holding the pass's
-     * state): those passed, done, the one under way saying {@code running},
-     * then those to come. A pass over several domains names each row's.
-     */
-    private List<SyncDock.Row> syncRows(String running) {
-        Set<String> domains = new HashSet<>();
-        List<String> sections = new ArrayList<>(syncReached);
-        for (String section : syncPlan.keySet()) {
-            domains.add(section.substring(0, section.indexOf('\n')));
-            if (!sections.contains(section)) {
-                sections.add(section);
-            }
-        }
-        List<SyncDock.Row> rows = new ArrayList<>();
-        for (String section : sections) {
-            // NOTE: a count before the pass reached an account opens a
-            // section of none, which no row stands for.
-            if (section.endsWith("\n" + null)) {
-                continue;
-            }
-            int cut = section.indexOf('\n');
-            SyncDock.Row row = new SyncDock.Row();
-            row.account = section.substring(cut + 1);
-            if (section.equals(syncSection)) {
-                row.state = SyncDock.Row.RUNNING;
-                row.line = running;
-            } else {
-                row.state =
-                        syncReached.contains(section) ? SyncDock.Row.DONE : SyncDock.Row.NEXT;
-                String state =
-                        getString(
-                                row.state == SyncDock.Row.DONE
-                                        ? R.string.sync_dock_done
-                                        : R.string.sync_dock_next);
-                row.line =
-                        domains.size() > 1
-                                ? getString(
-                                        R.string.sync_line_account,
-                                        getString(PimDomain.byId(section.substring(0, cut)).label),
-                                        state)
-                                : state;
-            }
-            rows.add(row);
-        }
-        return rows;
-    }
-
-    /**
-     * Keeps the step a pass stands at for the dock's sheet, after the
-     * account it is on (holding the pass's state).
-     */
-    private void syncLog(String detail) {
-        String line =
-                syncAccount == null
-                        ? detail
-                        : getString(R.string.sync_line_account, syncAccount, detail);
-        main.post(() -> dock.log(line));
-    }
-
-    /** Guards the dock's state, which the pass's workers set side by side. */
-    private final Object passState = new Object();
-
-    /** The account a pass is on, null until it reaches one. */
-    private String syncAccount;
-
-    /** The domain the pass is on, said in the dock's line. */
-    private String syncLine = "";
-
-    /** The engine's step the pass is on, after the domain; null for none yet. */
-    private String syncDetail;
-
-    /** Whether the pass downloads older mail (Load more). */
-    private boolean syncFill;
-
-    /** Whether the pass takes mail steps, whose counts are not mailboxes. */
-    private boolean syncStepping;
-
-    /**
-     * The pass's sections, one per domain and account it runs, each weighing
-     * the collections stored for it, one at least: the bar's whole is their
-     * sum, so it fills once over the pass rather than once per account. In
-     * the order they were planned, the sheet's order for those to come.
-     */
-    private final Map<String, Integer> syncPlan = new LinkedHashMap<>();
-
-    /** The sections the pass reached, in order, the last one under way. */
-    private final List<String> syncReached = new ArrayList<>();
-
-    private int syncPlanned;
-
-    /** What the sections the pass left behind weigh. */
-    private int syncPassed;
-
-    /** The section under way, null before the first. */
-    private String syncSection;
-
-    /**
-     * How many of the section's collections have landed, 0 of 0 until the
-     * pass knows how many there are.
-     */
-    private int syncLanded;
-
-    private int syncLandedOf;
-
-    /** How much of the collection under way its counted steps have filled. */
-    private double syncShare;
-
-    /**
-     * The bar in thousandths, which only ever grows over a pass: a step or a
-     * section starting at nothing holds it rather than emptying it.
-     */
-    private int syncShown;
-
-    /** Forgets the last pass's plan and bar (main thread, before a pass). */
-    private void resetSyncPlan() {
-        synchronized (passState) {
-            syncPlan.clear();
-            syncPlanned = 0;
-            syncPassed = 0;
-            syncSection = null;
-            syncLanded = 0;
-            syncLandedOf = 0;
-            syncShare = 0;
-            syncShown = 0;
-            syncReached.clear();
-            syncDetail = null;
-            syncFill = false;
-            syncStepping = false;
-        }
-    }
-
-    /**
-     * Sizes a domain's part of the pass before it runs (any thread): one
-     * section per account the pass takes, {@code only} narrowing them, each
-     * weighing the collections stored for it within the scope.
-     */
-    private void planSync(PimDomain domain, SyncScope scope, Collection<String> only) {
-        Map<String, Integer> weights = new LinkedHashMap<>();
-        if (domain == PimDomain.CONTACTS) {
-            for (BookEntry book : base.loadSubscribedAddressbooks()) {
-                if (!LocalBook.is(book.accountEmail)) {
-                    weights.put(book.accountEmail, 0);
-                }
-            }
-        } else {
-            for (AccountEntry account : passes.accountsFor(domain)) {
-                weights.put(account.email, 0);
-            }
-        }
-        weights.keySet()
-                .removeIf(email -> !scope.account(email) || (only != null && !only.contains(email)));
-        for (PimdirCollections.Stored stored : collectionsOf(domain)) {
-            Integer weight = weights.get(stored.accountEmail);
-            if (weight != null && scope.collection(stored.accountEmail, stored.id)) {
-                weights.put(stored.accountEmail, weight + 1);
-            }
-        }
-        synchronized (passState) {
-            for (Map.Entry<String, Integer> entry : weights.entrySet()) {
-                int weight = Math.max(1, entry.getValue());
-                syncPlan.put(sectionOf(domain, entry.getKey()), weight);
-                syncPlanned += weight;
-            }
-        }
-    }
-
-    /**
-     * Sizes a pass of mail steps before it runs (any thread): one section
-     * per account of {@code emails}, each weighing one, since every step
-     * brings about as many bodies whatever the account holds.
-     */
-    private void planSteps(List<String> emails) {
-        synchronized (passState) {
-            syncStepping = true;
-            for (String email : emails) {
-                if (syncPlan.put(sectionOf(PimDomain.MAIL, email), 1) == null) {
-                    syncPlanned += 1;
-                }
-            }
-        }
-    }
-
-    private static String sectionOf(PimDomain domain, String accountEmail) {
-        return domain.id + "\n" + accountEmail;
     }
 
     /** The addresses of some accounts. */
@@ -1699,262 +1407,75 @@ public class MainActivity extends Host {
         return emails;
     }
 
-    /**
-     * A section's weight, a section the plan missed weighing one and
-     * growing the whole (holding the pass's state).
-     */
-    private int weightOf(String section) {
-        Integer weight = syncPlan.get(section);
-        if (weight == null) {
-            syncPlan.put(section, 1);
-            syncPlanned += 1;
-            return 1;
-        }
-        return weight;
+    @Override
+    public SyncDock dock() {
+        return dock;
     }
 
-    /** Moves the bar to where the pass stands, never back (holding the pass's state). */
-    private void syncShow() {
-        int section = SyncSteps.permille(syncLanded, syncLandedOf, syncShare);
-        int whole =
-                syncSection == null
-                        ? 0
-                        : SyncSteps.across(syncPassed, weightOf(syncSection), syncPlanned, section);
-        syncShown = Math.max(syncShown, whole);
+    @Override
+    public void reload(PimDomain domain) {
+        switch (domain) {
+            case CONTACTS:
+                reloadContacts();
+                break;
+            case MAIL:
+                mailList.reload();
+                break;
+            case CALENDAR:
+                calendarList.reload();
+                break;
+        }
     }
 
     /**
-     * Names the account a pass moved on to, null between accounts (callable
-     * off the main thread), so a pass over several says whose it is on. The
-     * counts start over, the bar holding what the pass came to.
+     * The in-memory account cache a token refresh must keep current
+     * (mutated on the main thread the drawer reads it from).
      */
-    private void syncAccount(String accountEmail) {
-        synchronized (passState) {
-            syncAccount = accountEmail;
-            syncLanded = 0;
-            syncLandedOf = 0;
-            syncShare = 0;
-            syncDetail = null;
-        }
-        main.post(this::renderSyncDock);
+    @Override
+    public void renewed(AccountEntry updated) {
+        main.post(
+                () -> {
+                    accounts.removeIf(entry -> entry.email.equals(updated.email));
+                    accounts.add(updated);
+                });
     }
 
-    /**
-     * Sets the dock's line from the domain an engine step runs in and the
-     * step itself (any thread), keeping the step for the sheet. A step the
-     * domain has no words for leaves the last one.
-     */
-    private void syncStep(PimDomain domain, int stage, int count) {
-        String line = getString(SyncSteps.lineOf(domain));
-        String detail = SyncSteps.text(getResources(), domain, stage, count);
-        synchronized (passState) {
-            syncLine = line;
-            if (detail != null) {
-                syncDetail = detail;
-                syncLog(detail);
-            }
-        }
-        main.post(this::renderSyncDock);
-    }
-
-    /**
-     * Fills the bar with how far a counted step is (any thread): the
-     * contacts or events read so far, or written to the phone. A mail step
-     * tells its download only so, its step then naming the bodies it brings.
-     */
-    private void syncAdvance(PimDomain domain, int stage, int done, int total) {
-        String detail =
-                domain == PimDomain.MAIL && stage == PimdirEngine.Progress.STAGE_DOWNLOAD
-                        ? SyncSteps.text(getResources(), domain, stage, total)
-                        : null;
-        synchronized (passState) {
-            if (syncStepping && detail != null && !detail.equals(syncDetail)) {
-                syncDetail = detail;
-                syncLog(detail);
-            }
-            syncShare = SyncSteps.shareOf(domain, stage, done, total);
-            syncShow();
-        }
-        main.post(this::renderSyncDock);
-    }
-
-    /**
-     * Fills the bar with how many of the account's collections have landed
-     * (any thread): its mailboxes, address books or calendars. The first
-     * count of a domain and account opens its section, the one before it
-     * passed. A count overtaken by a worker beside it is dropped. The count
-     * is the dock's step, but in a mail step, whose one count is the step.
-     */
-    private void syncCollections(PimDomain domain, int done, int total) {
-        String line = getString(SyncSteps.lineOf(domain));
-        synchronized (passState) {
-            String section = sectionOf(domain, syncAccount);
-            if (!section.equals(syncSection)) {
-                if (syncSection != null) {
-                    syncPassed += weightOf(syncSection);
-                }
-                syncSection = section;
-                if (!syncReached.contains(section)) {
-                    syncReached.add(section);
-                }
-                syncLanded = 0;
-                syncLandedOf = 0;
-            } else if (total == syncLandedOf && done < syncLanded) {
-                return;
-            }
-            syncLine = line;
-            syncLanded = done;
-            syncLandedOf = total;
-            syncShare = 0;
-            syncShow();
-            if (!syncStepping && total > 0) {
-                syncDetail = getString(SyncSteps.collectionsOf(domain), done, total);
-                syncLog(syncDetail);
-            }
-        }
-        main.post(this::renderSyncDock);
+    @Override
+    public boolean backgroundRunning() {
+        return App.of(this).state.backgroundRunning;
     }
 
     /** Whether a sync pass is running. */
     public boolean isSyncing() {
-        return syncing;
+        return sync.isSyncing();
     }
 
-    /**
-     * Whether the sync is held, by a pass of the app's or a background run:
-     * a step asked for now would do nothing.
-     */
+    /** Whether the sync is held ({@link SyncCoordinator#syncHeld}). */
     public boolean syncHeld() {
-        return syncing || App.of(this).state.backgroundRunning;
+        return sync.syncHeld();
     }
 
-    /**
-     * Subscribes an element to the sync state and hands it the current
-     * value straight away, so it starts consistent.
-     */
     private void observeSync(java.util.function.Consumer<Boolean> observer) {
-        syncObservers.add(observer);
-        observer.accept(syncing);
+        sync.observe(observer);
     }
 
-    /**
-     * Store-to-remote spoke: per addressbook, fetches the remote into
-     * the store, pushes the staged local changes, and re-fetches the
-     * pushed state. The phone is not touched; that is the local sync.
-     * The shared syncing state drives the dock in the lists' app bar.
-     */
+    /** The contacts pass over every book ({@link SyncCoordinator#syncRemote}). */
     void syncRemote() {
-        // NOTE: one pass at a time; the lists stay usable while it runs,
-        // so a pull or the drawer can ask for another meanwhile.
-        if (syncing) {
-            return;
-        }
-        syncAccount(null);
-        if (!startSync()) {
-            return;
-        }
-
-        io.execute(
-                () -> {
-                    planSync(PimDomain.CONTACTS, SyncScope.all(this), null);
-                    SyncPasses.Outcome outcome = passes.syncRemote();
-                    postAlive(
-                            () -> {
-                                setSyncing(false);
-                                reloadContacts();
-                                reportSync(outcome);
-                            });
-                });
+        sync.syncRemote();
     }
 
-    /**
-     * Surfaces a failed sync in an error dialog. A pass that went through
-     * says nothing: the lists show what it brought, and a conflict marks
-     * its own row.
-     */
     private void reportSync(SyncPasses.Outcome outcome) {
-        if (outcome.failure != null) {
-            // NOTE: the last sync's store keeps failing addressbooks usable.
-            showError(outcome.failure, R.string.sync_failed);
-        }
+        sync.reportSync(outcome);
     }
 
-    /**
-     * The mail list's pull: the mail of the accounts and mailboxes the
-     * filter shows, into the merged list.
-     *
-     * <p>The endpoint is the one the account was connected with, which is what
-     * the mail domain of the connection flow exists to establish. It used to be
-     * re-discovered on every refresh from a contacts account's address, because
-     * there was no way to connect a mail account at all; that guessed at both
-     * the server and the credentials, and worked only where the two domains
-     * happened to share them.
-     *
-     * <p>Under a role chip ({@code role}, null for none) the pull syncs that
-     * role's mailboxes of the shown accounts alone, ticked or not, as the
-     * list shows them ({@link MailList#narrowed}).
-     */
+    /** The mail list's pull ({@link SyncCoordinator#syncMail}). */
     public void syncMail(String role) {
-        if (syncing) {
-            return;
-        }
-        syncAccount(null);
-        if (!startSync()) {
-            return;
-        }
-        // NOTE: on a metered network the outbox still goes out, and the
-        // listing waits for Wi-Fi.
-        boolean listing = wifi();
-        MergedFilter filter = filterOf(PimDomain.MAIL);
-        io.execute(
-                () -> {
-                    SyncScope scope = MailList.narrowed(filter, role, mail.roles());
-                    planSync(PimDomain.MAIL, scope, null);
-                    SyncPasses.MailPass pass = passes.mailPass(scope, listing);
-                    postAlive(
-                            () -> {
-                                setSyncing(false);
-                                mailList.reload();
-                                if (pass.failure != null) {
-                                    showError(pass.failure, R.string.sync_failed);
-                                }
-                                if (!listing) {
-                                    waitForWifi(() -> syncMail(role));
-                                }
-                                fillMail();
-                            });
-                });
+        sync.syncMail(role);
     }
 
-    /**
-     * The agenda's pull: the calendars the filter shows, and their events.
-     *
-     * <p>Read-only and whole-collection: CalDAV's ctag and sync-token
-     * rounds are what an incremental pass would use, and neither is
-     * wired yet, so a refresh relists. One report carries a whole
-     * calendar's objects, so this is one round trip per calendar.
-     */
+    /** The agenda's pull ({@link SyncCoordinator#syncCalendars}). */
     public void syncCalendars() {
-        if (syncing) {
-            return;
-        }
-        syncAccount(null);
-        if (!startSync()) {
-            return;
-        }
-        io.execute(
-                () -> {
-                    planSync(PimDomain.CALENDAR, filterOf(PimDomain.CALENDAR), null);
-                    Exception failure = passes.calendarPass(filterOf(PimDomain.CALENDAR));
-                    postAlive(
-                            () -> {
-                                setSyncing(false);
-                                calendarList.reload();
-                                if (failure != null) {
-                                    showError(failure, R.string.sync_failed);
-                                }
-                            });
-                });
+        sync.syncCalendars();
     }
 
     /** Opens one account's mail connection ({@link SyncPasses#openMail}). */
@@ -2039,7 +1560,7 @@ public class MainActivity extends Host {
         // NOTE: a background run holds the lock; its end calls back here.
         if (domain == null
                 || screen != panel
-                || syncing
+                || isSyncing()
                 || App.of(this).state.backgroundRunning
                 || isFinishing()) {
             return;
@@ -2080,14 +1601,14 @@ public class MainActivity extends Host {
             waitForWifi(() -> firstSyncIfOwed(screen));
             return;
         }
-        syncAccount(null);
+        syncProgress.syncAccount(null);
         if (!startSync()) {
             return;
         }
         io.execute(
                 () -> {
-                    planSteps(emailsOf(owing));
-                    syncAccount(null);
+                    syncProgress.planSteps(emailsOf(owing));
+                    syncProgress.syncAccount(null);
                     Exception failure = null;
                     for (AccountEntry account : owing) {
                         Exception error;
@@ -2120,13 +1641,13 @@ public class MainActivity extends Host {
      * book, the books the owing accounts just subscribed among them.
      */
     private void firstContacts(List<AccountEntry> owing) {
-        syncAccount(null);
+        syncProgress.syncAccount(null);
         if (!startSync()) {
             return;
         }
         io.execute(
                 () -> {
-                    planSync(PimDomain.CONTACTS, SyncScope.all(this), null);
+                    syncProgress.planSync(PimDomain.CONTACTS, SyncScope.all(this), null);
                     SyncPasses.Outcome outcome = passes.syncRemote();
                     if (outcome.failure == null) {
                         for (AccountEntry account : owing) {
@@ -2144,14 +1665,14 @@ public class MainActivity extends Host {
 
     /** The calendar tab's first sync: every owing account's calendars. */
     private void firstCalendars(List<AccountEntry> owing) {
-        syncAccount(null);
+        syncProgress.syncAccount(null);
         if (!startSync()) {
             return;
         }
         io.execute(
                 () -> {
-                    planSync(PimDomain.CALENDAR, SyncScope.all(this), emailsOf(owing));
-                    syncAccount(null);
+                    syncProgress.planSync(PimDomain.CALENDAR, SyncScope.all(this), emailsOf(owing));
+                    syncProgress.syncAccount(null);
                     Exception failure = null;
                     for (AccountEntry account : owing) {
                         Exception error = passes.fetchCalendars(account, SyncScope.all(this));
@@ -2195,9 +1716,10 @@ public class MainActivity extends Host {
      * the loop runs replans them, which is how a pass or a step
      * reaches a loop under way.
      */
+    @Override
     public void fillMail() {
         replanBodies = true;
-        if (filling || !foreground || syncing || !wifi()) {
+        if (filling || !foreground || isSyncing() || !wifi()) {
             return;
         }
         filling = true;
@@ -2461,7 +1983,7 @@ public class MainActivity extends Host {
      * foreground, no other sync, the account on, and Wi-Fi.
      */
     private boolean bodiesAllowed(String accountEmail) {
-        return foreground && !syncing && AccountActivation.enabled(this, accountEmail) && wifi();
+        return foreground && !isSyncing() && AccountActivation.enabled(this, accountEmail) && wifi();
     }
 
     /**
@@ -2624,7 +2146,7 @@ public class MainActivity extends Host {
      * other sync, and Wi-Fi.
      */
     private boolean fillAllowed() {
-        return foreground && !syncing && wifi();
+        return foreground && !isSyncing() && wifi();
     }
 
     /** Whether a network is there at all. */
@@ -2639,6 +2161,7 @@ public class MainActivity extends Host {
      * mail pass, step, fill or body download runs on. Opening one message
      * is an explicit act and fetches on any network ({@link #online}).
      */
+    @Override
     public boolean wifi() {
         return wifi(this);
     }
@@ -2659,9 +2182,10 @@ public class MainActivity extends Host {
      * Says in the sync dock that the mail sync waits for Wi-Fi, and
      * runs {@code then} once it is back ({@link #wifiBack}).
      */
-    void waitForWifi(Runnable then) {
+    @Override
+    public void waitForWifi(Runnable then) {
         owedOnWifi = then;
-        if (!syncing) {
+        if (!isSyncing()) {
             SyncDock.Pass wait = new SyncDock.Pass();
             wait.title = getString(R.string.sync_line_mail);
             wait.line = getString(R.string.sync_line_wifi);
@@ -2726,24 +2250,21 @@ public class MainActivity extends Host {
      * again and the bodies the steps leave to download are planned.
      */
     public void loadMore(List<MailList.Step> steps) {
-        if (syncing || !wifi()) {
+        if (isSyncing() || !wifi()) {
             return;
         }
-        syncAccount(null);
+        syncProgress.syncAccount(null);
         if (!startSync()) {
             return;
         }
-        synchronized (passState) {
-            syncFill = true;
-        }
-        renderSyncDock();
+        syncProgress.fill();
         Map<String, List<String>> byAccount = new LinkedHashMap<>();
         for (MailList.Step step : steps) {
             byAccount.computeIfAbsent(step.email, email -> new ArrayList<>()).add(step.only);
         }
         io.execute(
                 () -> {
-                    planSteps(new ArrayList<>(byAccount.keySet()));
+                    syncProgress.planSteps(new ArrayList<>(byAccount.keySet()));
                     Exception failure = null;
                     for (Map.Entry<String, List<String>> asked : byAccount.entrySet()) {
                         String email = asked.getKey();
@@ -2815,26 +2336,9 @@ public class MainActivity extends Host {
                 });
     }
 
-    /**
-     * Runs a store-wide write on the io thread while no sync runs: the
-     * process's sync lock taken around it, so a background run (on a
-     * thread of its own) never writes the same rows meanwhile. Turned down,
-     * saying so, while one holds it; a failure is said in a dialog, under
-     * {@code failed} when it names nothing itself.
-     */
+    /** Runs a store-wide write while no sync runs ({@link SyncCoordinator#underSyncLock}). */
     public void underSyncLock(int failed, Runnable write) {
-        if (!pimdir.locks().takeSync()) {
-            postAlive(() -> toast(getString(R.string.sync_busy)));
-            return;
-        }
-        try {
-            write.run();
-        } catch (RuntimeException error) {
-            Log.w("pimalaya", "store write failed", error);
-            postAlive(() -> showError(error, failed));
-        } finally {
-            pimdir.locks().releaseSync();
-        }
+        sync.underSyncLock(failed, write);
     }
 
     /** The list a freshly connected account lands on: its first domain. */
@@ -2845,76 +2349,14 @@ public class MainActivity extends Host {
         return account.covers(PimDomain.CONTACTS) ? PANEL_CONTACTS : PANEL_CALENDAR;
     }
 
-    /**
-     * The contacts list's pull: the addressbooks the filter shows,
-     * reconciled with their servers, each book's phone passes around its
-     * server one. The drawer's sync is the one that takes every domain and
-     * everything.
-     */
+    /** The contacts list's pull ({@link SyncCoordinator#syncContacts}). */
     public void syncContacts() {
-        if (syncing) {
-            return;
-        }
-
-        syncAccount(null);
-        if (!startSync()) {
-            return;
-        }
-        io.execute(
-                () -> {
-                    planSync(PimDomain.CONTACTS, filterOf(PimDomain.CONTACTS), null);
-                    SyncPasses.Outcome outcome = passes.syncRemote(filterOf(PimDomain.CONTACTS));
-                    postAlive(
-                            () -> {
-                                setSyncing(false);
-                                reloadContacts();
-                                reportSync(outcome);
-                            });
-                });
+        sync.syncContacts();
     }
 
-    /**
-     * Syncs every domain in turn, contacts then mail then calendars, the
-     * dialog naming each as it goes: the drawer's sync, which takes every
-     * collection of every account that is on whatever the filters hide,
-     * where a list's pull takes its own domain within its filter.
-     */
+    /** The drawer's sync over every domain ({@link SyncCoordinator#syncAll}). */
     void syncAll() {
-        if (syncing) {
-            return;
-        }
-
-        syncAccount(null);
-        if (!startSync()) {
-            return;
-        }
-        boolean listing = wifi();
-        io.execute(
-                () -> {
-                    planSync(PimDomain.CONTACTS, SyncScope.all(this), null);
-                    planSync(PimDomain.MAIL, SyncScope.mail(this), null);
-                    planSync(PimDomain.CALENDAR, SyncScope.all(this), null);
-                    SyncPasses.Outcome outcome = passes.syncRemote();
-                    SyncPasses.MailPass sent = passes.mailPass(SyncScope.mail(this), listing);
-                    Exception calendars = passes.calendarPass(SyncScope.all(this));
-                    Exception other = sent.failure != null ? sent.failure : calendars;
-                    postAlive(
-                            () -> {
-                                setSyncing(false);
-                                reloadContacts();
-                                mailList.reload();
-                                calendarList.reload();
-                                reportSync(outcome);
-                                if (!listing) {
-                                    waitForWifi(() -> syncMail(null));
-                                }
-                                fillMail();
-                                // NOTE: one error dialog, the contacts one first.
-                                if (other != null && outcome.failure == null) {
-                                    showError(other, R.string.sync_failed);
-                                }
-                            });
-                });
+        sync.syncAll();
     }
 
     /** The subscribed addressbooks set to mirror into the phone. */
@@ -3036,7 +2478,7 @@ public class MainActivity extends Host {
 
     /** The dock during a first projection, a null line once it ended. */
     private void phoneDock(String text, int done, int total) {
-        if (syncing || App.of(this).state.backgroundRunning) {
+        if (isSyncing() || App.of(this).state.backgroundRunning) {
             return;
         }
         if (text == null) {
@@ -4024,10 +3466,10 @@ public class MainActivity extends Host {
             waitForWifi(() -> firstOfMailboxes(taken));
             return;
         }
-        if (syncing) {
+        if (isSyncing()) {
             return;
         }
-        syncAccount(null);
+        syncProgress.syncAccount(null);
         if (!startSync()) {
             return;
         }
@@ -4045,7 +3487,7 @@ public class MainActivity extends Host {
                             }
                         }
                     }
-                    planSteps(new ArrayList<>(owed.keySet()));
+                    syncProgress.planSteps(new ArrayList<>(owed.keySet()));
                     Exception failure = null;
                     for (Map.Entry<String, List<String>> asked : owed.entrySet()) {
                         AccountEntry account = mailAccount(asked.getKey());

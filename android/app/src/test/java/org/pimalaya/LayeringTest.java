@@ -41,8 +41,10 @@ public class LayeringTest {
             Map.entry("contact", Set.of("ui", "phone", "pimdir", "account", CLIENT)),
             Map.entry("calendar", Set.of("ui", "phone", "pimdir", "account", CLIENT)),
             Map.entry("mail", Set.of("file", "ui", "pimdir", "account", CLIENT)),
+            // NOTE: sync reaches ui because the foreground sync draws the
+            // sync dock and posts through the host; ui depends on nothing.
             Map.entry("sync", Set.of("mail", "calendar", "contact", "phone", "pimdir",
-                    "account", CLIENT)),
+                    "ui", "account", CLIENT)),
             Map.entry("setup", Set.of("sync", "mail", "calendar", "contact", "phone",
                     "pimdir", "ui", "account", CLIENT)),
             Map.entry("filter", Set.of("mail", "pimdir", "account")),
