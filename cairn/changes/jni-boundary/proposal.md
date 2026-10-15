@@ -25,7 +25,7 @@ java-domain-layout typed the Java side and left the boundary itself as it was (i
 5. **Store formats out of the UI.** `DeletedItems.Row.retainedAt` as epoch millis; AccountSettings' server description from Rust.
 6. **Typed phone event view.** Java records for the PhoneEvent family; CalendarMapping off JSONObject, its logic unchanged.
 7. **Uniform text replies.** The five text verbs and `updateEvent` answer `{ical}` / `{etag}` / an error object; the `{` sniffing goes.
-8. **Naming in Rust.** `bound`, `pendingCreates` and `held` yields let the enumerate driver name members; MailEngine's naming code and the `enumerateMailbox` / `nameMessages` JSON exceptions go.
+8. **Mail pages typed.** `enumerateMailbox` and `nameMessages` cross as records; the dead meta fetch, `listed` map and always-true `full` flag go. Naming stays in Java (D7).
 
 Every step lands on its own, behaviour-preserving, captured before and compared after (wire values equal as JSON), on the gate of java-domain-layout plus `cargo test` and `cargo clippy --all-targets`.
 
@@ -42,4 +42,4 @@ Every step lands on its own, behaviour-preserving, captured before and compared 
 - D2. Facts only on the public client API, `isGraph`/`isGoogle`/`isJmap` gone.
 - D3. Storage stays out of this change, spike later.
 - D5. `cardTypeOrder` becomes production (spinners from Rust).
-- D7. Naming moves into Rust (step 8): it deletes the JSON instead of typing it twice.
+- D7. Revised 2026-10-15 on step 8's plan: naming stays in Java. Moved to Rust it would trade about 150 Java lines for 4 or 5 new store yields and about 250 Rust lines, and take naming out of the JVM tests that guard it (the analysis's `named` serves contacts, calendars and the phone, not mail). Step 8 types `MailPage`/`Named` instead and deletes the dead fetch path; naming in Rust waits on the storage spike (D3).
