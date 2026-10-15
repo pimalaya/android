@@ -18,7 +18,6 @@ use serde::Serialize;
 use serde_json::{from_str, to_string};
 
 use crate::{
-    account::Account,
     calendar::{
         Calendars, EventCreate, EventDelete, EventUpdate,
         conflict::{merge, resolve},
@@ -29,7 +28,7 @@ use crate::{
         series::{remove, split},
     },
     client::Client,
-    ffi::{ErrorReply, error_json, host::JniHost, read_string},
+    ffi::{ErrorReply, error_json, host::JniHost, parse_account, read_string},
 };
 
 /// `Native.listCalendars`: lists the account's calendars.
@@ -41,26 +40,27 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listCalendars<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
+    account: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
-        let account = Account::new(&base_url, &login, &password);
+        let account = read_string(env, &account);
 
-        let mut client = Client::new(JniHost::new(env, &transport, None));
-        let mut calendars = Calendars {
-            client: &mut client,
-            account: &account,
-        };
-        let json = match calendars.list_calendars() {
-            Ok(calendars) => {
-                to_string(&calendars).unwrap_or_else(|err| error_json(err.to_string()))
-            }
+        let json = match parse_account(&account) {
             Err(err) => error_json(err),
+            Ok(account) => {
+                let account = account.account();
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let mut calendars = Calendars {
+                    client: &mut client,
+                    account: &account,
+                };
+                match calendars.list_calendars() {
+                    Ok(calendars) => {
+                        to_string(&calendars).unwrap_or_else(|err| error_json(err.to_string()))
+                    }
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())
@@ -78,29 +78,32 @@ pub extern "system" fn Java_org_pimalaya_client_Native_syncEvents<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
+    account: JString<'local>,
     url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
     cursor: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
+        let account = read_string(env, &account);
         let url = read_string(env, &url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let cursor = read_string(env, &cursor);
-        let account = Account::new(&base_url, &login, &password);
-
-        let mut client = Client::new(JniHost::new(env, &transport, None));
         let cursor = Some(cursor.as_str()).filter(|value| !value.is_empty());
-        let mut calendars = Calendars {
-            client: &mut client,
-            account: &account,
-        };
-        let json = match calendars.sync_events(&url, cursor) {
-            Ok(delta) => to_string(&delta).unwrap_or_else(|err| error_json(err.to_string())),
+
+        let json = match parse_account(&account) {
             Err(err) => error_json(err),
+            Ok(account) => {
+                let account = account.account();
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let mut calendars = Calendars {
+                    client: &mut client,
+                    account: &account,
+                };
+                match calendars.sync_events(&url, cursor) {
+                    Ok(delta) => {
+                        to_string(&delta).unwrap_or_else(|err| error_json(err.to_string()))
+                    }
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())
@@ -116,23 +119,20 @@ pub extern "system" fn Java_org_pimalaya_client_Native_multigetEvents<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
+    account: JString<'local>,
     url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
     ids: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
+        let account = read_string(env, &account);
         let url = read_string(env, &url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let ids = read_string(env, &ids);
-        let account = Account::new(&base_url, &login, &password);
+        let ids = from_str::<Vec<String>>(&ids).map_err(|err| format!("Invalid id list: {err}"));
 
-        let json = match from_str::<Vec<String>>(&ids) {
-            Err(err) => error_json(format!("Invalid id list: {err}")),
-            Ok(ids) => {
+        let json = match (parse_account(&account), ids) {
+            (Err(err), _) | (_, Err(err)) => error_json(err),
+            (Ok(account), Ok(ids)) => {
+                let account = account.account();
                 let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
                 let mut client = Client::new(JniHost::new(env, &transport, None));
                 let mut calendars = Calendars {
@@ -272,40 +272,39 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateEvent<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
+    account: JString<'local>,
     calendar_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
     id: JString<'local>,
     ical: JString<'local>,
     etag: JString<'local>,
-    address: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
+        let account = read_string(env, &account);
         let calendar_url = read_string(env, &calendar_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let id = read_string(env, &id);
         let ical = read_string(env, &ical);
         let etag = read_string(env, &etag);
-        let address = read_string(env, &address);
-        let account = Account::new(&base_url, &login, &password);
-        let event = EventUpdate {
-            id: &id,
-            ical: &ical,
-            etag: (!etag.is_empty()).then_some(etag.as_str()),
-            address: &address,
-        };
 
-        let mut client = Client::new(JniHost::new(env, &transport, None));
-        let mut calendars = Calendars {
-            client: &mut client,
-            account: &account,
-        };
-        let json = match calendars.update_event(&calendar_url, &event) {
-            Ok(etag) => to_string(&etag).unwrap_or_else(|err| error_json(err.to_string())),
+        let json = match parse_account(&account) {
             Err(err) => error_json(err),
+            Ok(owned) => {
+                let account = owned.account();
+                let event = EventUpdate {
+                    id: &id,
+                    ical: &ical,
+                    etag: (!etag.is_empty()).then_some(etag.as_str()),
+                    address: &owned.address,
+                };
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let mut calendars = Calendars {
+                    client: &mut client,
+                    account: &account,
+                };
+                match calendars.update_event(&calendar_url, &event) {
+                    Ok(etag) => to_string(&etag).unwrap_or_else(|err| error_json(err.to_string())),
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())
@@ -499,37 +498,38 @@ pub extern "system" fn Java_org_pimalaya_client_Native_createEvent<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
+    account: JString<'local>,
     calendar_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
     id: JString<'local>,
     ical: JString<'local>,
-    address: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
+        let account = read_string(env, &account);
         let calendar_url = read_string(env, &calendar_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let id = read_string(env, &id);
         let ical = read_string(env, &ical);
-        let address = read_string(env, &address);
-        let account = Account::new(&base_url, &login, &password);
-        let event = EventCreate {
-            id: &id,
-            ical: &ical,
-            address: &address,
-        };
 
-        let mut client = Client::new(JniHost::new(env, &transport, None));
-        let mut calendars = Calendars {
-            client: &mut client,
-            account: &account,
-        };
-        let json = match calendars.create_event(&calendar_url, &event) {
-            Ok(created) => to_string(&created).unwrap_or_else(|err| error_json(err.to_string())),
+        let json = match parse_account(&account) {
             Err(err) => error_json(err),
+            Ok(owned) => {
+                let account = owned.account();
+                let event = EventCreate {
+                    id: &id,
+                    ical: &ical,
+                    address: &owned.address,
+                };
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let mut calendars = Calendars {
+                    client: &mut client,
+                    account: &account,
+                };
+                match calendars.create_event(&calendar_url, &event) {
+                    Ok(created) => {
+                        to_string(&created).unwrap_or_else(|err| error_json(err.to_string()))
+                    }
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())
@@ -545,37 +545,36 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteEvent<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
+    account: JString<'local>,
     calendar_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
     id: JString<'local>,
     etag: JString<'local>,
-    address: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
+        let account = read_string(env, &account);
         let calendar_url = read_string(env, &calendar_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let id = read_string(env, &id);
         let etag = read_string(env, &etag);
-        let address = read_string(env, &address);
-        let account = Account::new(&base_url, &login, &password);
-        let event = EventDelete {
-            id: &id,
-            etag: (!etag.is_empty()).then_some(etag.as_str()),
-            address: &address,
-        };
 
-        let mut client = Client::new(JniHost::new(env, &transport, None));
-        let mut calendars = Calendars {
-            client: &mut client,
-            account: &account,
-        };
-        let json = match calendars.delete_event(&calendar_url, &event) {
-            Ok(()) => String::from("{}"),
+        let json = match parse_account(&account) {
             Err(err) => error_json(err),
+            Ok(owned) => {
+                let account = owned.account();
+                let event = EventDelete {
+                    id: &id,
+                    etag: (!etag.is_empty()).then_some(etag.as_str()),
+                    address: &owned.address,
+                };
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let mut calendars = Calendars {
+                    client: &mut client,
+                    account: &account,
+                };
+                match calendars.delete_event(&calendar_url, &event) {
+                    Ok(()) => String::from("{}"),
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())

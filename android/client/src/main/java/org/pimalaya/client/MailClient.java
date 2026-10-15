@@ -298,10 +298,7 @@ public class MailClient {
                     Opened.from(
                             Replies.object(
                                     Native.openMailSession(
-                                            transport,
-                                            account.baseUrl,
-                                            account.login,
-                                            account.password)));
+                                            transport, account.toJson().toString())));
             return new MailSession(account, transport, opened.handle(), opened.expungesOne());
         } catch (RuntimeException failure) {
             transport.close();

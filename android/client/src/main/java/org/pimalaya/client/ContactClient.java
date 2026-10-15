@@ -22,9 +22,7 @@ public class ContactClient {
      */
     public List<Addressbook> listAddressbooks(Transport transport, Account account) {
         JSONArray reply =
-                Replies.array(
-                        Native.listAddressbooks(
-                                transport, account.baseUrl, account.login, account.password));
+                Replies.array(Native.listAddressbooks(transport, account.toJson().toString()));
 
         List<Addressbook> books = new ArrayList<>(reply.length());
         for (int index = 0; index < reply.length(); index++) {
@@ -40,9 +38,7 @@ public class ContactClient {
      */
     public Set<String> jmapCapabilities(Transport transport, Account account) {
         JSONArray reply =
-                Replies.array(
-                        Native.jmapCapabilities(
-                                transport, account.baseUrl, account.login, account.password));
+                Replies.array(Native.jmapCapabilities(transport, account.toJson().toString()));
 
         Set<String> urns = new LinkedHashSet<>();
         for (int index = 0; index < reply.length(); index++) {
@@ -53,13 +49,7 @@ public class ContactClient {
 
     /** Lists the cards of the addressbook collection at the given URL. */
     public List<Card> listCards(Transport transport, Account account, String addressbookUrl) {
-        return cards(
-                Native.listCards(
-                        transport,
-                        account.baseUrl,
-                        addressbookUrl,
-                        account.login,
-                        account.password));
+        return cards(Native.listCards(transport, account.toJson().toString(), addressbookUrl));
     }
 
     /**
@@ -73,10 +63,8 @@ public class ContactClient {
         String reply =
                 Native.syncCards(
                         transport,
-                        account.baseUrl,
+                        account.toJson().toString(),
                         addressbookUrl,
-                        account.login,
-                        account.password,
                         syncToken == null ? "" : syncToken);
 
         return CardDelta.from(Replies.object(reply));
@@ -87,9 +75,8 @@ public class ContactClient {
         return cards(
                 Native.multigetCards(
                         transport,
+                        account.toJson().toString(),
                         addressbookUrl,
-                        account.login,
-                        account.password,
                         new JSONArray(uris).toString()));
     }
 
@@ -100,7 +87,8 @@ public class ContactClient {
      */
     public List<Card> readGraphCards(Transport transport, Account account, List<String> ids) {
         return cards(
-                Native.readGraphCards(transport, account.password, new JSONArray(ids).toString()));
+                Native.readGraphCards(
+                        transport, account.toJson().toString(), new JSONArray(ids).toString()));
     }
 
     /**
@@ -111,7 +99,7 @@ public class ContactClient {
     public List<Card> readGoogleCards(Transport transport, Account account, List<String> ids) {
         return cards(
                 Native.readGoogleCards(
-                        transport, account.password, new JSONArray(ids).toString()));
+                        transport, account.toJson().toString(), new JSONArray(ids).toString()));
     }
 
     /**
@@ -123,9 +111,7 @@ public class ContactClient {
         Replies.object(
                 Native.updateCardBooks(
                         transport,
-                        account.baseUrl,
-                        account.login,
-                        account.password,
+                        account.toJson().toString(),
                         update.cardId(),
                         books(update.add()),
                         books(update.remove())));
@@ -141,10 +127,8 @@ public class ContactClient {
                 Replies.object(
                         Native.createCard(
                                 transport,
-                                account.baseUrl,
+                                account.toJson().toString(),
                                 addressbookUrl,
-                                account.login,
-                                account.password,
                                 card.id(),
                                 card.vcard())));
     }
@@ -155,10 +139,8 @@ public class ContactClient {
                 Replies.object(
                         Native.readCard(
                                 transport,
-                                account.baseUrl,
+                                account.toJson().toString(),
                                 addressbookUrl,
-                                account.login,
-                                account.password,
                                 uri)));
     }
 
@@ -173,10 +155,8 @@ public class ContactClient {
                 Replies.object(
                         Native.updateCard(
                                 transport,
-                                account.baseUrl,
+                                account.toJson().toString(),
                                 card.bookUrl(),
-                                account.login,
-                                account.password,
                                 card.card().id(),
                                 card.card().uri() == null ? "" : card.card().uri(),
                                 card.card().vcard(),
@@ -189,10 +169,8 @@ public class ContactClient {
         Replies.object(
                 Native.deleteCard(
                         transport,
-                        account.baseUrl,
+                        account.toJson().toString(),
                         card.bookUrl(),
-                        account.login,
-                        account.password,
                         card.card().id(),
                         card.card().uri() == null ? "" : card.card().uri(),
                         card.card().etag() == null ? "" : card.card().etag()));
@@ -207,9 +185,7 @@ public class ContactClient {
         return cards(
                 Native.createCards(
                         transport,
-                        account.baseUrl,
-                        account.login,
-                        account.password,
+                        account.toJson().toString(),
                         new JSONArray(vcards).toString()));
     }
 
@@ -218,9 +194,7 @@ public class ContactClient {
         Replies.object(
                 Native.deleteCards(
                         transport,
-                        account.baseUrl,
-                        account.login,
-                        account.password,
+                        account.toJson().toString(),
                         new JSONArray(ids).toString()));
     }
 
@@ -243,10 +217,8 @@ public class ContactClient {
                 Replies.array(
                         Native.pushCards(
                                 transport,
-                                account.baseUrl,
+                                account.toJson().toString(),
                                 addressbookUrl,
-                                account.login,
-                                account.password,
                                 batch.toString())));
     }
 

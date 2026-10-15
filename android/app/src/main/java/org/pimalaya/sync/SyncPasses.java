@@ -891,10 +891,7 @@ public final class SyncPasses {
                                                                     pimdir,
                                                                     clients,
                                                                     new RemoteAccount(
-                                                                            worker,
-                                                                            server,
-                                                                            accountId,
-                                                                            account.email));
+                                                                            worker, server, accountId));
                                                     engine.progress = alone;
                                                     try {
                                                         engine.sync(collection);

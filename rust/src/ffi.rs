@@ -32,7 +32,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{from_str, to_string};
 use url::Url;
 
-use crate::{contact::dedup::DuplicateCard, error::BridgeError};
+use crate::{account::AccountJson, contact::dedup::DuplicateCard, error::BridgeError};
 
 /// The longest panic message an error reply carries: a formatted panic
 /// can quote the data it failed on, which has no business in a reply or
@@ -136,6 +136,21 @@ pub fn read_string(env: &Env, value: &JString) -> String {
     value.try_to_string(env).unwrap_or_default()
 }
 
+/// Parses the account a network export addresses.
+///
+/// Java's `Account` written as `{"baseUrl", "login", "secret", ...}`.
+pub fn parse_account(raw: &str) -> Result<AccountJson, String> {
+    // NOTE: the position alone, since a parse error may quote the value
+    // it failed on, and the account carries a secret.
+    from_str(raw).map_err(|err| {
+        format!(
+            "Invalid account at line {}, column {}",
+            err.line(),
+            err.column()
+        )
+    })
+}
+
 /// Reads and parses a store verb's JSON facts; the error side is the
 /// ready-to-return error reply.
 pub fn parse_facts<T: DeserializeOwned>(env: &Env, facts: &JString) -> Result<T, String> {
@@ -180,7 +195,7 @@ pub mod tests {
     use serde::Serialize;
     use serde_json::{to_string, to_value};
 
-    use crate::ffi::*;
+    use crate::{account::Backend, client::Auth, ffi::*};
 
     /// Asserts the value serializes its keys in alphabetical order.
     ///
@@ -190,6 +205,133 @@ pub mod tests {
         let typed = to_string(value).unwrap();
         let sorted = to_string(&to_value(value).unwrap()).unwrap();
         assert_eq!(typed, sorted);
+    }
+
+    /// The account argument decodes to what the positional `baseUrl, login,
+    /// password` gave, per export family; token-only reads take the secret.
+    #[test]
+    fn the_account_argument_decodes_as_the_positional_tuple_did() {
+        // NOTE: (family, account, backend, base URL, login, address), no
+        // login meaning Bearer.
+        let rows = [
+            (
+                "contact carddav",
+                r#"{"baseUrl":"https://dav.example.org/","login":"jane","secret":"pw"}"#,
+                Backend::Carddav,
+                "https://dav.example.org/",
+                Some("jane"),
+                "",
+            ),
+            (
+                "contact jmap",
+                r#"{"baseUrl":"jmap://api.fastmail.com/jmap/session","login":"","secret":"pw"}"#,
+                Backend::Jmap,
+                "jmap://api.fastmail.com/jmap/session",
+                None,
+                "",
+            ),
+            (
+                "contact graph",
+                r#"{"baseUrl":"msgraph://jane@outlook.com","login":"","secret":"pw"}"#,
+                Backend::Graph,
+                "msgraph://jane@outlook.com",
+                None,
+                "",
+            ),
+            (
+                "contact google",
+                r#"{"baseUrl":"google://jane@gmail.com","login":"","secret":"pw"}"#,
+                Backend::Google,
+                "google://jane@gmail.com",
+                None,
+                "",
+            ),
+            (
+                "contact local",
+                r#"{"baseUrl":"local://","login":"","secret":"pw"}"#,
+                Backend::Carddav,
+                "local://",
+                None,
+                "",
+            ),
+            (
+                "contact multiget, login absent as a null one was",
+                r#"{"baseUrl":"https://dav.example.org/","secret":"pw"}"#,
+                Backend::Carddav,
+                "https://dav.example.org/",
+                None,
+                "",
+            ),
+            (
+                "calendar caldav",
+                r#"{"address":"jane@example.org","baseUrl":"https://cal.example.org/","login":"jane","secret":"pw"}"#,
+                Backend::Carddav,
+                "https://cal.example.org/",
+                Some("jane"),
+                "jane@example.org",
+            ),
+            (
+                "calendar google",
+                r#"{"address":"jane@gmail.com","baseUrl":"google://jane@gmail.com","login":"","secret":"pw"}"#,
+                Backend::Google,
+                "google://jane@gmail.com",
+                None,
+                "jane@gmail.com",
+            ),
+            (
+                "mail imap, submitUrl unread",
+                r#"{"address":"jane@example.org","baseUrl":"imaps://imap.example.org:993","login":"jane","secret":"pw","submitUrl":"smtps://smtp.example.org"}"#,
+                Backend::Carddav,
+                "imaps://imap.example.org:993",
+                Some("jane"),
+                "jane@example.org",
+            ),
+            (
+                "mail jmap",
+                r#"{"baseUrl":"jmap://api.fastmail.com","login":"","secret":"pw"}"#,
+                Backend::Jmap,
+                "jmap://api.fastmail.com",
+                None,
+                "",
+            ),
+            (
+                "token-only graph, the token whatever the login",
+                r#"{"baseUrl":"msgraph://jane@outlook.com","login":"jane@outlook.com","secret":"pw"}"#,
+                Backend::Graph,
+                "msgraph://jane@outlook.com",
+                Some("jane@outlook.com"),
+                "",
+            ),
+            (
+                "token-only google",
+                r#"{"baseUrl":"google://jane@gmail.com","login":"","secret":"pw"}"#,
+                Backend::Google,
+                "google://jane@gmail.com",
+                None,
+                "",
+            ),
+        ];
+
+        for (family, raw, backend, base_url, login, address) in rows {
+            let decoded = parse_account(raw).unwrap();
+            assert_eq!(decoded.address, address, "{family}");
+            let account = decoded.account();
+            assert_eq!(account.backend, backend, "{family}");
+            assert_eq!(account.base_url, base_url, "{family}");
+            assert_eq!(account.auth.secret(), "pw", "{family}");
+            match (account.auth, login) {
+                (Auth::Basic { login, .. }, Some(expected)) => assert_eq!(login, expected),
+                (Auth::Bearer(_), None) => (),
+                _ => panic!("{family}: Basic and Bearer swapped"),
+            }
+        }
+    }
+
+    /// An unreadable account names where, never what: it holds a secret.
+    #[test]
+    fn an_unreadable_account_never_quotes_it() {
+        let err = parse_account(r#"{"secret": 12345}"#).err().unwrap();
+        assert_eq!(err, "Invalid account at line 1, column 16");
     }
 
     #[test]

@@ -5,7 +5,9 @@
  * <p>{@link Native} declares the JNI exports, package-private: each blocks,
  * drives a {@link Transport} for its sockets, and answers JSON, a value or an
  * {@code error} with the HTTP status the caller branches on
- * ({@link PimalayaException#status}).
+ * ({@link PimalayaException#status}). A network export takes the
+ * {@link Account} as one JSON argument and holds nothing across calls: a
+ * renewed token rides in on the next one.
  *
  * <p>The app holds the five domain clients ({@link Clients}):
  * {@link AccountClient}, {@link ContactClient}, {@link CalendarClient},

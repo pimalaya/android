@@ -10,6 +10,8 @@
 mod discovery;
 pub mod oauth;
 
+use secrecy::{ExposeSecret, SecretString};
+use serde::Deserialize;
 use url::Url;
 
 use crate::client::Auth;
@@ -106,13 +108,32 @@ pub struct Account<'a> {
     pub auth: Auth<'a>,
 }
 
-impl<'a> Account<'a> {
-    /// The account as Java hands it over, its backend told from the URL.
-    pub fn new(base_url: &'a str, login: &'a str, password: &'a str) -> Self {
-        Self {
-            base_url,
-            backend: Backend::of(base_url),
-            auth: Auth::new(login, password),
+/// One account as Java's `Account` writes it, the argument of every
+/// network export.
+///
+/// A missing key reads empty, as a null positional string did. The secret
+/// is never printed: the struct has no `Debug`.
+#[derive(Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AccountJson {
+    /// The account's own address, empty for none: Google and JMAP announce
+    /// a calendar write to attendees only for a meeting it organizes.
+    pub address: String,
+    /// The base URL, a context root or a backend sentinel.
+    pub base_url: String,
+    /// The login, empty when the secret is a Bearer token.
+    pub login: String,
+    /// The password, or the OAuth 2.0 access token.
+    pub secret: SecretString,
+}
+
+impl AccountJson {
+    /// The account an operation addresses, its backend told from the URL.
+    pub fn account(&self) -> Account<'_> {
+        Account {
+            base_url: &self.base_url,
+            backend: Backend::of(&self.base_url),
+            auth: Auth::new(&self.login, self.secret.expose_secret()),
         }
     }
 }

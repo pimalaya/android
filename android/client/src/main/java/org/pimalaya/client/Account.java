@@ -1,5 +1,8 @@
 package org.pimalaya.client;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 /**
  * A usable account endpoint: where one domain lives, plus the credentials.
  *
@@ -18,6 +21,14 @@ public final class Account {
     /** Where mail is submitted, or null when there is nowhere separate. */
     public final String submitUrl;
 
+    /**
+     * The account's own address, or null for none.
+     *
+     * <p>Google and JMAP announce a calendar write to attendees only for a
+     * meeting it organizes.
+     */
+    public final String address;
+
     /** An endpoint with no separate submission endpoint. */
     public Account(String baseUrl, String login, String password) {
         this(baseUrl, login, password, null);
@@ -25,9 +36,37 @@ public final class Account {
 
     /** An endpoint with its submission endpoint, null for none. */
     public Account(String baseUrl, String login, String password, String submitUrl) {
+        this(baseUrl, login, password, submitUrl, null);
+    }
+
+    /** An endpoint with its submission endpoint and the account's address. */
+    public Account(
+            String baseUrl, String login, String password, String submitUrl, String address) {
         this.baseUrl = baseUrl;
         this.login = login;
         this.password = password;
         this.submitUrl = submitUrl;
+        this.address = address;
+    }
+
+    /**
+     * The account as the bridge's network verbs take it (rs/account.rs
+     * {@code AccountJson}).
+     *
+     * <p>{@code {address?, baseUrl, login, secret, submitUrl?}}; a null
+     * component is an absent key, which the bridge reads empty.
+     */
+    JSONObject toJson() {
+        try {
+            JSONObject account = new JSONObject();
+            account.put("address", address);
+            account.put("baseUrl", baseUrl);
+            account.put("login", login);
+            account.put("secret", password);
+            account.put("submitUrl", submitUrl);
+            return account;
+        } catch (JSONException error) {
+            throw new PimalayaException("Unwritable account");
+        }
     }
 }

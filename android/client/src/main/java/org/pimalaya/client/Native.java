@@ -4,8 +4,9 @@ package org.pimalaya.client;
  * The libpimalaya.so boundary: blocking calls answering JSON or an error.
  *
  * <p>A reply is the documented shape or {@code {"error": ".."}}; a method
- * taking no {@link Transport} is pure. Base URLs are opaque, dispatched in
- * Rust; an empty ETag means no If-Match, an empty login a Bearer token.
+ * taking no {@link Transport} is pure. A network verb takes the account as
+ * {@link Account#toJson}, its base URL opaque, dispatched in Rust, an empty
+ * login meaning a Bearer token; an empty ETag means no If-Match.
  */
 final class Native {
     static {
@@ -184,12 +185,10 @@ final class Native {
      *
      * <p>Among mail, submission, contacts and calendars.
      */
-    static native String jmapCapabilities(
-            Transport transport, String baseUrl, String login, String password);
+    static native String jmapCapabilities(Transport transport, String account);
 
     /** Lists the account's addressbooks, absolute URLs, as a JSON array. */
-    static native String listAddressbooks(
-            Transport transport, String baseUrl, String login, String password);
+    static native String listAddressbooks(Transport transport, String account);
 
     /**
      * The canonical pimdir SQL, statements keyed by constant, a JSON object.
@@ -262,8 +261,7 @@ final class Native {
      * <p>The handle is a pointer: one owner ({@link MailSession}), one thread
      * at a time, freed once with {@link #closeMailSession}.
      */
-    static native String openMailSession(
-            Transport transport, String url, String login, String password);
+    static native String openMailSession(Transport transport, String account);
 
     /** Frees the session a handle names; the sockets are the caller's. */
     static native void closeMailSession(long session);
@@ -392,8 +390,7 @@ final class Native {
             Transport transport, long session, String mailbox, byte[] source, String flags);
 
     /** Lists the account's calendars with their URLs, a JSON array. */
-    static native String listCalendars(
-            Transport transport, String baseUrl, String login, String password);
+    static native String listCalendars(Transport transport, String account);
 
     /**
      * Enumerates a calendar from a cursor, as {@link EventDelta}.
@@ -403,12 +400,7 @@ final class Native {
      * the backend (a JMAP calendar URL is an id, not an address).
      */
     static native String syncEvents(
-            Transport transport,
-            String baseUrl,
-            String url,
-            String login,
-            String password,
-            String cursor);
+            Transport transport, String account, String url, String cursor);
 
     /**
      * The iCalendar text of the named events, in one round.
@@ -416,12 +408,7 @@ final class Native {
      * <p>{@code ids}: a JSON array. Returns {@code [{id, etag, ical}]}.
      */
     static native String multigetEvents(
-            Transport transport,
-            String baseUrl,
-            String url,
-            String login,
-            String password,
-            String ids);
+            Transport transport, String account, String url, String ids);
 
     /**
      * The occurrences one calendar object has in a civil window.
@@ -494,19 +481,16 @@ final class Native {
     /**
      * Pushes an edited object back to its calendar, guarded by any ETag.
      *
-     * <p>{@code address} is the account's (Google and JMAP announce a meeting
-     * it organizes). Returns the new ETag as a JSON string, or null.
+     * <p>The account's address makes Google and JMAP announce a meeting it
+     * organizes. Returns the new ETag as a JSON string, or null.
      */
     static native String updateEvent(
             Transport transport,
-            String baseUrl,
+            String account,
             String calendarUrl,
-            String login,
-            String password,
             String id,
             String ical,
-            String etag,
-            String address);
+            String etag);
 
     /**
      * The object a new entry starts from, with RFC 5545's required properties.
@@ -525,45 +509,33 @@ final class Native {
     /**
      * Files a new object in a calendar, guarded on its absence.
      *
-     * <p>{@code address} as {@link #updateEvent} takes it. Returns
-     * {@code {id, etag}}.
+     * <p>Announced as {@link #updateEvent} is. Returns {@code {id, etag}}.
      */
     static native String createEvent(
             Transport transport,
-            String baseUrl,
+            String account,
             String calendarUrl,
-            String login,
-            String password,
             String id,
-            String ical,
-            String address);
+            String ical);
 
     /**
      * Removes one object from its calendar, guarded by any ETag.
      *
-     * <p>{@code address} as {@link #updateEvent} takes it. Returns {@code {}}.
+     * <p>Announced as {@link #updateEvent} is. Returns {@code {}}.
      */
     static native String deleteEvent(
             Transport transport,
-            String baseUrl,
+            String account,
             String calendarUrl,
-            String login,
-            String password,
             String id,
-            String etag,
-            String address);
+            String etag);
 
     /**
      * Lists an addressbook's cards (CardDAV, Graph).
      *
      * <p>Returns an array of {@code {id, uri, etag, vcard}}.
      */
-    static native String listCards(
-            Transport transport,
-            String baseUrl,
-            String addressbookUrl,
-            String login,
-            String password);
+    static native String listCards(Transport transport, String account, String addressbookUrl);
 
     /**
      * Creates the card in the addressbook.
@@ -573,10 +545,8 @@ final class Native {
      */
     static native String createCard(
             Transport transport,
-            String baseUrl,
+            String account,
             String addressbookUrl,
-            String login,
-            String password,
             String id,
             String vcard);
 
@@ -586,12 +556,7 @@ final class Native {
      * <p>Returns {@code {id, uri, etag, vcard}}.
      */
     static native String readCard(
-            Transport transport,
-            String baseUrl,
-            String addressbookUrl,
-            String login,
-            String password,
-            String uri);
+            Transport transport, String account, String addressbookUrl, String uri);
 
     /**
      * Updates the card at a resource name, empty for the id.
@@ -601,10 +566,8 @@ final class Native {
      */
     static native String updateCard(
             Transport transport,
-            String baseUrl,
+            String account,
             String addressbookUrl,
-            String login,
-            String password,
             String id,
             String uri,
             String vcard,
@@ -618,10 +581,8 @@ final class Native {
      */
     static native String deleteCard(
             Transport transport,
-            String baseUrl,
+            String account,
             String addressbookUrl,
-            String login,
-            String password,
             String id,
             String uri,
             String etag);
@@ -631,12 +592,10 @@ final class Native {
      *
      * <p>Returns an array of {@code {id, uri, etag, vcard}} in input order.
      */
-    static native String createCards(
-            Transport transport, String baseUrl, String login, String password, String vcards);
+    static native String createCards(Transport transport, String account, String vcards);
 
     /** Deletes a batch of cards (a JSON array of ids); Google only. */
-    static native String deleteCards(
-            Transport transport, String baseUrl, String login, String password, String ids);
+    static native String deleteCards(Transport transport, String account, String ids);
 
     /**
      * Pushes a round of {@link PushChange}s as batch calls; JMAP, Graph only.
@@ -645,12 +604,7 @@ final class Native {
      * per change.
      */
     static native String pushCards(
-            Transport transport,
-            String baseUrl,
-            String addressbookUrl,
-            String login,
-            String password,
-            String changes);
+            Transport transport, String account, String addressbookUrl, String changes);
 
     /**
      * Lists a collection's changes since a cursor, as {@link CardDelta}.
@@ -660,12 +614,7 @@ final class Native {
      * vcard?, books?}}.
      */
     static native String syncCards(
-            Transport transport,
-            String baseUrl,
-            String addressbookUrl,
-            String login,
-            String password,
-            String syncToken);
+            Transport transport, String account, String addressbookUrl, String syncToken);
 
     /**
      * Multigets cards by resource name (a JSON array); CardDAV only.
@@ -673,11 +622,7 @@ final class Native {
      * <p>Returns an array of {@code {id, uri, etag, vcard}}.
      */
     static native String multigetCards(
-            Transport transport,
-            String addressbookUrl,
-            String login,
-            String password,
-            String uris);
+            Transport transport, String account, String addressbookUrl, String uris);
 
     /**
      * Reads Graph contacts by id (a JSON array), 20 to a {@code $batch}.
@@ -685,7 +630,7 @@ final class Native {
      * <p>An unserved request is resent alone, a gone contact left out.
      * Returns an array of {@code {id, uri, etag, vcard}}.
      */
-    static native String readGraphCards(Transport transport, String token, String ids);
+    static native String readGraphCards(Transport transport, String account, String ids);
 
     /**
      * Reads People contacts by id (a JSON array), 200 to a batchGet.
@@ -693,7 +638,7 @@ final class Native {
      * <p>A gone contact is left out. Returns an array of
      * {@code {id, uri, etag, vcard, books}}.
      */
-    static native String readGoogleCards(Transport transport, String token, String ids);
+    static native String readGoogleCards(Transport transport, String account, String ids);
 
     /**
      * Adds and removes book memberships (JSON id arrays), account-level only.
@@ -702,9 +647,7 @@ final class Native {
      */
     static native String updateCardBooks(
             Transport transport,
-            String baseUrl,
-            String login,
-            String password,
+            String account,
             String id,
             String add,
             String remove);

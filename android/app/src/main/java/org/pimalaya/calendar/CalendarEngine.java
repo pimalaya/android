@@ -48,14 +48,6 @@ public final class CalendarEngine extends PimdirEngine {
     /** What the account's collection ids are namespaced under. */
     private final String accountId;
 
-    /**
-     * The account's address, the owner the phone gives its calendars.
-     *
-     * <p>What a write tells a meeting the user organizes by. Null on a driver
-     * that only stages.
-     */
-    private final String address;
-
     /** The phone pass: the calendar's rows in CalendarContract. */
     private final CalendarPhonePass phone;
 
@@ -69,7 +61,6 @@ public final class CalendarEngine extends PimdirEngine {
         this.pimdir = pimdir;
         this.account = remote.account();
         this.accountId = remote.accountId();
-        this.address = remote.address();
         this.phone = new CalendarPhonePass(pimdir, clients);
     }
 
@@ -279,7 +270,7 @@ public final class CalendarEngine extends PimdirEngine {
                             clients.calendar().createEvent(
                                     transport,
                                     account,
-                                    new EventTarget(url, name, null, address),
+                                    new EventTarget(url, name, null),
                                     row.getString("vcard"));
                     return result(
                             handle, true, created.id(), landed(url, created.id(), created.etag()));
@@ -305,7 +296,7 @@ public final class CalendarEngine extends PimdirEngine {
                             clients.calendar().updateEvent(
                                     transport,
                                     account,
-                                    new EventTarget(url, handle, ifMatch, address),
+                                    new EventTarget(url, handle, ifMatch),
                                     row.getString("vcard"));
                     return result(handle, true, null, landed(url, handle, etag));
                 } catch (RuntimeException failure) {
@@ -329,7 +320,7 @@ public final class CalendarEngine extends PimdirEngine {
                 }
                 try {
                     clients.calendar().deleteEvent(
-                            transport, account, new EventTarget(url, handle, ifMatch, address));
+                            transport, account, new EventTarget(url, handle, ifMatch));
                 } catch (RuntimeException failure) {
                     if (isGone(failure)) {
                         // NOTE: already gone upstream: the removal converged.

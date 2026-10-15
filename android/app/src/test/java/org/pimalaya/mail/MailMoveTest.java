@@ -420,7 +420,7 @@ public class MailMoveTest {
         String calendar = PimdirAccount.collectionId(accountId, "https://dav.example.org/cal/");
         CalendarEngine engine =
                 new CalendarEngine(
-                        pimdir, Clients.real(), new RemoteAccount(null, null, accountId, null));
+                        pimdir, Clients.real(), new RemoteAccount(null, null, accountId));
         JSONObject change =
                 new JSONObject()
                         .put("op", "remove")

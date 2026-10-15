@@ -126,8 +126,7 @@ public class CalendarDavWriteTest {
                         new Clients(
                                 new AccountClient(), new ContactClient(), dav, new MailClient(),
                                 new OfflineClient()),
-                        new RemoteAccount(
-                                null, account, new PimdirAccount(context).idOf(EMAIL), null));
+                        new RemoteAccount(null, account, new PimdirAccount(context).idOf(EMAIL)));
     }
 
     private static String ical(String summary) {

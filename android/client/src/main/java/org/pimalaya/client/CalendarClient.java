@@ -17,9 +17,7 @@ public class CalendarClient {
     /** Lists the account's calendars: the CalDAV discovery walk. */
     public List<Calendar> listCalendars(Transport transport, Account account) {
         JSONArray reply =
-                Replies.array(
-                        Native.listCalendars(
-                                transport, account.baseUrl, account.login, account.password));
+                Replies.array(Native.listCalendars(transport, account.toJson().toString()));
 
         List<Calendar> calendars = new ArrayList<>(reply.length());
         for (int index = 0; index < reply.length(); index++) {
@@ -41,10 +39,8 @@ public class CalendarClient {
                 Replies.object(
                         Native.syncEvents(
                                 transport,
-                                account.baseUrl,
+                                account.toJson().toString(),
                                 calendarUrl,
-                                account.login,
-                                account.password,
                                 cursor == null ? "" : cursor)));
     }
 
@@ -58,10 +54,8 @@ public class CalendarClient {
                 Replies.array(
                         Native.multigetEvents(
                                 transport,
-                                account.baseUrl,
+                                account.toJson().toString(),
                                 calendarUrl,
-                                account.login,
-                                account.password,
                                 new JSONArray(ids).toString())));
     }
 
@@ -187,22 +181,19 @@ public class CalendarClient {
      * Pushes an edited object back, guarded by its ETag; returns the new ETag.
      *
      * <p>Guarded: an unguarded PUT silently overwrites another client's edit.
-     * The target's {@code address} makes Google and JMAP announce a meeting
-     * it organizes to the attendees.
+     * The account's {@link Account#address} makes Google and JMAP announce a
+     * meeting it organizes to the attendees.
      */
     public String updateEvent(
             Transport transport, Account account, EventTarget target, String ical) {
         String reply =
                 Native.updateEvent(
                         transport,
-                        account.baseUrl,
+                        account.toJson().toString(),
                         target.calendarUrl(),
-                        account.login,
-                        account.password,
                         target.id(),
                         ical,
-                        target.etag() == null ? "" : target.etag(),
-                        target.address() == null ? "" : target.address());
+                        target.etag() == null ? "" : target.etag());
 
         return Replies.etag(reply);
     }
@@ -238,7 +229,7 @@ public class CalendarClient {
      * Files a new object, guarded on its absence; returns where it landed.
      *
      * <p>The name asked for, or the one Graph gave it, with its ETag. The
-     * target's {@code address} is as {@link #updateEvent} takes it; its ETag
+     * account's address is as {@link #updateEvent} takes it; the target's ETag
      * is not read.
      */
     public EventRef createEvent(
@@ -247,13 +238,10 @@ public class CalendarClient {
                 Replies.object(
                         Native.createEvent(
                                 transport,
-                                account.baseUrl,
+                                account.toJson().toString(),
                                 target.calendarUrl(),
-                                account.login,
-                                account.password,
                                 target.id(),
-                                ical,
-                                target.address() == null ? "" : target.address()));
+                                ical));
         try {
             return new EventRef(
                     created.getString("id"),
@@ -272,13 +260,10 @@ public class CalendarClient {
         Replies.object(
                 Native.deleteEvent(
                         transport,
-                        account.baseUrl,
+                        account.toJson().toString(),
                         target.calendarUrl(),
-                        account.login,
-                        account.password,
                         target.id(),
-                        target.etag() == null ? "" : target.etag(),
-                        target.address() == null ? "" : target.address()));
+                        target.etag() == null ? "" : target.etag()));
     }
 
     /**

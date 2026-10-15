@@ -26,7 +26,7 @@ use serde_json::{from_str, to_string};
 use crate::{
     client::Client,
     error::BridgeError,
-    ffi::{ErrorReply, error_json, host::JniHost, read_string},
+    ffi::{ErrorReply, error_json, host::JniHost, parse_account, read_string},
     mail::{
         self,
         compose::{self, Draft},
@@ -50,23 +50,24 @@ pub extern "system" fn Java_org_pimalaya_client_Native_openMailSession<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
+    account: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let url = read_string(env, &url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
+        let account = read_string(env, &account);
 
-        let mut client = Client::new(JniHost::new(env, &transport, None));
-        let json = match MailSession::open(&mut client, &url, &login, &password) {
-            Ok(opened) => to_string(&OpenedReply {
-                expunges_one: opened.expunges_one(),
-                handle: into_handle(opened),
-            })
-            .unwrap_or_else(|err| error_json(err.to_string())),
+        let json = match parse_account(&account) {
             Err(err) => error_json(err),
+            Ok(account) => {
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                match MailSession::open(&mut client, account) {
+                    Ok(opened) => to_string(&OpenedReply {
+                        expunges_one: opened.expunges_one(),
+                        handle: into_handle(opened),
+                    })
+                    .unwrap_or_else(|err| error_json(err.to_string())),
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())

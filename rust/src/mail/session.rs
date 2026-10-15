@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::{
-    account::{self, Account, Backend},
+    account::{self, AccountJson, Backend},
     client::{Auth, Client, Host, jmap::Jmap, msgraph::Msgraph, parse_url},
     error::{BridgeError, REFUSED},
     mail::{
@@ -46,10 +46,9 @@ use crate::{
 
 /// One account's live mail connection, held across native calls.
 pub struct MailSession {
-    /// Where mail is read from, as the account stores it.
-    base_url: String,
-    login: String,
-    password: String,
+    /// Where mail is read from and the credential, as the account stores
+    /// them.
+    account: AccountJson,
     kind: MailKind,
     /// What the session's pool run read of a Gmail account, shared with the
     /// run's other sessions; its own until it joins one ([`Self::join_run`]).
@@ -113,22 +112,20 @@ impl MailListing {
 }
 
 impl MailSession {
-    /// Opens and authenticates a session for `base_url`.
+    /// Opens and authenticates a session for the account.
     pub fn open<H: Host>(
         client: &mut Client<H>,
-        base_url: &str,
-        login: &str,
-        password: &str,
+        account: AccountJson,
     ) -> Result<Self, BridgeError> {
-        let account = Account::new(base_url, login, password);
-        let kind = match account.backend {
+        let opened = account.account();
+        let kind = match opened.backend {
             Backend::Jmap => {
                 // NOTE: checked eagerly, so a session that cannot
                 // authenticate fails here rather than on its first verb.
                 Jmap {
                     client,
-                    session_url: account::jmap_session_url(base_url)?,
-                    auth: account.auth,
+                    session_url: account::jmap_session_url(opened.base_url)?,
+                    auth: opened.auth,
                 }
                 .check_session()?;
                 MailKind::Jmap(MailListing::default())
@@ -136,7 +133,7 @@ impl MailSession {
             Backend::Graph => {
                 Msgraph {
                     client,
-                    token: account.auth.secret(),
+                    token: opened.auth.secret(),
                 }
                 .check_mail()?;
                 MailKind::Graph(MailListing::default())
@@ -144,21 +141,19 @@ impl MailSession {
             Backend::Google => {
                 Gmail {
                     client,
-                    token: account.auth.secret(),
+                    token: opened.auth.secret(),
                 }
                 .history_id()?;
                 MailKind::Gmail(MailListing::default())
             }
             _ => {
-                let url = parse_url(base_url)?;
-                MailKind::Imap(Box::new(imap::open(client, &url, &account.auth)?))
+                let url = parse_url(opened.base_url)?;
+                MailKind::Imap(Box::new(imap::open(client, &url, &opened.auth)?))
             }
         };
 
         Ok(Self {
-            base_url: base_url.into(),
-            login: login.into(),
-            password: password.into(),
+            account,
             kind,
             gmail: Arc::default(),
             jmap: Arc::default(),
@@ -168,12 +163,12 @@ impl MailSession {
 
     /// The credential every verb signs in with, borrowed from the session.
     fn auth(&self) -> Auth<'_> {
-        Auth::new(&self.login, &self.password)
+        self.account.account().auth
     }
 
     /// The JMAP session resource this account is reached through.
     fn jmap_url(&self) -> Result<Url, BridgeError> {
-        Ok(account::jmap_session_url(&self.base_url)?)
+        Ok(account::jmap_session_url(&self.account.base_url)?)
     }
 
     /// Whether a delete for good erases one message alone: every HTTP
@@ -199,7 +194,7 @@ impl MailSession {
     /// or JMAP account with the run's other sessions; 0 gives the session
     /// an empty run of its own.
     pub fn join_run(&mut self, run: i64) {
-        let account = format!("{}\u{0}{}", self.base_url, self.login);
+        let account = format!("{}\u{0}{}", self.account.base_url, self.account.login);
         self.gmail = gmail_step::join(&account, run);
         self.jmap = jmap_step::join(&account, run);
         self.run = run;

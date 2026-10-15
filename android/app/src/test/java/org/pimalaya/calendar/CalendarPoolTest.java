@@ -192,7 +192,7 @@ public class CalendarPoolTest {
                             new OfflineClient()));
             inner =
                     new CalendarEngine(
-                            pimdir, clients, new RemoteAccount(transport, account, accountId, null));
+                            pimdir, clients, new RemoteAccount(transport, account, accountId));
         }
 
         void sync(String collection) {

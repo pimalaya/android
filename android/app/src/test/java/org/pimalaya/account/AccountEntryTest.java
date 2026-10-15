@@ -80,6 +80,8 @@ public class AccountEntryTest {
         for (PimDomain domain : PimDomain.values()) {
             assertEquals("rotated", refreshed.credential(domain).refreshToken());
             assertEquals("fresh", refreshed.server(domain).password);
+            // NOTE: what a calendar write announces a meeting by.
+            assertEquals("jane@example.org", refreshed.server(domain).address);
         }
         assertEquals("one credential, however many domains name it", 1,
                 refreshed.credentials().size());

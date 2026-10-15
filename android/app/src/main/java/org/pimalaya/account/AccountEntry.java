@@ -88,7 +88,7 @@ public final class AccountEntry {
     }
 
     /**
-     * The server one domain talks to, credential included.
+     * The server one domain talks to, credential and address included.
      *
      * <p>Null when the account does not cover the domain.
      */
@@ -99,7 +99,11 @@ public final class AccountEntry {
             return null;
         }
         return new Account(
-                connection.baseUrl, credential.login, credential.secret, connection.submitUrl);
+                connection.baseUrl,
+                credential.login,
+                credential.secret,
+                connection.submitUrl,
+                email);
     }
 
     /** The domains this account covers, in the enum's order. */

@@ -18,8 +18,8 @@ use serde::Serialize;
 use serde_json::{from_str, to_string};
 
 use crate::{
-    account::{self, Account},
-    client::{Auth, Client, jmap::Jmap, msgraph::Msgraph, webdav::Webdav},
+    account,
+    client::{Client, jmap::Jmap, msgraph::Msgraph, webdav::Webdav},
     contact::{
         CardBooksUpdate, CardCreate, CardDelete, CardDelta, CardUpdate, Contacts,
         dedup::find_duplicates,
@@ -32,8 +32,8 @@ use crate::{
     },
     error::BridgeError,
     ffi::{
-        ErrorReply, error_json, host::JniHost, parse_books, parse_ref_cards, parse_strings,
-        parse_url, read_string,
+        ErrorReply, error_json, host::JniHost, parse_account, parse_books, parse_ref_cards,
+        parse_strings, parse_url, read_string,
     },
 };
 
@@ -46,30 +46,31 @@ pub extern "system" fn Java_org_pimalaya_client_Native_jmapCapabilities<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
+    account: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
-        let account = Account::new(&base_url, &login, &password);
+        let account = read_string(env, &account);
 
-        let mut client = Client::new(JniHost::new(env, &transport, None));
-        let served = account::jmap_session_url(account.base_url)
-            .map_err(BridgeError::from)
-            .and_then(|session_url| {
-                Jmap {
-                    client: &mut client,
-                    session_url,
-                    auth: account.auth,
-                }
-                .capabilities()
-            });
-        let json = match served {
-            Ok(urns) => to_string(&urns).unwrap_or_else(|err| error_json(err.to_string())),
+        let json = match parse_account(&account) {
             Err(err) => error_json(err),
+            Ok(account) => {
+                let account = account.account();
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let served = account::jmap_session_url(account.base_url)
+                    .map_err(BridgeError::from)
+                    .and_then(|session_url| {
+                        Jmap {
+                            client: &mut client,
+                            session_url,
+                            auth: account.auth,
+                        }
+                        .capabilities()
+                    });
+                match served {
+                    Ok(urns) => to_string(&urns).unwrap_or_else(|err| error_json(err.to_string())),
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())
@@ -85,24 +86,27 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listAddressbooks<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
+    account: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
-        let account = Account::new(&base_url, &login, &password);
+        let account = read_string(env, &account);
 
-        let mut client = Client::new(JniHost::new(env, &transport, None));
-        let mut contacts = Contacts {
-            client: &mut client,
-            account: &account,
-        };
-        let json = match contacts.list_addressbooks() {
-            Ok(books) => to_string(&books).unwrap_or_else(|err| error_json(err.to_string())),
+        let json = match parse_account(&account) {
             Err(err) => error_json(err),
+            Ok(account) => {
+                let account = account.account();
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let mut contacts = Contacts {
+                    client: &mut client,
+                    account: &account,
+                };
+                match contacts.list_addressbooks() {
+                    Ok(books) => {
+                        to_string(&books).unwrap_or_else(|err| error_json(err.to_string()))
+                    }
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())
@@ -118,26 +122,29 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
+    account: JString<'local>,
     addressbook_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
+        let account = read_string(env, &account);
         let addressbook_url = read_string(env, &addressbook_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
-        let account = Account::new(&base_url, &login, &password);
 
-        let mut client = Client::new(JniHost::new(env, &transport, None));
-        let mut contacts = Contacts {
-            client: &mut client,
-            account: &account,
-        };
-        let json = match contacts.list_cards(&addressbook_url) {
-            Ok(cards) => to_string(&cards).unwrap_or_else(|err| error_json(err.to_string())),
+        let json = match parse_account(&account) {
             Err(err) => error_json(err),
+            Ok(account) => {
+                let account = account.account();
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let mut contacts = Contacts {
+                    client: &mut client,
+                    account: &account,
+                };
+                match contacts.list_cards(&addressbook_url) {
+                    Ok(cards) => {
+                        to_string(&cards).unwrap_or_else(|err| error_json(err.to_string()))
+                    }
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())
@@ -154,34 +161,35 @@ pub extern "system" fn Java_org_pimalaya_client_Native_createCard<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
+    account: JString<'local>,
     addressbook_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
     id: JString<'local>,
     vcard: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
+        let account = read_string(env, &account);
         let addressbook_url = read_string(env, &addressbook_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let id = read_string(env, &id);
         let vcard = read_string(env, &vcard);
-        let account = Account::new(&base_url, &login, &password);
-
         let card = CardCreate {
             id: &id,
             vcard: &vcard,
         };
-        let mut client = Client::new(JniHost::new(env, &transport, None));
-        let mut contacts = Contacts {
-            client: &mut client,
-            account: &account,
-        };
-        let json = match contacts.create_card(&addressbook_url, &card) {
-            Ok(card) => to_string(&card).unwrap_or_else(|err| error_json(err.to_string())),
+
+        let json = match parse_account(&account) {
             Err(err) => error_json(err),
+            Ok(account) => {
+                let account = account.account();
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let mut contacts = Contacts {
+                    client: &mut client,
+                    account: &account,
+                };
+                match contacts.create_card(&addressbook_url, &card) {
+                    Ok(card) => to_string(&card).unwrap_or_else(|err| error_json(err.to_string())),
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())
@@ -197,28 +205,29 @@ pub extern "system" fn Java_org_pimalaya_client_Native_readCard<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
+    account: JString<'local>,
     addressbook_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
     uri: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
+        let account = read_string(env, &account);
         let addressbook_url = read_string(env, &addressbook_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let uri = read_string(env, &uri);
-        let account = Account::new(&base_url, &login, &password);
 
-        let mut client = Client::new(JniHost::new(env, &transport, None));
-        let mut contacts = Contacts {
-            client: &mut client,
-            account: &account,
-        };
-        let json = match contacts.read_card(&addressbook_url, &uri) {
-            Ok(card) => to_string(&card).unwrap_or_else(|err| error_json(err.to_string())),
+        let json = match parse_account(&account) {
             Err(err) => error_json(err),
+            Ok(account) => {
+                let account = account.account();
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let mut contacts = Contacts {
+                    client: &mut client,
+                    account: &account,
+                };
+                match contacts.read_card(&addressbook_url, &uri) {
+                    Ok(card) => to_string(&card).unwrap_or_else(|err| error_json(err.to_string())),
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())
@@ -236,10 +245,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateCard<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
+    account: JString<'local>,
     addressbook_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
     id: JString<'local>,
     uri: JString<'local>,
     vcard: JString<'local>,
@@ -247,16 +254,13 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateCard<'local>(
     etag: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
+        let account = read_string(env, &account);
         let addressbook_url = read_string(env, &addressbook_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let id = read_string(env, &id);
         let uri = read_string(env, &uri);
         let vcard = read_string(env, &vcard);
         let base_vcard = read_string(env, &base_vcard);
         let etag = read_string(env, &etag);
-        let account = Account::new(&base_url, &login, &password);
         let card = CardUpdate {
             id: &id,
             uri: &uri,
@@ -265,14 +269,20 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateCard<'local>(
             etag: (!etag.is_empty()).then_some(etag.as_str()),
         };
 
-        let mut client = Client::new(JniHost::new(env, &transport, None));
-        let mut contacts = Contacts {
-            client: &mut client,
-            account: &account,
-        };
-        let json = match contacts.update_card(&addressbook_url, &card) {
-            Ok(card) => to_string(&card).unwrap_or_else(|err| error_json(err.to_string())),
+        let json = match parse_account(&account) {
             Err(err) => error_json(err),
+            Ok(account) => {
+                let account = account.account();
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let mut contacts = Contacts {
+                    client: &mut client,
+                    account: &account,
+                };
+                match contacts.update_card(&addressbook_url, &card) {
+                    Ok(card) => to_string(&card).unwrap_or_else(|err| error_json(err.to_string())),
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())
@@ -289,37 +299,38 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteCard<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
+    account: JString<'local>,
     addressbook_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
     id: JString<'local>,
     uri: JString<'local>,
     etag: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
+        let account = read_string(env, &account);
         let addressbook_url = read_string(env, &addressbook_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let id = read_string(env, &id);
         let uri = read_string(env, &uri);
         let etag = read_string(env, &etag);
-        let account = Account::new(&base_url, &login, &password);
         let card = CardDelete {
             id: &id,
             uri: &uri,
             etag: (!etag.is_empty()).then_some(etag.as_str()),
         };
 
-        let mut client = Client::new(JniHost::new(env, &transport, None));
-        let mut contacts = Contacts {
-            client: &mut client,
-            account: &account,
-        };
-        let json = match contacts.delete_card(&addressbook_url, &card) {
-            Ok(()) => "{}".to_string(),
+        let json = match parse_account(&account) {
             Err(err) => error_json(err),
+            Ok(account) => {
+                let account = account.account();
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let mut contacts = Contacts {
+                    client: &mut client,
+                    account: &account,
+                };
+                match contacts.delete_card(&addressbook_url, &card) {
+                    Ok(()) => "{}".to_string(),
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())
@@ -336,20 +347,17 @@ pub extern "system" fn Java_org_pimalaya_client_Native_createCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
+    account: JString<'local>,
     vcards: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
+        let account = read_string(env, &account);
         let vcards = read_string(env, &vcards);
-        let account = Account::new(&base_url, &login, &password);
 
-        let json = match parse_strings(&vcards) {
-            Ok(vcards) => {
+        let json = match (parse_account(&account), parse_strings(&vcards)) {
+            (Err(err), _) | (_, Err(err)) => error_json(err),
+            (Ok(account), Ok(vcards)) => {
+                let account = account.account();
                 let mut client = Client::new(JniHost::new(env, &transport, None));
                 let mut contacts = Contacts {
                     client: &mut client,
@@ -362,7 +370,6 @@ pub extern "system" fn Java_org_pimalaya_client_Native_createCards<'local>(
                     Err(err) => error_json(err),
                 }
             }
-            Err(err) => error_json(err),
         };
 
         Ok(env.new_string(json)?.into())
@@ -379,20 +386,17 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
+    account: JString<'local>,
     ids: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
+        let account = read_string(env, &account);
         let ids = read_string(env, &ids);
-        let account = Account::new(&base_url, &login, &password);
 
-        let json = match parse_strings(&ids) {
-            Ok(ids) => {
+        let json = match (parse_account(&account), parse_strings(&ids)) {
+            (Err(err), _) | (_, Err(err)) => error_json(err),
+            (Ok(account), Ok(ids)) => {
+                let account = account.account();
                 let mut client = Client::new(JniHost::new(env, &transport, None));
                 let mut contacts = Contacts {
                     client: &mut client,
@@ -403,7 +407,6 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteCards<'local>(
                     Err(err) => error_json(err),
                 }
             }
-            Err(err) => error_json(err),
         };
 
         Ok(env.new_string(json)?.into())
@@ -421,22 +424,21 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pushCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
+    account: JString<'local>,
     addressbook_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
     changes: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
+        let account = read_string(env, &account);
         let addressbook_url = read_string(env, &addressbook_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let changes = read_string(env, &changes);
-        let account = Account::new(&base_url, &login, &password);
+        let changes = from_str::<Vec<PushChange>>(&changes)
+            .map_err(|err| format!("Unreadable push changes: {err}"));
 
-        let json = match from_str::<Vec<PushChange>>(&changes) {
-            Ok(changes) => {
+        let json = match (parse_account(&account), changes) {
+            (Err(err), _) | (_, Err(err)) => error_json(err),
+            (Ok(account), Ok(changes)) => {
+                let account = account.account();
                 let mut client = Client::new(JniHost::new(env, &transport, None));
                 let mut contacts = Contacts {
                     client: &mut client,
@@ -449,7 +451,6 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pushCards<'local>(
                     Err(err) => error_json(err),
                 }
             }
-            Err(err) => error_json(format!("Unreadable push changes: {err}")),
         };
 
         Ok(env.new_string(json)?.into())
@@ -467,29 +468,30 @@ pub extern "system" fn Java_org_pimalaya_client_Native_syncCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
+    account: JString<'local>,
     addressbook_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
     sync_token: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
+        let account = read_string(env, &account);
         let addressbook_url = read_string(env, &addressbook_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let sync_token = read_string(env, &sync_token);
         let sync_token = (!sync_token.is_empty()).then_some(sync_token.as_str());
-        let account = Account::new(&base_url, &login, &password);
 
-        let mut client = Client::new(JniHost::new(env, &transport, None));
-        let mut contacts = Contacts {
-            client: &mut client,
-            account: &account,
-        };
-        let json = match contacts.sync_cards(&addressbook_url, sync_token) {
-            Ok(delta) => delta_json(delta),
+        let json = match parse_account(&account) {
             Err(err) => error_json(err),
+            Ok(account) => {
+                let account = account.account();
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let mut contacts = Contacts {
+                    client: &mut client,
+                    account: &account,
+                };
+                match contacts.sync_cards(&addressbook_url, sync_token) {
+                    Ok(delta) => delta_json(delta),
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())
@@ -499,33 +501,35 @@ pub extern "system" fn Java_org_pimalaya_client_Native_syncCards<'local>(
 
 /// `Native.multigetCards`: batch-fetches cards by resource name.
 ///
-/// Takes a JSON string array, fetched by REPORT `addressbook-multiget`.
-/// Returns a JSON array of `{id, uri, etag, vcard}` objects.
+/// Takes a JSON string array, fetched by REPORT `addressbook-multiget`
+/// against the addressbook URL with the account's credential (its base URL
+/// unread). Returns a JSON array of `{id, uri, etag, vcard}` objects.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_multigetCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
+    account: JString<'local>,
     addressbook_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
     uris: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let account = read_string(env, &account);
         let addressbook_url = read_string(env, &addressbook_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let uris = read_string(env, &uris);
-        let auth = Auth::new(&login, &password);
 
-        let json = match (parse_url(&addressbook_url), parse_strings(&uris)) {
-            (Err(err), _) | (_, Err(err)) => error_json(err),
-            (Ok(url), Ok(uris)) => {
+        let json = match (
+            parse_account(&account),
+            parse_url(&addressbook_url),
+            parse_strings(&uris),
+        ) {
+            (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => error_json(err),
+            (Ok(account), Ok(url), Ok(uris)) => {
                 let uris: Vec<&str> = uris.iter().map(String::as_str).collect();
                 let mut client = Client::new(JniHost::new(env, &transport, None));
                 let mut webdav = Webdav {
                     client: &mut client,
-                    auth,
+                    auth: account.account().auth,
                 };
                 match webdav.multiget_cards(&url, &uris) {
                     Ok(cards) => {
@@ -544,28 +548,29 @@ pub extern "system" fn Java_org_pimalaya_client_Native_multigetCards<'local>(
 /// `Native.readGraphCards`: reads Graph contacts by id, Graph only.
 ///
 /// Takes a JSON string array, 20 to a `$batch`, a request the batch could
-/// not serve sent alone, a contact Graph no longer holds left out. Returns a
+/// not serve sent alone, a contact Graph no longer holds left out; the
+/// account's secret is the token, its base URL and login unread. Returns a
 /// JSON array of `{id, uri, etag, vcard}` objects.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_readGraphCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    token: JString<'local>,
+    account: JString<'local>,
     ids: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let token = read_string(env, &token);
+        let account = read_string(env, &account);
         let ids = read_string(env, &ids);
 
-        let json = match parse_strings(&ids) {
-            Err(err) => error_json(err),
-            Ok(ids) => {
+        let json = match (parse_account(&account), parse_strings(&ids)) {
+            (Err(err), _) | (_, Err(err)) => error_json(err),
+            (Ok(account), Ok(ids)) => {
                 let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
                 let mut client = Client::new(JniHost::new(env, &transport, None));
                 let mut graph = Msgraph {
                     client: &mut client,
-                    token: &token,
+                    token: account.account().auth.secret(),
                 };
                 match graph.read_cards(&ids) {
                     Ok(cards) => {
@@ -584,27 +589,28 @@ pub extern "system" fn Java_org_pimalaya_client_Native_readGraphCards<'local>(
 /// `Native.readGoogleCards`: reads People contacts by id, Google only.
 ///
 /// Takes a JSON string array, 200 to a `people:batchGet`, a contact Google
-/// no longer holds left out. Returns `[{id, uri, etag, vcard, books}]`.
+/// no longer holds left out; the account's secret is the token, its base
+/// URL and login unread. Returns `[{id, uri, etag, vcard, books}]`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_readGoogleCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    token: JString<'local>,
+    account: JString<'local>,
     ids: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let token = read_string(env, &token);
+        let account = read_string(env, &account);
         let ids = read_string(env, &ids);
 
-        let json = match parse_strings(&ids) {
-            Err(err) => error_json(err),
-            Ok(ids) => {
+        let json = match (parse_account(&account), parse_strings(&ids)) {
+            (Err(err), _) | (_, Err(err)) => error_json(err),
+            (Ok(account), Ok(ids)) => {
                 let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
                 let mut client = Client::new(JniHost::new(env, &transport, None));
                 let mut people = Gpeople {
                     client: &mut client,
-                    token: &token,
+                    token: account.account().auth.secret(),
                 };
                 match people.read_cards(&ids) {
                     Ok(cards) => {
@@ -629,25 +635,25 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateCardBooks<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    base_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
+    account: JString<'local>,
     id: JString<'local>,
     add: JString<'local>,
     remove: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
+        let account = read_string(env, &account);
         let id = read_string(env, &id);
         let add = read_string(env, &add);
         let remove = read_string(env, &remove);
-        let account = Account::new(&base_url, &login, &password);
 
-        let json = match (parse_books(&add), parse_books(&remove)) {
-            (Err(err), _) | (_, Err(err)) => error_json(err),
-            (Ok(add), Ok(remove)) => {
+        let json = match (
+            parse_account(&account),
+            parse_books(&add),
+            parse_books(&remove),
+        ) {
+            (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => error_json(err),
+            (Ok(account), Ok(add), Ok(remove)) => {
+                let account = account.account();
                 let books = CardBooksUpdate {
                     id: &id,
                     add: &add,
