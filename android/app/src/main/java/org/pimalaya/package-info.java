@@ -10,9 +10,11 @@
  * {@code :client} module alone ({@link org.pimalaya.client.Clients}).
  *
  * <p>Java holds as little logic as possible, what threading, Android
- * components and platform providers need. Logic here that duplicates the
- * bridge (scheme classification, edit diffs, push batches, SQL beside the
- * canonical statements) is tracked for a later boundary change.
+ * components and platform providers need, and decides by the facts the
+ * bridge answers, never a backend's identity. Logic here that still
+ * duplicates it (setup planning, edit diffs, contact fetch and push
+ * strategy, mail naming, SQL beside the canonical statements) is tracked for
+ * later boundary changes.
  *
  * <h2>Layout</h2>
  *

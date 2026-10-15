@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: jni-boundary
-status: active
+status: landed
 created: 2026-10-15
 ---
 

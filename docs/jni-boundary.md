@@ -1,6 +1,6 @@
 # The JNI boundary: the untyped-wire problem
 
-> Historical: predates cairn changes rust-domain-layout (2026-10-13) and java-domain-layout, so its counts, file names (store.rs, project.rs, PimalayaClient) and the "no Rust-held sessions" claim are stale. Rust replies with typed serde shapes (rust/src/lib.rs) and the Java half landed as typed records behind five domain clients (android/app/src/main/java/org/pimalaya/package-info.java); the boundary itself (one account argument, fewer crossings) is the next change.
+> Historical: predates cairn changes rust-domain-layout (2026-10-13) and java-domain-layout, so its counts, file names (store.rs, project.rs, PimalayaClient) and the "no Rust-held sessions" claim are stale. Rust replies with typed serde shapes (rust/src/lib.rs) and the Java half landed as typed records behind five domain clients (android/app/src/main/java/org/pimalaya/package-info.java); the boundary itself landed as cairn change jni-boundary (2026-10-15): one account argument, backend facts instead of identity, the phone event view and mail pages typed, text replies uniform.
 
 The detailed problem analysis behind [jni-typing-plan.md](jni-typing-plan.md): what the JNI boundary is, why its current shape is a liability, and how the three-lever plan addresses it. Read this to understand the why; read the plan for the staged how.
 
