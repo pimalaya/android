@@ -8,8 +8,8 @@ change: jni-boundary
 Decisions taken 2026-10-15 (proposal.md). Gate per step: `nix develop --command gradle -p android :app:assembleDebug :app:testDebugUnitTest --rerun :client:testDebugUnitTest --rerun --console=plain`, `cargo test`, `cargo clippy --all-targets`; wire values captured before a step and compared after.
 
 - [x] Review: decisions D1, D2, D3, D5, D7
-- [ ] 1. Dead natives: cardProps, cardSetProp, cardSetPropParts, cardPropLabels, cardSource, discover, listAccountCards; rust/src/contact/props.rs
-- [ ] 2. `writes_overrides`, `writes_exdates`, `writes_events` and their EventView branches
+- [x] 1. Dead natives: cardProps, cardSetProp, cardSetPropParts, cardPropLabels, cardSource, discover, listAccountCards; rust/src/contact/props.rs. 7 natives and exports gone, props.rs (2 tests) and what they alone reached: Client::discover, Contacts::list_account_cards, Gpeople::list_cards (1 test), Jmap::list_cards
+- [x] 2. `writes_overrides`, `writes_exdates`, `writes_events` and their EventView branches. Gone from Backend, accountInfo, BackendInfo and AccountClient; EventView asks LocalBook.is (2 sites), scope() loses its always-true flag (both callers behind writes()); 1 JVM test gone
 - [ ] 3. One account argument: contact, calendar, mail session open, token-only reads (one sub-step each)
 - [ ] 4. Backend facts on Account; the 38 call sites; AccountClient's memo; spinners from `cardTypeOrder`
 - [ ] 5. `retainedAt` as millis; server description from Rust

@@ -63,15 +63,6 @@ impl<H: Host> Jmap<'_, H> {
             .collect())
     }
 
-    /// Lists the account's ContactCards across every AddressBook, paged
-    /// as [`JmapCalls::list_cards`] says.
-    pub fn list_cards(&mut self) -> Result<Vec<Card>, BridgeError> {
-        let mut calls = self.calls()?;
-        let limit = page_size(&calls.session);
-
-        Ok(calls.list_cards(limit)?.0)
-    }
-
     /// Creates the vCard as a ContactCard in the AddressBook `book_id`,
     /// under the id the server assigns.
     pub fn create_card(&mut self, book_id: &str, vcard: &str) -> Result<Card, BridgeError> {

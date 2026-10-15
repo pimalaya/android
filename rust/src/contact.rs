@@ -5,7 +5,7 @@
 //!
 //! [`carddav`], [`msgraph`], [`jmap`] and [`gpeople`] add the contact verbs
 //! to their backend. The rest works on vCard text alone: the field model
-//! ([`fields`], [`form`], [`props`]), merges and duplicates ([`merge`],
+//! ([`fields`], [`form`]), merges and duplicates ([`merge`],
 //! [`dedup`], [`group`]), and the sync policy ([`push`], [`sync`]).
 
 pub mod carddav;
@@ -17,7 +17,6 @@ pub mod group;
 pub mod jmap;
 pub mod merge;
 mod msgraph;
-pub mod props;
 pub mod push;
 pub mod sync;
 
@@ -215,37 +214,9 @@ impl<H: Host> Contacts<'_, H> {
         }
     }
 
-    /// Lists every card of an account-level backend (JMAP, Google) in
-    /// one pass, each carrying its addressbook memberships as book ids.
-    pub fn list_account_cards(&mut self) -> Result<Vec<Card>, BridgeError> {
-        let account = self.account;
-
-        match account.backend {
-            Backend::Jmap => {
-                let session_url = account::jmap_session_url(account.base_url)?;
-                Jmap {
-                    client: self.client,
-                    session_url,
-                    auth: account.auth,
-                }
-                .list_cards()
-            }
-            Backend::Google => Gpeople {
-                client: self.client,
-                token: account.auth.secret(),
-            }
-            .list_cards(),
-            backend => Err(format!(
-                "Cards of a {} account are listed per collection",
-                backend.name(),
-            )
-            .into()),
-        }
-    }
-
     /// Lists the cards of the addressbook collection at
     /// `addressbook_url` (CardDAV, Graph); the account-level backends
-    /// list once per account through [`Self::list_account_cards`].
+    /// (JMAP, Google) read through their sync round instead.
     pub fn list_cards(&mut self, addressbook_url: &str) -> Result<Vec<Card>, BridgeError> {
         let account = self.account;
 

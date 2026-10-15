@@ -269,26 +269,6 @@ public class AccountClient {
     }
 
     /**
-     * True when a calendar write behind the URL carries occurrence overrides.
-     *
-     * <p>CalDAV's in the object, Graph's and Google's through the instance,
-     * JMAP's in {@code recurrenceOverrides}.
-     */
-    public static boolean writesOverrides(String url) {
-        return info(url).writesOverrides();
-    }
-
-    /** True when a calendar write behind the URL carries an {@code EXDATE}. */
-    public static boolean writesExdates(String url) {
-        return info(url).writesExdates();
-    }
-
-    /** True when the calendar behind the URL takes writes: all but local. */
-    public static boolean writesEvents(String url) {
-        return info(url).writesEvents();
-    }
-
-    /**
      * True when mail submits over the session it reads from.
      *
      * <p>JMAP, Graph and Gmail need no submit endpoint of their own.

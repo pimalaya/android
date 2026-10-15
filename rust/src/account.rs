@@ -77,36 +77,6 @@ impl Backend {
         matches!(self, Self::Jmap | Self::Google)
     }
 
-    /// True when a calendar write carries overrides (RFC 5545 3.8.4.4).
-    ///
-    /// CalDAV puts the whole object, Graph and Google write the instance
-    /// after the series, JMAP carries it in `recurrenceOverrides`.
-    pub fn writes_overrides(self) -> bool {
-        matches!(
-            self,
-            Self::Carddav | Self::Graph | Self::Jmap | Self::Google
-        )
-    }
-
-    /// True when a calendar write carries an `EXDATE` to the server.
-    ///
-    /// Where the object is not whole, the occurrence is deleted through its
-    /// instance, or excluded in `recurrenceOverrides` on JMAP.
-    pub fn writes_exdates(self) -> bool {
-        matches!(
-            self,
-            Self::Carddav | Self::Graph | Self::Jmap | Self::Google
-        )
-    }
-
-    /// True when a calendar of this backend takes event writes (all do).
-    pub fn writes_events(self) -> bool {
-        matches!(
-            self,
-            Self::Carddav | Self::Graph | Self::Jmap | Self::Google
-        )
-    }
-
     /// True when mail submits through the session it reads from.
     ///
     /// RFC 8621 section 7, Graph `sendMail`, Gmail `messages.send`; an IMAP

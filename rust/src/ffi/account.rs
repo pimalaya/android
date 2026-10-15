@@ -30,35 +30,6 @@ use crate::{
     ffi::{ErrorReply, error_json, host::JniHost, parse_url, read_string},
 };
 
-/// `Native.discover`: resolves the email's CardDAV context root (RFC 6764).
-///
-/// `resolver` is `tcp://host:port` or an RFC 8484 `https://…/dns-query`
-/// URL, empty for a public DNS-over-HTTPS one. Returns `{"url": ".."}`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_discover<'local>(
-    mut env: EnvUnowned<'local>,
-    _class: JClass<'local>,
-    transport: JObject<'local>,
-    email: JString<'local>,
-    resolver: JString<'local>,
-) -> JObject<'local> {
-    env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let email = read_string(env, &email);
-        let resolver = read_string(env, &resolver);
-        let resolver = (!resolver.is_empty()).then_some(resolver.as_str());
-
-        let json = match Client::new(JniHost::new(env, &transport, None)).discover(&email, resolver)
-        {
-            Ok(url) => to_string(&UrlReply { url: url.as_str() })
-                .unwrap_or_else(|err| error_json(err.to_string())),
-            Err(err) => error_json(err),
-        };
-
-        Ok(env.new_string(json)?.into())
-    })
-    .resolve::<ErrorReply>()
-}
-
 /// `Native.searchProvider`: the configs the fixed provider rules give.
 ///
 /// Matched against the email's MX records. Returns a JSON array of service
@@ -620,9 +591,9 @@ fn client_information_json(client: &Oauth20ClientInformation) -> String {
 
 /// `Native.accountInfo`: the backend behind an account base URL; pure.
 ///
-/// `{"backend", "accountLevel", "writesOverrides", "writesExdates",
-/// "writesEvents", "submitsOverSession"}`, the flags those of [`Backend`];
-/// `backend` is `carddav`, `graph`, `jmap`, `google` or `local` (on-device).
+/// `{"backend", "accountLevel", "submitsOverSession"}`, the flags those of
+/// [`Backend`]; `backend` is `carddav`, `graph`, `jmap`, `google` or `local`
+/// (on-device).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_accountInfo<'local>(
     mut env: EnvUnowned<'local>,
@@ -640,9 +611,6 @@ pub extern "system" fn Java_org_pimalaya_client_Native_accountInfo<'local>(
                 account_level: false,
                 backend: "local",
                 submits_over_session: false,
-                writes_events: false,
-                writes_exdates: false,
-                writes_overrides: false,
             }
         } else {
             let backend = Backend::of(&base_url);
@@ -650,9 +618,6 @@ pub extern "system" fn Java_org_pimalaya_client_Native_accountInfo<'local>(
                 account_level: backend.account_level(),
                 backend: backend.name(),
                 submits_over_session: backend.submits_over_session(),
-                writes_events: backend.writes_events(),
-                writes_exdates: backend.writes_exdates(),
-                writes_overrides: backend.writes_overrides(),
             }
         };
         let json = to_string(&info).unwrap_or_else(|err| error_json(err.to_string()));
@@ -728,7 +693,4 @@ struct AccountInfoReply {
     account_level: bool,
     backend: &'static str,
     submits_over_session: bool,
-    writes_events: bool,
-    writes_exdates: bool,
-    writes_overrides: bool,
 }

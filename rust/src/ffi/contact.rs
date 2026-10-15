@@ -28,9 +28,6 @@ use crate::{
         gpeople::Gpeople,
         group::{DuplicateMember, duplicate_group, group_contacts},
         merge::{merge_cards, merge_conflict, merge_conflict_form, set_uid},
-        props::{
-            CardProp, card_prop_labels, card_props, card_set_prop, card_set_prop_parts, card_source,
-        },
         push::PushChange,
     },
     error::BridgeError,
@@ -105,40 +102,6 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listAddressbooks<'local>(
         };
         let json = match contacts.list_addressbooks() {
             Ok(books) => to_string(&books).unwrap_or_else(|err| error_json(err.to_string())),
-            Err(err) => error_json(err),
-        };
-
-        Ok(env.new_string(json)?.into())
-    })
-    .resolve::<ErrorReply>()
-}
-
-/// `Native.listAccountCards`: every card of an account-level backend.
-///
-/// JMAP or Google, in one pass, each card carrying its memberships as book
-/// ids. Returns a JSON array of `{id, uri, etag, vcard, books}` objects.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_listAccountCards<'local>(
-    mut env: EnvUnowned<'local>,
-    _class: JClass<'local>,
-    transport: JObject<'local>,
-    base_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
-) -> JObject<'local> {
-    env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let base_url = read_string(env, &base_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
-        let account = Account::new(&base_url, &login, &password);
-
-        let mut client = Client::new(JniHost::new(env, &transport, None));
-        let mut contacts = Contacts {
-            client: &mut client,
-            account: &account,
-        };
-        let json = match contacts.list_account_cards() {
-            Ok(cards) => to_string(&cards).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 
@@ -724,20 +687,6 @@ struct VcardReply {
     vcard: String,
 }
 
-/// The `{"props"}` reply of `Native.cardProps`.
-#[derive(Serialize)]
-struct PropsReply {
-    /// The card's raw property lines.
-    props: Vec<CardProp>,
-}
-
-/// The `{"labels"}` reply of `Native.cardPropLabels`.
-#[derive(Serialize)]
-struct LabelsReply {
-    /// The component labels.
-    labels: Vec<&'static str>,
-}
-
 /// The `{"order"}` reply of `Native.cardTypeOrder`.
 #[derive(Serialize)]
 struct TypeOrderReply {
@@ -906,103 +855,6 @@ pub extern "system" fn Java_org_pimalaya_client_Native_findDuplicates<'local>(
     .resolve::<ErrorReply>()
 }
 
-/// `Native.cardProps`: the card's raw property lines, for the advanced editor.
-///
-/// Returns `{"props": ["VERSION:4.0", ...]}`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_cardProps<'local>(
-    mut env: EnvUnowned<'local>,
-    _class: JClass<'local>,
-    vcard: JString<'local>,
-) -> JObject<'local> {
-    env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let vcard = read_string(env, &vcard);
-
-        let json = match card_props(&vcard) {
-            Ok(props) => reply_json(&PropsReply { props }),
-            Err(err) => error_json(err),
-        };
-
-        Ok(env.new_string(json)?.into())
-    })
-    .resolve::<ErrorReply>()
-}
-
-/// `Native.cardSetProp`: rewrites one raw property line.
-///
-/// For the advanced editor; a blank line removes, index -1 appends. Returns
-/// `{"vcard": ".."}`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_cardSetProp<'local>(
-    mut env: EnvUnowned<'local>,
-    _class: JClass<'local>,
-    vcard: JString<'local>,
-    index: jint,
-    line: JString<'local>,
-) -> JObject<'local> {
-    env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let vcard = read_string(env, &vcard);
-        let line = read_string(env, &line);
-
-        let json = match card_set_prop(&vcard, index as i64, &line) {
-            Ok(vcard) => reply_json(&VcardReply { vcard }),
-            Err(err) => error_json(err),
-        };
-
-        Ok(env.new_string(json)?.into())
-    })
-    .resolve::<ErrorReply>()
-}
-
-/// `Native.cardSetPropParts`: rewrites one property from its parts.
-///
-/// Takes `{"name", "params": [{"name", "values"}], "value"}`; index -1
-/// appends. Returns `{"vcard": ".."}`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_cardSetPropParts<'local>(
-    mut env: EnvUnowned<'local>,
-    _class: JClass<'local>,
-    vcard: JString<'local>,
-    index: jint,
-    prop: JString<'local>,
-) -> JObject<'local> {
-    env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let vcard = read_string(env, &vcard);
-        let prop = read_string(env, &prop);
-
-        let json = match from_str(&prop) {
-            Err(err) => error_json(format!("Invalid property: {err}")),
-            Ok(prop) => match card_set_prop_parts(&vcard, index as i64, &prop) {
-                Ok(vcard) => reply_json(&VcardReply { vcard }),
-                Err(err) => error_json(err),
-            },
-        };
-
-        Ok(env.new_string(json)?.into())
-    })
-    .resolve::<ErrorReply>()
-}
-
-/// `Native.cardPropLabels`: the component labels of a structured property.
-///
-/// N, ADR, GENDER, empty for plain values: the advanced editor's value form.
-/// Returns `{"labels": [...]}`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_cardPropLabels<'local>(
-    mut env: EnvUnowned<'local>,
-    _class: JClass<'local>,
-    name: JString<'local>,
-) -> JObject<'local> {
-    env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let name = read_string(env, &name);
-        let json = reply_json(&LabelsReply {
-            labels: card_prop_labels(&name),
-        });
-        Ok(env.new_string(json)?.into())
-    })
-    .resolve::<ErrorReply>()
-}
-
 /// `Native.cardTypeOrder`: the type-set vocabulary of the form's spinners.
 ///
 /// For `phone`, `email`, `address`, `relation` or `gender`, each position's
@@ -1019,28 +871,6 @@ pub extern "system" fn Java_org_pimalaya_client_Native_cardTypeOrder<'local>(
         let json = reply_json(&TypeOrderReply {
             order: card_type_order(&kind),
         });
-        Ok(env.new_string(json)?.into())
-    })
-    .resolve::<ErrorReply>()
-}
-
-/// `Native.cardSource`: validates a hand-edited vCard source.
-///
-/// It must reparse; it comes back re-serialized. Returns `{"vcard": ".."}`.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_cardSource<'local>(
-    mut env: EnvUnowned<'local>,
-    _class: JClass<'local>,
-    vcard: JString<'local>,
-) -> JObject<'local> {
-    env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let vcard = read_string(env, &vcard);
-
-        let json = match card_source(&vcard) {
-            Ok(vcard) => reply_json(&VcardReply { vcard }),
-            Err(err) => error_json(err),
-        };
-
         Ok(env.new_string(json)?.into())
     })
     .resolve::<ErrorReply>()

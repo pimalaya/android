@@ -28,14 +28,4 @@ public class AccountTraitsTest {
         assertFalse(AccountClient.submitsOverSession(imap));
         assertFalse(AccountClient.submitsOverSession(null));
     }
-
-    @Test
-    public void aJmapCalendarTakesEventWritesAndOccurrences() {
-        String jmap = "jmap://api.fastmail.com/jmap/session/u1/c1";
-        assertTrue(AccountClient.writesEvents(jmap));
-        assertTrue(AccountClient.writesOverrides(jmap));
-        assertTrue(AccountClient.writesExdates(jmap));
-        assertTrue(AccountClient.writesEvents("https://dav.example.com/calendars/jane/home/"));
-        assertTrue(AccountClient.writesEvents("msgraph://jane@outlook.com/c1"));
-    }
 }

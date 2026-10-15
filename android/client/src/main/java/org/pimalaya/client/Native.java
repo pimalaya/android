@@ -18,40 +18,33 @@ final class Native {
     private Native() {}
 
     /**
-     * RFC 6764 discovery: email to CardDAV context root, {@code {"url": ".."}}.
-     *
-     * <p>The resolver is a {@code tcp://host:port} or RFC 8484 URL; empty or
-     * null is a public DNS-over-HTTPS one, which mobile networks blocking
-     * DNS over TCP still reach.
-     */
-    static native String discover(Transport transport, String email, String resolver);
-
-    /**
      * Fixed provider rules: the configs of the provider the MX names.
      *
      * <p>Google or Microsoft, custom domains included. Returns a JSON array,
-     * empty when no rule matched. Resolver as in {@link #discover}.
+     * empty when no rule matched. The resolver is a {@code tcp://host:port}
+     * or RFC 8484 URL; empty or null is a public DNS-over-HTTPS one, which
+     * mobile networks blocking DNS over TCP still reach.
      */
     static native String searchProvider(Transport transport, String email, String resolver);
 
     /**
      * PACC discovery: the domain's PACC document as configs, a JSON array.
      *
-     * <p>Resolver as in {@link #discover}.
+     * <p>Resolver as in {@link #searchProvider}.
      */
     static native String searchPacc(Transport transport, String email, String resolver);
 
     /**
      * RFC 6764 resolve: the domain's CardDAV root as configs, a JSON array.
      *
-     * <p>Resolver as in {@link #discover}.
+     * <p>Resolver as in {@link #searchProvider}.
      */
     static native String searchCarddav(Transport transport, String email, String resolver);
 
     /**
      * RFC 6764 resolve: the domain's CalDAV root as configs, a JSON array.
      *
-     * <p>Resolver as in {@link #discover}.
+     * <p>Resolver as in {@link #searchProvider}.
      */
     static native String searchCaldav(Transport transport, String email, String resolver);
 
@@ -59,14 +52,14 @@ final class Native {
      * Mozilla autoconfig: the domain's IMAP and SMTP configs, a JSON array.
      *
      * <p>From the ISP URLs, the ISPDB or the mailconf TXT redirect. Resolver
-     * as in {@link #discover}.
+     * as in {@link #searchProvider}.
      */
     static native String searchAutoconfig(Transport transport, String email, String resolver);
 
     /**
      * RFC 8620 resolve: the domain's JMAP session URL as configs, a JSON array.
      *
-     * <p>Resolver as in {@link #discover}.
+     * <p>Resolver as in {@link #searchProvider}.
      */
     static native String searchJmap(Transport transport, String email, String resolver);
 
@@ -173,8 +166,8 @@ final class Native {
     /**
      * The backend behind an account base URL and its traits.
      *
-     * <p>Returns {@code {backend, accountLevel, writesOverrides,
-     * writesExdates, writesEvents, submitsOverSession}}, the rest booleans.
+     * <p>Returns {@code {backend, accountLevel, submitsOverSession}}, the
+     * rest booleans.
      */
     static native String accountInfo(String baseUrl);
 
@@ -561,14 +554,6 @@ final class Native {
             String address);
 
     /**
-     * Lists every card of an account-level backend (JMAP, Google) at once.
-     *
-     * <p>Returns an array of {@code {id, uri, etag, vcard, books}}.
-     */
-    static native String listAccountCards(
-            Transport transport, String baseUrl, String login, String password);
-
-    /**
      * Lists an addressbook's cards (CardDAV, Graph).
      *
      * <p>Returns an array of {@code {id, uri, etag, vcard}}.
@@ -817,49 +802,12 @@ final class Native {
     static native String findDuplicates(String cards);
 
     /**
-     * Lists the card's raw property lines; no caller left.
-     *
-     * <p>Returns {@code {"props": ["VERSION:4.0", ...]}}.
-     */
-    static native String cardProps(String vcard);
-
-    /**
-     * Rewrites one raw property line; no caller left.
-     *
-     * <p>A blank line removes, index -1 appends. Returns {@code {vcard}}.
-     */
-    static native String cardSetProp(String vcard, int index, String line);
-
-    /**
-     * Rewrites one property from its parts; no caller left.
-     *
-     * <p>{@code {name, params: [{name, values}], value}}, index -1 appending.
-     * Returns {@code {"vcard": ".."}}.
-     */
-    static native String cardSetPropParts(String vcard, int index, String prop);
-
-    /**
-     * The component labels of a structured property; no caller left.
-     *
-     * <p>N, ADR, GENDER; empty for plain values. Returns
-     * {@code {"labels": [...]}}.
-     */
-    static native String cardPropLabels(String name);
-
-    /**
      * The ordered TYPE sets the edit form's spinners address for a kind.
      *
      * <p>The order the Android string-arrays mirror. Returns
      * {@code {"order": [[..], ..]}}.
      */
     static native String cardTypeOrder(String kind);
-
-    /**
-     * Reparses a hand-edited vCard, re-serialized; no caller left.
-     *
-     * <p>Returns {@code {"vcard": ".."}}.
-     */
-    static native String cardSource(String vcard);
 
     /** Projects a vCard onto the neutral {@link ContactFields} model. */
     static native String projectCard(String vcard);

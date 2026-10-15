@@ -114,30 +114,6 @@ impl<H: Host> Gpeople<'_, H> {
         Ok(books)
     }
 
-    /// Lists the account's contacts as vCards, [`PEOPLE_PAGE_SIZE`] to a
-    /// page.
-    pub fn list_cards(&mut self) -> Result<Vec<Card>, BridgeError> {
-        let mut cards = Vec::new();
-        let mut page_token: Option<String> = None;
-
-        loop {
-            let params = GpeopleConnectionsListParams {
-                page_size: Some(PEOPLE_PAGE_SIZE),
-                page_token: page_token.as_deref(),
-                ..Default::default()
-            };
-            let page = self
-                .connections(GPEOPLE_PERSON_VCARD_FIELDS, &params)?
-                .map_err(|err| coroutine_error(&err))?;
-            cards.extend(page.connections.into_iter().map(google_card));
-
-            match page.next_page_token {
-                Some(next) => page_token = Some(next),
-                None => return Ok(cards),
-            }
-        }
-    }
-
     /// Lists the contact changes since `cursor`, bodies whole, all without one.
     ///
     /// [`None`] when Google expired the cursor or it is of another shape
@@ -955,25 +931,6 @@ mod tests {
             panic!("the round went through");
         };
         assert_eq!(err.status, Some(400));
-    }
-
-    #[test]
-    fn a_listing_reads_a_thousand_a_page() {
-        let people = account(1_200);
-        let mut client = Client::new(FakeServer::new(|request| people.answer(request)));
-
-        let cards = Gpeople {
-            client: &mut client,
-            token: "token",
-        }
-        .list_cards()
-        .unwrap();
-
-        assert_eq!(cards.len(), 1_200);
-        assert_eq!(
-            pages(&client.host.requests),
-            [(Some(1_000), None), (Some(1_000), None)]
-        );
     }
 
     #[test]

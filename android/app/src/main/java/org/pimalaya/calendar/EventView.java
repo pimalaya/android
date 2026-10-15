@@ -18,9 +18,9 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import org.pimalaya.R;
+import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
-import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.DateEdit;
 import org.pimalaya.client.EventConflictKind;
@@ -333,16 +333,17 @@ public final class EventView {
      */
     public void composeNew() {
         Map<String, EventStore.StoredCalendar> byId = new HashMap<>();
-        boolean readOnlyBackend = false;
+        boolean local = false;
         for (EventStore.StoredCalendar calendar : parts.events().loadCalendars()) {
             byId.put(calendar.id, calendar);
-            readOnlyBackend |= !AccountClient.writesEvents(calendar.url);
+            local |= LocalBook.is(calendar.url);
         }
         List<PimdirCollections.Stored> collections =
                 new PimdirCollections(parts.pimdir(), host).list(PimdirSummary.CALENDAR);
-        // NOTE: a backend taking no event write lists as read only, and the
-        // line for no calendar at all would leave its owner guessing why.
-        if (readOnlyBackend && DefaultCollection.writable(collections).isEmpty()) {
+        // NOTE: a local calendar takes no event write and lists as read only,
+        // and the line for no calendar at all would leave its owner guessing
+        // why.
+        if (local && DefaultCollection.writable(collections).isEmpty()) {
             host.toast(host.getString(R.string.event_read_only));
             return;
         }
@@ -572,9 +573,9 @@ public final class EventView {
         return readable() && writes();
     }
 
-    /** Whether the calendar's backend takes event writes at all. */
+    /** Whether the calendar takes event writes: every remote one does. */
     private boolean writes() {
-        return AccountClient.writesEvents(calendar.url);
+        return !LocalBook.is(calendar.url);
     }
 
     /** The component on the page, an event when nothing was read. */
@@ -1493,10 +1494,7 @@ public final class EventView {
             save(EventScope.ALL);
             return;
         }
-        scope(
-                R.string.event_scope_save,
-                AccountClient.writesOverrides(calendar.url),
-                this::save);
+        scope(R.string.event_scope_save, this::save);
     }
 
     /** Whether the page edited anything beyond the stamp every save carries. */
@@ -1507,26 +1505,19 @@ public final class EventView {
     /**
      * Asks which occurrences of the series a change is for.
      *
-     * <p>This occurrence alone is offered only where the calendar's push
-     * carries it, as every calendar backend's does: offering it where one did
-     * not would stage a change the server never sees.
+     * <p>This occurrence alone is always offered: every remote calendar's push
+     * carries it, as an override or an {@code EXDATE}.
      */
-    private void scope(int title, boolean one, Consumer<EventScope> then) {
-        List<EventScope> scopes = new ArrayList<>();
-        List<String> labels = new ArrayList<>();
-        int[] names = {
-            R.string.event_scope_this, R.string.event_scope_following, R.string.event_scope_all,
+    private void scope(int title, Consumer<EventScope> then) {
+        String[] labels = {
+            host.getString(R.string.event_scope_this),
+            host.getString(R.string.event_scope_following),
+            host.getString(R.string.event_scope_all),
         };
-        for (int index = one ? 0 : 1; index < SCOPES.length; index++) {
-            scopes.add(SCOPES[index]);
-            labels.add(host.getString(names[index]));
-        }
 
         new AlertDialog.Builder(host)
                 .setTitle(title)
-                .setItems(
-                        labels.toArray(new String[0]),
-                        (dialog, which) -> then.accept(scopes.get(which)))
+                .setItems(labels, (dialog, which) -> then.accept(SCOPES[which]))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
@@ -1620,7 +1611,6 @@ public final class EventView {
         if (!creating && series()) {
             scope(
                     R.string.event_scope_delete,
-                    AccountClient.writesExdates(calendar.url),
                     scope -> {
                         if (scope == EventScope.ALL && merge != null) {
                             confirmWhole();

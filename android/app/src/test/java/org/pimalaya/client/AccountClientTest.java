@@ -104,23 +104,23 @@ public class AccountClientTest {
         Map<String, BackendInfo> expected = new LinkedHashMap<>();
         expected.put(
                 AccountClient.googleBase("jane@gmail.com"),
-                new BackendInfo(true, Backend.GOOGLE, true, true, true, true));
+                new BackendInfo(true, Backend.GOOGLE, true));
         expected.put(
                 AccountClient.msgraphBase("jane@outlook.com"),
-                new BackendInfo(false, Backend.GRAPH, true, true, true, true));
+                new BackendInfo(false, Backend.GRAPH, true));
         expected.put(
                 AccountClient.jmapBase("https://api.fastmail.com/jmap/session"),
-                new BackendInfo(true, Backend.JMAP, true, true, true, true));
+                new BackendInfo(true, Backend.JMAP, true));
         expected.put(
                 "https://dav.example.org/",
-                new BackendInfo(false, Backend.CARDDAV, false, true, true, true));
+                new BackendInfo(false, Backend.CARDDAV, false));
         expected.put(
                 "imaps://imap.example.org:993",
-                new BackendInfo(false, Backend.CARDDAV, false, true, true, true));
-        expected.put("", new BackendInfo(false, Backend.CARDDAV, false, true, true, true));
+                new BackendInfo(false, Backend.CARDDAV, false));
+        expected.put("", new BackendInfo(false, Backend.CARDDAV, false));
         expected.put(
                 "local://on-this-device",
-                new BackendInfo(false, Backend.LOCAL, false, false, false, false));
+                new BackendInfo(false, Backend.LOCAL, false));
 
         for (Map.Entry<String, BackendInfo> entry : expected.entrySet()) {
             assertEquals(entry.getKey(), entry.getValue(), AccountClient.info(entry.getKey()));
@@ -147,10 +147,6 @@ public class AccountClientTest {
         assertEquals(false, AccountClient.isJmap(graph));
         assertEquals(true, AccountClient.submitsOverSession(graph));
         assertEquals(false, AccountClient.submitsOverSession(new Account("imaps://imap.example.org:993", "", "")));
-        assertEquals(false, AccountClient.writesEvents("local://on-this-device"));
-        assertEquals(false, AccountClient.writesExdates("local://on-this-device"));
-        assertEquals(false, AccountClient.writesOverrides("local://on-this-device"));
-        assertEquals(true, AccountClient.writesOverrides("https://dav.example.org/"));
     }
 
     @Test

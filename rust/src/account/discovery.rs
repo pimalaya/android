@@ -14,9 +14,7 @@ use io_pim_discovery::{
     },
     coroutine::{DiscoveryCoroutine, DiscoveryCoroutineState, DiscoveryYield},
     pacc::discover::DiscoveryPacc,
-    rfc6764::{
-        resolve::DiscoveryDavResolve, service::DiscoveryDavService, well_known::DiscoveryWellKnown,
-    },
+    rfc6764::{resolve::DiscoveryDavResolve, service::DiscoveryDavService},
     rfc8620::resolve::DiscoveryJmapResolve,
     rfc9110::DiscoveryProbeAuth,
 };
@@ -39,44 +37,6 @@ const DNS_RESOLVER: &str = "https://cloudflare-dns.com/dns-query";
 
 /// Discovery operations: RFC 6764 discovery, provider and protocol search.
 impl<H: Host> Client<H> {
-    /// Resolves the email's domain to a CardDAV context root (RFC 6764).
-    ///
-    /// SRV and TXT over the resolver (`tcp://host:port` or DoH, the
-    /// default), then `.well-known`; an unreachable resolver retries with
-    /// `.well-known` alone, whose socket resolves the domain through the OS.
-    pub fn discover(&mut self, email: &str, resolver: Option<&str>) -> Result<Url, BridgeError> {
-        let domain = email.rsplit('@').next().unwrap_or(email).trim();
-
-        if domain.is_empty() {
-            return Err("Email address is missing a domain".into());
-        }
-
-        let resolver = resolver.unwrap_or(DNS_RESOLVER);
-        let resolver = Url::parse(resolver)
-            .map_err(|err| format!("Invalid DNS resolver URL `{resolver}`: {err}"))?;
-
-        // NOTE: secure only, or a plain SRV record hands the credential an
-        // http origin.
-        let coroutine = DiscoveryDavResolve::new(domain, DiscoveryDavService::Carddav, resolver)
-            .with_secure_only(true);
-        let srv_err = match self.run_discovery(coroutine) {
-            Ok(url) => return Ok(url),
-            Err(err) => err,
-        };
-
-        let origin = format!("https://{domain}/");
-        let origin =
-            Url::parse(&origin).map_err(|err| format!("Invalid origin URL `{origin}`: {err}"))?;
-
-        let coroutine = DiscoveryWellKnown::new(origin.clone(), DiscoveryDavService::Carddav);
-        match self.run_discovery(coroutine) {
-            // NOTE: RFC 6764 §5: no redirect means the origin itself is
-            // the context root.
-            Ok(redirect) => Ok(redirect.unwrap_or(origin)),
-            Err(err) => Err(format!("{err} (SRV/TXT lookup failed first: {srv_err})").into()),
-        }
-    }
-
     /// Matches the domain's MX records against the fixed provider rules.
     ///
     /// Catches every domain whose mail lives at Google or Microsoft, their
