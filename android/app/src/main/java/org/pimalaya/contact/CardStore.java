@@ -192,62 +192,6 @@ public class CardStore extends SQLiteOpenHelper {
     }
 
     /**
-     * Links group keys into one cluster, their rows becoming one contact.
-     *
-     * <p>NOTE: unwired (linking goes through a shared UID); kept with
-     * {@link #unlinkGroup} for docs/merged-view.md's match suggestions, whose
-     * cluster computation then belongs in the bridge.
-     */
-    public void linkGroups(List<String> groupKeys) {
-        if (groupKeys.size() < 2) {
-            return;
-        }
-
-        SQLiteDatabase db = getWritableDatabase();
-        db.beginTransaction();
-        try {
-            String cluster = groupKeys.get(0);
-            for (String key : groupKeys) {
-                ContentValues rebind = new ContentValues();
-                rebind.put("cluster", cluster);
-                db.update("link", rebind, "cluster = ?", new String[] {key});
-
-                ContentValues values = new ContentValues();
-                values.put("member", key);
-                values.put("cluster", cluster);
-                db.insertWithOnConflict("link", null, values, SQLiteDatabase.CONFLICT_REPLACE);
-            }
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
-        }
-    }
-
-    /** Splits a merged contact: drops its links and detaches every replica. */
-    public void unlinkGroup(String clusterKey, List<String> members, List<String> replicaRefs) {
-        SQLiteDatabase db = getWritableDatabase();
-        db.beginTransaction();
-        try {
-            db.delete("link", "cluster = ? OR member = ?", new String[] {clusterKey, clusterKey});
-            for (String member : members) {
-                db.delete("link", "member = ?", new String[] {member});
-            }
-
-            for (String ref : replicaRefs) {
-                int newline = ref.indexOf('\n');
-                ContentValues values = new ContentValues();
-                values.put("account_email", ref.substring(0, newline));
-                values.put("card_key", ref.substring(newline + 1));
-                db.insertWithOnConflict(
-                        "detached", null, values, SQLiteDatabase.CONFLICT_IGNORE);
-            }
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
-        }
-    }
-
-    /**
      * Replaces one account's books' switches; new ones subscribed, remote on.
      *
      * <p>{@link PimdirCollections} writes the books. A book matches by URL,

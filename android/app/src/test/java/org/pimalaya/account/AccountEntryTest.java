@@ -124,51 +124,6 @@ public class AccountEntryTest {
     }
 
     @Test
-    public void disconnectingLeavesTheAccountAndItsOtherDomains() {
-        AccountEntry account =
-                AccountEntry.of(
-                                "jane@example.org",
-                                PimDomain.CONTACTS,
-                                "https://dav.example.org/",
-                                password("secret"))
-                        .with(
-                                PimDomain.MAIL,
-                                "imaps://mail.example.org:993",
-                                password("secret"));
-
-        AccountEntry remaining = account.without(PimDomain.MAIL);
-
-        assertEquals("jane@example.org", remaining.email);
-        assertTrue(remaining.covers(PimDomain.CONTACTS));
-        assertFalse(remaining.covers(PimDomain.MAIL));
-    }
-
-    @Test
-    public void disconnectingDropsACredentialNothingElseSignsInWith() {
-        AccountCredential shared = oauth("one-consent");
-        AccountEntry account =
-                AccountEntry.of(
-                                "jane@example.org",
-                                PimDomain.MAIL,
-                                "jmap://api.example.org/",
-                                shared)
-                        .with(PimDomain.CALENDAR, "jmap://api.example.org/", shared)
-                        .with(
-                                PimDomain.CONTACTS,
-                                "https://people.example.org/",
-                                oauth("contacts-consent"));
-
-        // NOTE: a shared credential stays while another domain names it.
-        AccountEntry withoutContacts = account.without(PimDomain.CONTACTS);
-        assertEquals(1, withoutContacts.credentials().size());
-
-        AccountEntry withoutMail = withoutContacts.without(PimDomain.MAIL);
-        assertEquals("the calendar still signs in with it", 1, withoutMail.credentials().size());
-
-        assertEquals(0, withoutMail.without(PimDomain.CALENDAR).credentials().size());
-    }
-
-    @Test
     public void aGoogleGrantAddedLaterTakesOverTheDomainsItCovers() {
         AccountEntry account =
                 AccountEntry.of(

@@ -29,6 +29,7 @@ import org.pimalaya.client.MessageRef;
 import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.SyncReport;
+import org.pimalaya.pimdir.ItemFixtures;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
@@ -55,6 +56,7 @@ public class MailMoveTest {
 
     private Context context;
     private PimdirDb pimdir;
+    private ItemFixtures fixtures;
     private MailStore store;
     private String accountId;
     private String inbox;
@@ -128,6 +130,7 @@ public class MailMoveTest {
     public void setUp() throws Exception {
         context = RuntimeEnvironment.getApplication();
         pimdir = new PimdirDb(context);
+        fixtures = new ItemFixtures(pimdir);
         store = new MailStore(context, pimdir);
         store.replaceMailboxes(
                 EMAIL,
@@ -210,7 +213,7 @@ public class MailMoveTest {
                 scalar("SELECT subject FROM mail_summary WHERE collection = ? AND link_id = '42'",
                         trash));
 
-        List<MailStore.StoredMessage> rows = store.loadMerged(10);
+        List<MailStore.StoredMessage> rows = MailFixtures.merged(store, 10);
         assertEquals(1, rows.size());
         assertEquals("Trash", rows.get(0).mailbox);
     }
@@ -246,12 +249,12 @@ public class MailMoveTest {
         assertEquals(List.of("relocate INBOX 42 Trash"), server.calls);
         assertNull("the target's create is withdrawn, the arrival brings it",
                 scalar("SELECT link_id FROM items WHERE collection = ?", trash));
-        assertTrue(store.loadMerged(10).isEmpty());
+        assertTrue(MailFixtures.merged(store, 10).isEmpty());
     }
 
     @Test
     public void aMoveTargetWaitsForItsSource() throws Exception {
-        store.saveSource(inbox, "42", "Subject: Hello\r\n\r\nbody\r\n".getBytes(StandardCharsets.UTF_8));
+        fixtures.putObject(inbox, "42", "Subject: Hello\r\n\r\nbody\r\n".getBytes(StandardCharsets.UTF_8));
         stager().mutateMove(inbox, "42", trash);
 
         Server server = new Server();
@@ -277,7 +280,7 @@ public class MailMoveTest {
 
     /** The first listed row of one mailbox, null when it lists none. */
     private MailStore.StoredMessage rowIn(String mailbox) {
-        for (MailStore.StoredMessage row : store.loadMerged(10)) {
+        for (MailStore.StoredMessage row : MailFixtures.merged(store, 10)) {
             if (row.mailbox.equals(mailbox)) {
                 return row;
             }
@@ -345,20 +348,6 @@ public class MailMoveTest {
     }
 
     @Test
-    public void aCopyIsPushedServerSide() throws Exception {
-        stager().mutateCopy(inbox, "42", trash);
-
-        Server server = new Server();
-        SyncReport report = sync(server, trash);
-
-        assertEquals(String.valueOf(report), List.of("copy INBOX 42 Trash"), server.calls);
-        assertNull("accepted with no handle, the arrival brings it",
-                scalar("SELECT link_id FROM items WHERE collection = ?", trash));
-        assertEquals("the source stays", "0",
-                scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '42'", inbox));
-    }
-
-    @Test
     public void aDeleteOfAMessageGoneIsAcceptedAndThePageStillLands() throws Exception {
         file(trash, named("7", "Old"));
         stager().mutateRemove(trash, "7");
@@ -389,17 +378,6 @@ public class MailMoveTest {
         assertTrue("accepted: " + report, report.pushed() == 1);
         assertNull("nothing moves into the target",
                 scalar("SELECT link_id FROM items WHERE collection = ?", trash));
-    }
-
-    @Test
-    public void aCopyOfAMessageGoneIsRefused() throws Exception {
-        stager().mutateCopy(inbox, "42", trash);
-
-        Server server = new Server();
-        server.gone.add("42");
-        SyncReport report = sync(server, trash);
-
-        assertTrue("rejected: " + report, report.rejected() == 1);
     }
 
     @Test

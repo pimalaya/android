@@ -132,7 +132,7 @@ public class PendingGrantTest {
 
     private OauthFlow startedGoogleGrant(MainActivity host) {
         OauthFlow flow = flow(host);
-        flow.startGoogleOauth("user@gmail.com", "https://mail.google.com/", "imaps://imap.gmail.com");
+        flow.startGoogleOauth("user@gmail.com", "https://mail.google.com/");
         return flow;
     }
 
@@ -242,7 +242,7 @@ public class PendingGrantTest {
         flow.onBusy = () -> busy[0] = true;
 
         flow.launchSchemeGrant(
-                new OauthFlow.Target("user@example.org", "https://api.example.org/", null),
+                new OauthFlow.Target("user@example.org", null),
                 new OauthFlow.AuthServer(
                         "https://auth.example.org/authorize",
                         "https://auth.example.org/token"),
@@ -268,37 +268,35 @@ public class PendingGrantTest {
 
     @Test
     public void aStartedGrantPersistsWhatThePreviousReleaseDid() throws Exception {
-        // NOTE: captured on the previous release, which an install may have
-        // left mid-grant: the next one has to read it back.
+        // NOTE: captured on the previous release, less the baseUrl it wrote
+        // and never read, which an install may have left mid-grant: the next
+        // one has to read it back.
         MainActivity host = Robolectric.buildActivity(MainActivity.class).get();
         OauthFlow flow = startedGoogleGrant(host);
         assertEquals(
-                "{\"clientId\":\"991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1.apps.googleusercontent.com\",\"clientSecret\":\"\",\"redirectUri\":\"com.googleusercontent.apps.991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1:\\/oauth2redirect\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/oauth2.googleapis.com\\/token\",\"baseUrl\":\"imaps:\\/\\/imap.gmail.com\",\"email\":\"user@gmail.com\",\"issuer\":\"\",\"savedAt\":SAVED}",
+                "{\"clientId\":\"991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1.apps.googleusercontent.com\",\"clientSecret\":\"\",\"redirectUri\":\"com.googleusercontent.apps.991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1:\\/oauth2redirect\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/oauth2.googleapis.com\\/token\",\"email\":\"user@gmail.com\",\"issuer\":\"\",\"savedAt\":SAVED}",
                 persisted());
 
         flow.launchSchemeGrant(
-                new OauthFlow.Target(
-                        "user@example.org",
-                        "https://api.example.org/",
-                        "https://api.example.org/jmap/session"),
+                new OauthFlow.Target("user@example.org", "https://api.example.org/jmap/session"),
                 new OauthFlow.AuthServer(
                         "https://auth.example.org/authorize",
                         "https://auth.example.org/token"),
                 new OauthRequest("client", "sec", Oauth.REDIRECT_URI, "mail offline_access"),
                 "https://auth.example.org");
         assertEquals(
-                "{\"clientId\":\"client\",\"clientSecret\":\"sec\",\"redirectUri\":\"org.pimalaya:\\/oauth2redirect\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/auth.example.org\\/token\",\"baseUrl\":\"https:\\/\\/api.example.org\\/\",\"email\":\"user@example.org\",\"issuer\":\"https:\\/\\/auth.example.org\",\"savedAt\":SAVED}",
+                "{\"clientId\":\"client\",\"clientSecret\":\"sec\",\"redirectUri\":\"org.pimalaya:\\/oauth2redirect\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/auth.example.org\\/token\",\"email\":\"user@example.org\",\"issuer\":\"https:\\/\\/auth.example.org\",\"savedAt\":SAVED}",
                 persisted());
 
         flow.launchSchemeGrant(
-                new OauthFlow.Target("example.org", "https://api.example.org/", null),
+                new OauthFlow.Target("example.org", null),
                 new OauthFlow.AuthServer(
                         "https://auth.example.org/authorize",
                         "https://auth.example.org/token"),
                 new OauthRequest("client", null, Oauth.REDIRECT_URI, "mail"),
                 null);
         assertEquals(
-                "{\"clientId\":\"client\",\"clientSecret\":\"\",\"redirectUri\":\"org.pimalaya:\\/oauth2redirect\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/auth.example.org\\/token\",\"baseUrl\":\"https:\\/\\/api.example.org\\/\",\"email\":\"example.org\",\"issuer\":\"\",\"savedAt\":SAVED}",
+                "{\"clientId\":\"client\",\"clientSecret\":\"\",\"redirectUri\":\"org.pimalaya:\\/oauth2redirect\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/auth.example.org\\/token\",\"email\":\"example.org\",\"issuer\":\"\",\"savedAt\":SAVED}",
                 persisted());
         host.io.shutdownNow();
     }

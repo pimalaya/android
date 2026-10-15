@@ -210,16 +210,6 @@ public abstract class Stager implements OfflineDriver {
         staged(target);
     }
 
-    /**
-     * Stages a copy into {@code target}, the placement kept.
-     *
-     * <p>A pending create there, pushed as a server-side copy.
-     */
-    public void mutateCopy(String collection, String handle, String target) throws JSONException {
-        mutate(collection, Mutation.copy(handle, target));
-        staged(target);
-    }
-
     /** Stages a content edit; editing a conflicted placement resolves it. */
     public void mutateEdit(String collection, String handle, String body, JSONObject summary,
             String sortKey) throws JSONException {

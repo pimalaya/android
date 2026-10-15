@@ -417,14 +417,14 @@ public class MailPoolTest {
         List<MailStore.Edge> edges =
                 List.of(
                         new MailStore.Edge(EMAIL, "Projets", "Projets", "", true,
-                                "2026-09-20T00:00:00Z"),
+                                "2026-09-20T00:00:00Z", false),
                         new MailStore.Edge(EMAIL, "Sent", "Sent", "sent", true,
-                                "2026-09-05T00:00:00Z"),
+                                "2026-09-05T00:00:00Z", false),
                         new MailStore.Edge(EMAIL, "INBOX", "INBOX", "inbox", true,
-                                "2026-09-08T00:00:00Z"),
+                                "2026-09-08T00:00:00Z", false),
                         new MailStore.Edge("joe@example.org", "INBOX", "joe-INBOX", "inbox",
-                                true, "2026-09-08T00:00:00Z"),
-                        new MailStore.Edge(EMAIL, "Archive", "Archive", "", false, null));
+                                true, "2026-09-08T00:00:00Z", false),
+                        new MailStore.Edge(EMAIL, "Archive", "Archive", "", false, null, false));
 
         List<MailStore.Edge> batch = MailFill.batch(edges, email -> email.equals(EMAIL) ? 3 : 1);
         List<String> taken = new ArrayList<>();

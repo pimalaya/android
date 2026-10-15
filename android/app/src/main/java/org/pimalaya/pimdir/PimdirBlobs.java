@@ -123,11 +123,6 @@ public final class PimdirBlobs {
         }
     }
 
-    /** Files text, the shape every current kind stores. */
-    void putText(String hash, String body) throws IOException {
-        put(hash, body.getBytes(StandardCharsets.UTF_8));
-    }
-
     /** Reads a body back, or null when it is not stored. */
     byte[] get(String hash) throws IOException {
         File source = pathOf(hash);

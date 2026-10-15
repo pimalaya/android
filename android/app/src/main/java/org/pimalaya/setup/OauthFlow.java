@@ -39,10 +39,9 @@ public final class OauthFlow {
      * The account one grant is for.
      *
      * @param email the address signing in, the login hint
-     * @param baseUrl the server the account is kept at
      * @param resource the RFC 8707 resource asked for, null or empty for none
      */
-    record Target(String email, String baseUrl, String resource) {}
+    record Target(String email, String resource) {}
 
     /** The two endpoints of the authorization server one grant runs against. */
     record AuthServer(String authEndpoint, String tokenEndpoint) {}
@@ -76,7 +75,6 @@ public final class OauthFlow {
     private OauthSession pendingOauth;
 
     private String pendingTokenEndpoint;
-    private String pendingBaseUrl;
     private String pendingAccountEmail;
     private String pendingClientId;
     private String pendingClientSecret;
@@ -118,13 +116,12 @@ public final class OauthFlow {
      * <p>Mail, calendars, CardDAV or the People API; the redirect comes back on
      * the reversed-client-id scheme.
      */
-    void startGoogleOauth(String email, String scope, String baseUrl) {
+    void startGoogleOauth(String email, String scope) {
         pendingOauth =
                 OauthSession.start(
                         new OauthRequest(
                                 Oauth.GOOGLE_CLIENT_ID, null, Oauth.GOOGLE_REDIRECT_URI, scope));
         pendingTokenEndpoint = Oauth.GOOGLE_TOKEN_ENDPOINT;
-        pendingBaseUrl = baseUrl;
         pendingAccountEmail = email;
         pendingClientId = Oauth.GOOGLE_CLIENT_ID;
         pendingClientSecret = null;
@@ -159,13 +156,12 @@ public final class OauthFlow {
      * one API, Outlook's for mail or Graph's for contacts and calendars: Entra
      * issues a token for one.
      */
-    void startMicrosoftOauth(String email, String scope, String baseUrl) {
+    void startMicrosoftOauth(String email, String scope) {
         pendingOauth =
                 OauthSession.start(
                         new OauthRequest(
                                 Oauth.MICROSOFT_CLIENT_ID, null, Oauth.MICROSOFT_REDIRECT_URI, scope));
         pendingTokenEndpoint = Oauth.MICROSOFT_TOKEN_ENDPOINT;
-        pendingBaseUrl = baseUrl;
         pendingAccountEmail = email;
         pendingClientId = Oauth.MICROSOFT_CLIENT_ID;
         pendingClientSecret = null;
@@ -522,7 +518,6 @@ public final class OauthFlow {
     void launchSchemeGrant(
             Target target, AuthServer authServer, OauthRequest request, String issuer) {
         String email = target.email();
-        String baseUrl = target.baseUrl();
         String resource = target.resource();
         String authEndpoint = authServer.authEndpoint();
         String tokenEndpoint = authServer.tokenEndpoint();
@@ -532,7 +527,6 @@ public final class OauthFlow {
         pendingOauth = OauthSession.start(request);
         pendingIssuer = issuer;
         pendingTokenEndpoint = tokenEndpoint;
-        pendingBaseUrl = baseUrl;
         pendingAccountEmail = email;
         pendingClientId = clientId;
         pendingClientSecret = clientSecret;
@@ -699,7 +693,6 @@ public final class OauthFlow {
                         .put("state", pendingOauth.state())
                         .put("verifier", pendingOauth.pkceVerifier())
                         .put("tokenEndpoint", pendingTokenEndpoint)
-                        .put("baseUrl", pendingBaseUrl)
                         .put("email", pendingAccountEmail)
                         .put("issuer", pendingIssuer == null ? "" : pendingIssuer)
                         .put(PendingGrantStore.SAVED_AT, pendingSince));
@@ -723,7 +716,6 @@ public final class OauthFlow {
                         grant.optString("state"),
                         grant.optString("verifier"));
         pendingTokenEndpoint = grant.optString("tokenEndpoint");
-        pendingBaseUrl = grant.optString("baseUrl");
         pendingAccountEmail = grant.optString("email");
         pendingClientId = grant.optString("clientId");
         pendingClientSecret = secret.isEmpty() ? null : secret;

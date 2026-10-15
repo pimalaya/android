@@ -51,7 +51,7 @@ public class MutationTest {
     }
 
     @Test
-    public void flagsRemoveMoveAndCopy() throws Exception {
+    public void flagsRemoveAndMove() throws Exception {
         stager.mutateFlags("c", "h1", new Flags(List.of("\\Seen", "$junk")));
         assertSameJson(
                 "{\"op\":\"setFlags\",\"handle\":\"h1\",\"flags\":[\"\\\\Seen\",\"$junk\"]}",
@@ -62,9 +62,7 @@ public class MutationTest {
         assertSameJson("{\"op\":\"remove\",\"handle\":\"h3\"}", last());
         stager.mutateMove("c", "h4", "t");
         assertSameJson("{\"op\":\"move\",\"handle\":\"h4\",\"target\":\"t\"}", last());
-        stager.mutateCopy("c", "h5", "t");
-        assertSameJson("{\"op\":\"copy\",\"handle\":\"h5\",\"target\":\"t\"}", last());
-        assertEquals(5, client.sent.size());
+        assertEquals(4, client.sent.size());
     }
 
     @Test

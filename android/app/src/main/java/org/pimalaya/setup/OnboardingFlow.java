@@ -1953,13 +1953,11 @@ public final class OnboardingFlow {
             if (existing != null) {
                 scope = Oauth.union(existing.grantedScope(Oauth.GOOGLE_CLIENT_ID), scope);
             }
-            oauth.startGoogleOauth(
-                    pendingEmail, Oauth.fixedScope(shipped, scope), option.baseUrl);
+            oauth.startGoogleOauth(pendingEmail, Oauth.fixedScope(shipped, scope));
             return;
         }
         if (shipped == Oauth.Shipped.MICROSOFT) {
-            oauth.startMicrosoftOauth(
-                    pendingEmail, Oauth.fixedScope(shipped, scope), option.baseUrl);
+            oauth.startMicrosoftOauth(pendingEmail, Oauth.fixedScope(shipped, scope));
             return;
         }
         if (option.method.type() == AuthMethod.Type.OAUTH_ISSUER) {
@@ -1968,14 +1966,14 @@ public final class OnboardingFlow {
             // authorization server asked to issue a token for either answers
             // invalid_target: neither is a URI it protects.
             oauth.startIssuerOauth(
-                    new OauthFlow.Target(pendingEmail, option.baseUrl, option.resource),
+                    new OauthFlow.Target(pendingEmail, option.resource),
                     option.method.issuer(),
                     grantedDomains(),
                     new OauthFlow.Prompt(heading, own));
             return;
         }
         oauth.promptOauthClient(
-                new OauthFlow.Target(pendingEmail, option.baseUrl, option.resource),
+                new OauthFlow.Target(pendingEmail, option.resource),
                 new OauthFlow.AuthServer(
                         option.method.authorizationEndpoint(), option.method.tokenEndpoint()),
                 scope,

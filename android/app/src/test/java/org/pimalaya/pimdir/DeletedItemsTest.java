@@ -47,6 +47,7 @@ public class DeletedItemsTest {
 
     private Context context;
     private PimdirDb pimdir;
+    private ItemFixtures fixtures;
     private PimdirContacts contacts;
     private DeletedItems deleted;
     private SQLiteDatabase db;
@@ -55,6 +56,7 @@ public class DeletedItemsTest {
     public void setUp() {
         context = RuntimeEnvironment.getApplication();
         pimdir = new PimdirDb(context);
+        fixtures = new ItemFixtures(pimdir);
         contacts = new PimdirContacts(pimdir);
         deleted = new DeletedItems(pimdir, context);
         db = pimdir.getWritableDatabase();
@@ -292,12 +294,11 @@ public class DeletedItemsTest {
     public void anOpenedMailRestoredIntoItsMailboxRevivesUnderItsHandle() throws Exception {
         String inbox = inbox();
         retainedMail(inbox, "42", new JSONArray().put(Flags.Marker.SEEN.wire()).put(Flags.Marker.DELETED.wire()));
-        new MailStore(context, pimdir)
-                .saveSource(
-                        inbox,
-                        "42",
-                        "Message-ID: <m42@example.org>\r\nSubject: Hello\r\n\r\nbody\r\n"
-                                .getBytes(StandardCharsets.UTF_8));
+        fixtures.putObject(
+                inbox,
+                "42",
+                "Message-ID: <m42@example.org>\r\nSubject: Hello\r\n\r\nbody\r\n"
+                        .getBytes(StandardCharsets.UTF_8));
         drop(inbox, "42");
         long seq = scalar("SELECT seq FROM items WHERE link_id = '42'");
 
@@ -327,7 +328,7 @@ public class DeletedItemsTest {
                                 + "Content-Transfer-Encoding: 8bit\r\n\r\ndéjà vu\r\n")
                         .getBytes(StandardCharsets.ISO_8859_1);
         MailStore store = new MailStore(context, pimdir);
-        store.saveSource(inbox, "43", source);
+        fixtures.putObject(inbox, "43", source);
         drop(inbox, "43");
 
         deleted.restore(mailEngine(), only(), inbox);

@@ -16,6 +16,7 @@ import org.junit.runner.RunWith;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.pimdir.ItemFixtures;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirItems;
@@ -32,7 +33,7 @@ import java.util.List;
  *
  * <p>Pins mailboxes namespaced by account (two INBOXes never merge), the merged
  * list ordered by the key written at sync, and the outbox surviving a roster
- * replace. Items are written as the engine does ({@link PimdirItems}).
+ * replace. Items are written as the engine does ({@link ItemFixtures}).
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailStoreTest {
@@ -43,6 +44,7 @@ public class MailStoreTest {
 
     private PimdirDb pimdir;
     private PimdirItems items;
+    private ItemFixtures fixtures;
     private MailStore store;
 
     @Before
@@ -50,6 +52,7 @@ public class MailStoreTest {
         Context context = RuntimeEnvironment.getApplication();
         pimdir = new PimdirDb(context);
         items = new PimdirItems(pimdir);
+        fixtures = new ItemFixtures(pimdir);
         store = new MailStore(context, pimdir);
     }
 
@@ -79,10 +82,10 @@ public class MailStoreTest {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            items.put(
+            fixtures.put(
                     db,
                     collection,
-                    new PimdirItems.Row(
+                    new ItemFixtures.Row(
                             id,
                             null,
                             PimdirSummary.mail(
@@ -115,7 +118,7 @@ public class MailStoreTest {
         // row.
         assertEquals(2, scalar("SELECT count(*) FROM items"));
 
-        List<MailStore.StoredMessage> merged = store.loadMerged(10);
+        List<MailStore.StoredMessage> merged = MailFixtures.merged(store, 10);
         assertEquals(2, merged.size());
         assertEquals("newest first", "His", merged.get(0).subject);
         assertEquals(TWO, merged.get(0).accountEmail);
@@ -145,7 +148,7 @@ public class MailStoreTest {
         envelope(ONE, "INBOX", "2", "Newer", "Thu, 5 Feb 2026 09:00:00 +0000");
         envelope(ONE, "INBOX", "3", "Undated", "not a date");
 
-        List<MailStore.StoredMessage> merged = store.loadMerged(10);
+        List<MailStore.StoredMessage> merged = MailFixtures.merged(store, 10);
         assertEquals("Newer", merged.get(0).subject);
         assertEquals("Older", merged.get(1).subject);
         assertEquals("an unreadable date sinks rather than fails", "Undated", merged.get(2).subject);
@@ -166,7 +169,7 @@ public class MailStoreTest {
         envelope(ONE, "INBOX", "1", "Imap", "Mon, 5 Jan 2026 09:00:00 +0000");
         envelope(TWO, "INBOX", "j1", "Jmap", "2026-02-05T09:00:00Z");
 
-        List<MailStore.StoredMessage> merged = store.loadMerged(10);
+        List<MailStore.StoredMessage> merged = MailFixtures.merged(store, 10);
         assertEquals("Jmap", merged.get(0).subject);
         assertEquals("j1", merged.get(0).id);
         assertTrue("an RFC 3339 date is read, not sunk", merged.get(0).stamp > 0);
@@ -182,7 +185,7 @@ public class MailStoreTest {
 
         // NOTE: answered and flagged are IMAP flags in the item's flag set, the
         // attachment a summary field, since no protocol treats it as a flag.
-        MailStore.StoredMessage stored = store.loadMerged(10).get(0);
+        MailStore.StoredMessage stored = MailFixtures.merged(store, 10).get(0);
         assertTrue(stored.seen());
         assertTrue(stored.answered());
         assertTrue(stored.flagged());
@@ -215,10 +218,10 @@ public class MailStoreTest {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            items.put(
+            fixtures.put(
                     db,
                     collection,
-                    new PimdirItems.Row(
+                    new ItemFixtures.Row(
                             "1",
                             null,
                             PimdirSummary.mail(
@@ -227,10 +230,10 @@ public class MailStoreTest {
                             PimdirSummary.mailSortKey(DATE),
                             "[]",
                             null));
-            items.put(
+            fixtures.put(
                     db,
                     collection,
-                    new PimdirItems.Row(
+                    new ItemFixtures.Row(
                             "2",
                             null,
                             PimdirSummary.mail(
@@ -246,8 +249,8 @@ public class MailStoreTest {
 
         // NOTE: the row shows the name and the avatar is keyed by the address,
         // so losing either half costs one of the two.
-        MailStore.StoredMessage nameless = store.loadMerged(10).get(0);
-        MailStore.StoredMessage named = store.loadMerged(10).get(1);
+        MailStore.StoredMessage nameless = MailFixtures.merged(store, 10).get(0);
+        MailStore.StoredMessage named = MailFixtures.merged(store, 10).get(1);
 
         assertEquals("Ada Lovelace", named.fromName);
         assertEquals("ada@example.org", named.fromAddress);
@@ -263,7 +266,7 @@ public class MailStoreTest {
         mailboxes(ONE, "INBOX");
         envelope(ONE, "INBOX", "1", "Unread", DATE);
 
-        assertNull(store.source(store.loadMerged(10).get(0)));
+        assertNull(store.source(MailFixtures.merged(store, 10).get(0)));
         assertEquals(PimdirItems.META, scalar("SELECT level FROM items WHERE link_id = ?", "1"));
     }
 
@@ -273,9 +276,9 @@ public class MailStoreTest {
         envelope(ONE, "INBOX", "1", "Read", DATE);
 
         String collection = store.collectionOf(ONE, "INBOX");
-        store.saveSource(collection, "1", SOURCE.getBytes(StandardCharsets.UTF_8));
+        fixtures.putObject(collection, "1", SOURCE.getBytes(StandardCharsets.UTF_8));
 
-        byte[] stored = store.source(store.loadMerged(10).get(0));
+        byte[] stored = store.source(MailFixtures.merged(store, 10).get(0));
         assertEquals(SOURCE, new String(stored, StandardCharsets.UTF_8));
         assertEquals(PimdirItems.FULL, scalar("SELECT level FROM items WHERE link_id = ?", "1"));
     }
@@ -303,7 +306,7 @@ public class MailStoreTest {
 
         // NOTE: pending is the one state where the store holds a message no
         // server has.
-        MailStore.StoredMessage row = store.loadMerged(10).get(0);
+        MailStore.StoredMessage row = MailFixtures.merged(store, 10).get(0);
         assertTrue(row.pending());
         assertFalse(row.failed);
         assertEquals("Waiting", row.subject);
@@ -329,7 +332,7 @@ public class MailStoreTest {
 
         // NOTE: still a message the sender wrote, so it is shown, saying it was
         // refused rather than disappearing.
-        MailStore.StoredMessage row = store.loadMerged(10).get(0);
+        MailStore.StoredMessage row = MailFixtures.merged(store, 10).get(0);
         assertTrue(row.failed);
         assertTrue(row.pending());
         assertEquals(SOURCE, new String(store.source(row), StandardCharsets.UTF_8));
@@ -348,7 +351,7 @@ public class MailStoreTest {
         // NOTE: never handed over again on its own, which could deliver it
         // twice.
         assertTrue(store.outbox().outgoing(ONE).isEmpty());
-        MailStore.StoredMessage row = store.loadMerged(10).get(0);
+        MailStore.StoredMessage row = MailFixtures.merged(store, 10).get(0);
         assertTrue(row.uncertain);
         assertTrue(row.failed);
 
@@ -358,7 +361,7 @@ public class MailStoreTest {
         assertEquals(1, waiting.size());
         assertEquals("maybe@example.org", waiting.get(0).messageId);
         assertEquals(SOURCE, new String(waiting.get(0).source, StandardCharsets.UTF_8));
-        MailStore.StoredMessage again = store.loadMerged(10).get(0);
+        MailStore.StoredMessage again = MailFixtures.merged(store, 10).get(0);
         assertFalse(again.uncertain);
         assertFalse(again.failed);
         assertEquals("one body, still pinned", 1, scalar("SELECT count(*) FROM objects"));
@@ -405,10 +408,10 @@ public class MailStoreTest {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            items.put(
+            fixtures.put(
                     db,
                     outbox,
-                    new PimdirItems.Row(
+                    new ItemFixtures.Row(
                             "stranded@example.org",
                             SOURCE,
                             PimdirSummary.mail(
@@ -426,9 +429,9 @@ public class MailStoreTest {
         assertEquals(SOURCE, new String(waiting.get(0).source, StandardCharsets.UTF_8));
 
         assertEquals("the item is gone", 0, scalar("SELECT count(*) FROM items"));
-        assertEquals("and it is on the queue", 1, store.loadMerged(10).size());
+        assertEquals("and it is on the queue", 1, MailFixtures.merged(store, 10).size());
 
-        MailStore.StoredMessage row = store.loadMerged(10).get(0);
+        MailStore.StoredMessage row = MailFixtures.merged(store, 10).get(0);
         assertTrue(row.pending());
         assertEquals("Waiting", row.subject);
 
@@ -544,7 +547,7 @@ public class MailStoreTest {
         assertEquals(3_000, known.size);
         assertEquals(0, known.unknown);
         // NOTE: held 1 is what a release frees, 0 what a download fetches.
-        store.saveSource(
+        fixtures.putObject(
                 store.collectionOf(ONE, "INBOX"), "s1", SOURCE.getBytes(StandardCharsets.UTF_8));
         assertEquals(1, store.sum(query, "2026-03-02T00:00:00Z", null, 1).count);
         assertEquals(1, store.sum(query, "2026-03-02T00:00:00Z", null, 0).count);

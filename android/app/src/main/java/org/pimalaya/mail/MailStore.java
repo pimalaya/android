@@ -491,18 +491,6 @@ public final class MailStore {
     }
 
     /**
-     * Every account's messages, newest first: the merged list itself.
-     *
-     * <p>Waiting messages come from the queue (STORAGE section 15.4) and go on
-     * top, where a sender looks and a refusal is seen; the rest by sort key.
-     */
-    List<StoredMessage> loadMerged(int limit) {
-        List<StoredMessage> messages = new ArrayList<>(outbox.outgoing());
-        messages.addAll(page(query((account, mailbox) -> true, false, false, ""), null, 0, limit));
-        return messages;
-    }
-
-    /**
      * A reply's `References`, oldest first, ending with the parent's id.
      *
      * <p>Angle-bracketed, empty with no id. The parent's `In-Reply-To` stands
@@ -1318,16 +1306,6 @@ public final class MailStore {
                 String collection,
                 String role,
                 boolean listed,
-                String limit) {
-            this(accountEmail, mailbox, collection, role, listed, limit, false);
-        }
-
-        Edge(
-                String accountEmail,
-                String mailbox,
-                String collection,
-                String role,
-                boolean listed,
                 String limit,
                 boolean accountWide) {
             this.accountEmail = accountEmail;
@@ -1601,11 +1579,6 @@ public final class MailStore {
      */
     java.io.File sourceFile(StoredMessage message) {
         return message.pending() ? null : items.objectFile(message.collection, message.id);
-    }
-
-    /** Files the message a reader just fetched, against its envelope. */
-    public void saveSource(String collection, String id, byte[] source) {
-        items.putObject(collection, id, source);
     }
 
     /**

@@ -56,8 +56,6 @@ public final class FilesList {
 
     static final int PDFS = 1;
 
-    static final int DOCUMENTS = 2;
-
     private final Host host;
 
     private final FileStore files;

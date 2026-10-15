@@ -16,6 +16,7 @@ import org.junit.runner.RunWith;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.mail.MailStore;
+import org.pimalaya.pimdir.ItemFixtures;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
@@ -63,6 +64,7 @@ public class FileStoreTest {
     private final MailClient client = new MailClient();
     private PimdirDb pimdir;
     private PimdirItems items;
+    private ItemFixtures fixtures;
     private MailStore mail;
     private FileStore files;
     private String accountId;
@@ -73,6 +75,7 @@ public class FileStoreTest {
         Context context = RuntimeEnvironment.getApplication();
         pimdir = new PimdirDb(context);
         items = new PimdirItems(pimdir);
+        fixtures = new ItemFixtures(pimdir);
         mail = new MailStore(context, pimdir);
         files = new FileStore(context, pimdir);
         mail.replaceMailboxes(ONE, List.of(new Mailbox("INBOX", "")));
@@ -86,10 +89,10 @@ public class FileStoreTest {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            items.put(
+            fixtures.put(
                     db,
                     inbox,
-                    new PimdirItems.Row(
+                    new ItemFixtures.Row(
                             linkId,
                             null,
                             PimdirSummary.mail(
@@ -100,7 +103,7 @@ public class FileStoreTest {
         } finally {
             db.endTransaction();
         }
-        mail.saveSource(inbox, linkId, source);
+        fixtures.putObject(inbox, linkId, source);
         files.recordAttachments(accountId, linkId, client.parseMessage(source).attachments());
         return source;
     }
@@ -303,10 +306,12 @@ public class FileStoreTest {
     public void theTypeChipsSortMediaTypes() throws Exception {
         assertTrue(FilesList.matches(FilesList.IMAGES, "image/png"));
         assertTrue(FilesList.matches(FilesList.PDFS, "application/pdf"));
+        // NOTE: the documents chip, the third, past images and PDFs.
+        int documents = 2;
         assertTrue(FilesList.matches(
-                FilesList.DOCUMENTS,
+                documents,
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
-        assertTrue(!FilesList.matches(FilesList.DOCUMENTS, null));
+        assertTrue(!FilesList.matches(documents, null));
     }
 
     @Test

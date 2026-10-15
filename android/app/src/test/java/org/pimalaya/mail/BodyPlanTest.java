@@ -15,6 +15,7 @@ import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.pimdir.ItemFixtures;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirItems;
@@ -42,6 +43,7 @@ public class BodyPlanTest {
 
     private Context context;
     private PimdirItems items;
+    private ItemFixtures fixtures;
     private MailStore store;
     private List<AccountEntry> accounts;
 
@@ -50,6 +52,7 @@ public class BodyPlanTest {
         context = RuntimeEnvironment.getApplication();
         PimdirDb pimdir = new PimdirDb(context);
         items = new PimdirItems(pimdir);
+        fixtures = new ItemFixtures(pimdir);
         store = new MailStore(context, pimdir);
         store.replaceMailboxes(
                 JANE,
@@ -76,10 +79,10 @@ public class BodyPlanTest {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            items.put(
+            fixtures.put(
                     db,
                     collection,
-                    new PimdirItems.Row(
+                    new ItemFixtures.Row(
                             id,
                             body,
                             PimdirSummary.mail(

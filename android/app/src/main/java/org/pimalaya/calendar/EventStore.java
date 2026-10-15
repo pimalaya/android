@@ -211,11 +211,6 @@ public final class EventStore {
         return events;
     }
 
-    /** How many entries conflict on a source, left for their page. */
-    int conflictCount() {
-        return conflicted().size();
-    }
-
     /**
      * The entries conflicted on any source of any calendar.
      *

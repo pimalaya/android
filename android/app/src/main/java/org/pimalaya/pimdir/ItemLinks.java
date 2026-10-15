@@ -234,11 +234,6 @@ public final class ItemLinks {
             return cursor.moveToFirst();
         }
     }
-    /** An endpoint's first live placement in its kind, or null for none. */
-    /** An endpoint's first live placement in a collection of its kind. */
-    Placement placement(Endpoint endpoint) {
-        return placement(store.getReadableDatabase(), endpoint);
-    }
 
     /** {@code describe_endpoint}: the first live placement and its title. */
     private static Placement placement(SQLiteDatabase db, Endpoint endpoint) {

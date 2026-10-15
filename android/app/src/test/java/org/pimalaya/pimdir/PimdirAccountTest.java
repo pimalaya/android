@@ -44,16 +44,6 @@ public class PimdirAccountTest {
     }
 
     @Test
-    public void renamingAnAddressKeepsTheStoreId() {
-        // NOTE: the whole reason the id is not the email: an address change
-        // must not become an id change for every collection of that account.
-        String before = accounts.idOf("old@example.org");
-        accounts.rename("old@example.org", "new@example.org");
-
-        assertEquals(before, accounts.idOf("new@example.org"));
-    }
-
-    @Test
     public void aHierarchicalCollectionNameSurvivesTheRoundTrip() {
         String id = accounts.idOf("jane@example.org");
 
@@ -73,14 +63,5 @@ public class PimdirAccountTest {
         String other = PimdirAccount.collectionId(theirs, "INBOX");
         assertEquals("stripping must not claim another account's id", other,
                 PimdirAccount.nameOf(mine, other));
-    }
-
-    @Test
-    public void forgettingAnAccountStartsAFreshId() {
-        String before = accounts.idOf("jane@example.org");
-        accounts.forget("jane@example.org");
-
-        assertNotEquals("a removed and re-added account is a new store grouping",
-                before, accounts.idOf("jane@example.org"));
     }
 }

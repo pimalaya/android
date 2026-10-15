@@ -15,7 +15,7 @@ import org.json.JSONObject;
  * @param op the operation, the wire's {@code op} tag
  * @param handle the placement's handle; null for an add
  * @param linkId the identity an add files the item under; null otherwise
- * @param target the collection a move or copy goes into; null otherwise
+ * @param target the collection a move goes into; null otherwise
  * @param flags the marker set of a flag set or an add
  * @param hash the body's content hash, for an edit or an add
  * @param size the body's size in bytes, for an edit or an add
@@ -45,8 +45,6 @@ public record Mutation(
         REMOVE("remove"),
         /** A move to {@code target}: create there, tombstone here (SYNC §3). */
         MOVE("move"),
-        /** A copy into {@code target}, the source kept. */
-        COPY("copy"),
         /** A content edit of the placement's body. */
         EDIT("edit"),
         /** A locally authored item. */
@@ -79,12 +77,6 @@ public record Mutation(
     /** A move of one placement into {@code target}. */
     public static Mutation move(String handle, String target) {
         return new Mutation(Op.MOVE, handle, null, target, null, null, null, null, null, null,
-                null);
-    }
-
-    /** A copy of one placement into {@code target}. */
-    public static Mutation copy(String handle, String target) {
-        return new Mutation(Op.COPY, handle, null, target, null, null, null, null, null, null,
                 null);
     }
 

@@ -204,23 +204,6 @@ public final class AccountEntry {
         return new AccountEntry(email, connections, held);
     }
 
-    /**
-     * The same account with one domain disconnected.
-     *
-     * <p>Its credential is dropped when that domain was the last to use it.
-     */
-    AccountEntry without(PimDomain domain) {
-        Map<PimDomain, AccountConnection> remaining = new EnumMap<>(connections);
-        AccountConnection removed = remaining.remove(domain);
-
-        Map<String, AccountCredential> held = new HashMap<>(credentials);
-        if (removed != null && !usedBy(remaining, removed.credentialId)) {
-            held.remove(removed.credentialId);
-        }
-
-        return new AccountEntry(email, remaining, held);
-    }
-
     private static boolean usedBy(
             Map<PimDomain, AccountConnection> connections, String credentialId) {
         for (AccountConnection connection : connections.values()) {

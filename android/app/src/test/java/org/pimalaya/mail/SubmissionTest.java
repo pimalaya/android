@@ -95,7 +95,7 @@ public class SubmissionTest {
                 payloads());
 
         List<String> rows = new ArrayList<>();
-        for (MailStore.StoredMessage message : store.loadMerged(10)) {
+        for (MailStore.StoredMessage message : MailFixtures.merged(store, 10)) {
             rows.add(message.accountEmail + "|" + message.mailbox + "|" + message.id + "|"
                     + message.subject + "|" + message.fromAddress + "|" + message.stamp);
         }
@@ -125,7 +125,7 @@ public class SubmissionTest {
         payload(2, "not json");
 
         List<String> rows = new ArrayList<>();
-        for (MailStore.StoredMessage message : store.loadMerged(10)) {
+        for (MailStore.StoredMessage message : MailFixtures.merged(store, 10)) {
             rows.add(message.accountEmail + "|" + message.mailbox + "|" + message.id + "|"
                     + message.subject + "|" + message.fromAddress + "|" + message.stamp);
         }

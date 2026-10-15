@@ -92,6 +92,5 @@ public class MailTallyTest {
         }
 
         assertEquals("the last ones counted as it closes", 3, last()[0]);
-        assertEquals(3, tally.landed());
     }
 }

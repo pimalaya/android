@@ -9,6 +9,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.pimdir.ItemFixtures;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirItems;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -34,6 +35,7 @@ public class StoredMessageTest {
 
     private PimdirDb pimdir;
     private PimdirItems items;
+    private ItemFixtures fixtures;
     private MailStore store;
 
     @Before
@@ -41,6 +43,7 @@ public class StoredMessageTest {
         Context context = RuntimeEnvironment.getApplication();
         pimdir = new PimdirDb(context);
         items = new PimdirItems(pimdir);
+        fixtures = new ItemFixtures(pimdir);
         store = new MailStore(context, pimdir);
     }
 
@@ -50,10 +53,10 @@ public class StoredMessageTest {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            items.put(
+            fixtures.put(
                     db,
                     collection,
-                    new PimdirItems.Row(
+                    new ItemFixtures.Row(
                             id,
                             body,
                             PimdirSummary.mail(
@@ -111,7 +114,7 @@ public class StoredMessageTest {
         store.outbox().parkUncertain(3, "eof");
 
         List<String> merged = new ArrayList<>();
-        for (MailStore.StoredMessage m : store.loadMerged(20)) {
+        for (MailStore.StoredMessage m : MailFixtures.merged(store, 20)) {
             merged.add(dump(m));
         }
         assertEquals(

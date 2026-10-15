@@ -2,7 +2,6 @@ package org.pimalaya.pimdir;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
@@ -53,6 +52,7 @@ public class ItemLinksTest {
 
     private PimdirDb pimdir;
     private PimdirItems items;
+    private ItemFixtures fixtures;
     private MailStore mail;
     private FileStore files;
     private ItemLinks links;
@@ -66,6 +66,7 @@ public class ItemLinksTest {
         Context context = RuntimeEnvironment.getApplication();
         pimdir = new PimdirDb(context);
         items = new PimdirItems(pimdir);
+        fixtures = new ItemFixtures(pimdir);
         mail = new MailStore(context, pimdir);
         files = new FileStore(context, pimdir);
         links = new ItemLinks(context, pimdir);
@@ -77,20 +78,20 @@ public class ItemLinksTest {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            items.put(
+            fixtures.put(
                     db,
                     inbox,
-                    new PimdirItems.Row(
+                    new ItemFixtures.Row(
                             "m1",
                             null,
                             PimdirSummary.mail(
                                     null, "Quarterly report", "Alice", "a@example.org", null,
                                     DATE, 0, true),
                             PimdirSummary.mailSortKey(DATE)));
-            items.put(
+            fixtures.put(
                     db,
                     BOOK,
-                    new PimdirItems.Row(
+                    new ItemFixtures.Row(
                             "alice",
                             VCARD,
                             card.summary(),
@@ -125,13 +126,12 @@ public class ItemLinksTest {
     public void anItemTheStoreDoesNotHoldIsNotLinked() {
         assertFalse(links.add(message, ItemLinks.ofContact("nobody")));
         assertFalse("nor an item to itself", links.add(message, message));
-        assertNull(links.placement(ItemLinks.ofContact("nobody")));
     }
 
     @Test
     public void anAttachmentIsARulesLinkFromItsMessage() {
         byte[] source = SOURCE.getBytes(StandardCharsets.UTF_8);
-        mail.saveSource(inbox, "m1", source);
+        fixtures.putObject(inbox, "m1", source);
         files.recordAttachments(
                 mail.accountIdOf(ONE), "m1", new MailClient().parseMessage(source).attachments());
 
@@ -145,7 +145,7 @@ public class ItemLinksTest {
     @Test
     public void theSearchFindsEachKindByItsTitle() {
         byte[] source = SOURCE.getBytes(StandardCharsets.UTF_8);
-        mail.saveSource(inbox, "m1", source);
+        fixtures.putObject(inbox, "m1", source);
         files.recordAttachments(
                 mail.accountIdOf(ONE), "m1", new MailClient().parseMessage(source).attachments());
 

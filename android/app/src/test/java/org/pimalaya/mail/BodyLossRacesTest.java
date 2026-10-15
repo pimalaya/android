@@ -16,6 +16,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.pimdir.ItemFixtures;
 import org.pimalaya.pimdir.PimdirBlobs;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
@@ -46,6 +47,7 @@ public class BodyLossRacesTest {
 
     private Context context;
     private PimdirDb pimdir;
+    private ItemFixtures fixtures;
     private PimdirStorage storage;
     private MailStore store;
     private PimdirBlobs blobs;
@@ -55,6 +57,7 @@ public class BodyLossRacesTest {
     public void setUp() throws Exception {
         context = RuntimeEnvironment.getApplication();
         pimdir = new PimdirDb(context);
+        fixtures = new ItemFixtures(pimdir);
         storage = new PimdirStorage(pimdir);
         store = new MailStore(context, pimdir);
         blobs = new PimdirBlobs(pimdir.blobs());
@@ -108,7 +111,7 @@ public class BodyLossRacesTest {
         JSONArray unread = new JSONArray();
         storage.applyWrites(new JSONArray().put(listed("m1", unread, flagsBase(unread))));
 
-        store.saveSource(inbox, "m1", SOURCE);
+        fixtures.putObject(inbox, "m1", SOURCE);
         String hash = item("object_hash", "m1");
         assertEquals("2", item("level", "m1"));
 
@@ -181,7 +184,7 @@ public class BodyLossRacesTest {
                 new JSONArray()
                         .put(listed("m1", none, flagsBase(none)))
                         .put(listed("m2", none, flagsBase(none))));
-        store.saveSource(inbox, "m1", SOURCE);
+        fixtures.putObject(inbox, "m1", SOURCE);
         String hash = item("object_hash", "m1");
 
         PimdirItems.pin(pimdir, hash);
@@ -189,7 +192,7 @@ public class BodyLossRacesTest {
         writeFile(fetched, SOURCE);
         blobs.adopt(hash, fetched);
 
-        store.saveSource(inbox, "m1", "Subject: Other\r\n\r\nother\r\n".getBytes(
+        fixtures.putObject(inbox, "m1", "Subject: Other\r\n\r\nother\r\n".getBytes(
                 StandardCharsets.UTF_8));
         assertNull("collected", refcount(hash));
         new PimdirItems(pimdir).unlinkCollected();

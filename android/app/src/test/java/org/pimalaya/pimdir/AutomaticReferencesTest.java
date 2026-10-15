@@ -72,6 +72,7 @@ public class AutomaticReferencesTest {
     private Context context;
     private PimdirDb pimdir;
     private PimdirItems items;
+    private ItemFixtures fixtures;
     private MailStore mail;
     private FileStore files;
     private ItemLinks links;
@@ -91,6 +92,7 @@ public class AutomaticReferencesTest {
     private void open() {
         pimdir = new PimdirDb(context);
         items = new PimdirItems(pimdir);
+        fixtures = new ItemFixtures(pimdir);
         mail = new MailStore(context, pimdir);
         files = new FileStore(context, pimdir);
         links = new ItemLinks(context, pimdir);
@@ -99,7 +101,7 @@ public class AutomaticReferencesTest {
     private void envelope(String linkId) {
         put(
                 inbox,
-                new PimdirItems.Row(
+                new ItemFixtures.Row(
                         linkId,
                         null,
                         PimdirSummary.mail(
@@ -112,14 +114,14 @@ public class AutomaticReferencesTest {
         Derived derived = PimdirSql.derive(kind, body.getBytes(StandardCharsets.UTF_8));
         put(
                 collection,
-                new PimdirItems.Row(derived.linkId(), body, derived.summary(), derived.sortKey()));
+                new ItemFixtures.Row(derived.linkId(), body, derived.summary(), derived.sortKey()));
     }
 
-    private void put(String collection, PimdirItems.Row row) {
+    private void put(String collection, ItemFixtures.Row row) {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            items.put(db, collection, row);
+            fixtures.put(db, collection, row);
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
@@ -129,7 +131,7 @@ public class AutomaticReferencesTest {
     /** Stores the invitation's body the way an open does. */
     private void storeInvitation(String linkId) {
         byte[] body = INVITATION.getBytes(StandardCharsets.UTF_8);
-        mail.saveSource(inbox, linkId, body);
+        fixtures.putObject(inbox, linkId, body);
         mail.restateFromBody(
                 inbox, linkId, PimdirSql.derive(PimdirSummary.MAIL, body).summary());
         files.recordAttachments(
@@ -197,7 +199,7 @@ public class AutomaticReferencesTest {
     @Test
     public void aStoreWrittenBeforeAutomaticReferencesIsReconciledOnOpen() {
         envelope("inv@example.org");
-        mail.saveSource(inbox, "inv@example.org", INVITATION.getBytes(StandardCharsets.UTF_8));
+        fixtures.putObject(inbox, "inv@example.org", INVITATION.getBytes(StandardCharsets.UTF_8));
         derived(BOOK, PimdirSummary.CONTACT, VCARD);
         derived(CALENDAR, PimdirSummary.CALENDAR, ICS);
         files.recordAttachments(

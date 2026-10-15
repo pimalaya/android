@@ -138,7 +138,10 @@ public class CardStoreTest {
 
     @Test
     public void forgettingAnAccountDropsItsSwitchesAndItsLinkExceptions() {
-        store.unlinkGroup("g1", List.of("g1"), List.of(CardStore.replicaRef(EMAIL, "k1")));
+        store.getWritableDatabase()
+                .execSQL(
+                        "INSERT INTO detached(account_email, card_key) VALUES(?, ?)",
+                        new Object[] {EMAIL, "k1"});
         assertEquals(1, store.loadDetached().size());
 
         store.forgetAccount(EMAIL);

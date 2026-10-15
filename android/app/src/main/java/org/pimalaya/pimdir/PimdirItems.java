@@ -4,11 +4,9 @@ import android.database.Cursor;
 import android.util.Log;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
-import org.json.JSONObject;
 import org.pimalaya.client.PimdirSql;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -35,42 +33,6 @@ public final class PimdirItems {
     public PimdirItems(PimdirDb store) {
         this.store = store;
         this.blobs = new PimdirBlobs(store.blobs());
-    }
-
-    /** One item as a caller hands it over: its identity and its content. */
-    public static final class Row {
-        final String linkId;
-        final String body;
-
-        /** The typed summary row (Annex A), or null to keep the stored one. */
-        final JSONObject summary;
-
-        final String sortKey;
-        final String flags;
-
-        /**
-         * The revision this row was mirrored at, or null when untracked.
-         *
-         * <p>Stored as the source binding's base: a mirror's guarded write has
-         * nowhere else to keep its validator.
-         */
-        final String revision;
-
-        /** A row with flags and a mirrored revision (null when untracked). */
-        public Row(String linkId, String body, JSONObject summary, String sortKey, String flags,
-                String revision) {
-            this.linkId = linkId;
-            this.body = body;
-            this.summary = summary;
-            this.sortKey = sortKey;
-            this.flags = flags;
-            this.revision = revision;
-        }
-
-        /** A row with no flags and no revision. */
-        public Row(String linkId, String body, JSONObject summary, String sortKey) {
-            this(linkId, body, summary, sortKey, "[]", null);
-        }
     }
 
     /** The store for reading. */
@@ -124,102 +86,6 @@ public final class PimdirItems {
             Log.w("pimalaya", "could not read the body " + hash, error);
             return null;
         }
-    }
-
-    /**
-     * Files a body against a held item, raising it to full, the row untouched.
-     *
-     * <p>For the mirrors' spines gaining bodies one open at a time. An item not
-     * held is not created: no listing could reach it.
-     */
-    public void putObject(String collection, String linkId, byte[] body) {
-        String hash = PimdirHash.of(body);
-        SQLiteDatabase db = writable();
-        db.beginTransaction();
-        try {
-            if (!knows(db, collection, linkId)) {
-                Log.w("pimalaya", "no item " + linkId + " in " + collection);
-                return;
-            }
-
-            String previous = objectOf(db, collection, linkId);
-            storeObject(db, hash, body);
-            db.execSQL(
-                    "UPDATE items SET object_hash = ?, level = ?"
-                            + " WHERE collection = ? AND link_id = ?",
-                    new Object[] {hash, FULL, collection, linkId});
-            adjustRefcount(db, previous, hash);
-            collectGarbage(db);
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
-        }
-    }
-
-    /**
-     * Writes one item's content, returning the hash it now carries.
-     *
-     * <p>Bindings stay (a staged edit keeps its base); retention stamps clear,
-     * a write reviving a retired item.
-     */
-    public String put(SQLiteDatabase db, String collection, Row row) {
-        String hash = row.body == null || row.body.isEmpty() ? null : PimdirHash.of(row.body);
-        if (hash != null) {
-            storeObject(db, hash, row.body);
-        }
-
-        String previous = objectOf(db, collection, row.linkId);
-        boolean exists = previous != null || knows(db, collection, row.linkId);
-
-        // NOTE: a row carrying no body keeps the stored one, on the same
-        // terms as the summary it does not restate. A mail refresh restates
-        // the spine of every mailbox and knows nothing about bodies, so
-        // taking the absence as a removal would discard the message a reader
-        // stored by opening it, once a round, for as long as they keep the
-        // account.
-        if (hash == null) {
-            hash = previous;
-        }
-        int level = hash == null ? META : FULL;
-
-        if (exists) {
-            db.execSQL(
-                    "UPDATE items SET object_hash = ?, sort_key = ?, flags = ?,"
-                            + " level = ?, deleted = 0, retained_at = NULL, retained_by = NULL"
-                            + " WHERE collection = ? AND link_id = ?",
-                    new Object[] {hash, row.sortKey, row.flags, level, collection, row.linkId});
-        } else {
-            db.execSQL(
-                    "INSERT INTO items(collection, link_id, seq, flags, object_hash,"
-                            + " sort_key, level) VALUES(?, ?, ?, ?, ?, ?, ?)",
-                    new Object[] {
-                        collection, row.linkId, seqFor(db, row.linkId), row.flags, hash,
-                        row.sortKey, level
-                    });
-        }
-
-        PimdirSummary.write(db, collection, row.linkId, row.summary);
-        if (row.revision != null) {
-            bindRevision(db, collection, row.linkId, row.revision);
-        }
-        adjustRefcount(db, previous, hash);
-        return hash;
-    }
-
-    /**
-     * Records the revision the mirror read, as its source binding's base.
-     *
-     * <p>Not a merge base: the validator a guarded write reads back. The body
-     * is not pinned; a mirror stages nothing to diff.
-     */
-    private void bindRevision(
-            SQLiteDatabase db, String collection, String linkId, String revision) {
-        db.execSQL(
-                "INSERT INTO bindings(collection, link_id, source, handle, base_revision,"
-                        + " base_present) VALUES(?, ?, ?, ?, ?, 1)"
-                        + " ON CONFLICT(collection, link_id, source) DO UPDATE SET"
-                        + " base_revision = excluded.base_revision, base_present = 1",
-                new Object[] {collection, linkId, PimdirStorage.SERVER, linkId, revision});
     }
 
     /**
@@ -301,24 +167,6 @@ public final class PimdirItems {
         }
     }
 
-    /** Files a text body and indexes it, leaving the refcount to the caller. */
-    void storeObject(SQLiteDatabase db, String hash, String body) {
-        storeObject(db, hash, body.getBytes(StandardCharsets.UTF_8));
-    }
-
-    /** Files a body and indexes it, leaving the refcount to the caller. */
-    void storeObject(SQLiteDatabase db, String hash, byte[] bytes) {
-        try {
-            blobs.put(hash, bytes);
-        } catch (IOException error) {
-            throw new IllegalStateException("Could not store the body " + hash, error);
-        }
-        db.execSQL(
-                "INSERT INTO objects(hash, size, refcount) VALUES(?, ?, 0)"
-                        + " ON CONFLICT(hash) DO NOTHING",
-                new Object[] {hash, bytes.length});
-    }
-
     /** Files and indexes a file's bytes, streamed; refcount the caller's. */
     public void storeObject(SQLiteDatabase db, String hash, java.io.File source) {
         try {
@@ -351,9 +199,11 @@ public final class PimdirItems {
     }
 
     /**
-     * {@link #putObject(String, String, byte[])} of a file the bridge hashed.
+     * Files a body the bridge hashed against a held item, raising it to full.
      *
-     * <p>Moved into the blob store, never read here; the file is gone after.
+     * <p>For the mirrors' spines gaining bodies one open at a time, the row
+     * untouched; an item not held is not created. Moved into the blob store,
+     * never read here: the file is gone after.
      */
     public void putObject(String collection, String linkId, String hash, java.io.File source) {
         SQLiteDatabase db = writable();

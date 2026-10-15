@@ -160,7 +160,6 @@ public class CalendarTriageTest {
 
         EventStore.StoredEvent event = stored();
         assertTrue(event.conflicted);
-        assertEquals("the pending line counts it", 1, events.conflictCount());
         EventStore.StoredConflict found = events.conflictOf(event);
         assertNotNull(found);
         assertEquals(calendar, found.collection);
@@ -203,6 +202,5 @@ public class CalendarTriageTest {
         assertTrue(row.getBoolean("deleted"));
         assertEquals("etag-remote", row.getString("etag"));
         assertTrue(EventStore.conflictsOf(storage, calendar).isEmpty());
-        assertEquals(0, events.conflictCount());
     }
 }

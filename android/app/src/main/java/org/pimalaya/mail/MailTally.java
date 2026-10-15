@@ -44,11 +44,6 @@ public final class MailTally {
         this.listener = listener;
     }
 
-    /** What has landed, settled and in flight. */
-    synchronized int landed() {
-        return settled + flight;
-    }
-
     synchronized int planned() {
         return planned;
     }

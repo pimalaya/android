@@ -49,8 +49,9 @@ public class ContactPoolTest {
                         entry(WORK, "b@x", "4", "UID:u4"),
                         entry(HOME, "c@x", "5", "UID:u5", "FN:Mid"),
                         entry(WORK, "c@x", "6", "UID:u1", "FN:Detached"));
-        store.linkGroups(List.of("uid\u0000u4", "uid\u0000u5"));
-        store.unlinkGroup("none", List.of(), List.of(pool.replicaRef(entries.get(5))));
+        link("uid\u0000u4", "uid\u0000u4");
+        link("uid\u0000u5", "uid\u0000u4");
+        detach(pool.replicaRef(entries.get(5)));
 
         List<Group> groups = pool.group(entries, List.of());
 
@@ -82,6 +83,25 @@ public class ContactPoolTest {
         for (int at = 0; at < indexes.length; at++) {
             assertSame(entries.get(indexes[at]), group.replicas.get(at));
         }
+    }
+
+    /** Files a link row: {@code member}'s group joins {@code cluster}. */
+    private void link(String member, String cluster) {
+        store.getWritableDatabase()
+                .execSQL(
+                        "INSERT INTO link(member, cluster) VALUES(?, ?)",
+                        new Object[] {member, cluster});
+    }
+
+    /** Files a detached row for one replica, out of its UID group. */
+    private void detach(String replicaRef) {
+        int newline = replicaRef.indexOf('\n');
+        store.getWritableDatabase()
+                .execSQL(
+                        "INSERT INTO detached(account_email, card_key) VALUES(?, ?)",
+                        new Object[] {
+                            replicaRef.substring(0, newline), replicaRef.substring(newline + 1)
+                        });
     }
 
     private static Entry entry(Addressbook book, String email, String id, String... lines) {

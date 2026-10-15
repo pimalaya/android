@@ -16,7 +16,7 @@ import java.util.List;
  */
 public class MailFillTest {
     private static MailStore.Edge edge(String name, String role, boolean listed, String limit) {
-        return new MailStore.Edge("jane@example.com", name, name, role, listed, limit);
+        return new MailStore.Edge("jane@example.com", name, name, role, listed, limit, false);
     }
 
     /**

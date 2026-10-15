@@ -26,6 +26,7 @@ import org.pimalaya.client.MessageRef;
 import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.OfflineDriver;
 import org.pimalaya.client.SyncReport;
+import org.pimalaya.pimdir.ItemFixtures;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -48,6 +49,7 @@ public class MailEngineTest {
     private static final String EMAIL = "jane@example.com";
 
     private PimdirDb pimdir;
+    private ItemFixtures fixtures;
     private MailStore store;
     private MailStager engine;
     private String collection;
@@ -57,6 +59,7 @@ public class MailEngineTest {
     public void setUp() throws Exception {
         Context context = RuntimeEnvironment.getApplication();
         pimdir = new PimdirDb(context);
+        fixtures = new ItemFixtures(pimdir);
         store = new MailStore(context, pimdir);
         store.replaceMailboxes(EMAIL, List.of(new Mailbox("INBOX", "")));
         collection = store.collectionOf(EMAIL, "INBOX");
@@ -147,7 +150,7 @@ public class MailEngineTest {
      */
     @Test
     public void aStoredBodyIsNotAPendingPush() throws Exception {
-        store.saveSource(collection, "42", "From: a@b.c\r\n\r\nbody\r\n".getBytes(StandardCharsets.UTF_8));
+        fixtures.putObject(collection, "42", "From: a@b.c\r\n\r\nbody\r\n".getBytes(StandardCharsets.UTF_8));
 
         JSONObject load = new JSONObject();
         load.put("op", "load");
@@ -166,7 +169,7 @@ public class MailEngineTest {
      */
     @Test
     public void aMarkerOnAnOpenedMessageIsPushedAsAMarker() throws Exception {
-        store.saveSource(collection, "42", "From: a@b.c\r\n\r\nbody\r\n".getBytes(StandardCharsets.UTF_8));
+        fixtures.putObject(collection, "42", "From: a@b.c\r\n\r\nbody\r\n".getBytes(StandardCharsets.UTF_8));
         engine.mutateFlags(
                 collection,
                 "42",
@@ -247,7 +250,7 @@ public class MailEngineTest {
         // NOTE: marked rather than dropped: the row survives until a sync has
         // told the server, or the delete would happen only here.
         assertEquals("1", scalar("SELECT deleted FROM items WHERE link_id = ?", "42"));
-        assertTrue("and it leaves the list at once", store.loadMerged(10).isEmpty());
+        assertTrue("and it leaves the list at once", MailFixtures.merged(store, 10).isEmpty());
     }
 
     @Test
@@ -270,7 +273,7 @@ public class MailEngineTest {
         assertEquals(1, waiting.size());
         assertEquals(source, new String(waiting.get(0).source, StandardCharsets.UTF_8));
 
-        MailStore.StoredMessage row = store.loadMerged(10).get(0);
+        MailStore.StoredMessage row = MailFixtures.merged(store, 10).get(0);
         assertTrue("it says of itself that it has not gone yet", row.pending());
         assertEquals("Hi", row.subject);
         assertEquals(store.outbox().outboxOf(EMAIL), row.collection);

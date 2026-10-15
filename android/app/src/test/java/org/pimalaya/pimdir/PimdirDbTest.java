@@ -19,6 +19,7 @@ import org.robolectric.RuntimeEnvironment;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -185,7 +186,7 @@ public class PimdirDbTest {
         String hash = "abcdef0123456789";
 
         assertFalse(blobs.has(hash));
-        blobs.putText(hash, "BEGIN:VCARD\r\nEND:VCARD\r\n");
+        blobs.put(hash, "BEGIN:VCARD\r\nEND:VCARD\r\n".getBytes(StandardCharsets.UTF_8));
 
         assertTrue(blobs.has(hash));
         assertEquals("BEGIN:VCARD\r\nEND:VCARD\r\n", blobs.getText(hash));
@@ -197,7 +198,7 @@ public class PimdirDbTest {
         assertEquals("ab", path.getParentFile().getParentFile().getName());
 
         // NOTE: re-filing the same hash is a no-op: the name is the content.
-        blobs.putText(hash, "BEGIN:VCARD\r\nEND:VCARD\r\n");
+        blobs.put(hash, "BEGIN:VCARD\r\nEND:VCARD\r\n".getBytes(StandardCharsets.UTF_8));
         assertEquals("BEGIN:VCARD\r\nEND:VCARD\r\n", blobs.getText(hash));
 
         assertEquals(0, path.getParentFile().listFiles(

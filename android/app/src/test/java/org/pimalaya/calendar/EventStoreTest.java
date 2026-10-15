@@ -12,6 +12,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Calendar;
+import org.pimalaya.pimdir.ItemFixtures;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirItems;
 import org.pimalaya.pimdir.PimdirStorage;
@@ -41,6 +42,7 @@ public class EventStoreTest {
 
     private PimdirDb pimdir;
     private PimdirItems items;
+    private ItemFixtures fixtures;
     private EventStore store;
 
     /** The stored collection id of {@link #CALENDAR}, namespaced by account. */
@@ -51,6 +53,7 @@ public class EventStoreTest {
         Context context = RuntimeEnvironment.getApplication();
         pimdir = new PimdirDb(context);
         items = new PimdirItems(pimdir);
+        fixtures = new ItemFixtures(pimdir);
         store = new EventStore(context, pimdir);
         store.replaceCalendars(
                 EMAIL,
@@ -104,7 +107,7 @@ public class EventStoreTest {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            items.put(db, collection, new PimdirItems.Row(id, ICAL, null, "", "[]", etag));
+            fixtures.put(db, collection, new ItemFixtures.Row(id, ICAL, null, "", "[]", etag));
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
@@ -133,7 +136,7 @@ public class EventStoreTest {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            items.put(db, collection, new PimdirItems.Row("new.ics", ICAL, null, ""));
+            fixtures.put(db, collection, new ItemFixtures.Row("new.ics", ICAL, null, ""));
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();

@@ -13,6 +13,7 @@ import org.junit.runner.RunWith;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.pimdir.ItemFixtures;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirItems;
@@ -37,6 +38,7 @@ public class MailFilterTest {
 
     private Context context;
     private PimdirItems items;
+    private ItemFixtures fixtures;
     private MailStore store;
 
     @Before
@@ -44,6 +46,7 @@ public class MailFilterTest {
         context = RuntimeEnvironment.getApplication();
         PimdirDb pimdir = new PimdirDb(context);
         items = new PimdirItems(pimdir);
+        fixtures = new ItemFixtures(pimdir);
         store = new MailStore(context, pimdir);
 
         for (String account : new String[] {JANE, JOHN}) {
@@ -64,10 +67,10 @@ public class MailFilterTest {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            items.put(
+            fixtures.put(
                     db,
                     store.collectionOf(account, mailbox),
-                    new PimdirItems.Row(
+                    new ItemFixtures.Row(
                             id,
                             null,
                             PimdirSummary.mail(

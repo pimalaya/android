@@ -51,17 +51,6 @@ public final class PimdirAccount {
         return null;
     }
 
-    /** Re-points an account's stored id at a new address, keeping the id. */
-    synchronized void rename(String oldEmail, String newEmail) {
-        String id = idOf(oldEmail);
-        prefs.edit().remove(oldEmail).putString(newEmail, id).apply();
-    }
-
-    /** Forgets an account: re-adding it mints a fresh store id. */
-    synchronized void forget(String email) {
-        prefs.edit().remove(email).apply();
-    }
-
     /** The account id a collection id is namespaced under. */
     public static String accountIdOf(String collectionId) {
         int at = collectionId.indexOf(SEPARATOR);
