@@ -20,7 +20,10 @@ import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailPage;
+import org.pimalaya.client.MailRequest;
 import org.pimalaya.client.MailSession;
+import org.pimalaya.client.MailWire;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.MessageRef;
 import org.pimalaya.client.OfflineClient;
@@ -179,17 +182,17 @@ public class MailEngineTest {
         MailClient server =
                 new MailClient() {
                     @Override
-                    public JSONObject enumerateMailbox(
-                            MailSession session, String mailbox, JSONObject request) {
+                    public MailPage enumerateMailbox(
+                            MailSession session, String mailbox, MailRequest request) {
                         try {
                             JSONObject item =
                                     new JSONObject()
                                             .put("handle", "42")
                                             .put("flags", new JSONArray().put("$junk"));
-                            return new JSONObject()
+                            return MailWire.page(new JSONObject()
                                     .put("items", new JSONArray().put(item))
                                     .put("vanished", new JSONArray())
-                                    .put("complete", true);
+                                    .put("complete", true));
                         } catch (JSONException failure) {
                             throw new AssertionError(failure);
                         }
@@ -327,25 +330,25 @@ public class MailEngineTest {
     @Test
     public void aRoundLandsPageByPageAndResumesWhereItStopped() throws Exception {
         String since = "2026-01-01T00:00:00Z";
-        List<JSONObject> asked = new ArrayList<>();
+        List<MailRequest> asked = new ArrayList<>();
         boolean[] cut = {true};
         MailClient server =
                 new MailClient() {
                     @Override
-                    public JSONObject enumerateMailbox(
-                            MailSession session, String mailbox, JSONObject request) {
+                    public MailPage enumerateMailbox(
+                            MailSession session, String mailbox, MailRequest request) {
                         asked.add(request);
                         try {
-                            JSONObject listing = request.getJSONObject("listing");
-                            if ("delta".equals(listing.getString("kind"))) {
-                                return new JSONObject()
+                            MailRequest.Listing listing = request.listing();
+                            if (!listing.round()) {
+                                return MailWire.page(new JSONObject()
                                         .put("items", new JSONArray())
                                         .put("vanished", new JSONArray())
                                         .put("complete", false)
-                                        .put("checkpoint", "cp-2");
+                                        .put("checkpoint", "cp-2"));
                             }
-                            if (listing.isNull("cursor")) {
-                                return new JSONObject()
+                            if (listing.cursor() == null) {
+                                return MailWire.page(new JSONObject()
                                         .put(
                                                 "items",
                                                 new JSONArray()
@@ -355,20 +358,20 @@ public class MailEngineTest {
                                         .put("complete", true)
                                         .put("last", false)
                                         .put("cursor", "7:100")
-                                        .put("checkpoint", "cp-1");
+                                        .put("checkpoint", "cp-1"));
                             }
                             if (cut[0]) {
                                 cut[0] = false;
                                 throw new IllegalStateException("the connection dropped");
                             }
-                            return new JSONObject()
+                            return MailWire.page(new JSONObject()
                                     .put(
                                             "items",
                                             new JSONArray()
                                                     .put(named("99", "2026-02-01T08:00:00Z")))
                                     .put("vanished", new JSONArray())
                                     .put("complete", true)
-                                    .put("last", true);
+                                    .put("last", true));
                         } catch (JSONException failure) {
                             throw new AssertionError(failure);
                         }
@@ -392,22 +395,22 @@ public class MailEngineTest {
         assertEquals(
                 "the first page landed before the cut", "Subject 101",
                 scalar("SELECT subject FROM mail_summary WHERE link_id = ?", "101"));
-        assertEquals("2026-01-01T00:00:00Z", asked.get(0).getJSONObject("scope").getString("since"));
+        assertEquals("2026-01-01T00:00:00Z", asked.get(0).scope().since());
         assertTrue("a first pass is filling in", store.coverage(collection).filling);
         assertNull("and covers nothing yet", store.coverage(collection).at);
 
         new OfflineClient().syncImmutable(remote, collection, since, false);
-        JSONObject resumed = asked.get(asked.size() - 1).getJSONObject("listing");
-        assertEquals("resumed, not restarted", "7:100", resumed.getString("cursor"));
+        MailRequest.Listing resumed = asked.get(asked.size() - 1).listing();
+        assertEquals("resumed, not restarted", "7:100", resumed.cursor());
         assertEquals("1", scalar("SELECT count(*) FROM items WHERE link_id = '99'"));
         // NOTE: the message the setup filed was in scope and listed by no
         // page of the round, so its close retires it.
         assertEquals("1", scalar("SELECT deleted FROM items WHERE link_id = '42'"));
 
         new OfflineClient().syncImmutable(remote, collection, since, false);
-        JSONObject delta = asked.get(asked.size() - 1).getJSONObject("listing");
-        assertEquals("a closed round leaves a delta", "delta", delta.getString("kind"));
-        assertEquals("the checkpoint taken up front", "cp-1", delta.getString("checkpoint"));
+        MailRequest.Listing delta = asked.get(asked.size() - 1).listing();
+        assertEquals("a closed round leaves a delta", "delta", delta.kind());
+        assertEquals("the checkpoint taken up front", "cp-1", delta.checkpoint());
         MailStore.Coverage coverage = store.coverage(collection);
         assertEquals("mail since the bound", since, coverage.since);
         assertTrue("and complete", coverage.at != null && !coverage.filling);

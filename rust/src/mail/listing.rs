@@ -3,10 +3,11 @@
 //! The mail listing every mail backend answers an `enumerate` yield with
 //! (pimdir SYNC §4, §5): a page of members, each named by its meta.
 //!
-//! Java forwards the engine's request as it came ([`MailRequest`]): a delta
-//! from the checkpoint, or a round over a scope. The answer is one
-//! [`MailPage`], newest first, each member with the Annex A summary and
-//! sort key read in the listing, so nothing reaches the store unnamed.
+//! Java hands the engine's request over typed ([`MailRequest`]), with what
+//! only the store knows: a delta from the checkpoint, or a round over a
+//! scope. The answer is one [`MailPage`], newest first, each member with
+//! the Annex A summary and sort key read in the listing, so nothing
+//! reaches the store unnamed.
 //!
 //! The scope is a floor on the `Date` header. A provider's received-date
 //! filter only narrows the listing to a superset of it, taken with a
@@ -17,7 +18,7 @@ use io_pimdir::summary::{PimdirSummary, mail::PimdirMailSummary};
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 
-use crate::offline::summary::SummaryJson;
+use crate::offline::{summary::SummaryJson, wire::sorted};
 
 /// UIDs per IMAP `UID FETCH`: `FLAGS`, `RFC822.SIZE` and a few header
 /// fields are under 1 KB a message, half a megabyte a response.
@@ -45,7 +46,7 @@ pub const RECEIVED_MARGIN_DAYS: i64 = 2;
 /// whole days in the sender's zone.
 pub const SENT_MARGIN_DAYS: i64 = 1;
 
-/// One `enumerate` yield, as the engine asked it.
+/// One `enumerate` yield, as the app writes it (its `MailRequest` mirror).
 #[derive(Debug, Deserialize)]
 pub struct MailRequest {
     /// What is listed.
@@ -263,28 +264,29 @@ pub struct FloorReply {
     pub dates: Vec<String>,
 }
 
-/// One page of a mail listing on the JSON wire.
+/// One page of a mail listing on the JSON wire, keys alphabetical as the
+/// app's `MailPage` mirror reads them.
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MailPage {
+    /// The checkpoint, on the page where the source gives one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<String>,
+    /// Whether the page belongs to a round (true) or a delta (false).
+    pub complete: bool,
+    /// Where the next page of the round resumes, absent on the last.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
     /// The source refused the cursor (or a delta's checkpoint): the
     /// engine restarts the round rather than this answering as if resumed.
     #[serde(skip_serializing_if = "core::ops::Not::not")]
     pub cursor_rejected: bool,
     /// The members listed.
     pub items: Vec<Named>,
-    /// The handles a delta reports gone.
-    pub vanished: Vec<String>,
-    /// Whether the page belongs to a round (true) or a delta (false).
-    pub complete: bool,
     /// Whether the page closes its listing.
     pub last: bool,
-    /// Where the next page of the round resumes, absent on the last.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cursor: Option<String>,
-    /// The checkpoint, on the page where the source gives one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub checkpoint: Option<String>,
+    /// The handles a delta reports gone.
+    pub vanished: Vec<String>,
 }
 
 impl MailPage {
@@ -323,7 +325,8 @@ impl MailPage {
     }
 }
 
-/// One listed message, named by its meta.
+/// One listed message, named by its meta, keys alphabetical as the app's
+/// `Named` mirror reads them.
 ///
 /// A member listed by id and markers alone (a Graph delta) has no summary:
 /// the store keeps the one it holds where it binds the message, and the
@@ -331,19 +334,19 @@ impl MailPage {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Named {
-    /// The UID within its mailbox, or the provider's message id.
-    pub handle: String,
     /// Its IMAP markers ([`flags`]).
     pub flags: Vec<String>,
+    /// The UID within its mailbox, or the provider's message id.
+    pub handle: String,
     /// The handle again: what the store files it under, a reader opens and
     /// a push addresses it by.
     pub link_id: String,
-    /// Its Annex A summary, absent when listed unnamed.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<SummaryJson>,
     /// The summary's sort key, empty when listed unnamed.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub sort_key: String,
+    /// Its Annex A summary, absent when listed unnamed.
+    #[serde(serialize_with = "sorted", skip_serializing_if = "Option::is_none")]
+    pub summary: Option<SummaryJson>,
 }
 
 impl Named {
@@ -556,5 +559,40 @@ mod tests {
             }
         ));
         assert_eq!(round.scope, Scope::default());
+    }
+
+    #[test]
+    fn a_page_is_written_as_the_app_mirrors_it() {
+        let summary = PimdirMailSummary {
+            message_id: Some("m1@example.org".into()),
+            subject: "Hi".into(),
+            date: Some("2026-10-01T08:00:00Z".into()),
+            ..Default::default()
+        };
+        let items = vec![
+            Named::new("7".into(), flags(true, false, false), summary),
+            Named::unnamed("8".into(), Vec::new()),
+        ];
+        let round = MailPage::round(items, Some("7:8".into()), None);
+        assert_eq!(
+            serde_json::to_string(&round).unwrap(),
+            concat!(
+                r#"{"complete":true,"cursor":"7:8","items":[{"flags":["\\Seen"],"handle":"7","#,
+                r#""linkId":"7","sortKey":"2026-10-01T08:00:00Z","summary":{"mail":{"addresses":[],"#,
+                r#""date":"2026-10-01T08:00:00Z","in_reply_to":[],"message_id":"m1@example.org","#,
+                r#""subject":"Hi"}}},{"flags":[],"handle":"8","linkId":"8"}],"last":false,"#,
+                r#""vanished":[]}"#
+            )
+        );
+
+        let delta = MailPage::delta(Vec::new(), vec!["6".into()], "1:42".into());
+        assert_eq!(
+            serde_json::to_string(&delta).unwrap(),
+            r#"{"checkpoint":"1:42","complete":false,"items":[],"last":true,"vanished":["6"]}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&MailPage::rejected()).unwrap(),
+            r#"{"complete":false,"cursorRejected":true,"items":[],"last":false,"vanished":[]}"#
+        );
     }
 }

@@ -46,7 +46,7 @@ public class OfflineClient {
         return UpgradeReport.from(
                 Replies.object(
                         Native.offlineUpgrade(
-                                driver, collection, new JSONArray(handles).toString(), true)));
+                                driver, collection, new JSONArray(handles).toString())));
     }
 
     /** Stages a local mutation; storage yields only, the remote untouched. */

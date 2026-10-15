@@ -3,6 +3,7 @@ package org.pimalaya.client;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 import static org.pimalaya.client.ReplyShape.assertMirrors;
 import static org.pimalaya.client.ReplyShape.assertSameJson;
 import static org.pimalaya.client.ReplyShape.elements;
@@ -15,6 +16,7 @@ import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
+import org.json.JSONObject;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -768,5 +770,91 @@ public class MailClientTest {
                                         null,
                                         "2026-01-05T08:30:00Z"))),
                 GraphStepReply.from(Replies.object(raw)));
+    }
+
+    /** A round's page as rs/mail/listing.rs writes it (its own test pins it). */
+    private static final String ROUND =
+            "{\"complete\":true,\"cursor\":\"7:8\",\"items\":[{\"flags\":[\"\\\\Seen\"],"
+                    + "\"handle\":\"7\",\"linkId\":\"7\",\"sortKey\":\"2026-10-01T08:00:00Z\","
+                    + "\"summary\":{\"mail\":{\"addresses\":[],\"date\":\"2026-10-01T08:00:00Z\","
+                    + "\"in_reply_to\":[],\"message_id\":\"m1@example.org\",\"subject\":\"Hi\"}}},"
+                    + "{\"flags\":[],\"handle\":\"8\",\"linkId\":\"8\"}],\"last\":false,"
+                    + "\"vanished\":[]}";
+
+    @Test
+    public void aListingPageReadsAsTheBridgeWritesIt() throws Exception {
+        assertMirrors(
+                MailPage.class,
+                "{\"checkpoint\":\"1:42\",\"complete\":false,\"cursor\":null,"
+                        + "\"cursorRejected\":true,\"items\":[],\"last\":true,\"vanished\":[]}");
+        assertMirrors(Named.class, elements(field(ROUND, "items")).get(0));
+
+        MailPage round = MailPage.from(Replies.object(ROUND));
+        assertEquals(null, round.checkpoint());
+        assertEquals(true, round.complete());
+        assertEquals("7:8", round.cursor());
+        assertEquals(false, round.cursorRejected());
+        assertEquals(false, round.last());
+        assertEquals(List.of(), round.vanished());
+        Named named = round.items().get(0);
+        assertEquals(List.of("\\Seen"), named.flags());
+        assertEquals("7", named.handle());
+        assertEquals("7", named.linkId());
+        assertEquals("2026-10-01T08:00:00Z", named.sortKey());
+        assertEquals(
+                "m1@example.org",
+                named.summary().getJSONObject("mail").getString("message_id"));
+        Named bare = round.items().get(1);
+        assertEquals("absent reads empty, as optString did", "", bare.sortKey());
+        assertEquals(null, bare.summary());
+        assertSameJson(ROUND, round.toJson().toString());
+
+        String delta =
+                "{\"checkpoint\":\"1:42\",\"complete\":false,\"items\":[],\"last\":true,"
+                        + "\"vanished\":[\"6\"]}";
+        assertSameJson(delta, MailPage.from(Replies.object(delta)).toJson().toString());
+        String rejected =
+                "{\"complete\":false,\"cursorRejected\":true,\"items\":[],\"last\":false,"
+                        + "\"vanished\":[]}";
+        assertSameJson(rejected, MailPage.from(Replies.object(rejected)).toJson().toString());
+        assertEquals(
+                "a page saying nothing of last closes its listing, as the engine reads it",
+                true,
+                MailPage.from(Replies.object("{\"items\":[]}")).last());
+    }
+
+    @Test
+    public void aListingRequestIsWrittenAsTheBridgeReadsIt() throws Exception {
+        MailRequest round =
+                new MailRequest(
+                        false,
+                        new MailRequest.Listing("round", null, null, false),
+                        null,
+                        new MailRequest.Scope(null, null));
+        assertSameJson(
+                "{\"listing\":{\"kind\":\"round\",\"cursor\":null,\"band\":false},"
+                        + "\"scope\":{},\"covered\":false}",
+                round.toJson().toString());
+        MailRequest delta =
+                new MailRequest(
+                        true,
+                        new MailRequest.Listing("delta", "1:42", null, false),
+                        1767690000000L,
+                        new MailRequest.Scope("2026-04-01T00:00:00Z", "2026-05-01T00:00:00Z"));
+        assertSameJson(
+                "{\"listing\":{\"kind\":\"delta\",\"checkpoint\":\"1:42\"},"
+                        + "\"scope\":{\"since\":\"2026-04-01T00:00:00Z\","
+                        + "\"until\":\"2026-05-01T00:00:00Z\"},\"covered\":true,"
+                        + "\"received\":1767690000000}",
+                delta.toJson().toString());
+
+        // NOTE: the bridge reads the request before the session, so a closed
+        // one answers for a request it could read.
+        for (MailRequest request : List.of(round, delta)) {
+            String reply = Native.enumerateMailbox(null, 0, "INBOX", request.toJson().toString());
+            assertEquals("This mail session is closed", new JSONObject(reply).getString("error"));
+        }
+        String unread = Native.enumerateMailbox(null, 0, "INBOX", "{}");
+        assertTrue(new JSONObject(unread).getString("error").startsWith("Invalid listing request"));
     }
 }

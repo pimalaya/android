@@ -23,7 +23,10 @@ import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.GraphStepItem;
 import org.pimalaya.client.GraphStepReply;
 import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailPage;
+import org.pimalaya.client.MailRequest;
 import org.pimalaya.client.MailSession;
+import org.pimalaya.client.MailWire;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.OfflineDriver;
@@ -179,21 +182,17 @@ public class GraphStepTest {
         }
 
         @Override
-        public JSONObject enumerateMailbox(
-                MailSession session, String mailbox, JSONObject request) {
+        public MailPage enumerateMailbox(MailSession session, String mailbox, MailRequest request) {
             try {
-                JSONObject listing = request.getJSONObject("listing");
-                JSONObject scope = request.optJSONObject("scope");
-                String since =
-                        scope == null || scope.isNull("since") ? null : scope.optString("since");
-                String until =
-                        scope == null || scope.isNull("until") ? null : scope.optString("until");
+                MailRequest.Listing listing = request.listing();
+                String since = request.scope().since();
+                String until = request.scope().until();
                 JSONObject page =
                         new JSONObject().put("vanished", new JSONArray()).put("last", true);
-                if ("delta".equals(listing.getString("kind"))) {
-                    return page.put("items", new JSONArray())
+                if (!listing.round()) {
+                    return MailWire.page(page.put("items", new JSONArray())
                             .put("complete", false)
-                            .put("checkpoint", "cp");
+                            .put("checkpoint", "cp"));
                 }
                 banded.add(mailbox);
                 JSONArray items = new JSONArray();
@@ -205,10 +204,10 @@ public class GraphStepTest {
                     }
                 }
                 page.put("items", items).put("complete", true);
-                if (!listing.optBoolean("band")) {
+                if (!listing.band()) {
                     page.put("checkpoint", "cp");
                 }
-                return page;
+                return MailWire.page(page);
             } catch (JSONException failure) {
                 throw new AssertionError(failure);
             }

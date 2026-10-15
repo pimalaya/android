@@ -23,7 +23,10 @@ import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailPage;
+import org.pimalaya.client.MailRequest;
 import org.pimalaya.client.MailSession;
+import org.pimalaya.client.MailWire;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.MessageRef;
 import org.pimalaya.client.OfflineClient;
@@ -82,15 +85,14 @@ public class MailMoveTest {
                         accountId);
 
         @Override
-        public JSONObject enumerateMailbox(
-                MailSession session, String mailbox, JSONObject request) {
+        public MailPage enumerateMailbox(MailSession session, String mailbox, MailRequest request) {
             try {
-                return new JSONObject()
+                return MailWire.page(new JSONObject()
                         .put("items", listed)
                         .put("vanished", new JSONArray())
                         .put("complete", true)
                         .put("last", true)
-                        .put("checkpoint", "cp");
+                        .put("checkpoint", "cp"));
             } catch (JSONException failure) {
                 throw new AssertionError(failure);
             }

@@ -228,9 +228,8 @@ final class Native {
     /**
      * One page of a mailbox's listing, the engine's enumerate (SYNC 4, 5).
      *
-     * <p>Takes {@code {listing, scope, covered?}}; returns {@code {items,
-     * vanished, complete, last, cursor?, checkpoint?}} or a cursorRejected.
-     * Graph delta items lack summary and sort key ({@link #nameMessages}).
+     * <p>Takes a {@link MailRequest}, returns a {@link MailPage}. Graph delta
+     * items lack summary and sort key ({@link #nameMessages}).
      */
     static native String enumerateMailbox(
             Transport transport, long session, String mailbox, String request);
@@ -238,8 +237,8 @@ final class Native {
     /**
      * Names the messages a Graph delta listed by id and markers alone.
      *
-     * <p>{@code handles}: a JSON array of ids. Returns {@code {items}}, each
-     * named as a listed one is; a message gone since listed left out.
+     * <p>{@code handles}: a JSON array of ids. Returns {@code {items}}, each a
+     * {@link Named}; a message gone since listed left out.
      */
     static native String nameMessages(
             Transport transport, long session, String mailbox, String handles);
@@ -668,12 +667,11 @@ final class Native {
             boolean scopeBound);
 
     /**
-     * Raises handles (a JSON array) to the full tier, or meta without full.
+     * Raises handles (a JSON array) to the full tier.
      *
      * <p>Returns {@code {upgraded, fetched, deduped}}.
      */
-    static native String offlineUpgrade(
-            OfflineDriver driver, String collection, String handles, boolean full);
+    static native String offlineUpgrade(OfflineDriver driver, String collection, String handles);
 
     /**
      * Stages a local {@link Mutation}; the remote is never touched.

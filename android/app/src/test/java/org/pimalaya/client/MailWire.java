@@ -5,8 +5,8 @@ import org.json.JSONObject;
 /**
  * The mail records' package-private wire, for other packages' engine tests.
  *
- * <p>A step request as the bridge reads it, a step reply as the client parses
- * it.
+ * <p>A step or listing request as the bridge reads it, a step reply or a
+ * listing page as the client parses it.
  */
 public final class MailWire {
     private MailWire() {}
@@ -28,5 +28,20 @@ public final class MailWire {
     /** A Gmail or JMAP step reply as {@link MailClient#step} parses it. */
     public static NamedStep namedStep(String raw) throws Exception {
         return NamedStep.from(new JSONObject(raw));
+    }
+
+    /** A listing page as {@link MailClient#enumerateMailbox} parses it. */
+    public static MailPage page(JSONObject raw) {
+        return MailPage.from(raw);
+    }
+
+    /** A listed message as {@link MailClient#nameMessages} parses it. */
+    public static Named named(JSONObject raw) {
+        return Named.from(raw);
+    }
+
+    /** A listing request as the bridge reads it. */
+    public static JSONObject json(MailRequest request) {
+        return request.toJson();
     }
 }

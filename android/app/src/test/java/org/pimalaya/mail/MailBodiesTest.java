@@ -20,7 +20,10 @@ import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.FloorReply;
 import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailPage;
+import org.pimalaya.client.MailRequest;
 import org.pimalaya.client.MailSession;
+import org.pimalaya.client.MailWire;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.MessageSource;
 import org.pimalaya.client.MessageSources;
@@ -103,14 +106,13 @@ public class MailBodiesTest {
         }
 
         @Override
-        public JSONObject enumerateMailbox(
-                MailSession session, String mailbox, JSONObject request) {
+        public MailPage enumerateMailbox(MailSession session, String mailbox, MailRequest request) {
             try {
                 JSONObject page =
                         new JSONObject().put("vanished", new JSONArray()).put("last", true);
-                if ("delta".equals(request.getJSONObject("listing").getString("kind"))) {
-                    return page.put("items", new JSONArray()).put("complete", false)
-                            .put("checkpoint", "cp");
+                if (!request.listing().round()) {
+                    return MailWire.page(page.put("items", new JSONArray()).put("complete", false)
+                            .put("checkpoint", "cp"));
                 }
                 JSONArray items =
                         new JSONArray()
@@ -118,7 +120,8 @@ public class MailBodiesTest {
                                 .put(named("3", daysBack(2), 40_000, false))
                                 .put(named("2", daysBack(3), 3_000_000, false))
                                 .put(named("1", daysBack(3 * 365), 1_000, false));
-                return page.put("items", items).put("complete", true).put("checkpoint", "cp");
+                return MailWire.page(
+                        page.put("items", items).put("complete", true).put("checkpoint", "cp"));
             } catch (JSONException failure) {
                 throw new AssertionError(failure);
             }
@@ -496,11 +499,11 @@ public class MailBodiesTest {
         MailClient listing =
                 new MailClient() {
                     @Override
-                    public JSONObject enumerateMailbox(
+                    public MailPage enumerateMailbox(
                             org.pimalaya.client.MailSession session,
                             String mailbox,
-                            JSONObject request) {
-                        return delta;
+                            MailRequest request) {
+                        return MailWire.page(delta);
                     }
                 };
         new MailEngine(

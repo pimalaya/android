@@ -57,7 +57,7 @@ public class OfflineClientTest {
 
     @Test
     public void anUpgradeReportMirrorsItsReply() throws Exception {
-        String raw = Native.offlineUpgrade(EMPTY, "c", "[]", true);
+        String raw = Native.offlineUpgrade(EMPTY, "c", "[]");
         assertMirrors(UpgradeReport.class, raw);
         assertEquals(
                 new UpgradeReport(1, 2, 3),

@@ -1,8 +1,6 @@
 package org.pimalaya.mail;
 
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
+import org.pimalaya.client.Named;
 import org.pimalaya.client.NamedStep;
 import org.pimalaya.client.NamedStepItem;
 import org.pimalaya.client.StepRequest;
@@ -23,7 +21,7 @@ import java.util.Map;
  */
 final class GmailStep implements MailStep {
     @Override
-    public Outcome run(MailEngine engine, StepRun run) throws JSONException {
+    public Outcome run(MailEngine engine, StepRun run) {
         List<String> collections = run.collections();
         String only = run.only();
         boolean first = run.first();
@@ -44,15 +42,15 @@ final class GmailStep implements MailStep {
         try {
             NamedStep step = engine.stepRead(collections, request, dir);
             List<NamedStepItem> items = step.items();
-            Map<String, JSONArray> members = new LinkedHashMap<>();
+            Map<String, List<Named>> members = new LinkedHashMap<>();
             for (String collection : collections) {
-                members.put(collection, new JSONArray());
+                members.put(collection, new ArrayList<>());
             }
             // NOTE: every message lands in All Mail where the step holds by
             // it, an archived one there alone, so the next step finds it
             // held and does not read it again (PimdirCollections.ALL_MAIL).
             String allMail = MailStore.allMailOf(engine.accountId());
-            JSONArray all = members.get(allMail);
+            List<Named> all = members.get(allMail);
             Map<String, File> files = new HashMap<>();
             Map<String, Long> sizes = new HashMap<>();
             List<Brought> brought = new ArrayList<>();
@@ -67,27 +65,29 @@ final class GmailStep implements MailStep {
                     reach = received;
                 }
                 if (all != null) {
-                    all.put(MailEngine.wireItem(item));
+                    all.add(MailEngine.named(item));
                 }
                 for (String mailbox : item.mailboxes()) {
-                    JSONArray into = members.get(engine.collectionOf(mailbox));
+                    List<Named> into = members.get(engine.collectionOf(mailbox));
                     if (into != null) {
-                        into.put(MailEngine.wireItem(item));
+                        into.add(MailEngine.named(item));
                     }
                 }
             }
 
             // NOTE: the first step opens every mailbox, the trash and the
-            // junk included, so the next pass is a delta in each.
+            // junk included, so the next pass is a delta in each. A mailbox
+            // keeps its members as they landed: a sent copy under its
+            // create's link id, which its body downloads under.
             String checkpoint = step.historyId();
-            for (Map.Entry<String, JSONArray> mailbox : members.entrySet()) {
-                if (first || mailbox.getValue().length() > 0) {
-                    engine.land(mailbox.getKey(), mailbox.getValue(), checkpoint);
+            for (Map.Entry<String, List<Named>> mailbox : members.entrySet()) {
+                if (first || !mailbox.getValue().isEmpty()) {
+                    mailbox.setValue(engine.land(mailbox.getKey(), mailbox.getValue(), checkpoint));
                 }
             }
             engine.fetched(files);
             try {
-                for (Map.Entry<String, JSONArray> mailbox : members.entrySet()) {
+                for (Map.Entry<String, List<Named>> mailbox : members.entrySet()) {
                     // NOTE: All Mail holds no body, being shown nowhere.
                     if (mailbox.getKey().equals(allMail)) {
                         continue;
@@ -131,18 +131,16 @@ final class GmailStep implements MailStep {
      * <p>Under the link id they landed with, a sent copy's being its create's.
      */
     private static List<MailBodies.Row> rows(
-            String collection, JSONArray members, Map<String, Long> sizes)
-            throws JSONException {
-        List<MailBodies.Row> rows = new ArrayList<>(members.length());
-        for (int index = 0; index < members.length(); index++) {
-            JSONObject member = members.getJSONObject(index);
+            String collection, List<Named> members, Map<String, Long> sizes) {
+        List<MailBodies.Row> rows = new ArrayList<>(members.size());
+        for (Named member : members) {
             rows.add(
                     new MailBodies.Row(
                             collection,
-                            member.getString("linkId"),
-                            member.optString("sortKey"),
+                            member.linkId(),
+                            member.sortKey(),
                             false,
-                            sizes.get(member.getString("handle")),
+                            sizes.get(member.handle()),
                             null,
                             true));
         }

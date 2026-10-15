@@ -213,13 +213,13 @@ public class StepRequestTest {
                                 + "\"mailboxes\":[],\"path\":\"/d/m2\",\"received\":null,"
                                 + "\"size\":0}]}");
         NamedStepItem full = step.items().get(0);
-        JSONObject named = MailEngine.wireItem(full);
+        JSONObject named = MailEngine.named(full).toJson();
         MailWire.assertSameJson(
                 "{\"handle\":\"m1\",\"flags\":[\"\\\\Seen\",\"$label\"],"
                         + "\"linkId\":\"m1\",\"summary\":{\"subject\":\"Lunch\"},"
                         + "\"sortKey\":\"2026-01-06T08:30:00Z\"}",
                 named);
-        JSONObject bare = MailEngine.wireItem(step.items().get(1));
+        JSONObject bare = MailEngine.named(step.items().get(1)).toJson();
         MailWire.assertSameJson("{\"handle\":\"m2\",\"flags\":[],\"linkId\":\"m2\"}", bare);
     }
 }

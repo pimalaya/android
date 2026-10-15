@@ -118,9 +118,10 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listMailboxes<'local>(
 
 /// `Native.enumerateMailbox`: answers the engine's `enumerate` with a page.
 ///
-/// `request` is the yield, a [`MailRequest`] (pimdir SYNC §4, §5). Returns
-/// `{items, vanished, complete, last, cursor?, checkpoint?}`, each item
-/// `{handle, flags, linkId, summary?, sortKey?}`, or `{cursorRejected: true}`.
+/// `request` is a [`MailRequest`] (pimdir SYNC §4, §5), the yield the app
+/// read. Returns a [`MailPage`](mail::listing::MailPage) (`{checkpoint?,
+/// complete, cursor?, cursorRejected?, items, last, vanished}`), each item a
+/// [`Named`] (`{flags, handle, linkId, sortKey?, summary?}`).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_enumerateMailbox<'local>(
     mut env: EnvUnowned<'local>,

@@ -20,7 +20,10 @@ import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.FloorReply;
 import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailPage;
+import org.pimalaya.client.MailRequest;
 import org.pimalaya.client.MailSession;
+import org.pimalaya.client.MailWire;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.MessageRef;
 import org.pimalaya.client.OfflineClient;
@@ -78,7 +81,7 @@ public class MailChunksTest {
     private final class Server extends MailClient {
         final int size;
         final int spacing;
-        final List<JSONObject> asked = new ArrayList<>();
+        final List<MailRequest> asked = new ArrayList<>();
 
         /** The account's driver, on this server. */
         final MailEngine engine;
@@ -114,21 +117,17 @@ public class MailChunksTest {
         }
 
         @Override
-        public JSONObject enumerateMailbox(
-                MailSession session, String mailbox, JSONObject request) {
+        public MailPage enumerateMailbox(MailSession session, String mailbox, MailRequest request) {
             asked.add(request);
             try {
-                JSONObject listing = request.getJSONObject("listing");
-                JSONObject scope = request.optJSONObject("scope");
-                String since =
-                        scope == null || scope.isNull("since") ? null : scope.optString("since");
-                String until =
-                        scope == null || scope.isNull("until") ? null : scope.optString("until");
+                MailRequest.Listing listing = request.listing();
+                String since = request.scope().since();
+                String until = request.scope().until();
                 JSONObject page =
                         new JSONObject().put("vanished", new JSONArray()).put("last", true);
-                if ("delta".equals(listing.getString("kind"))) {
-                    return page.put("items", new JSONArray()).put("complete", false)
-                            .put("checkpoint", "cp");
+                if (!listing.round()) {
+                    return MailWire.page(page.put("items", new JSONArray()).put("complete", false)
+                            .put("checkpoint", "cp"));
                 }
                 JSONArray items = new JSONArray();
                 for (int uid = size; uid >= 1; uid--) {
@@ -139,10 +138,10 @@ public class MailChunksTest {
                     }
                 }
                 page.put("items", items).put("complete", true);
-                if (!listing.optBoolean("band")) {
+                if (!listing.band()) {
                     page.put("checkpoint", "cp");
                 }
-                return page;
+                return MailWire.page(page);
             } catch (JSONException failure) {
                 throw new AssertionError(failure);
             }
@@ -191,11 +190,11 @@ public class MailChunksTest {
         Server server = new Server(120, 1);
 
         server.engine.sync(inbox);
-        JSONObject first = server.asked.get(0);
+        MailRequest first = server.asked.get(0);
         assertEquals(
                 "the floor is the date of the 50th newest message",
                 server.dateOf(71),
-                first.getJSONObject("scope").getString("since"));
+                first.scope().since());
         assertEquals(50, stored(inbox));
         MailStore.Edge edge = edgeOf(inbox);
         assertTrue(edge.listed);
@@ -206,13 +205,13 @@ public class MailChunksTest {
         assertEquals(
                 "a pass after the first is a delta under the same floor",
                 "delta",
-                server.asked.get(1).getJSONObject("listing").getString("kind"));
+                server.asked.get(1).listing().kind());
 
         assertTrue(server.engine.widen(inbox, MailEngine.FIRST_CHUNK));
-        JSONObject band = server.asked.get(2);
-        assertTrue("a widening lists the band alone", band.getJSONObject("listing").getBoolean("band"));
-        assertEquals(server.dateOf(21), band.getJSONObject("scope").getString("since"));
-        assertEquals(server.dateOf(71), band.getJSONObject("scope").getString("until"));
+        MailRequest band = server.asked.get(2);
+        assertTrue("a widening lists the band alone", band.listing().band());
+        assertEquals(server.dateOf(21), band.scope().since());
+        assertEquals(server.dateOf(71), band.scope().until());
         assertEquals(100, stored(inbox));
         assertEquals(server.dateOf(21), edgeOf(inbox).limit);
 
@@ -285,8 +284,8 @@ public class MailChunksTest {
         assertEquals(server.dateOf(21), first.frontier);
         assertEquals(50, first.brought);
         assertFalse(first.exhausted);
-        JSONObject band = server.asked.get(server.asked.size() - 1);
-        assertTrue("the band alone", band.getJSONObject("listing").getBoolean("band"));
+        MailRequest band = server.asked.get(server.asked.size() - 1);
+        assertTrue("the band alone", band.listing().band());
 
         MailWindow.moveBack(context, accountId, first.frontier);
         MailStep.Outcome last =

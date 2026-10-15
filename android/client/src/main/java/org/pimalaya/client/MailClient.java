@@ -23,27 +23,27 @@ public class MailClient {
     /**
      * One page of a mailbox's listing, answering the engine's enumerate yield.
      *
-     * <p>Members named by their listed summary (pimdir SYNC 4). JSON (recorded
-     * exception): the engine's wire, handed straight back; a Java model of it
-     * would duplicate the schema.
+     * <p>Members named by their listed summary (pimdir SYNC 4), but those a
+     * Graph delta or a Gmail round lists by id alone ({@link #nameMessages}).
      */
-    public JSONObject enumerateMailbox(MailSession session, String mailbox, JSONObject request) {
-        String asked = request.toString();
-        return Replies.object(
-                on(
-                        session,
-                        open ->
-                                Native.enumerateMailbox(
-                                        open.transport(), open.handle(), mailbox, asked)));
+    public MailPage enumerateMailbox(MailSession session, String mailbox, MailRequest request) {
+        String asked = request.toJson().toString();
+        return MailPage.from(
+                Replies.object(
+                        on(
+                                session,
+                                open ->
+                                        Native.enumerateMailbox(
+                                                open.transport(), open.handle(), mailbox, asked))));
     }
 
     /**
-     * The messages a Graph delta named by id and markers alone, with summaries.
+     * The messages a listing named by id and markers alone, with summaries.
      *
-     * <p>Items as a listing names them (JSON, recorded exception); a message
-     * gone since it was listed is left out.
+     * <p>Named as a listing names them; a message gone since it was listed is
+     * left out.
      */
-    public JSONArray nameMessages(MailSession session, String mailbox, List<String> handles) {
+    public List<Named> nameMessages(MailSession session, String mailbox, List<String> handles) {
         String asked = new JSONArray(handles).toString();
         JSONObject reply =
                 Replies.object(
@@ -52,8 +52,7 @@ public class MailClient {
                                 open ->
                                         Native.nameMessages(
                                                 open.transport(), open.handle(), mailbox, asked)));
-        JSONArray items = reply.optJSONArray("items");
-        return items == null ? new JSONArray() : items;
+        return Named.list(reply.optJSONArray("items"));
     }
 
     /**

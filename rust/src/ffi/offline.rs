@@ -25,7 +25,7 @@ use crate::{
     contact::sync,
     ffi::{ErrorReply, error_json, host::JniHost, parse_facts, parse_strings, read_string},
     mail::derivable,
-    offline::{Driver, OfflineSync, OfflineUpgrade, summary::SummaryJson, wire::sorted},
+    offline::{Driver, OfflineSync, summary::SummaryJson, wire::sorted},
 };
 
 /// `Native.offlineSync`: reconciles a collection, answering its sync report.
@@ -66,8 +66,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineSync<'local>(
 
 /// `Native.offlineUpgrade`: raises handles to the full detail tier.
 ///
-/// `handles` is a JSON string array; without `full` the target is the meta
-/// tier. Answers `{"upgraded", "fetched", "deduped"}`.
+/// `handles` is a JSON string array. Answers `{"upgraded", "fetched",
+/// "deduped"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
     mut env: EnvUnowned<'local>,
@@ -75,7 +75,6 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
     driver: JObject<'local>,
     collection: JString<'local>,
     handles: JString<'local>,
-    full: jboolean,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let collection = read_string(env, &collection);
@@ -84,11 +83,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
         let json = match parse_strings(&handles) {
             Err(err) => error_json(err),
             Ok(handles) => {
-                match Driver::new(JniHost::offline(env, &driver)).upgrade(OfflineUpgrade {
-                    collection: &collection,
-                    handles,
-                    full,
-                }) {
+                match Driver::new(JniHost::offline(env, &driver)).upgrade(&collection, handles) {
                     Ok(report) => {
                         to_string(&report).unwrap_or_else(|err| error_json(err.to_string()))
                     }

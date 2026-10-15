@@ -18,7 +18,10 @@ import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.FloorReply;
 import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailPage;
+import org.pimalaya.client.MailRequest;
 import org.pimalaya.client.MailSession;
+import org.pimalaya.client.MailWire;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.OfflineClient;
 import org.pimalaya.pimdir.PimdirAccount;
@@ -166,7 +169,7 @@ public class MailPoolTest {
         }
 
         @Override
-        public JSONObject enumerateMailbox(MailSession on, String mailbox, JSONObject request) {
+        public MailPage enumerateMailbox(MailSession on, String mailbox, MailRequest request) {
             String collection = store.collectionOf(EMAIL, mailbox);
             started.add(collection);
             if (first != null) {
@@ -194,12 +197,12 @@ public class MailPoolTest {
                     String date = hoursBack(index);
                     items.put(named(collection + "-" + index, date));
                 }
-                return new JSONObject()
+                return MailWire.page(new JSONObject()
                         .put("items", items)
                         .put("vanished", new JSONArray())
                         .put("complete", true)
                         .put("last", true)
-                        .put("checkpoint", "cp");
+                        .put("checkpoint", "cp"));
             } catch (JSONException failure) {
                 throw new AssertionError(failure);
             }

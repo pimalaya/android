@@ -75,16 +75,6 @@ pub struct OfflineSync<'a> {
     pub scope_bound: bool,
 }
 
-/// Which items one upgrade raises, and how far.
-pub struct OfflineUpgrade<'a> {
-    /// The collection holding the items.
-    pub collection: &'a str,
-    /// The handles raised.
-    pub handles: Vec<String>,
-    /// Whether they are raised to the full tier, else to the meta one.
-    pub full: bool,
-}
-
 /// The engine's driver: the host whose `OfflineDriver` services its yields.
 pub struct Driver<H> {
     host: H,
@@ -115,21 +105,19 @@ impl<H: Host> Driver<H> {
         Ok(SyncReportJson::from(&report))
     }
 
-    /// Raises items to a detail tier, returning the upgrade report.
+    /// Raises `collection`'s `handles` to the full tier, returning the
+    /// upgrade report.
     ///
-    /// Bodies are deduped by link id against the object store.
-    pub fn upgrade(&mut self, upgrade: OfflineUpgrade) -> Result<UpgradeReportJson, BridgeError> {
-        let handles = upgrade
-            .handles
-            .into_iter()
-            .map(PimdirHandle::from)
-            .collect();
-        let tier = if upgrade.full {
-            PimdirTier::Full
-        } else {
-            PimdirTier::Meta
-        };
-        let coroutine = PimdirUpgrade::new(upgrade.collection, handles, tier);
+    /// Bodies are deduped by link id against the object store. The meta tier
+    /// is never asked: a mail listing names its members, other domains name
+    /// theirs from full bodies.
+    pub fn upgrade(
+        &mut self,
+        collection: &str,
+        handles: Vec<String>,
+    ) -> Result<UpgradeReportJson, BridgeError> {
+        let handles = handles.into_iter().map(PimdirHandle::from).collect();
+        let coroutine = PimdirUpgrade::new(collection, handles, PimdirTier::Full);
         let report = self.run(coroutine)?;
 
         Ok(UpgradeReportJson::from(&report))

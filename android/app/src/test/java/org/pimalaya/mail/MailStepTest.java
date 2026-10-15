@@ -94,15 +94,35 @@ public class MailStepTest {
         final Instant received;
         final List<String> mailboxes;
 
+        /** Its bare {@code Message-ID}, null for none. */
+        final String messageId;
+
         Mail(String id, String date, Instant received, String... mailboxes) {
+            this(id, date, received, null, List.of(mailboxes));
+        }
+
+        private Mail(
+                String id,
+                String date,
+                Instant received,
+                String messageId,
+                List<String> mailboxes) {
             this.id = id;
             this.date = date;
             this.received = received;
-            this.mailboxes = List.of(mailboxes);
+            this.messageId = messageId;
+            this.mailboxes = mailboxes;
+        }
+
+        /** The same message, stamped with {@code messageId}. */
+        Mail stamped(String messageId) {
+            return new Mail(id, date, received, messageId, mailboxes);
         }
 
         byte[] source() {
-            return ("Date: " + date + "\r\nSubject: Mail " + id + "\r\n\r\nBody " + id + "\r\n")
+            String stamp = messageId == null ? "" : "Message-ID: <" + messageId + ">\r\n";
+            return (stamp + "Date: " + date + "\r\nSubject: Mail " + id + "\r\n\r\nBody " + id
+                            + "\r\n")
                     .getBytes(StandardCharsets.UTF_8);
         }
     }
@@ -158,8 +178,8 @@ public class MailStepTest {
                                     mail.source().length,
                                     PimdirSummary.mailSortKey(mail.date),
                                     PimdirSummary.mail(
-                                            null, "Mail " + mail.id, "", "a@example.org",
-                                            null, mail.date, 0, false)));
+                                            mail.messageId, "Mail " + mail.id, "",
+                                            "a@example.org", null, mail.date, 0, false)));
                 }
                 return new NamedStep(anchors, false, false, "h1", items);
             } catch (IOException failure) {
@@ -283,6 +303,50 @@ public class MailStepTest {
         new GmailStep().run(server.engine, new StepRun(EMAIL, collections, null, false));
         assertEquals(Set.of("m1", "a1"), server.held.get(1));
     }
+
+    @Test
+    public void aStepLandsASentCopyOnItsPendingCreate() throws Exception {
+        store.replaceMailboxes(
+                EMAIL,
+                List.of(
+                        new Mailbox("INBOX", "inbox"),
+                        new Mailbox("Clients", ""),
+                        new Mailbox("TRASH", "trash"),
+                        new Mailbox("SENT", "sent")));
+        String sent = store.collectionOf(EMAIL, "SENT");
+        List<String> collections = new ArrayList<>(mailboxes());
+        collections.add(sent);
+        String date = "2026-10-09T11:00:00Z";
+        String body = "Message-ID: <mine@example.org>\r\nSubject: Hi\r\n\r\nbody\r\n";
+        String create = PimdirSummary.bare("mine@example.org");
+        new MailStager(pimdir, Clients.real())
+                .mutateAdd(
+                        sent,
+                        create,
+                        body,
+                        Flags.of(Flags.Marker.SEEN),
+                        PimdirSummary.mail(
+                                "mine@example.org", "Hi", null, EMAIL, "bob@example.org", date,
+                                body.length(), false),
+                        PimdirSummary.mailSortKey(date));
+        // NOTE: Gmail stamps a Message-ID of its own on what it sends.
+        store.policy().aliasSentCopy("mine@example.org", "theirs@gmail");
+        Server server = new Server();
+        Instant now = Instant.parse("2026-10-09T12:00:00Z");
+        server.next = List.of(new Mail("s1", date, now, "SENT").stamped("theirs@gmail"));
+
+        new GmailStep().run(server.engine, new StepRun(EMAIL, collections, null, true));
+
+        assertEquals("landed on the create, not a second copy", 1, held(sent));
+        MailStore.Query all = store.query((account, name) -> true, false, false, "");
+        for (MailStore.StoredMessage message : store.all(all)) {
+            if (message.collection.equals(sent)) {
+                assertEquals("filed under the arrival's handle", "s1", message.id);
+            }
+        }
+        assertNull("the alias is spent", store.policy().stagedSentCopy("theirs@gmail"));
+    }
+
     @Test
     public void aStepsBodyThatDidNotLandIsOwed() throws Exception {
         Instant now = Instant.parse("2026-10-09T12:00:00Z");

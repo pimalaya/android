@@ -13,12 +13,15 @@ import org.pimalaya.client.Description;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.GraphStepReply;
 import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailPage;
+import org.pimalaya.client.MailRequest;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.MessageRef;
 import org.pimalaya.client.MessageSource;
 import org.pimalaya.client.MessageSources;
+import org.pimalaya.client.Named;
 import org.pimalaya.client.NamedStep;
 import org.pimalaya.client.NamedStepItem;
 import org.pimalaya.client.StepRequest;
@@ -76,13 +79,6 @@ public final class MailEngine extends PimdirEngine {
 
     /** The store, for the account's bound kept beside it. */
     private final PimdirDb pimdir;
-
-    /**
-     * The members the last listed page named, by handle.
-     *
-     * <p>What a meta fetch reads back: the listing read all it would.
-     */
-    private final Map<String, JSONObject> listed = new HashMap<>();
 
     /** Counts the bodies bridge calls write ({@link MailTally}), or null. */
     public MailTally tally;
@@ -424,14 +420,18 @@ public final class MailEngine extends PimdirEngine {
 
     /** What a step's next enumerate answers: its members of one mailbox. */
     private static final class Landing {
-        final JSONArray items;
+        final List<Named> items;
         final String checkpoint;
         final boolean empty;
 
-        Landing(JSONArray items, String checkpoint, boolean empty) {
+        /** The members as the enumerate named them, until then as stepped. */
+        List<Named> named;
+
+        Landing(List<Named> items, String checkpoint, boolean empty) {
             this.items = items;
             this.checkpoint = checkpoint;
             this.empty = empty;
+            this.named = items;
         }
     }
 
@@ -440,26 +440,30 @@ public final class MailEngine extends PimdirEngine {
      *
      * <p>On an empty mailbox opening a round, they are that round, closed with
      * {@code checkpoint} (the history id before the step), so the next pass is
-     * a delta; elsewhere a delta adding them, finding nothing absent.
+     * a delta; elsewhere a delta adding them, finding nothing absent. Answers
+     * the members under the link ids they landed with: a sent copy's is its
+     * create's ({@link #nameByMessageId}), which its body downloads under.
      */
-    void land(String collection, JSONArray items, String checkpoint) {
+    List<Named> land(String collection, List<Named> items, String checkpoint) {
         boolean empty;
         synchronized (locks.store) {
             empty = !offline.bindsAny(collection);
         }
-        landing = new Landing(items, checkpoint, empty);
+        Landing step = new Landing(items, checkpoint, empty);
+        landing = step;
         try {
             String bound = bound(collection);
             MailStore.Coverage coverage = mail().coverage(collection);
             String since = coverage.at != null ? MailScope.clamp(coverage.since, bound) : bound;
             Log.d(
                     "pimalaya",
-                    "mail step " + collection + " (" + items.length() + "): "
+                    "mail step " + collection + " (" + items.size() + "): "
                             + clients.offline().syncImmutable(this, collection, since, false));
             MailState.of(pimdir.context()).relisted(collection);
         } finally {
             landing = null;
         }
+        return step.named;
     }
 
     /**
@@ -475,66 +479,78 @@ public final class MailEngine extends PimdirEngine {
     @Override
     protected JSONObject enumerate(JSONObject yielded) throws JSONException {
         String collection = yielded.getString("collection");
-        JSONObject listing = yielded.getJSONObject("listing");
+        MailRequest.Listing listing = listingOf(yielded.getJSONObject("listing"));
         if (landing != null) {
-            return landed(collection, listing);
+            return landed(collection, listing).toJson();
         }
-        JSONObject request = new JSONObject();
-        request.put("listing", listing);
-        JSONObject scope = yielded.optJSONObject("scope");
-        request.put("scope", scope == null ? new JSONObject() : scope);
-        request.put("covered", covered(collection, scope));
-        Long reach = MailWindow.reach(pimdir.context(), accountId);
-        if (reach != null) {
-            request.put("received", reach);
-        }
+        JSONObject wide = yielded.optJSONObject("scope");
+        MailRequest.Scope scope =
+                wide == null
+                        ? new MailRequest.Scope(null, null)
+                        : new MailRequest.Scope(
+                                wide.isNull("since") ? null : wide.optString("since"),
+                                wide.isNull("until") ? null : wide.optString("until"));
+        MailRequest request =
+                new MailRequest(
+                        covered(collection, scope),
+                        listing,
+                        MailWindow.reach(pimdir.context(), accountId),
+                        scope);
 
         long started = System.nanoTime();
-        JSONObject page = clients.mail().enumerateMailbox(session, mailboxOf(collection), request);
-        nameUnnamed(collection, listing, page);
-        nameByMessageId(collection, page);
+        MailPage page = clients.mail().enumerateMailbox(session, mailboxOf(collection), request);
+        page = page.with(nameUnnamed(collection, listing, page));
+        page = page.with(nameByMessageId(collection, page.items()));
         remote(System.nanoTime() - started);
-        return listed(collection, page, true);
+        return listed(collection, page, true).toJson();
+    }
+
+    /** The listing an enumerate yield asks for, as the bridge reads it. */
+    private static MailRequest.Listing listingOf(JSONObject listing) throws JSONException {
+        String kind = listing.getString("kind");
+        if ("round".equals(kind)) {
+            return new MailRequest.Listing(
+                    kind,
+                    null,
+                    listing.isNull("cursor") ? null : listing.getString("cursor"),
+                    listing.optBoolean("band"));
+        }
+        return new MailRequest.Listing(kind, listing.getString("checkpoint"), null, false);
     }
 
     /** A step's page ({@link #land}): an empty box's round, else a delta. */
-    private JSONObject landed(String collection, JSONObject listing) throws JSONException {
+    private MailPage landed(String collection, MailRequest.Listing listing) {
         Landing step = landing;
         landing = null;
-        JSONObject page = new JSONObject();
-        page.put("items", step.items);
-        page.put("vanished", new JSONArray());
-        page.put("last", true);
-        boolean round = "round".equals(listing.optString("kind"));
-        page.put("complete", round && step.empty);
-        if (round && step.empty) {
-            page.put("checkpoint", step.checkpoint);
-        }
-        nameByMessageId(collection, page);
+        boolean opens = listing.round() && step.empty;
+        step.named = nameByMessageId(collection, step.items);
+        MailPage page =
+                new MailPage(
+                        opens ? step.checkpoint : null,
+                        opens,
+                        null,
+                        false,
+                        step.named,
+                        true,
+                        List.of());
         return listed(collection, page, false);
     }
 
     /**
-     * Keeps a page's names for meta fetches, counts it, owes arrivals.
+     * Counts a page and owes its arrivals.
      *
      * <p>With {@code arrivals}, a delta's members new to the store are owed
      * their body whatever the date ({@link MailOwed}); a step's download
      * anyway.
      */
-    private JSONObject listed(String collection, JSONObject page, boolean arrivals)
-            throws JSONException {
-        listed.clear();
-        JSONArray items = page.optJSONArray("items");
+    private MailPage listed(String collection, MailPage page, boolean arrivals) {
         List<String> handles = new ArrayList<>();
         Map<String, String> links = new HashMap<>();
-        for (int index = 0; items != null && index < items.length(); index++) {
-            JSONObject item = items.getJSONObject(index);
-            String handle = item.getString("handle");
-            listed.put(handle, item);
-            handles.add(handle);
-            links.put(handle, item.optString("linkId", handle));
+        for (Named item : page.items()) {
+            handles.add(item.handle());
+            links.put(item.handle(), item.linkId());
         }
-        if (arrivals && !page.optBoolean("complete") && !handles.isEmpty()) {
+        if (arrivals && !page.complete() && !handles.isEmpty()) {
             Map<String, String[]> bound;
             synchronized (locks.store) {
                 bound = offline.bound(collection, handles);
@@ -559,7 +575,7 @@ public final class MailEngine extends PimdirEngine {
      * first chunk by {@code /messages} with no delta link; a later round over
      * the covered scope makes that link.
      */
-    boolean covered(String collection, JSONObject scope) {
+    boolean covered(String collection, MailRequest.Scope scope) {
         MailStore.Coverage coverage = mail().coverage(collection);
         if (coverage.at == null) {
             return false;
@@ -567,8 +583,7 @@ public final class MailEngine extends PimdirEngine {
         if (coverage.since == null) {
             return true;
         }
-        String since = scope == null || scope.isNull("since") ? null : scope.optString("since", null);
-        return since != null && since.compareTo(coverage.since) >= 0;
+        return scope.since() != null && scope.since().compareTo(coverage.since) >= 0;
     }
 
     /**
@@ -576,20 +591,18 @@ public final class MailEngine extends PimdirEngine {
      *
      * <p>Bound ones keep their summary, others are read
      * ({@link MailClient#nameMessages}), gone ones dropped. On Gmail rounds
-     * only refiled or new arrivals are read ({@link #steppedIn}).
+     * only refiled or new arrivals are read ({@link #steppedIn}). Answers the
+     * page's members, named.
      */
-    void nameUnnamed(String collection, JSONObject listing, JSONObject page)
-            throws JSONException {
-        JSONArray items = page.optJSONArray("items");
+    List<Named> nameUnnamed(String collection, MailRequest.Listing listing, MailPage page) {
         List<String> unnamed = new ArrayList<>();
-        for (int index = 0; items != null && index < items.length(); index++) {
-            JSONObject item = items.getJSONObject(index);
-            if (!item.has("summary")) {
-                unnamed.add(item.getString("handle"));
+        for (Named item : page.items()) {
+            if (item.summary() == null) {
+                unnamed.add(item.handle());
             }
         }
         if (unnamed.isEmpty()) {
-            return;
+            return page.items();
         }
 
         Map<String, String[]> bound;
@@ -602,33 +615,30 @@ public final class MailEngine extends PimdirEngine {
                 unbound.add(handle);
             }
         }
-        if (page.optBoolean("complete") && accountWide()) {
+        if (page.complete() && accountWide()) {
             unbound = steppedIn(listing, unnamed, bound);
         }
-        Map<String, JSONObject> read = new HashMap<>();
+        Map<String, Named> read = new HashMap<>();
         if (!unbound.isEmpty()) {
-            JSONArray named =
+            List<Named> named =
                     clients.mail().nameMessages(session, mailboxOf(collection), unbound);
-            for (int index = 0; index < named.length(); index++) {
-                JSONObject item = named.getJSONObject(index);
-                read.put(item.getString("handle"), item);
+            for (Named item : named) {
+                read.put(item.handle(), item);
             }
         }
 
-        JSONArray kept = new JSONArray();
-        for (int index = 0; index < items.length(); index++) {
-            JSONObject item = items.getJSONObject(index);
-            String handle = item.getString("handle");
-            if (item.has("summary")) {
-                kept.put(item);
+        List<Named> kept = new ArrayList<>(page.items().size());
+        for (Named item : page.items()) {
+            String handle = item.handle();
+            if (item.summary() != null) {
+                kept.add(item);
             } else if (bound.containsKey(handle)) {
-                item.put("linkId", bound.get(handle)[0]);
-                kept.put(item);
+                kept.add(item.linked(bound.get(handle)[0]));
             } else if (read.containsKey(handle)) {
-                kept.put(read.get(handle));
+                kept.add(read.get(handle));
             }
         }
-        page.put("items", kept);
+        return kept;
     }
 
     /**
@@ -638,15 +648,14 @@ public final class MailEngine extends PimdirEngine {
      * band round: listed newest received first, they arrived after.
      */
     private List<String> steppedIn(
-            JSONObject listing, List<String> unnamed, Map<String, String[]> bound) {
-        if (listing.isNull("cursor")) {
+            MailRequest.Listing listing, List<String> unnamed, Map<String, String[]> bound) {
+        if (listing.cursor() == null) {
             sawHeld = false;
         }
         Set<String> held;
         synchronized (locks.store) {
             held = offline.heldOf(accountCollections(), unnamed);
         }
-        boolean band = listing.optBoolean("band");
         List<String> named = new ArrayList<>();
         for (String handle : unnamed) {
             if (bound.containsKey(handle)) {
@@ -654,7 +663,7 @@ public final class MailEngine extends PimdirEngine {
             } else if (held.contains(handle)) {
                 sawHeld = true;
                 named.add(handle);
-            } else if (!band && !sawHeld) {
+            } else if (!listing.band() && !sawHeld) {
                 named.add(handle);
             }
         }
@@ -688,35 +697,36 @@ public final class MailEngine extends PimdirEngine {
      *
      * <p>So the engine lands the create on it (pimdir SYNC §6), not a second
      * copy: a provider-filed sent copy. Already bound members stay as named.
+     * Answers {@code items}, named.
      */
-    void nameByMessageId(String collection, JSONObject page) throws JSONException {
-        JSONArray items = page.optJSONArray("items");
-        if (items == null || items.length() == 0) {
-            return;
+    List<Named> nameByMessageId(String collection, List<Named> items) {
+        if (items.isEmpty()) {
+            return items;
         }
         Map<String, String> creates;
         synchronized (locks.store) {
             creates = offline.pendingCreatesByMessageId(collection);
         }
         if (creates.isEmpty()) {
-            return;
+            return items;
         }
 
-        List<String> handles = new ArrayList<>(items.length());
-        for (int index = 0; index < items.length(); index++) {
-            handles.add(items.getJSONObject(index).getString("handle"));
+        List<String> handles = new ArrayList<>(items.size());
+        for (Named item : items) {
+            handles.add(item.handle());
         }
         Map<String, String[]> bound;
         synchronized (locks.store) {
             bound = offline.bound(collection, handles);
         }
 
-        for (int index = 0; index < items.length(); index++) {
-            JSONObject item = items.getJSONObject(index);
-            JSONObject summary = item.optJSONObject("summary");
+        List<Named> named = new ArrayList<>(items.size());
+        for (Named item : items) {
+            JSONObject summary = item.summary();
             JSONObject mail = summary == null ? null : summary.optJSONObject("mail");
             String messageId = mail == null ? null : mail.optString("message_id", null);
-            if (messageId == null || bound.containsKey(item.getString("handle"))) {
+            if (messageId == null || bound.containsKey(item.handle())) {
+                named.add(item);
                 continue;
             }
             String create = creates.remove(messageId);
@@ -729,10 +739,9 @@ public final class MailEngine extends PimdirEngine {
                     mail().policy().forgetSentAlias(messageId);
                 }
             }
-            if (create != null) {
-                item.put("linkId", create);
-            }
+            named.add(create == null ? item : item.linked(create));
         }
+        return named;
     }
 
     @Override
@@ -741,27 +750,14 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * The last page's members at meta, or {@link #download}'s bodies at full.
+     * {@link #download}'s bodies: the only fetch a mail driver is asked.
      *
-     * <p>A sync never asks; a meta upgrade reads back the last page. Full is
-     * the body step's alone, the reader fetching itself.
+     * <p>A sync never fetches and every upgrade is to full, the body step's;
+     * the reader fetches by itself.
      */
     @Override
     protected JSONObject fetch(JSONObject yielded) throws JSONException {
-        if ("full".equals(yielded.optString("tier"))) {
-            return fetchBodies(yielded.getString("collection"), yielded.getJSONArray("handles"));
-        }
-        JSONArray items = new JSONArray();
-        for (String handle : stringsOf(yielded.getJSONArray("handles"))) {
-            JSONObject item = listed.get(handle);
-            if (item != null) {
-                items.put(item);
-            }
-        }
-
-        JSONObject reply = new JSONObject();
-        reply.put("items", items);
-        return reply;
+        return fetchBodies(yielded.getString("collection"), yielded.getJSONArray("handles"));
     }
 
     /** The rows {@link #download} asked for, by handle, during its upgrade. */
@@ -1091,19 +1087,10 @@ public final class MailEngine extends PimdirEngine {
         }
     }
 
-    /** A step's item on the engine's wire, its file and labels left out. */
-    static JSONObject wireItem(NamedStepItem item) throws JSONException {
-        JSONObject named = new JSONObject();
-        named.put("handle", item.handle());
-        named.put("flags", new JSONArray(item.flags()));
-        named.put("linkId", item.linkId());
-        if (item.summary() != null) {
-            named.put("summary", item.summary());
-        }
-        if (!item.sortKey().isEmpty()) {
-            named.put("sortKey", item.sortKey());
-        }
-        return named;
+    /** A step's item as a listed member, its file and labels left out. */
+    static Named named(NamedStepItem item) {
+        return new Named(
+                item.flags(), item.handle(), item.linkId(), item.sortKey(), item.summary());
     }
 
     /** The handles {@link #sources} found gone while a download runs. */

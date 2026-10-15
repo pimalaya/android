@@ -15,7 +15,10 @@ import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailPage;
+import org.pimalaya.client.MailRequest;
 import org.pimalaya.client.MailSession;
+import org.pimalaya.client.MailWire;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.OfflineClient;
 import org.pimalaya.pimdir.PimdirAccount;
@@ -101,10 +104,10 @@ public class MailBridgeClockTest {
                     int next;
 
                     @Override
-                    public JSONObject enumerateMailbox(
-                            MailSession session, String mailbox, JSONObject request) {
+                    public MailPage enumerateMailbox(
+                            MailSession session, String mailbox, MailRequest request) {
                         try {
-                            return new JSONObject(pages[next++]);
+                            return MailWire.page(new JSONObject(pages[next++]));
                         } catch (JSONException failure) {
                             throw new AssertionError(failure);
                         }
