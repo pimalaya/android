@@ -4,8 +4,6 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -13,8 +11,8 @@ import org.json.JSONObject;
  * The account verbs of the bridge (rs/ffi/account.rs).
  *
  * <p>Config search, OAuth 2.0 refresh, metadata and registration (the code
- * exchange is {@link OauthSession}'s), and what a URL tells of its backend.
- * Calls taking a transport block: run them off the main thread.
+ * exchange is {@link OauthSession}'s), account base URLs. Calls taking a
+ * transport block: run them off the main thread.
  */
 public class AccountClient {
     /**
@@ -251,60 +249,6 @@ public class AccountClient {
     /** Builds one account base URL through the bridge. */
     private static String base(String kind, String value) {
         return Json.string(Replies.object(Native.accountBase(kind, value)), "url");
-    }
-
-    /**
-     * True when the account's cards are account-level (JMAP, Google).
-     *
-     * <p>m:n book memberships, listed once per account; CardDAV and Graph
-     * cards live in one collection each ({@link ContactClient#listCards}).
-     */
-    public static boolean isAccountLevel(Account account) {
-        return account != null && isAccountLevel(account.baseUrl);
-    }
-
-    /** True when the URL (account base or collection) is account-level. */
-    public static boolean isAccountLevel(String url) {
-        return info(url).accountLevel();
-    }
-
-    /**
-     * True when mail submits over the session it reads from.
-     *
-     * <p>JMAP, Graph and Gmail need no submit endpoint of their own.
-     */
-    public static boolean submitsOverSession(Account account) {
-        return account != null && info(account.baseUrl).submitsOverSession();
-    }
-
-    /** True when the URL belongs to a plain CardDAV backend. */
-    public static boolean isCarddav(String url) {
-        return info(url).backend() == Backend.CARDDAV;
-    }
-
-    /** True when the account's backend is Microsoft Graph. */
-    public static boolean isGraph(Account account) {
-        return account != null && info(account.baseUrl).backend() == Backend.GRAPH;
-    }
-
-    /** True when the account's backend is the Google People API. */
-    public static boolean isGoogle(Account account) {
-        return account != null && info(account.baseUrl).backend() == Backend.GOOGLE;
-    }
-
-    /** True when the account's backend speaks JMAP (RFC 8620). */
-    public static boolean isJmap(Account account) {
-        return account != null && info(account.baseUrl).backend() == Backend.JMAP;
-    }
-
-    /** Parsed backend info by URL, cached (pure computation). */
-    private static final Map<String, BackendInfo> infos = new ConcurrentHashMap<>();
-
-    /** What the URL tells about its backend; a null URL reads as empty. */
-    public static BackendInfo info(String url) {
-        return infos.computeIfAbsent(
-                url == null ? "" : url,
-                key -> BackendInfo.from(Replies.object(Native.accountInfo(key))));
     }
 
     /** Parses a search reply into service configs. */

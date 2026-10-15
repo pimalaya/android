@@ -9,6 +9,9 @@
  * {@link Account} as one JSON argument and holds nothing across calls: a
  * renewed token rides in on the next one.
  *
+ * <p>{@link Account#info} answers the facts a caller decides by, read once
+ * per account ({@link BackendInfo}), never the backend's identity.
+ *
  * <p>The app holds the five domain clients ({@link Clients}):
  * {@link AccountClient}, {@link ContactClient}, {@link CalendarClient},
  * {@link MailClient} on a held {@link MailSession}, and {@link OfflineClient},

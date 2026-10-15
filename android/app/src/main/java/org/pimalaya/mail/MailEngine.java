@@ -8,7 +8,6 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
-import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.Description;
 import org.pimalaya.client.Flags;
@@ -69,42 +68,6 @@ public final class MailEngine extends PimdirEngine {
     /** Messages one step of the background fill widens a mailbox by. */
     public static final int FILL_CHUNK = 500;
 
-    /** Graph sessions an account runs at once: HTTP requests, nothing held. */
-    static final int GRAPH = 4;
-
-    /** JMAP sessions an account runs at once: HTTP requests, nothing held. */
-    static final int JMAP = 4;
-
-    /** IMAP sessions an account runs at once: a connection and a login each. */
-    static final int IMAP = 3;
-
-    /**
-     * Gmail sessions an account runs at once.
-     *
-     * <p>The account is one listing, read once per run, its metadata batches
-     * spread over the sessions under one pacing bucket.
-     */
-    static final int GMAIL = 2;
-
-    /**
-     * How many sessions one account of this backend runs at once.
-     *
-     * <p>Four for Graph and JMAP (plain HTTP), three for IMAP (a login each),
-     * two for Gmail, paced process-wide so more would queue on one bucket.
-     */
-    public static int sessionsOf(Account account) {
-        if (AccountClient.isGraph(account)) {
-            return GRAPH;
-        }
-        if (AccountClient.isJmap(account)) {
-            return JMAP;
-        }
-        if (AccountClient.isGoogle(account)) {
-            return GMAIL;
-        }
-        return IMAP;
-    }
-
     /** The live connection; null on a stage-only driver, reaching no server. */
     private final MailSession session;
 
@@ -142,9 +105,9 @@ public final class MailEngine extends PimdirEngine {
     public List<Mailbox> mailboxes() {
         List<Mailbox> mailboxes = clients.mail().listMailboxes(session);
         Account server = session.account();
-        boolean accountWide = AccountClient.isGoogle(server) || AccountClient.isJmap(server);
+        boolean accountWide = server.info().accountLevel();
         MailPolicy.markAccountWide(pimdir.context(), accountId, accountWide);
-        MailPolicy.markAllMail(pimdir.context(), accountId, AccountClient.isGoogle(server));
+        MailPolicy.markAllMail(pimdir.context(), accountId, server.info().hasAllMail());
         MailPolicy.markExpungesOne(pimdir.context(), accountId, session.expungesOne());
         if (!accountWide) {
             int released;
@@ -1291,7 +1254,7 @@ public final class MailEngine extends PimdirEngine {
             return result(handle, true, null, null);
         }
 
-        if (AccountClient.submitsOverSession(session.account()) || mail().outbox().submitting(linkId)) {
+        if (session.account().info().submitsOverSession() || mail().outbox().submitting(linkId)) {
             return result(handle, false, null, null);
         }
 

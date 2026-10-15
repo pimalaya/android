@@ -635,7 +635,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_composeMessage<'local>(
     .resolve::<ErrorReply>()
 }
 
-/// `Native.submitMessage`: hands one stored message over.
+/// `Native.submitMessage`: hands one stored message over, over SMTP to the
+/// session account's submit URL or through the session's API.
 ///
 /// Returns `{messageId}`, the provider's own or null, or `{"error": "..",
 /// "permanent": bool, "uncertain": bool}`. The submission opens its own
@@ -646,17 +647,15 @@ pub extern "system" fn Java_org_pimalaya_client_Native_submitMessage<'local>(
     _class: JClass<'local>,
     transport: JObject<'local>,
     handle: i64,
-    submit_url: JString<'local>,
     source: JByteArray<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let submit_url = read_string(env, &submit_url);
         let raw = env.convert_byte_array(&source).unwrap_or_default();
 
         let mut client = Client::new(JniHost::new(env, &transport, None));
         let submitted = unsafe { bind(handle, &mut client) }
             .map_err(Refused::transient)
-            .and_then(|mut mail| mail.submit(&submit_url, &raw));
+            .and_then(|mut mail| mail.submit(&raw));
         let json = match submitted {
             Ok(message_id) => to_string(&SubmittedReply { message_id })
                 .unwrap_or_else(|err| error_json(err.to_string())),

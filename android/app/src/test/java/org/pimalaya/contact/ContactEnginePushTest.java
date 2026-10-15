@@ -369,7 +369,7 @@ public class ContactEnginePushTest {
 
     @Test
     public void aGraphRoundIsOneBatchOfCreatesAndDestroys() throws Exception {
-        String book = "https://graph.example.com/books/b1/";
+        String book = "msgraph://example/b1";
         account("msgraph://example", book, "b1");
 
         assertSameResults(
@@ -397,11 +397,11 @@ public class ContactEnginePushTest {
         server.calls.clear();
         List<String> singles = singles(book);
         assertSameResults(
-                "[{\"handle\":\"n1\",\"accepted\":true,\"assigned\":\"srv-n1.vcf\","
+                "[{\"handle\":\"n1\",\"accepted\":true,\"assigned\":\"srv-n1\","
                         + "\"revision\":\"e-new\"}]",
                 singles.get(0));
         assertSameResults(
-                "[{\"handle\":\"a\",\"accepted\":true,\"assigned\":\"srv-a.vcf\","
+                "[{\"handle\":\"a\",\"accepted\":true,\"assigned\":\"srv-a\","
                         + "\"revision\":\"e-new\"}]",
                 singles.get(1));
         assertSameResults(
@@ -410,8 +410,8 @@ public class ContactEnginePushTest {
         assertSameResults("[{\"handle\":\"d\",\"accepted\":true}]", singles.get(4));
         assertEquals(
                 List.of(
-                        "createCard " + book + " n1.vcf " + quoted("n1", "New one"),
-                        "createCard " + book + " a.vcf " + quoted("a", "A"),
+                        "createCard " + book + " n1 " + quoted("n1", "New one"),
+                        "createCard " + book + " a " + quoted("a", "A"),
                         "updateCard " + book + " uid-b b e-b " + quoted("b", "B edited") + " "
                                 + quoted("b", "B"),
                         "deleteCard " + book + " uid-c c e-c",

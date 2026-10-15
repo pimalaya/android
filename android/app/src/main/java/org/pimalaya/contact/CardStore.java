@@ -10,7 +10,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -392,22 +391,5 @@ public class CardStore extends SQLiteOpenHelper {
     /** The byte-exact content hash naming a body in the object store. */
     public static String byteHash(String text) {
         return PimdirHash.of(text);
-    }
-
-    /**
-     * The name a create offers: {@code id.vcf} on CardDAV, else the bare id.
-     */
-    static String resourceName(String url, String id) {
-        return isCarddavUrl(url) ? id + ".vcf" : id;
-    }
-
-    /** True for the backends whose cards are account-level (JMAP, Google). */
-    static boolean isAccountLevelUrl(String url) {
-        return AccountClient.isAccountLevel(url);
-    }
-
-    /** True for plain CardDAV collections. */
-    static boolean isCarddavUrl(String url) {
-        return AccountClient.isCarddav(url);
     }
 }

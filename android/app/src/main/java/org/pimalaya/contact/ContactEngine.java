@@ -19,13 +19,13 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
-import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.AccountSnapshot;
 import org.pimalaya.client.AccountSnapshotFacts;
 import org.pimalaya.client.BookCard;
 import org.pimalaya.client.BooksUpdate;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.CardDelta;
+import org.pimalaya.client.CardFetch;
 import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ConflictForm;
@@ -331,7 +331,7 @@ public final class ContactEngine extends PimdirEngine {
         serverOnly(url);
         String cursor = yielded.isNull("cursor") ? null : yielded.getString("cursor");
 
-        boolean accountLevel = AccountClient.isAccountLevel(account);
+        boolean accountLevel = account.info().accountLevel();
         CardDelta delta = accountLevel ? accountDeltas.get(cursor) : null;
         if (delta == null) {
             long asked = System.nanoTime();
@@ -353,7 +353,9 @@ public final class ContactEngine extends PimdirEngine {
         // the body cache with one full listing. The delta link predates the
         // listing; anything changed between re-lists on the next round. An
         // incremental round reads what changed 20 to a $batch (fetchGraph).
-        if (isGraph() && delta.complete() && !delta.changed().isEmpty()) {
+        if (account.info().cardFetch() == CardFetch.JSON_BATCH
+                && delta.complete()
+                && !delta.changed().isEmpty()) {
             Map<String, Card> byHandle = new HashMap<>();
             long listing = System.nanoTime();
             for (Card card : clients.contact().listCards(primary, account, url)) {
@@ -441,33 +443,37 @@ public final class ContactEngine extends PimdirEngine {
         serverOnly(url);
 
         JSONArray items = new JSONArray();
-        if (isGoogle()) {
-            fetchGoogle(url, handles, items);
-        } else if (AccountClient.isAccountLevel(account)) {
-            for (int index = 0; index < handles.length(); index++) {
-                String handle = handles.getString(index);
-                Card card = deltaCards.get(handle);
-                if (card == null) {
-                    card = clients.contact().readCard(primary, account, url, handle);
+        switch (account.info().cardFetch()) {
+            case BATCH_GET:
+                fetchGoogle(url, handles, items);
+                break;
+            case CHANGES:
+                for (int index = 0; index < handles.length(); index++) {
+                    String handle = handles.getString(index);
+                    Card card = deltaCards.get(handle);
+                    if (card == null) {
+                        card = clients.contact().readCard(primary, account, url, handle);
+                    }
+                    items.put(fetchedItem(url, handle, card));
                 }
-                items.put(fetchedItem(url, handle, card));
-            }
-        } else if (isGraph()) {
-            fetchGraph(url, handles, items);
-        } else {
-            // NOTE: CardDAV multiget in chunks, matched back by resource
-            // name.
-            List<String> uris = new ArrayList<>(handles.length());
-            for (int index = 0; index < handles.length(); index++) {
-                uris.add(handles.getString(index));
-            }
-            for (int start = 0; start < uris.size(); start += MULTIGET_CHUNK) {
-                List<String> chunk =
-                        uris.subList(start, Math.min(start + MULTIGET_CHUNK, uris.size()));
-                for (Card card : clients.contact().multigetCards(primary, account, url, chunk)) {
-                    items.put(fetchedItem(url, card.uri(), card));
+                break;
+            case JSON_BATCH:
+                fetchGraph(url, handles, items);
+                break;
+            default:
+                // NOTE: multiget in chunks, matched back by resource name.
+                List<String> uris = new ArrayList<>(handles.length());
+                for (int index = 0; index < handles.length(); index++) {
+                    uris.add(handles.getString(index));
                 }
-            }
+                for (int start = 0; start < uris.size(); start += MULTIGET_CHUNK) {
+                    List<String> chunk =
+                            uris.subList(start, Math.min(start + MULTIGET_CHUNK, uris.size()));
+                    List<Card> cards = clients.contact().multigetCards(primary, account, url, chunk);
+                    for (Card card : cards) {
+                        items.put(fetchedItem(url, card.uri(), card));
+                    }
+                }
         }
 
         JSONObject reply = new JSONObject();
@@ -608,22 +614,25 @@ public final class ContactEngine extends PimdirEngine {
         serverOnly(url);
         step(Progress.STAGE_UPLOAD, changes.length());
 
-        // NOTE: CardDAV has no batch verb, so the round parallelizes; each
-        // change is one guarded round trip on its own transport, dividing
-        // the wall clock by the pool on a latency-bound link.
-        boolean concurrent =
-                changes.length() > 1
-                        && !AccountClient.isAccountLevel(account)
-                        && !isGraph();
-
         JSONArray results;
         try {
-            if (isGoogle() && changes.length() > 1) {
-                results = pushGoogle(url, changes);
-            } else if ((isJmap() || isGraph()) && changes.length() > 1) {
-                results = pushRound(url, changes);
+            if (changes.length() < 2) {
+                results = pushEach(url, changes);
             } else {
-                results = concurrent ? pushAll(url, changes) : pushEach(url, changes);
+                switch (account.info().cardPush()) {
+                    case BATCH:
+                        results = pushGoogle(url, changes);
+                        break;
+                    case ROUND:
+                        results = pushRound(url, changes);
+                        break;
+                    default:
+                        // NOTE: with no batch verb the round parallelizes;
+                        // each change is one guarded round trip on its own
+                        // transport, dividing the wall clock by the pool on a
+                        // latency-bound link.
+                        results = pushAll(url, changes);
+                }
             }
         } finally {
             // NOTE: drop the pass caches once per round, not per change; no
@@ -1004,7 +1013,10 @@ public final class ContactEngine extends PimdirEngine {
         // and io-webdav names the resource verbatim now instead of appending
         // .vcf itself, so what goes out is the name this side calls the card
         // by. Sending the handle would file it under a control character.
-        String name = CardStore.resourceName(url, PimdirStorage.nameOf(handle));
+        String name = PimdirStorage.nameOf(handle);
+        if (account.info().namesResources()) {
+            name += ".vcf";
+        }
         Card created =
                 clients.contact().createCard(
                         transport, account, url, new NewCard(name, row.getString("vcard")));
@@ -1138,7 +1150,7 @@ public final class ContactEngine extends PimdirEngine {
      * edit, undoing a staged removal. A failed read leaves it unknown.
      */
     private String landed(Transport transport, String url, String uri, String answered) {
-        if (answered != null || !CardStore.isCarddavUrl(url)) {
+        if (answered != null || !account.info().readsBackRevision()) {
             return answered;
         }
         try {
@@ -1187,20 +1199,6 @@ public final class ContactEngine extends PimdirEngine {
                         Boolean.TRUE.equals(listedComplete.get(url)),
                         handle,
                         ifMatch));
-    }
-
-    private boolean isGraph() {
-        return account != null && AccountClient.isGraph(account);
-    }
-
-    private boolean isGoogle() {
-        return account != null && AccountClient.isGoogle(account);
-    }
-
-    private boolean isJmap() {
-        return account != null
-                && AccountClient.isAccountLevel(account)
-                && !AccountClient.isGoogle(account);
     }
 
 }

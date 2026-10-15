@@ -505,48 +505,27 @@
     <string name="dup_reason_phone">Même téléphone</string>
     <string name="dup_reason_name">Même nom</string>
 
-    <string-array name="phone_types">
-        <item>Mobile</item>
-        <item>Domicile</item>
-        <item>Professionnel</item>
-        <item>Mobile professionnel</item>
-        <item>Fax (domicile)</item>
-        <item>Fax (professionnel)</item>
-        <item>Bipeur</item>
-        <item>Autre</item>
-    </string-array>
-
-    <string-array name="email_types">
-        <item>Domicile</item>
-        <item>Professionnel</item>
-        <item>Autre</item>
-    </string-array>
-
-    <string-array name="address_types">
-        <item>Domicile</item>
-        <item>Professionnel</item>
-        <item>Autre</item>
-    </string-array>
-
-    <string-array name="relation_types">
-        <item>Conjoint</item>
-        <item>Enfant</item>
-        <item>Parent</item>
-        <item>Frère ou sœur</item>
-        <item>Ami</item>
-        <item>Collègue</item>
-        <item>Urgence</item>
-        <item>Autre</item>
-    </string-array>
-
-    <string-array name="gender_types">
-        <item>Non défini</item>
-        <item>Homme</item>
-        <item>Femme</item>
-        <item>Autre</item>
-        <item>Aucun</item>
-        <item>Inconnu</item>
-    </string-array>
+    <string name="type_cell">Mobile</string>
+    <string name="type_home">Domicile</string>
+    <string name="type_work">Professionnel</string>
+    <string name="type_cell_work">Mobile professionnel</string>
+    <string name="type_fax_home">Fax (domicile)</string>
+    <string name="type_fax_work">Fax (professionnel)</string>
+    <string name="type_pager">Bipeur</string>
+    <string name="type_spouse">Conjoint</string>
+    <string name="type_child">Enfant</string>
+    <string name="type_parent">Parent</string>
+    <string name="type_sibling">Frère ou sœur</string>
+    <string name="type_friend">Ami</string>
+    <string name="type_colleague">Collègue</string>
+    <string name="type_emergency">Urgence</string>
+    <string name="type_other">Autre</string>
+    <string name="sex_unset">Non défini</string>
+    <string name="sex_male">Homme</string>
+    <string name="sex_female">Femme</string>
+    <string name="sex_other">Autre</string>
+    <string name="sex_none">Aucun</string>
+    <string name="sex_unknown">Inconnu</string>
 
     <!-- Ce que le lecteur fait du message qu'il a ouvert. -->
     <string name="message_mark_unread">Marquer comme non lu</string>

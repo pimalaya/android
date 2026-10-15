@@ -22,7 +22,6 @@ import android.widget.TextView;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
-import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MessageBody;
@@ -689,9 +688,9 @@ public final class MessageView implements FilesList.Origins {
     /**
      * Stages the messages' deletion, reloads the list, runs {@code done}.
      *
-     * <p>The toast says what {@link MailStager#stageDelete} staged. A JMAP
-     * account with no trash is refused: RFC 8621 4.1.1 has no deleted keyword,
-     * so the change would fail once per sync forever.
+     * <p>The toast says what {@link MailStager#stageDelete} staged. An account
+     * with no trash keeping no {@code \Deleted} marker is refused: the change
+     * would fail once per sync forever.
      */
     void stageDelete(List<MailStore.StoredMessage> messages, Runnable done) {
         List<MailStore.StoredMessage> staged = new ArrayList<>();
@@ -701,7 +700,8 @@ public final class MessageView implements FilesList.Origins {
             if (parts.mail().policy().trashOf(message.accountEmail).isEmpty()
                     && !message.pending()
                     && account != null
-                    && AccountClient.isJmap(account.server(PimDomain.MAIL))) {
+                    && account.server(PimDomain.MAIL) != null
+                    && !account.server(PimDomain.MAIL).info().keepsDeleted()) {
                 refused = true;
                 continue;
             }

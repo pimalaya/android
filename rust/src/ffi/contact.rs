@@ -864,7 +864,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_findDuplicates<'local>(
 /// `Native.cardTypeOrder`: the type-set vocabulary of the form's spinners.
 ///
 /// For `phone`, `email`, `address`, `relation` or `gender`, each position's
-/// TYPE set in the order the Android string-arrays must mirror. Returns
+/// TYPE set, the order the spinners are built in. Returns
 /// `{"order": [[..], ..]}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_cardTypeOrder<'local>(

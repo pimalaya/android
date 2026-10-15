@@ -23,6 +23,12 @@ public final class AccountEntry {
     private final Map<PimDomain, AccountConnection> connections;
     private final Map<String, AccountCredential> credentials;
 
+    /**
+     * Each covered domain's server, built once so its backend facts are read
+     * once per entry ({@link Account#info}).
+     */
+    private final Map<PimDomain, Account> servers = new EnumMap<>(PimDomain.class);
+
     AccountEntry(
             String email,
             Map<PimDomain, AccountConnection> connections,
@@ -34,6 +40,20 @@ public final class AccountEntry {
         this.connections = new EnumMap<>(PimDomain.class);
         this.connections.putAll(connections);
         this.credentials = new HashMap<>(credentials);
+        for (Map.Entry<PimDomain, AccountConnection> entry : this.connections.entrySet()) {
+            AccountConnection connection = entry.getValue();
+            AccountCredential credential = this.credentials.get(connection.credentialId);
+            if (credential != null) {
+                servers.put(
+                        entry.getKey(),
+                        new Account(
+                                connection.baseUrl,
+                                credential.login,
+                                credential.secret,
+                                connection.submitUrl,
+                                email));
+            }
+        }
     }
 
     /** One identity covering nothing yet, to connect domains onto. */
@@ -93,17 +113,7 @@ public final class AccountEntry {
      * <p>Null when the account does not cover the domain.
      */
     public Account server(PimDomain domain) {
-        AccountConnection connection = connections.get(domain);
-        AccountCredential credential = credential(domain);
-        if (connection == null || credential == null) {
-            return null;
-        }
-        return new Account(
-                connection.baseUrl,
-                credential.login,
-                credential.secret,
-                connection.submitUrl,
-                email);
+        return servers.get(domain);
     }
 
     /** The domains this account covers, in the enum's order. */

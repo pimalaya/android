@@ -31,6 +31,7 @@ import org.pimalaya.client.ContactRelation;
 import org.pimalaya.client.FormAddress;
 import org.pimalaya.client.FormGender;
 import org.pimalaya.client.FormView;
+import org.pimalaya.client.TypeKind;
 import org.pimalaya.ui.Sections;
 import org.pimalaya.ui.Ui;
 
@@ -593,7 +594,7 @@ public final class ContactForm {
                 ContactRelation entry = relations.get(index);
                 items.add(
                         entryItem(
-                                typeLabel(R.array.relation_types, typeAt(view.relations(), index)),
+                                typeLabel(TypeKind.RELATION, typeAt(view.relations(), index)),
                                 entry.value(),
                                 divergedItem("relations", at),
                                 () -> dialogs.relationDialog(at)));
@@ -609,7 +610,7 @@ public final class ContactForm {
                 ContactPhone entry = phones.get(index);
                 items.add(
                         entryItem(
-                                typeLabel(R.array.phone_types, typeAt(view.phones(), index)),
+                                typeLabel(TypeKind.PHONE, typeAt(view.phones(), index)),
                                 entry.number(),
                                 divergedItem("phones", at),
                                 () -> dialogs.phoneDialog(at)));
@@ -627,7 +628,7 @@ public final class ContactForm {
                 ContactEmail entry = emails.get(index);
                 items.add(
                         entryItem(
-                                typeLabel(R.array.email_types, typeAt(view.emails(), index)),
+                                typeLabel(TypeKind.EMAIL, typeAt(view.emails(), index)),
                                 entry.address(),
                                 divergedItem("emails", at),
                                 () -> dialogs.emailDialog(at)));
@@ -658,7 +659,7 @@ public final class ContactForm {
                 items.add(
                         entryItem(
                                 typeLabel(
-                                        R.array.address_types,
+                                        TypeKind.ADDRESS,
                                         addressAt(index).index()),
                                 value(addressAt(index).summary()),
                                 divergedItem("addresses", at),
@@ -856,7 +857,7 @@ public final class ContactForm {
         List<String> parts = new ArrayList<>();
         int sex = gender.sexIndex();
         if (sex > 0) {
-            parts.add(typeLabel(R.array.gender_types, sex));
+            parts.add(typeLabel(TypeKind.GENDER, sex));
         }
         if (!gender.identity().isEmpty()) {
             parts.add(gender.identity());
@@ -864,8 +865,8 @@ public final class ContactForm {
         return String.join(" · ", parts);
     }
 
-    private String typeLabel(int arrayId, int index) {
-        String[] labels = activity.getResources().getStringArray(arrayId);
+    private String typeLabel(TypeKind kind, int index) {
+        String[] labels = TypeLabels.of(activity.getResources(), kind);
         return labels[Math.min(index, labels.length - 1)];
     }
 

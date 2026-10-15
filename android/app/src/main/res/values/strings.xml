@@ -700,48 +700,28 @@
     <string name="dup_reason_phone">Same phone</string>
     <string name="dup_reason_name">Same name</string>
 
-    <string-array name="phone_types">
-        <item>Mobile</item>
-        <item>Home</item>
-        <item>Work</item>
-        <item>Work mobile</item>
-        <item>Fax (home)</item>
-        <item>Fax (work)</item>
-        <item>Pager</item>
-        <item>Other</item>
-    </string-array>
-
-    <string-array name="email_types">
-        <item>Home</item>
-        <item>Work</item>
-        <item>Other</item>
-    </string-array>
-
-    <string-array name="address_types">
-        <item>Home</item>
-        <item>Work</item>
-        <item>Other</item>
-    </string-array>
-
-    <string-array name="relation_types">
-        <item>Spouse</item>
-        <item>Child</item>
-        <item>Parent</item>
-        <item>Sibling</item>
-        <item>Friend</item>
-        <item>Colleague</item>
-        <item>Emergency</item>
-        <item>Other</item>
-    </string-array>
-
-    <string-array name="gender_types">
-        <item>Not set</item>
-        <item>Male</item>
-        <item>Female</item>
-        <item>Other</item>
-        <item>None</item>
-        <item>Unknown</item>
-    </string-array>
+    <!-- Type and sex labels of the edit form, keyed by rs/contact/form.rs's tokens (TypeLabels). -->
+    <string name="type_cell">Mobile</string>
+    <string name="type_home">Home</string>
+    <string name="type_work">Work</string>
+    <string name="type_cell_work">Work mobile</string>
+    <string name="type_fax_home">Fax (home)</string>
+    <string name="type_fax_work">Fax (work)</string>
+    <string name="type_pager">Pager</string>
+    <string name="type_spouse">Spouse</string>
+    <string name="type_child">Child</string>
+    <string name="type_parent">Parent</string>
+    <string name="type_sibling">Sibling</string>
+    <string name="type_friend">Friend</string>
+    <string name="type_colleague">Colleague</string>
+    <string name="type_emergency">Emergency</string>
+    <string name="type_other">Other</string>
+    <string name="sex_unset">Not set</string>
+    <string name="sex_male">Male</string>
+    <string name="sex_female">Female</string>
+    <string name="sex_other">Other</string>
+    <string name="sex_none">None</string>
+    <string name="sex_unknown">Unknown</string>
 
     <!-- Account settings (AccountSettings). -->
     <string name="account_enable">Use this account</string>

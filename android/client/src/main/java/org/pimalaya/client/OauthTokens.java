@@ -6,7 +6,7 @@ import org.json.JSONObject;
  * Tokens returned by an OAuth 2.0 code exchange or refresh.
  *
  * <p>Mirrors io-oauth {@code Oauth20AccessTokenSuccessParams} (RFC 6749 5.1).
- * An {@link Account} with an empty login and the access token as password
+ * An {@link Account} with an empty login and the access token as secret
  * authenticates with Bearer.
  *
  * @param accessToken the issued access token

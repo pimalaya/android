@@ -2,7 +2,6 @@ package org.pimalaya.mail;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
@@ -10,7 +9,6 @@ import android.content.Context;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.pimalaya.client.Account;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ComposeDraft;
 import org.pimalaya.client.MailClient;
@@ -92,17 +90,5 @@ public class MailSubmitTest {
         assertEquals(1, waiting.size());
         assertEquals("fixed-16@example.com", waiting.get(0).messageId);
         assertArrayEquals(new MailClient().compose(draft), waiting.get(0).source);
-    }
-
-    @Test
-    public void graphAndGmailKeepNoAnsweredMarker() {
-        assertFalse(answers("msgraph://jane@outlook.com"));
-        assertFalse(answers("google://jane@gmail.com"));
-        assertTrue(answers("imaps://imap.example.org:993"));
-        assertTrue(answers("jmap://api.fastmail.com/jmap/session"));
-    }
-
-    private static boolean answers(String baseUrl) {
-        return MailSubmit.marksAnswered(new Account(baseUrl, "jane", "secret", null));
     }
 }

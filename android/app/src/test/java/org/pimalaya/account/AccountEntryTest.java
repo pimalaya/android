@@ -79,7 +79,7 @@ public class AccountEntryTest {
 
         for (PimDomain domain : PimDomain.values()) {
             assertEquals("rotated", refreshed.credential(domain).refreshToken());
-            assertEquals("fresh", refreshed.server(domain).password);
+            assertEquals("fresh", refreshed.server(domain).secret);
             // NOTE: what a calendar write announces a meeting by.
             assertEquals("jane@example.org", refreshed.server(domain).address);
         }
@@ -105,12 +105,12 @@ public class AccountEntryTest {
         AccountEntry refreshed = account.refreshed(PimDomain.MAIL, "fresh", "mail-rotated");
 
         assertEquals("mail-rotated", refreshed.credential(PimDomain.MAIL).refreshToken());
-        assertEquals("fresh", refreshed.server(PimDomain.MAIL).password);
+        assertEquals("fresh", refreshed.server(PimDomain.MAIL).secret);
         assertEquals(
                 "the other consent keeps its own token",
                 "contacts-consent",
                 refreshed.credential(PimDomain.CONTACTS).refreshToken());
-        assertEquals("access", refreshed.server(PimDomain.CONTACTS).password);
+        assertEquals("access", refreshed.server(PimDomain.CONTACTS).secret);
     }
 
     @Test

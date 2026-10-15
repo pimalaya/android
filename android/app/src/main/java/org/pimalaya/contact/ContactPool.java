@@ -7,7 +7,6 @@ import java.util.Set;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
-import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.ContactGroup;
 import org.pimalaya.client.PoolReplica;
@@ -96,7 +95,7 @@ public final class ContactPool {
      * <p>The bare server id on account-level backends, else collection-scoped.
      */
     private static String cardKey(Account account, String bookUrl, String id) {
-        return AccountClient.isAccountLevel(account) ? id : CardStore.key(bookUrl, id);
+        return account != null && account.info().accountLevel() ? id : CardStore.key(bookUrl, id);
     }
 
     private static String replicaRef(Entry entry, List<AccountEntry> accounts) {

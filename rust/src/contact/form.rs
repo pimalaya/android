@@ -1,7 +1,7 @@
 //! # Edit form
 //!
-//! The edit form's arrays.xml-coupled type tables and the view and
-//! summary helpers that project the field model onto the form.
+//! The edit form's type tables, which the spinners are built from, and
+//! the view and summary helpers that project the field model onto the form.
 
 use serde::Serialize;
 
@@ -9,8 +9,7 @@ use crate::contact::fields::{
     ContactEmail, ContactFields, ContactGender, ContactPhone, ContactRelation, strings, trimmed,
 };
 
-/// Spinner position to vCard TYPE set of the phone rows, aligned with
-/// the Android phone_types string array.
+/// Spinner position to vCard TYPE set of the phone rows.
 const PHONE_TYPES: [&[&str]; 8] = [
     &["cell"],
     &["home"],
@@ -22,12 +21,10 @@ const PHONE_TYPES: [&[&str]; 8] = [
     &[],
 ];
 
-/// Spinner position to vCard TYPE set of the email and address rows,
-/// aligned with the Android email_types and address_types arrays.
+/// Spinner position to vCard TYPE set of the email and address rows.
 const HOME_WORK_OTHER: [&[&str]; 3] = [&["home"], &["work"], &[]];
 
-/// Spinner position to RELATED type set, aligned with the Android
-/// relation_types array.
+/// Spinner position to RELATED type set.
 const RELATION_TYPES: [&[&str]; 8] = [
     &["spouse"],
     &["child"],
@@ -39,8 +36,8 @@ const RELATION_TYPES: [&[&str]; 8] = [
     &[],
 ];
 
-/// Spinner position to GENDER sex code (RFC 6350 §6.2.7), aligned with
-/// the Android gender_types array; position 0 means unset.
+/// Spinner position to GENDER sex code (RFC 6350 §6.2.7); position 0
+/// means unset.
 const GENDER_SEXES: [&str; 6] = ["", "M", "F", "O", "N", "U"];
 
 /// The edit form's view support of one field model (see [`form_view`]).
@@ -217,10 +214,10 @@ pub fn form_entry(kind: &str, index: i64, value: &str, pref: bool) -> Result<For
 }
 
 /// Each spinner position's vCard TYPE set by kind (the sex code alone
-/// for `gender`), in the order the Android string-arrays mirror.
+/// for `gender`).
 ///
-/// The single owner of that order: a cross-language test pins the
-/// arrays.xml labels to it, so a reorder fails instead of mismapping.
+/// The single owner of that order: Java builds the spinners from it,
+/// naming each set, so a position always reads back as its set.
 pub fn card_type_order(kind: &str) -> Vec<Vec<&'static str>> {
     let table: &[&[&str]] = match kind {
         "phone" => &PHONE_TYPES,

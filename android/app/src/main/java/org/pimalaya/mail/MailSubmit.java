@@ -1,8 +1,6 @@
 package org.pimalaya.mail;
 
 import org.json.JSONException;
-import org.pimalaya.client.Account;
-import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.ComposeDraft;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
@@ -132,16 +130,6 @@ public final class MailSubmit {
                         source.length,
                         false),
                 PimdirSummary.mailSortKey(date));
-    }
-
-    /**
-     * Whether a reply marks its parent answered once queued.
-     *
-     * <p>Graph and Gmail keep no answered marker, and one staged there
-     * would be refused on every sync.
-     */
-    static boolean marksAnswered(Account server) {
-        return !AccountClient.isGraph(server) && !AccountClient.isGoogle(server);
     }
 
     /** Now, as the date RFC 5322 section 3.3 writes. */

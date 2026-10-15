@@ -2034,7 +2034,7 @@ public final class OnboardingFlow {
             setup.baseUrl = granted.getValue();
             setup.credential = credential;
             Account server = new Account(setup.baseUrl, "", tokens.accessToken());
-            if (AccountClient.isJmap(server)) {
+            if (server.info().announcesCapabilities()) {
                 overJmap.add(setup.domain);
                 jmap = server;
             }
@@ -2208,7 +2208,7 @@ public final class OnboardingFlow {
      */
     private Exception probe(PimDomain domain, Account account) {
         try {
-            if (AccountClient.isJmap(account)) {
+            if (account.info().announcesCapabilities()) {
                 Set<String> capabilities;
                 try (Transport transport = new Transport()) {
                     capabilities = parts.clients().contact().jmapCapabilities(transport, account);

@@ -10,7 +10,6 @@ import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
-import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Flags;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
@@ -98,7 +97,7 @@ public final class MessageCompose {
             Account server = candidate.server(PimDomain.MAIL);
             boolean endpoint =
                     server != null && server.submitUrl != null && !server.submitUrl.isEmpty();
-            if (endpoint || AccountClient.submitsOverSession(server)) {
+            if (endpoint || server != null && server.info().submitsOverSession()) {
                 accounts.add(candidate);
             }
         }
@@ -231,7 +230,7 @@ public final class MessageCompose {
         AccountEntry sender = account;
         Account server = account.server(PimDomain.MAIL);
         MailStore.StoredMessage parent =
-                opened == null || !MailSubmit.marksAnswered(server) ? null : opened.parent;
+                opened == null || !server.info().keepsAnswered() ? null : opened.parent;
         host.setSending(true);
         host.io.execute(
                 () -> {

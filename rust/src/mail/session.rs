@@ -1034,7 +1034,7 @@ impl<H: Host> Mail<'_, '_, H> {
     /// Answers the `Message-ID` the provider filed its sent copy under when
     /// it stamped its own. The sent copy is a create staged when queued,
     /// landed by the provider's filing or pushed as an IMAP append.
-    pub fn submit(&mut self, submit_url: &str, raw: &[u8]) -> Result<Option<String>, Refused> {
+    pub fn submit(&mut self, raw: &[u8]) -> Result<Option<String>, Refused> {
         match self.session.kind {
             MailKind::Jmap(_) => {
                 // NOTE: the server files the copy in Sent once it accepts
@@ -1092,6 +1092,7 @@ impl<H: Host> Mail<'_, '_, H> {
                 Ok(filed)
             }
             MailKind::Imap(_) => {
+                let submit_url = &self.session.account.submit_url;
                 if submit_url.is_empty() {
                     return Err(Refused::transient(
                         "This account has no server to send through",

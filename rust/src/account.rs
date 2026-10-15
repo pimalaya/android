@@ -3,7 +3,8 @@
 //! Account base URLs and the backend each one names: a DAV context root,
 //! or a sentinel scheme for an API with no root (Graph, JMAP, Google).
 //!
-//! Base URLs are opaque to Java, which threads them back into the bridge.
+//! Base URLs are opaque to Java, which threads them back into the bridge
+//! and decides by the facts [`AccountInfo`] answers, never by the backend.
 //! The domains route on [`Backend`] and address collections through the
 //! pieces extracted here; onboarding lives in [`discovery`] and [`oauth`].
 
@@ -11,7 +12,7 @@ mod discovery;
 pub mod oauth;
 
 use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::client::Auth;
@@ -47,7 +48,8 @@ pub const GOOGLE_DEFAULT_BOOK: &str = "contacts";
 /// scheme (no sentinel means a CardDAV context root).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Backend {
-    /// CardDAV (RFC 6352), the base URL being the context root.
+    /// CardDAV (RFC 6352), the base URL being the context root; also the
+    /// CalDAV and IMAP base URLs, which name no sentinel either.
     Carddav,
     /// Microsoft Graph contacts, behind [`MSGRAPH_PREFIX`].
     Graph,
@@ -71,12 +73,107 @@ impl Backend {
         }
     }
 
-    /// True when cards are account-level with m:n book memberships.
+    /// True when cards and mail are account-level, in m:n collections.
     ///
-    /// JMAP and Google cards are listed once per account; CardDAV and
-    /// Graph cards live in the one collection they were listed from.
+    /// JMAP and Google items are listed once per account; CardDAV, IMAP and
+    /// Graph items live in the one collection they were listed from.
     pub fn account_level(self) -> bool {
         matches!(self, Self::Jmap | Self::Google)
+    }
+
+    /// True when the session names the domains it serves (RFC 8620 section
+    /// 2), so a sign-in reads them before probing a domain.
+    pub fn announces_capabilities(self) -> bool {
+        matches!(self, Self::Jmap)
+    }
+
+    /// True when mail with no origin uploads (IMAP APPEND, RFC 9051 section
+    /// 6.3.12); the APIs file their own copies.
+    pub fn appends_mail(self) -> bool {
+        matches!(self, Self::Carddav)
+    }
+
+    /// How changed cards are read in bulk.
+    pub fn card_fetch(self) -> CardFetch {
+        match self {
+            Self::Carddav => CardFetch::Multiget,
+            Self::Graph => CardFetch::JsonBatch,
+            Self::Jmap => CardFetch::Changes,
+            Self::Google => CardFetch::BatchGet,
+        }
+    }
+
+    /// How a round of card changes is pushed.
+    pub fn card_push(self) -> CardPush {
+        match self {
+            Self::Carddav => CardPush::Parallel,
+            Self::Graph | Self::Jmap => CardPush::Round,
+            Self::Google => CardPush::Batch,
+        }
+    }
+
+    /// True when mailboxes are labels over an All Mail holding every
+    /// message (Gmail).
+    pub fn has_all_mail(self) -> bool {
+        matches!(self, Self::Google)
+    }
+
+    /// True when a reply's `\Answered` marker is kept (IMAP, JMAP
+    /// `$answered`); Graph and Gmail refuse to set it.
+    pub fn keeps_answered(self) -> bool {
+        matches!(self, Self::Carddav | Self::Jmap)
+    }
+
+    /// True when a `\Deleted` marker is kept, so a delete needs no trash.
+    ///
+    /// JMAP has no such keyword (RFC 8621 section 4.1.1), Graph and Gmail
+    /// refuse to set it.
+    pub fn keeps_deleted(self) -> bool {
+        matches!(self, Self::Carddav)
+    }
+
+    /// How a mail step walks the account.
+    pub fn mail_step(self) -> MailStepKind {
+        match self {
+            Self::Carddav => MailStepKind::Store,
+            Self::Graph => MailStepKind::Mailboxes,
+            Self::Jmap | Self::Google => MailStepKind::Account,
+        }
+    }
+
+    /// True when a created card's resource is named by the client,
+    /// `<id>.vcf` (a WebDAV PUT, RFC 4918 section 9.7).
+    pub fn names_resources(self) -> bool {
+        matches!(self, Self::Carddav)
+    }
+
+    /// The protocol family a screen labels the account by.
+    pub fn protocol(self) -> Protocol {
+        match self {
+            Self::Carddav => Protocol::Standard,
+            Self::Graph => Protocol::Graph,
+            Self::Jmap => Protocol::Jmap,
+            Self::Google => Protocol::Google,
+        }
+    }
+
+    /// True when a card write may answer no revision, read back instead: a
+    /// server storing other than it was sent answers no ETag (as CalDAV,
+    /// RFC 4791 section 5.3.4).
+    pub fn reads_back_revision(self) -> bool {
+        matches!(self, Self::Carddav)
+    }
+
+    /// How many mail sessions one account runs at once.
+    ///
+    /// Four over plain HTTP (Graph, JMAP), three for IMAP (a login each),
+    /// two for Gmail, paced process-wide so more would queue on one bucket.
+    pub fn sessions(self) -> u32 {
+        match self {
+            Self::Carddav => 3,
+            Self::Graph | Self::Jmap => 4,
+            Self::Google => 2,
+        }
     }
 
     /// True when mail submits through the session it reads from.
@@ -95,6 +192,152 @@ impl Backend {
             Self::Jmap => "jmap",
             Self::Google => "google",
         }
+    }
+}
+
+/// How a backend reads changed cards in bulk.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CardFetch {
+    /// One `addressbook-multiget` REPORT per chunk (RFC 6352 section 8.7).
+    Multiget,
+    /// JSON batching of single reads, a complete round's listing priming
+    /// the bodies its delta rows lack (Graph `$batch`).
+    JsonBatch,
+    /// The changes carry the cards, one missing read alone (JMAP).
+    Changes,
+    /// One read naming many cards (People `people:batchGet`).
+    BatchGet,
+}
+
+/// How a backend pushes a round of card changes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CardPush {
+    /// One guarded request per change, run in parallel: no batch verb.
+    Parallel,
+    /// One request carrying the round (JMAP `/set`, Graph `$batch`).
+    Round,
+    /// The batch verbs, memberships patched apart (People API).
+    Batch,
+}
+
+/// How a mail step walks an account.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MailStepKind {
+    /// The account as one listing, newest first (Gmail, JMAP).
+    Account,
+    /// Each stepped mailbox by date (Graph).
+    Mailboxes,
+    /// Widened from the store, the server listing per mailbox (IMAP).
+    Store,
+}
+
+/// The protocol family a screen labels an account by.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Protocol {
+    /// The domain's open standard: IMAP, CalDAV or CardDAV.
+    Standard,
+    /// Microsoft Graph.
+    Graph,
+    /// JMAP (RFC 8620).
+    Jmap,
+    /// Google's APIs: Gmail, Calendar, People.
+    Google,
+    /// The on-device account, with no transport.
+    Local,
+}
+
+/// What an account base URL tells of its backend: the facts Java decides
+/// by, never the backend itself.
+#[derive(Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountInfo {
+    /// See [`Backend::account_level`].
+    pub account_level: bool,
+    /// See [`Backend::announces_capabilities`].
+    pub announces_capabilities: bool,
+    /// See [`Backend::appends_mail`].
+    pub appends_mail: bool,
+    /// See [`Backend::card_fetch`].
+    pub card_fetch: CardFetch,
+    /// See [`Backend::card_push`].
+    pub card_push: CardPush,
+    /// See [`Backend::has_all_mail`].
+    pub has_all_mail: bool,
+    /// The host the base URL reaches, the providers' APIs by their name;
+    /// a URL naming none reads whole.
+    pub host: String,
+    /// See [`Backend::keeps_answered`].
+    pub keeps_answered: bool,
+    /// See [`Backend::keeps_deleted`].
+    pub keeps_deleted: bool,
+    /// See [`Backend::mail_step`].
+    pub mail_step: MailStepKind,
+    /// See [`Backend::names_resources`].
+    pub names_resources: bool,
+    /// See [`Backend::protocol`].
+    pub protocol: Protocol,
+    /// See [`Backend::reads_back_revision`].
+    pub reads_back_revision: bool,
+    /// See [`Backend::sessions`].
+    pub sessions: u32,
+    /// See [`Backend::submits_over_session`].
+    pub submits_over_session: bool,
+}
+
+impl AccountInfo {
+    /// What the base URL tells, the on-device account included.
+    pub fn of(base_url: &str) -> Self {
+        let host = host(base_url);
+        let backend = Backend::of(base_url);
+        let info = Self {
+            account_level: backend.account_level(),
+            announces_capabilities: backend.announces_capabilities(),
+            appends_mail: backend.appends_mail(),
+            card_fetch: backend.card_fetch(),
+            card_push: backend.card_push(),
+            has_all_mail: backend.has_all_mail(),
+            host,
+            keeps_answered: backend.keeps_answered(),
+            keeps_deleted: backend.keeps_deleted(),
+            mail_step: backend.mail_step(),
+            names_resources: backend.names_resources(),
+            protocol: backend.protocol(),
+            reads_back_revision: backend.reads_back_revision(),
+            sessions: backend.sessions(),
+            submits_over_session: backend.submits_over_session(),
+        };
+
+        // NOTE: the local account has no transport, so it is not a
+        // Backend; it reads as a standards server whose cards never leave
+        // the app's store, so none is named or read back.
+        if base_url.starts_with(LOCAL_PREFIX) {
+            return Self {
+                names_resources: false,
+                protocol: Protocol::Local,
+                reads_back_revision: false,
+                ..info
+            };
+        }
+        info
+    }
+}
+
+/// The host a base URL reaches, the providers' APIs by their name.
+fn host(base_url: &str) -> String {
+    let url = match Backend::of(base_url) {
+        Backend::Graph => return "graph.microsoft.com".to_string(),
+        Backend::Google => return "googleapis.com".to_string(),
+        Backend::Jmap => jmap_session_url(base_url).ok(),
+        Backend::Carddav => Url::parse(base_url).ok(),
+    };
+
+    match url.as_ref().and_then(Url::host_str) {
+        Some(host) => host.to_string(),
+        None => base_url.to_string(),
     }
 }
 
@@ -125,6 +368,8 @@ pub struct AccountJson {
     pub login: String,
     /// The password, or the OAuth 2.0 access token.
     pub secret: SecretString,
+    /// Where mail is submitted, empty when the session submits itself.
+    pub submit_url: String,
 }
 
 impl AccountJson {
@@ -231,23 +476,78 @@ mod tests {
         assert_eq!(Backend::of(""), Backend::Carddav);
     }
 
-    /// JMAP and Google cards are account-level, CardDAV and Graph
-    /// cards per-collection.
+    /// Every backend's facts, the on-device account's included: the table
+    /// Java decides by.
     #[test]
-    fn account_level_splits_the_backends() {
-        assert!(Backend::Jmap.account_level());
-        assert!(Backend::Google.account_level());
-        assert!(!Backend::Carddav.account_level());
-        assert!(!Backend::Graph.account_level());
+    fn account_info_answers_every_backend() {
+        use CardFetch::*;
+        use CardPush::*;
+        use MailStepKind::{Account as AccountStep, Mailboxes, Store};
+
+        #[rustfmt::skip]
+        let table = [
+            // url, level, caps, appends, fetch, push, all mail, host
+            // answered, deleted, step, names, protocol, reads back, sessions, submits
+            ("google://jane@gmail.com", true, false, false, BatchGet, Batch, true, "googleapis.com",
+                false, false, AccountStep, false, Protocol::Google, false, 2, true),
+            ("msgraph://jane@outlook.com", false, false, false, JsonBatch, Round, false, "graph.microsoft.com",
+                false, false, Mailboxes, false, Protocol::Graph, false, 4, true),
+            ("jmap://api.fastmail.com/jmap/session", true, true, false, Changes, Round, false, "api.fastmail.com",
+                true, false, AccountStep, false, Protocol::Jmap, false, 4, true),
+            ("imaps://imap.example.org:993", false, false, true, Multiget, Parallel, false, "imap.example.org",
+                true, true, Store, true, Protocol::Standard, true, 3, false),
+            ("https://dav.example.org/", false, false, true, Multiget, Parallel, false, "dav.example.org",
+                true, true, Store, true, Protocol::Standard, true, 3, false),
+            ("local://on-this-device", false, false, true, Multiget, Parallel, false, "on-this-device",
+                true, true, Store, false, Protocol::Local, false, 3, false),
+        ];
+
+        for row in table {
+            let expected = AccountInfo {
+                account_level: row.1,
+                announces_capabilities: row.2,
+                appends_mail: row.3,
+                card_fetch: row.4,
+                card_push: row.5,
+                has_all_mail: row.6,
+                host: row.7.to_string(),
+                keeps_answered: row.8,
+                keeps_deleted: row.9,
+                mail_step: row.10,
+                names_resources: row.11,
+                protocol: row.12,
+                reads_back_revision: row.13,
+                sessions: row.14,
+                submits_over_session: row.15,
+            };
+            assert_eq!(AccountInfo::of(row.0), expected, "{}", row.0);
+        }
     }
 
-    /// API mail backends send over the API; an IMAP base URL needs SMTP.
+    /// The host keeps what the URL names; a URL naming none reads whole.
     #[test]
-    fn mail_submits_over_the_session_on_every_api_backend() {
-        assert!(Backend::of("jmap://api.fastmail.com").submits_over_session());
-        assert!(Backend::of("msgraph://user@outlook.com").submits_over_session());
-        assert!(Backend::of("google://user@gmail.com").submits_over_session());
-        assert!(!Backend::of("imaps://imap.example.com:993").submits_over_session());
+    fn account_info_host_reads_the_url() {
+        let hosts = [
+            ("jmap://API.Example.org", "api.example.org"),
+            ("imaps://IMAP.Example.org:993", "IMAP.Example.org"),
+            (
+                "imaps://jane%40example.org@imap.example.org:993",
+                "imap.example.org",
+            ),
+            ("imap://imap.example.org:143", "imap.example.org"),
+            ("https://DAV.Example.org/dav/", "dav.example.org"),
+            ("https://[::1]:8443/dav/", "[::1]"),
+            ("https://dav_host.example.org/", "dav_host.example.org"),
+            (
+                "https://www.googleapis.com/carddav/v1/principals/jane@gmail.com/",
+                "www.googleapis.com",
+            ),
+            ("", ""),
+        ];
+
+        for (url, host) in hosts {
+            assert_eq!(AccountInfo::of(url).host, host, "{url}");
+        }
     }
 
     /// Every kind builds its shape; jmap strips an HTTP(S) scheme.

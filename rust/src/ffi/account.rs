@@ -20,7 +20,7 @@ use serde_json::{from_str, to_string};
 
 use crate::{
     account::{
-        self, Backend,
+        self, AccountInfo,
         oauth::{
             AuthorizationRequest, CodeExchange, TokenRefresh, authorize_url, domain_scope,
             session_params, validate_redirect,
@@ -589,11 +589,9 @@ fn client_information_json(client: &Oauth20ClientInformation) -> String {
     .unwrap_or_else(|err| error_json(err.to_string()))
 }
 
-/// `Native.accountInfo`: the backend behind an account base URL; pure.
+/// `Native.accountInfo`: what an account base URL tells of its backend; pure.
 ///
-/// `{"backend", "accountLevel", "submitsOverSession"}`, the flags those of
-/// [`Backend`]; `backend` is `carddav`, `graph`, `jmap`, `google` or `local`
-/// (on-device).
+/// The [`AccountInfo`] facts, the on-device account included.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_accountInfo<'local>(
     mut env: EnvUnowned<'local>,
@@ -603,23 +601,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_accountInfo<'local>(
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let base_url = read_string(env, &base_url);
 
-        // NOTE: the local account has no transport, so it is not a
-        // Backend; reporting it so keeps its cards non-account-level
-        // (one book, per-collection keys) and out of backend matches.
-        let info = if base_url.starts_with(account::LOCAL_PREFIX) {
-            AccountInfoReply {
-                account_level: false,
-                backend: "local",
-                submits_over_session: false,
-            }
-        } else {
-            let backend = Backend::of(&base_url);
-            AccountInfoReply {
-                account_level: backend.account_level(),
-                backend: backend.name(),
-                submits_over_session: backend.submits_over_session(),
-            }
-        };
+        let info = AccountInfo::of(&base_url);
         let json = to_string(&info).unwrap_or_else(|err| error_json(err.to_string()));
 
         Ok(env.new_string(json)?.into())
@@ -684,13 +666,4 @@ struct ScopeReply<'a> {
 struct ClientInformationReply<'a> {
     client_id: &'a str,
     client_secret: Option<&'a str>,
-}
-
-/// The reply of `accountInfo`.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AccountInfoReply {
-    account_level: bool,
-    backend: &'static str,
-    submits_over_session: bool,
 }

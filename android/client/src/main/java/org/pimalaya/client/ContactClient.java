@@ -316,10 +316,10 @@ public class ContactClient {
     /**
      * The ordered TYPE sets the edit form's spinners address for the kind.
      *
-     * <p>The sex code alone for {@link TypeKind#GENDER}. Rust owns the order;
-     * a test pins the Android string-arrays to it.
+     * <p>The sex code alone for {@link TypeKind#GENDER}. Rust owns the order,
+     * which the spinners are built from: a position crosses back as an index.
      */
-    static List<List<String>> cardTypeOrder(TypeKind kind) {
+    public static List<List<String>> cardTypeOrder(TypeKind kind) {
         JSONArray order = Replies.object(Native.cardTypeOrder(kind.wire())).optJSONArray("order");
 
         List<List<String>> sets = new ArrayList<>(order == null ? 0 : order.length());

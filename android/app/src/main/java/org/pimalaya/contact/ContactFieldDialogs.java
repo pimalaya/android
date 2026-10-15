@@ -33,6 +33,7 @@ import org.pimalaya.client.ContactPhone;
 import org.pimalaya.client.ContactRelation;
 import org.pimalaya.client.FormDate;
 import org.pimalaya.client.FormGender;
+import org.pimalaya.client.TypeKind;
 
 /**
  * The contact form's per-field edit dialogs, plus their shared scaffolding.
@@ -163,7 +164,7 @@ final class ContactFieldDialogs {
         ContactPhone entry = index >= 0 ? phones.get(index) : null;
 
         LinearLayout content = dialogContent();
-        Spinner type = typeSpinner(R.array.phone_types);
+        Spinner type = typeSpinner(TypeKind.PHONE);
         type.setSelection(entry == null ? 0 : ContactForm.typeAt(host.view.phones(), index));
         EditText number =
                 typedValueLine(content, type, R.string.hint_number,
@@ -190,7 +191,7 @@ final class ContactFieldDialogs {
         ContactEmail entry = index >= 0 ? emails.get(index) : null;
 
         LinearLayout content = dialogContent();
-        Spinner type = typeSpinner(R.array.email_types);
+        Spinner type = typeSpinner(TypeKind.EMAIL);
         type.setSelection(entry == null ? 0 : ContactForm.typeAt(host.view.emails(), index));
         EditText address =
                 typedValueLine(content, type, R.string.hint_email_address,
@@ -225,7 +226,7 @@ final class ContactFieldDialogs {
         RadioGroup type =
                 typeRadios(
                         content,
-                        R.array.address_types,
+                        TypeKind.ADDRESS,
                         entry == null ? 0 : host.addressAt(index).index());
         EditText street =
                 dialogField(content, null, R.string.hint_street, safe.street(),
@@ -340,7 +341,7 @@ final class ContactFieldDialogs {
         ContactRelation entry = index >= 0 ? relations.get(index) : null;
 
         LinearLayout content = dialogContent();
-        Spinner type = typeSpinner(R.array.relation_types);
+        Spinner type = typeSpinner(TypeKind.RELATION);
         type.setSelection(entry == null ? 0 : ContactForm.typeAt(host.view.relations(), index));
         EditText value =
                 typedValueLine(content, type, R.string.hint_relation,
@@ -368,7 +369,7 @@ final class ContactFieldDialogs {
      * identity. The dropdown opens when adding, stays closed when editing.
      */
     void genderDialog() {
-        String[] labels = host.activity.getResources().getStringArray(R.array.gender_types);
+        String[] labels = TypeLabels.of(host.activity.getResources(), TypeKind.GENDER);
         // NOTE: suggestions drop the leading "Not set" placeholder.
         String[] choices = Arrays.copyOfRange(labels, 1, labels.length);
         boolean adding = !host.filled("gender");
@@ -608,10 +609,13 @@ final class ContactFieldDialogs {
     }
 
     /** The type spinner of an entry dialog (self-describing, no label). */
-    private Spinner typeSpinner(int entries) {
+    private Spinner typeSpinner(TypeKind kind) {
         Spinner spinner = new Spinner(host.activity);
-        ArrayAdapter<CharSequence> adapter =
-                ArrayAdapter.createFromResource(host.activity, entries, R.layout.spinner_form_item);
+        ArrayAdapter<String> adapter =
+                new ArrayAdapter<>(
+                        host.activity,
+                        R.layout.spinner_form_item,
+                        TypeLabels.of(host.activity.getResources(), kind));
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinner.setAdapter(adapter);
         // NOTE: zero out the stock spinner's own padding, which otherwise
@@ -644,11 +648,11 @@ final class ContactFieldDialogs {
     }
 
     /** The entry types as one line of radios (position = table index). */
-    private RadioGroup typeRadios(LinearLayout content, int entries, int selected) {
+    private RadioGroup typeRadios(LinearLayout content, TypeKind kind, int selected) {
         RadioGroup group = new RadioGroup(host.activity);
         group.setOrientation(LinearLayout.HORIZONTAL);
 
-        String[] labels = host.activity.getResources().getStringArray(entries);
+        String[] labels = TypeLabels.of(host.activity.getResources(), kind);
         for (int index = 0; index < labels.length; index++) {
             RadioButton option = new RadioButton(host.activity);
             option.setText(labels[index]);

@@ -203,16 +203,11 @@ public class MailClient {
      * @throws SubmissionUncertain when sent whole with no verdict: parked
      */
     public String submit(MailSession session, byte[] source) {
-        String submitUrl = session.account().submitUrl;
         // NOTE: run once, never retried: sending is not idempotent, and an
         // accepted submission that lost its answer would go twice. A failure
         // leaves it queued for the outbox instead.
         String json =
-                Native.submitMessage(
-                        session.transport(),
-                        session.handle(),
-                        submitUrl == null ? "" : submitUrl,
-                        source);
+                Native.submitMessage(session.transport(), session.handle(), source);
 
         JSONObject reply = Replies.read(json);
         String error = reply.optString("error");

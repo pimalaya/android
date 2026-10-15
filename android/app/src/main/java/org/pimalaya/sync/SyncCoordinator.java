@@ -812,7 +812,7 @@ public final class SyncCoordinator implements MailSync {
                 AccountEntry account = mailAccount(accountEmail);
                 return account == null
                         ? 1
-                        : MailEngine.sessionsOf(account.server(PimDomain.MAIL));
+                        : account.server(PimDomain.MAIL).info().sessions();
             }
 
             @Override
@@ -994,7 +994,7 @@ public final class SyncCoordinator implements MailSync {
         if (pool == null) {
             pool =
                     new WorkerPool<>(
-                            MailEngine.sessionsOf(account.server(PimDomain.MAIL)),
+                            account.server(PimDomain.MAIL).info().sessions(),
                             null,
                             () -> passes.openMail(account),
                             MailSession::join);

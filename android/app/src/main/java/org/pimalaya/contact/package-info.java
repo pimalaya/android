@@ -13,7 +13,7 @@
  *
  * <p>The list merges the replicas sharing a vCard UID into one contact
  * ({@link ContactPool}, docs/merged-view.md). {@link ContactEditor} opens one
- * into the form ({@link ContactForm}), over the field model the bridge
- * projects, and a save is staged on every replica.
+ * into the form ({@link ContactForm}), over the field model and type sets
+ * the bridge projects ({@link TypeLabels}); a save is staged on every replica.
  */
 package org.pimalaya.contact;

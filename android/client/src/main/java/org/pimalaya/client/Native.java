@@ -165,10 +165,9 @@ final class Native {
             String scope);
 
     /**
-     * The backend behind an account base URL and its traits.
+     * What an account base URL tells of its backend; pure.
      *
-     * <p>Returns {@code {backend, accountLevel, submitsOverSession}}, the
-     * rest booleans.
+     * <p>Returns the {@link BackendInfo} facts, keys in its component order.
      */
     static native String accountInfo(String baseUrl);
 
@@ -347,14 +346,15 @@ final class Native {
     static native String composeMessage(String draft);
 
     /**
-     * Hands one stored message over, to the submit URL or the session's API.
+     * Hands one stored message over, to the account's submit URL or the
+     * session's API.
      *
      * <p>The envelope comes off the address headers, {@code Bcc} stripped on
      * the way. Returns {@code {messageId?}}, or an error flagged
      * {@code permanent} or {@code uncertain}.
      */
     static native String submitMessage(
-            Transport transport, long session, String submitUrl, byte[] source);
+            Transport transport, long session, byte[] source);
 
     /**
      * Moves one message into {@code target}, returning {@code {}}.

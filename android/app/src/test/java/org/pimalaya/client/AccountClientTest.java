@@ -100,62 +100,33 @@ public class AccountClientTest {
                             "ispMain"));
 
     @Test
-    public void everyBackendReadsAsTheBridgeNamesIt() {
-        Map<String, BackendInfo> expected = new LinkedHashMap<>();
-        expected.put(
-                AccountClient.googleBase("jane@gmail.com"),
-                new BackendInfo(true, Backend.GOOGLE, true));
-        expected.put(
-                AccountClient.msgraphBase("jane@outlook.com"),
-                new BackendInfo(false, Backend.GRAPH, true));
-        expected.put(
-                AccountClient.jmapBase("https://api.fastmail.com/jmap/session"),
-                new BackendInfo(true, Backend.JMAP, true));
-        expected.put(
-                "https://dav.example.org/",
-                new BackendInfo(false, Backend.CARDDAV, false));
-        expected.put(
-                "imaps://imap.example.org:993",
-                new BackendInfo(false, Backend.CARDDAV, false));
-        expected.put("", new BackendInfo(false, Backend.CARDDAV, false));
-        expected.put(
-                "local://on-this-device",
-                new BackendInfo(false, Backend.LOCAL, false));
+    public void everyBackendAnswersTheFactsShape() {
+        List<String> urls =
+                List.of(
+                        AccountClient.googleBase("jane@gmail.com"),
+                        AccountClient.msgraphBase("jane@outlook.com"),
+                        AccountClient.jmapBase("https://api.fastmail.com/jmap/session"),
+                        "https://dav.example.org/",
+                        "imaps://imap.example.org:993",
+                        "",
+                        "local://on-this-device");
 
-        for (Map.Entry<String, BackendInfo> entry : expected.entrySet()) {
-            assertEquals(entry.getKey(), entry.getValue(), AccountClient.info(entry.getKey()));
-            assertMirrors(BackendInfo.class, Native.accountInfo(entry.getKey()));
+        for (String url : urls) {
+            assertMirrors(BackendInfo.class, Native.accountInfo(url));
         }
-        assertEquals(expected.get(""), AccountClient.info(null));
+        assertEquals(new Account("", "", "").info(), new Account(null, "", "").info());
     }
 
     @Test
-    public void thePredicatesReadTheInfo() {
-        String google = AccountClient.googleBase("jane@gmail.com");
-        Account graph = new Account(AccountClient.msgraphBase("jane@outlook.com"), "", "");
-        Account jmap = new Account(AccountClient.jmapBase("https://api.fastmail.com/jmap/session"), "", "");
-
-        assertEquals(true, AccountClient.isAccountLevel(google));
-        assertEquals(false, AccountClient.isAccountLevel(graph));
-        assertEquals(true, AccountClient.isAccountLevel(jmap));
-        assertEquals(false, AccountClient.isAccountLevel((Account) null));
-        assertEquals(true, AccountClient.isCarddav("https://dav.example.org/"));
-        assertEquals(false, AccountClient.isCarddav(google));
-        assertEquals(true, AccountClient.isGraph(graph));
-        assertEquals(true, AccountClient.isGoogle(new Account(google, "", "")));
-        assertEquals(true, AccountClient.isJmap(jmap));
-        assertEquals(false, AccountClient.isJmap(graph));
-        assertEquals(true, AccountClient.submitsOverSession(graph));
-        assertEquals(false, AccountClient.submitsOverSession(new Account("imaps://imap.example.org:993", "", "")));
-    }
-
-    @Test
-    public void anUnknownBackendIsUnreadable() {
-        // NOTE: strict on purpose: the bridge names five, and an unknown one
-        // used to read as none of them.
+    public void anUnknownProtocolIsUnreadable() {
+        // NOTE: strict on purpose: an unknown family would read as none.
         assertThrows(
                 PimalayaException.class,
-                () -> BackendInfo.from(new JSONObject("{\"backend\":\"pop3\"}")));
+                () -> BackendInfo.from(
+                        new JSONObject(
+                                "{\"cardFetch\":\"multiget\",\"cardPush\":\"parallel\","
+                                        + "\"host\":\"\",\"mailStep\":\"store\","
+                                        + "\"protocol\":\"pop3\",\"sessions\":3}")));
     }
 
     @Test

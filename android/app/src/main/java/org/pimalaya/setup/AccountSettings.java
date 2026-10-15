@@ -30,7 +30,7 @@ import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.calendar.PhoneCalendars;
 import org.pimalaya.client.Account;
-import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.Protocol;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.mail.MailScope;
@@ -315,7 +315,7 @@ public final class AccountSettings {
         // NOTE: JMAP, Graph and Gmail submit through the account they read
         // from, so there is no server of its own to change.
         Account mail = account.server(PimDomain.MAIL);
-        if (mail != null && !AccountClient.submitsOverSession(mail)) {
+        if (mail != null && !mail.info().submitsOverSession()) {
             String current = mail.submitUrl;
             boolean none = current == null || current.isEmpty();
             rows.add(
@@ -651,7 +651,7 @@ public final class AccountSettings {
             if (server == null || credential == null) {
                 continue;
             }
-            servers.computeIfAbsent(serverHost(server.baseUrl), key -> new Server())
+            servers.computeIfAbsent(server.info().host(), key -> new Server())
                     .add(domain, protocolOf(domain, server), methodOf(credential));
             if (domain == PimDomain.MAIL
                     && server.submitUrl != null
@@ -693,29 +693,16 @@ public final class AccountSettings {
         }
     }
 
-    /** The host a base URL reaches, the providers' APIs by their name. */
-    private static String serverHost(String url) {
-        if (url.startsWith("msgraph://")) {
-            return "graph.microsoft.com";
-        }
-        if (url.startsWith("google://")) {
-            return "googleapis.com";
-        }
-        if (url.startsWith("jmap://")) {
-            return hostOf("https://" + url.substring("jmap://".length()));
-        }
-        return hostOf(url);
-    }
-
     /** The protocol one domain speaks to its server. */
     private String protocolOf(PimDomain domain, Account server) {
-        if (AccountClient.isGraph(server)) {
+        Protocol protocol = server.info().protocol();
+        if (protocol == Protocol.GRAPH) {
             return host.getString(R.string.config_msgraph);
         }
-        if (AccountClient.isJmap(server)) {
+        if (protocol == Protocol.JMAP) {
             return host.getString(R.string.config_jmap);
         }
-        boolean google = AccountClient.isGoogle(server);
+        boolean google = protocol == Protocol.GOOGLE;
         switch (domain) {
             case MAIL:
                 return host.getString(google ? R.string.config_gmail : R.string.config_imap);

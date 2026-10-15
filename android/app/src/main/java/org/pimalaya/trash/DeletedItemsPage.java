@@ -19,7 +19,6 @@ import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.calendar.CalendarStager;
 import org.pimalaya.client.Account;
-import org.pimalaya.client.AccountClient;
 import org.pimalaya.contact.ContactStager;
 import org.pimalaya.mail.MailStager;
 import org.pimalaya.pimdir.DefaultCollection;
@@ -250,17 +249,13 @@ public final class DeletedItemsPage {
     /**
      * Whether the account's mail sync uploads a create with no origin.
      *
-     * <p>An append is IMAP's: Graph and Gmail file their own copies, JMAP
-     * pushes none yet.
+     * <p>An append is IMAP's: the APIs file their own copies.
      */
     private boolean appends(String email) {
         for (AccountEntry account : accounts) {
             if (account.email.equals(email)) {
                 Account server = account.server(PimDomain.MAIL);
-                return server != null
-                        && !AccountClient.isGraph(server)
-                        && !AccountClient.isGoogle(server)
-                        && !AccountClient.isJmap(server);
+                return server != null && server.info().appendsMail();
             }
         }
         return false;

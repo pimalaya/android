@@ -1,7 +1,6 @@
 package org.pimalaya.mail;
 
 import org.pimalaya.client.Account;
-import org.pimalaya.client.AccountClient;
 
 import java.util.List;
 
@@ -54,15 +53,19 @@ public interface MailStep {
     Outcome run(MailEngine engine, StepRun run) throws Exception;
 
     /**
-     * The step of an account's mail backend.
+     * The step of an account's mail backend, as its facts say it walks.
      *
      * <p>Gmail and JMAP step through the account as one listing
      * ({@link GmailStep}).
      */
     static MailStep of(Account server) {
-        if (AccountClient.isGoogle(server) || AccountClient.isJmap(server)) {
-            return new GmailStep();
+        switch (server.info().mailStep()) {
+            case ACCOUNT:
+                return new GmailStep();
+            case MAILBOXES:
+                return new GraphStep();
+            default:
+                return new ImapStep();
         }
-        return AccountClient.isGraph(server) ? new GraphStep() : new ImapStep();
     }
 }

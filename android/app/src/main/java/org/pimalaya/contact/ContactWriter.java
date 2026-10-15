@@ -7,7 +7,7 @@ import org.json.JSONException;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
-import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.Account;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.ContactFields;
@@ -201,7 +201,7 @@ final class ContactWriter {
      * <p>A membership when the account-level backend already holds a card.
      */
     private void addToBook(BookEntry target, AccountEntry account, String vcard) {
-        if (AccountClient.isAccountLevel(account.server(PimDomain.CONTACTS))) {
+        if (accountLevel(account)) {
             for (Entry entry : editor.edit().replicas) {
                 if (entry.accountEmail.equals(target.accountEmail)) {
                     parts.contacts().stageMembership(
@@ -236,12 +236,18 @@ final class ContactWriter {
         // else the book is the only place it exists, so the card goes with it.
         // Both are the same staged delete, on the placement rather than on the
         // card: what differs is only whether another placement survives it.
-        if (AccountClient.isAccountLevel(owner.server(PimDomain.CONTACTS))
+        if (accountLevel(owner)
                 && parts.contacts().collectionsOf(replica.card.id()).size() > 1) {
             parts.contacts().stageMembership(
                     replica.book.url(), target.book.url(), replica.card.id(), false);
         } else {
             parts.contacts().stageDelete(replica.book.url(), replica.card.id());
         }
+    }
+
+    /** Whether the account's cards are account-level, in m:n books. */
+    private static boolean accountLevel(AccountEntry account) {
+        Account server = account.server(PimDomain.CONTACTS);
+        return server != null && server.info().accountLevel();
     }
 }

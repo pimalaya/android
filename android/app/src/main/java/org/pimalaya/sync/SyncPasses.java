@@ -22,7 +22,6 @@ import org.pimalaya.calendar.CalendarRows;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.RemoteAccount;
 import org.pimalaya.client.Account;
-import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.MailClient;
@@ -648,7 +647,7 @@ public final class SyncPasses {
         WorkerPool.Outcome outcome;
         try (WorkerPool<MailSession> pool =
                 new WorkerPool<>(
-                        MailEngine.sessionsOf(account.server(PimDomain.MAIL)),
+                        account.server(PimDomain.MAIL).info().sessions(),
                         session,
                         () -> openMail(account),
                         MailSession::join)) {
@@ -724,7 +723,7 @@ public final class SyncPasses {
     public Exception loadMore(AccountEntry account, MailSession session, String only) {
         if (only == null
                 || MailBodies.downloads(mail.roles().get(only), false)
-                || AccountClient.isGoogle(account.server(PimDomain.MAIL))) {
+                || account.server(PimDomain.MAIL).info().hasAllMail()) {
             return stepMail(account, session, only, false);
         }
         progress.account(account.email);
@@ -798,7 +797,7 @@ public final class SyncPasses {
             String allMail = MailStore.allMailOf(accountId);
             if (only != null && !MailBodies.downloads(mail.roles().get(only), false)) {
                 collections = new ArrayList<>(List.of(only));
-            } else if (AccountClient.isGoogle(account.server(PimDomain.MAIL))) {
+            } else if (account.server(PimDomain.MAIL).info().hasAllMail()) {
                 mail.ensureAllMail(account.email);
                 collections.add(allMail);
             }

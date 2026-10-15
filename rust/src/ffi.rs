@@ -279,7 +279,7 @@ pub mod tests {
                 "jane@gmail.com",
             ),
             (
-                "mail imap, submitUrl unread",
+                "mail imap",
                 r#"{"address":"jane@example.org","baseUrl":"imaps://imap.example.org:993","login":"jane","secret":"pw","submitUrl":"smtps://smtp.example.org"}"#,
                 Backend::Carddav,
                 "imaps://imap.example.org:993",
@@ -325,6 +325,18 @@ pub mod tests {
                 _ => panic!("{family}: Basic and Bearer swapped"),
             }
         }
+    }
+
+    /// The submit URL rides in the account, an absent one reading empty as
+    /// the null positional argument did.
+    #[test]
+    fn the_submit_url_decodes_as_the_positional_argument_did() {
+        let with = parse_account(r#"{"baseUrl":"imaps://imap.example.org:993","secret":"pw","submitUrl":"smtps://smtp.example.org"}"#).unwrap();
+        let without =
+            parse_account(r#"{"baseUrl":"jmap://api.fastmail.com","secret":"pw"}"#).unwrap();
+
+        assert_eq!(with.submit_url, "smtps://smtp.example.org");
+        assert_eq!(without.submit_url, "");
     }
 
     /// An unreadable account names where, never what: it holds a secret.
