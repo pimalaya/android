@@ -5,9 +5,9 @@ change: jni-boundary
 
 # Tasks
 
-Waits on the user's review of proposal.md (decisions D1, D2, D3, D5, D7). Gate per step: `nix develop --command gradle -p android :app:assembleDebug :app:testDebugUnitTest --rerun :client:testDebugUnitTest --rerun --console=plain`, `cargo test`, `cargo clippy --all-targets`; wire values captured before a step and compared after.
+Decisions taken 2026-10-15 (proposal.md). Gate per step: `nix develop --command gradle -p android :app:assembleDebug :app:testDebugUnitTest --rerun :client:testDebugUnitTest --rerun --console=plain`, `cargo test`, `cargo clippy --all-targets`; wire values captured before a step and compared after.
 
-- [ ] Review: decisions D1, D2, D3, D5, D7
+- [x] Review: decisions D1, D2, D3, D5, D7
 - [ ] 1. Dead natives: cardProps, cardSetProp, cardSetPropParts, cardPropLabels, cardSource, discover, listAccountCards; rust/src/contact/props.rs
 - [ ] 2. `writes_overrides`, `writes_exdates`, `writes_events` and their EventView branches
 - [ ] 3. One account argument: contact, calendar, mail session open, token-only reads (one sub-step each)

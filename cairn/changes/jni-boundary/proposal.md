@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: jni-boundary
-status: proposed
+status: active
 created: 2026-10-15
 ---
 
@@ -36,10 +36,10 @@ Every step lands on its own, behaviour-preserving, captured before and compared 
 - **Later changes**, each its own: contact fetch/push strategy in Rust, setup planning and endpoints in Rust, VTIMEZONE from ical-rs `tzdb` instead of `Zones.vtimezone` (bundled vs device tzdata), typing the load/write yields (only if storage stays Java).
 - Token exchange and refresh carrying the RFC 8707 resource: network-trust-hardening L3.
 
-## Decisions owed (user)
+## Decisions (user, 2026-10-15: all as recommended)
 
-- D1. Account argument as one JSON string (recommended) rather than a Rust handle or JNI field reads.
-- D2. Facts only on the public client API, `isGraph`/`isGoogle`/`isJmap` gone (recommended).
-- D3. Storage stays out of this change, spike later (recommended).
-- D5. `cardTypeOrder` becomes production (spinners from Rust) rather than deleted with its check (recommended).
-- D7. Naming moves into Rust (step 8) rather than typing the yields as they are (recommended: it deletes the JSON instead of typing it twice).
+- D1. The account crosses as one JSON string, not a Rust handle or JNI field reads.
+- D2. Facts only on the public client API, `isGraph`/`isGoogle`/`isJmap` gone.
+- D3. Storage stays out of this change, spike later.
+- D5. `cardTypeOrder` becomes production (spinners from Rust).
+- D7. Naming moves into Rust (step 8): it deletes the JSON instead of typing it twice.
