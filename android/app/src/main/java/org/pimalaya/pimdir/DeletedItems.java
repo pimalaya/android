@@ -12,6 +12,8 @@ import org.pimalaya.client.Flags;
 import org.pimalaya.client.PimdirSql;
 
 import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
@@ -46,8 +48,10 @@ public final class DeletedItems {
         final String sortKey;
         final boolean full;
 
-        /** When the store retained it (RFC 3339), null while bound. */
-        public final String retainedAt;
+        /** When the store retained it (epoch millis), 0 while bound. */
+        public final long retainedAt;
+
+        private final boolean waiting;
 
         /** What its body weighs, 0 for none. */
         final long size;
@@ -80,13 +84,14 @@ public final class DeletedItems {
             this.object = object;
             this.sortKey = sortKey;
             this.full = full;
-            this.retainedAt = retainedAt;
+            this.retainedAt = instantOf(retainedAt);
+            this.waiting = retainedAt == null;
             this.size = size;
         }
 
         /** Whether a source still binds it, its delete not pushed yet. */
         public boolean waiting() {
-            return retainedAt == null;
+            return waiting;
         }
 
         /** Whether the store holds its body, which a restore stages. */
@@ -97,9 +102,8 @@ public final class DeletedItems {
 
     /** Newest deletion first, the rows still waiting ahead of them. */
     static final Comparator<Row> NEWEST_FIRST =
-            Comparator.comparing(
-                            (Row row) -> row.retainedAt,
-                            Comparator.nullsFirst(Comparator.<String>reverseOrder()))
+            Comparator.comparing((Row row) -> !row.waiting)
+                    .thenComparing(row -> row.retainedAt, Comparator.reverseOrder())
                     .thenComparing(row -> row.seq, Comparator.reverseOrder());
 
     private final PimdirDb store;
@@ -320,6 +324,18 @@ public final class DeletedItems {
         SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
         format.setTimeZone(TimeZone.getTimeZone("UTC"));
         return format.format(date);
+    }
+
+    /** The instant of a retention {@link #stamp}, 0 for none or unreadable. */
+    private static long instantOf(String stamp) {
+        if (stamp == null) {
+            return 0;
+        }
+        try {
+            return Instant.parse(stamp).toEpochMilli();
+        } catch (DateTimeParseException error) {
+            return 0;
+        }
     }
 
     /**

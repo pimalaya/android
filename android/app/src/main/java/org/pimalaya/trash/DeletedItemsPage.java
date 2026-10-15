@@ -441,12 +441,10 @@ public final class DeletedItemsPage {
         if (row.waiting()) {
             return host.getString(R.string.deleted_waiting);
         }
-        // NOTE: the store stamps milliseconds, which the shared reader of a
-        // key does not take: the second is precision enough here.
-        String retained = row.retainedAt.substring(0, Math.min(19, row.retainedAt.length()));
-        long stamp = PimdirSummary.stampOf(retained + "Z");
         String deleted =
-                stamp == 0 ? "" : host.getString(R.string.deleted_at, Dates.dateTime(host, stamp));
+                row.retainedAt == 0
+                        ? ""
+                        : host.getString(R.string.deleted_at, Dates.dateTime(host, row.retainedAt));
         if (row.stored()) {
             return deleted;
         }

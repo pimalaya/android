@@ -125,6 +125,14 @@ public class DeletedItemsTest {
     }
 
     @Test
+    public void aRetentionStampIsReadToTheMillisecond() {
+        retainedCard("u1", "Jane Doe");
+        db.execSQL("UPDATE items SET retained_at = '2026-03-05T14:07:09.042Z' WHERE link_id = 'u1'");
+
+        assertEquals(1772719629042L, only().retainedAt);
+    }
+
+    @Test
     public void aRetainedCardIsListedWithItsSummary() {
         retainedCard("u1", "Jane Doe");
 
