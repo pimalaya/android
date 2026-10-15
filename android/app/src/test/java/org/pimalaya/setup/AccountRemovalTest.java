@@ -138,7 +138,7 @@ public class AccountRemovalTest {
         assertNull(AccountEntry.find(store.loadAll(), EMAIL));
         assertEquals(1, contacts.list(LocalBook.URL).size());
         assertEquals("Bob", contacts.list(LocalBook.URL).get(0).name);
-        assertTrue(mail.loadMailboxes(List.of()).isEmpty());
+        assertTrue(new PimdirCollections(pimdir, context).list(PimdirSummary.MAIL).isEmpty());
         assertTrue(events.loadCalendars().isEmpty());
 
         assertFalse(FirstSync.owing(context, PimDomain.MAIL).contains(EMAIL));

@@ -124,6 +124,21 @@ public class MailStoreTest {
     }
 
     @Test
+    public void anAccountsMailboxesAreItsOwnAlone() {
+        mailboxes(ONE, "INBOX", "Archive");
+        mailboxes(TWO, "INBOX", "Lists");
+
+        List<PimdirCollections.Stored> listed = store.loadMailboxes(List.of(ONE));
+
+        assertEquals(3, listed.size());
+        assertEquals(store.outbox().outboxOf(ONE), listed.get(0).id);
+        for (PimdirCollections.Stored stored : listed) {
+            assertEquals(ONE, stored.accountEmail);
+        }
+        assertTrue(store.loadMailboxes(List.of()).isEmpty());
+    }
+
+    @Test
     public void theListIsOrderedByTheKeyWrittenAtSyncTime() {
         mailboxes(ONE, "INBOX");
         envelope(ONE, "INBOX", "1", "Older", "Mon, 5 Jan 2026 09:00:00 +0000");

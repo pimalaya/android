@@ -74,6 +74,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Fixed a Microsoft 365 event created on the phone being created twice, its attendees invited twice, when the answer to its creation was lost.
 - Fixed a slow server write being sent again after 30 seconds without an answer, and a send or other non-repeatable request being repeated after a 503.
 - Fixed a JMAP account whose sign-in expired during a mail download marking every message it was downloading as failed: the download now stops for the sign-in to be renewed, then carries on.
+- Fixed one mail account's sync and background download reaching into another account's mailboxes when several are connected: each account now syncs and downloads its own mailboxes alone.
+- Fixed a custom OAuth client signing in through a `http://127.0.0.1` redirect failing on servers that require the RFC 8707 resource, such as Fastmail: the resource is now asked for as on the app's own redirect.
 
 ### Security
 

@@ -1618,9 +1618,9 @@ public final class MailStore {
     }
 
     /**
-     * Every account's mailboxes with their roles, for the filter page.
+     * The mailboxes of the accounts in {@code emails}, with their roles.
      *
-     * <p>The outbox of each mail account in {@code emails} among them.
+     * <p>Each account's outbox among them, ahead of every mailbox.
      */
     public List<PimdirCollections.Stored> loadMailboxes(List<String> emails) {
         List<PimdirCollections.Stored> mailboxes = new ArrayList<>();
@@ -1629,7 +1629,11 @@ public final class MailStore {
                     new PimdirCollections.Stored(
                             outbox.outboxOf(email), email, outbox.outboxName(), null, null));
         }
-        mailboxes.addAll(collections.list(PimdirSummary.MAIL));
+        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
+            if (emails.contains(stored.accountEmail)) {
+                mailboxes.add(stored);
+            }
+        }
         return mailboxes;
     }
 

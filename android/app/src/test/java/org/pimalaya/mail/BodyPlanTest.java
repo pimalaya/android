@@ -68,12 +68,17 @@ public class BodyPlanTest {
 
     /** Files one message, its body held when one is given. */
     private void message(String mailbox, String id, String date, String body) {
+        filed(collection(mailbox), id, date, body);
+    }
+
+    /** Files one message in any account's collection. */
+    private void filed(String collection, String id, String date, String body) {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
             items.put(
                     db,
-                    collection(mailbox),
+                    collection,
                     new PimdirItems.Row(
                             id,
                             body,
@@ -144,6 +149,21 @@ public class BodyPlanTest {
 
         assertEquals(Integer.valueOf(0), plan.left().get(JANE));
         assertEquals(0, plan.planned());
+    }
+
+    @Test
+    public void anAccountPlansNoneOfAnotherAccountsBodies() {
+        String john = "john@example.org";
+        store.replaceMailboxes(john, List.of(new Mailbox("INBOX", "inbox")));
+        String his = store.collectionOf(john, "INBOX");
+        MailWindow.set(context, PimdirAccount.accountIdOf(his), FRONTIER);
+        message("INBOX", "1", NEW, null);
+        filed(his, "2", NEW, null);
+
+        BodyPlan.Plan plan = plan();
+
+        assertEquals(List.of(collection("INBOX") + " 1"), planned(plan));
+        assertEquals(1, plan.planned());
     }
 
     @Test
