@@ -570,6 +570,7 @@ public final class OauthFlow {
      */
     private void startLoopbackOauth(Target target, AuthServer authServer, OauthRequest request) {
         String email = target.email();
+        String resource = target.resource();
         String clientId = request.clientId();
         String clientSecret = request.clientSecret();
         String authEndpoint = authServer.authEndpoint();
@@ -614,10 +615,14 @@ public final class OauthFlow {
 
         // NOTE: access_type=offline + prompt=consent make Google-style
         // servers issue a refresh token (ignored by servers that do not
-        // use them); login_hint preselects the account.
+        // use them); login_hint preselects the account. The RFC 8707
+        // resource goes as on the scheme grant.
         Map<String, String> extras = new LinkedHashMap<>();
         extras.put("access_type", "offline");
         extras.put("prompt", "consent");
+        if (resource != null && !resource.isEmpty()) {
+            extras.put("resource", resource);
+        }
         if (email.contains("@")) {
             extras.put("login_hint", email);
         }
