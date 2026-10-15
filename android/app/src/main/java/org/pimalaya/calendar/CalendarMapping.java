@@ -21,11 +21,13 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.EventTimeKind;
+import org.pimalaya.client.PhoneAlarm;
+import org.pimalaya.client.PhoneAttendee;
+import org.pimalaya.client.PhoneComponent;
+import org.pimalaya.client.PhoneEvent;
+import org.pimalaya.client.PhoneTime;
 import org.pimalaya.pimdir.PimdirHash;
 
 /**
@@ -115,45 +117,43 @@ final class CalendarMapping {
      * <p>The master and an exception row per override, or a standalone row per
      * override when no master.
      */
-    static List<Row> rows(JSONObject event, Phone phone) throws JSONException {
+    static List<Row> rows(PhoneEvent event, Phone phone) {
         List<Row> rows = new ArrayList<>();
-        String uid = event.optString("uid");
-        JSONObject master = event.optJSONObject("master");
-        JSONArray overrides = event.optJSONArray("overrides");
+        String uid = event.uid();
+        PhoneComponent master = event.master();
+        List<PhoneComponent> overrides = listOf(event.overrides());
 
         if (master != null) {
-            EventTime start = time(master.optJSONObject("start"));
+            EventTime start = time(master.start());
             if (start == null) {
                 return rows;
             }
-            Row row = row(master, master, uid, phone, event.optBoolean("listed"));
+            Row row = row(master, master, uid, phone, event.listed());
             row.values.put(Events._SYNC_ID, phone.handle);
             rows.add(row);
-            for (int index = 0; overrides != null && index < overrides.length(); index++) {
-                JSONObject over = overrides.getJSONObject(index);
-                if (time(over.optJSONObject("start")) == null) {
+            for (PhoneComponent over : overrides) {
+                if (over.start() == null) {
                     continue;
                 }
                 Row exception = row(over, master, uid, phone, false);
                 exception.values.put(Events.ORIGINAL_SYNC_ID, phone.handle);
                 exception.values.put(
                         Events.ORIGINAL_INSTANCE_TIME,
-                        instanceOf(time(over.optJSONObject("recurrenceId")), start, phone.device));
+                        instanceOf(time(over.recurrenceId()), start, phone.device));
                 exception.values.put(Events.ORIGINAL_ALL_DAY, start.isDate() ? 1 : 0);
                 rows.add(exception);
             }
             return rows;
         }
 
-        for (int index = 0; overrides != null && index < overrides.length(); index++) {
-            JSONObject over = overrides.getJSONObject(index);
-            if (time(over.optJSONObject("start")) == null) {
+        for (PhoneComponent over : overrides) {
+            if (over.start() == null) {
                 continue;
             }
             Row standalone = row(over, over, uid, phone, false);
             standalone.values.put(
                     Events._SYNC_ID,
-                    phone.handle + STANDALONE + standaloneKey(over.optJSONObject("recurrenceId")));
+                    phone.handle + STANDALONE + standaloneKey(over.recurrenceId()));
             rows.add(standalone);
         }
         return rows;
@@ -170,17 +170,17 @@ final class CalendarMapping {
 
     /** A component's row, organizer and series read off {@code master}. */
     private static Row row(
-            JSONObject component, JSONObject master, String uid, Phone phone, boolean listed)
-            throws JSONException {
+            PhoneComponent component, PhoneComponent master, String uid, Phone phone,
+            boolean listed) {
         Row row = new Row();
         Map<String, Object> values = row.values;
         values.put(Events.UID_2445, uid);
-        values.put(Events.TITLE, clip(component.optString("summary"), SHORT_TEXT));
-        values.put(Events.DESCRIPTION, clip(component.optString("description"), LONG_TEXT));
-        values.put(Events.EVENT_LOCATION, clip(component.optString("location"), SHORT_TEXT));
+        values.put(Events.TITLE, clip(orEmpty(component.summary()), SHORT_TEXT));
+        values.put(Events.DESCRIPTION, clip(orEmpty(component.description()), LONG_TEXT));
+        values.put(Events.EVENT_LOCATION, clip(orEmpty(component.location()), SHORT_TEXT));
 
-        EventTime start = time(component.optJSONObject("start"));
-        EventTime end = time(component.optJSONObject("end"));
+        EventTime start = time(component.start());
+        EventTime end = time(component.end());
         if (end == null) {
             end = start;
         }
@@ -212,7 +212,7 @@ final class CalendarMapping {
         if (series && listed) {
             // NOTE: the window's first instance stands as the start, so the
             // provider shows no instance the list does not hold.
-            List<Long> dates = aligned(component.optJSONArray("rdates"), start, phone.device);
+            List<Long> dates = aligned(component.rdates(), start, phone.device);
             if (!dates.isEmpty()) {
                 until = dates.get(0) + (until - from);
                 from = dates.get(0);
@@ -226,17 +226,16 @@ final class CalendarMapping {
             values.put(Events.DTEND, null);
             values.put(Events.EVENT_END_TIMEZONE, null);
             values.put(Events.DURATION, duration((until - from) / 1000, allDay));
-            List<Long> dates = aligned(component.optJSONArray("rdates"), start, phone.device);
+            List<Long> dates = aligned(component.rdates(), start, phone.device);
             if (!dates.isEmpty() && !listed) {
                 dates.add(from);
             }
-            values.put(Events.RRULE, listed ? null : joined(component.optJSONArray("rrules")));
+            values.put(Events.RRULE, listed ? null : joined(component.rrules()));
             values.put(Events.RDATE, cell(dates));
             values.put(
                     Events.EXDATE,
-                    listed ? null : cell(aligned(component.optJSONArray("exdates"), start,
-                            phone.device)));
-            values.put(Events.EXRULE, listed ? null : joined(component.optJSONArray("exrules")));
+                    listed ? null : cell(aligned(component.exdates(), start, phone.device)));
+            values.put(Events.EXRULE, listed ? null : joined(component.exrules()));
         } else {
             values.put(Events.DTEND, until);
             values.put(Events.EVENT_END_TIMEZONE, endZone);
@@ -247,16 +246,16 @@ final class CalendarMapping {
             values.put(Events.EXRULE, null);
         }
 
-        values.put(Events.STATUS, status(component.optString("status")));
+        values.put(Events.STATUS, status(orEmpty(component.status())));
         values.put(
                 Events.AVAILABILITY,
-                "TRANSPARENT".equalsIgnoreCase(component.optString("transp"))
+                "TRANSPARENT".equalsIgnoreCase(component.transp())
                         ? Events.AVAILABILITY_FREE
                         : Events.AVAILABILITY_BUSY);
-        values.put(Events.ACCESS_LEVEL, access(component.optString("class")));
-        values.put(Events.EVENT_COLOR_KEY, colorKey(component.optString("color")));
+        values.put(Events.ACCESS_LEVEL, access(orEmpty(component.classification())));
+        values.put(Events.EVENT_COLOR_KEY, colorKey(orEmpty(component.color())));
 
-        String organizer = master.optString("organizer");
+        String organizer = orEmpty(master.organizer());
         if (!organizer.isEmpty()) {
             values.put(Events.ORGANIZER, organizer);
         }
@@ -265,30 +264,25 @@ final class CalendarMapping {
                 organizer.isEmpty() || organizer.equalsIgnoreCase(phone.owner) ? 1 : 0);
         values.put(Events.HAS_ATTENDEE_DATA, 1);
 
-        JSONArray alarms = component.optJSONArray("alarms");
-        int reminders = alarms == null ? 0 : Math.min(alarms.length(), MAX_REMINDERS);
-        for (int index = 0; index < reminders; index++) {
+        List<PhoneAlarm> alarms = listOf(component.alarms());
+        for (PhoneAlarm alarm : alarms.subList(0, Math.min(alarms.size(), MAX_REMINDERS))) {
             Map<String, Object> reminder = new LinkedHashMap<>();
-            reminder.put(Reminders.MINUTES, minutes(alarms.getJSONObject(index), from));
+            reminder.put(Reminders.MINUTES, minutes(alarm, from));
             reminder.put(Reminders.METHOD, Reminders.METHOD_ALERT);
             row.reminders.add(reminder);
         }
 
-        JSONArray attendees = component.optJSONArray("attendees");
-        for (int index = 0; attendees != null && index < attendees.length(); index++) {
-            JSONObject attendee = attendees.getJSONObject(index);
-            String email = attendee.optString("email");
+        for (PhoneAttendee attendee : listOf(component.attendees())) {
+            String email = attendee.email();
             Map<String, Object> entry = new LinkedHashMap<>();
             // NOTE: the provider derives the user's own answer from the row
             // spelled exactly as OWNER_ACCOUNT.
             entry.put(
                     Attendees.ATTENDEE_EMAIL,
                     email.equalsIgnoreCase(phone.owner) ? phone.owner : email);
-            entry.put(Attendees.ATTENDEE_NAME, attendee.optString("name"));
-            entry.put(
-                    Attendees.ATTENDEE_TYPE,
-                    attendeeType(attendee.optString("role"), attendee.optString("cutype")));
-            entry.put(Attendees.ATTENDEE_STATUS, attendeeStatus(attendee.optString("partstat")));
+            entry.put(Attendees.ATTENDEE_NAME, attendee.name());
+            entry.put(Attendees.ATTENDEE_TYPE, attendeeType(attendee.role(), attendee.cutype()));
+            entry.put(Attendees.ATTENDEE_STATUS, attendeeStatus(attendee.partstat()));
             entry.put(
                     Attendees.ATTENDEE_RELATIONSHIP,
                     email.equalsIgnoreCase(organizer)
@@ -297,16 +291,14 @@ final class CalendarMapping {
             row.attendees.add(entry);
         }
 
-        String url = component.optString("url");
+        String url = orEmpty(component.url());
         row.url = url.isEmpty() ? null : url;
         return row;
     }
 
     /** Whether a master repeats: a rule or a date of its own. */
-    private static boolean recurs(JSONObject master) {
-        JSONArray rules = master.optJSONArray("rrules");
-        JSONArray dates = master.optJSONArray("rdates");
-        return (rules != null && rules.length() > 0) || (dates != null && dates.length() > 0);
+    private static boolean recurs(PhoneComponent master) {
+        return !listOf(master.rrules()).isEmpty() || !listOf(master.rdates()).isEmpty();
     }
 
     /**
@@ -339,11 +331,10 @@ final class CalendarMapping {
         return Zones.instant(value, device);
     }
 
-    private static List<Long> aligned(JSONArray values, EventTime start, ZoneId device)
-            throws JSONException {
+    private static List<Long> aligned(List<PhoneTime> values, EventTime start, ZoneId device) {
         List<Long> dates = new ArrayList<>();
-        for (int index = 0; values != null && index < values.length(); index++) {
-            dates.add(aligned(time(values.getJSONObject(index)), start, device));
+        for (PhoneTime value : listOf(values)) {
+            dates.add(aligned(value.eventTime(), start, device));
         }
         return dates;
     }
@@ -576,11 +567,11 @@ final class CalendarMapping {
     }
 
     /** An alarm as minutes before {@code start}, negative for after. */
-    private static long minutes(JSONObject alarm, long start) {
-        if (alarm.has("minutes")) {
-            return alarm.optLong("minutes");
+    private static long minutes(PhoneAlarm alarm, long start) {
+        if (alarm.minutes() != null) {
+            return alarm.minutes();
         }
-        String absolute = alarm.optString("absolute");
+        String absolute = orEmpty(alarm.absolute());
         String civil =
                 absolute.endsWith("Z") ? absolute.substring(0, absolute.length() - 1) : absolute;
         long at = Zones.civil(civil).toInstant(ZoneOffset.UTC).toEpochMilli();
@@ -588,14 +579,13 @@ final class CalendarMapping {
     }
 
     /** The {@code _SYNC_ID} suffix of a standalone override's row. */
-    static String standaloneKey(JSONObject recurrenceId) {
+    static String standaloneKey(PhoneTime recurrenceId) {
         if (recurrenceId == null) {
             return "";
         }
-        String tzid = recurrenceId.optString("tzid");
-        String time = recurrenceId.optString("time");
-        String wire =
-                EventTimeKind.UTC.wire().equals(recurrenceId.optString("kind")) ? time + "Z" : time;
+        String tzid = recurrenceId.tzid();
+        String time = recurrenceId.time();
+        String wire = recurrenceId.kind() == EventTimeKind.UTC ? time + "Z" : time;
         return tzid.isEmpty() ? wire : tzid + ":" + wire;
     }
 
@@ -616,56 +606,51 @@ final class CalendarMapping {
      * projection: mapping loss is no edit. Answers the view to patch on, or
      * null to keep the base bytes; a listed master's dates and rules revert.
      */
-    static JSONObject merge(JSONObject base, List<Row> phone, Phone context)
-            throws JSONException {
+    static PhoneEvent merge(PhoneEvent base, List<Row> phone, Phone context) {
         List<Row> held = rows(base, context);
-        JSONObject master = base.optJSONObject("master");
-        boolean listed = base.optBoolean("listed");
+        PhoneComponent master = base.master();
+        boolean listed = base.listed();
         boolean edited = false;
 
-        JSONObject merged = new JSONObject();
-        merged.put("uid", base.optString("uid"));
-
+        String mergedUid = base.uid();
+        PhoneComponent mergedMaster = null;
         Row phoneMaster = master(phone);
         if (phoneMaster != null && (master != null || held.isEmpty())) {
-            JSONObject component = copy(master);
+            PhoneComponent.Builder component =
+                    master == null
+                            ? new PhoneComponent.Builder()
+                            : new PhoneComponent.Builder(master);
             String uid = text(phoneMaster, Events.UID_2445);
             if (master == null && !uid.isEmpty()) {
-                merged.put("uid", uid);
+                mergedUid = uid;
             }
             edited |= component(component, master(held), phoneMaster, master, context, true,
                     listed, false);
-            merged.put("master", component);
+            mergedMaster = component.build();
         }
 
-        JSONArray overrides = base.optJSONArray("overrides");
-        JSONArray out = new JSONArray();
+        List<PhoneComponent> overrides = listOf(base.overrides());
+        List<PhoneComponent> out = new ArrayList<>();
         if (master != null) {
-            EventTime start = time(master.optJSONObject("start"));
+            EventTime start = time(master.start());
             Map<Long, Row> heldBy = exceptions(held);
             Map<Long, Row> phoneBy = exceptions(phone);
-            Set<Long> exdates =
-                    new TreeSet<>(aligned(master.optJSONArray("exdates"), start, context.device));
+            Set<Long> exdates = new TreeSet<>(aligned(master.exdates(), start, context.device));
             // NOTE: an instance a listed series no longer lists is one the
             // object already excludes.
             Set<Long> instances =
-                    listed
-                            ? new TreeSet<>(aligned(master.optJSONArray("rdates"), start,
-                                    context.device))
-                            : null;
-            for (int index = 0; overrides != null && index < overrides.length(); index++) {
-                JSONObject over = overrides.getJSONObject(index);
-                long key = instanceOf(time(over.optJSONObject("recurrenceId")), start,
-                        context.device);
+                    listed ? new TreeSet<>(aligned(master.rdates(), start, context.device)) : null;
+            for (PhoneComponent over : overrides) {
+                long key = instanceOf(time(over.recurrenceId()), start, context.device);
                 Row row = phoneBy.remove(key);
                 if (row == null) {
                     edited = true;
                     continue;
                 }
-                JSONObject component = copy(over);
+                PhoneComponent.Builder component = new PhoneComponent.Builder(over);
                 edited |= component(component, heldBy.get(key), row, over, context, false, false,
                         false);
-                out.put(component);
+                out.add(component.build());
             }
             for (Map.Entry<Long, Row> entry : phoneBy.entrySet()) {
                 Row row = entry.getValue();
@@ -674,16 +659,16 @@ final class CalendarMapping {
                         || (instances != null && !instances.contains(entry.getKey())))) {
                     continue;
                 }
-                JSONObject instance = instance(master, entry.getKey(), context.device);
-                JSONObject component = new JSONObject();
-                component.put("recurrenceId", instance.get("recurrenceId"));
+                PhoneComponent instance = instance(master, entry.getKey(), context.device);
+                PhoneComponent.Builder component = new PhoneComponent.Builder();
+                component.recurrenceId = instance.recurrenceId();
                 if (cancelled) {
-                    component.put("status", "CANCELLED");
+                    component.status = "CANCELLED";
                 } else {
                     Row shifted = rows(withOverride(base, instance), context).get(1);
                     component(component, shifted, row, instance, context, false, false, true);
                 }
-                out.put(component);
+                out.add(component.build());
                 edited = true;
             }
         } else {
@@ -691,16 +676,14 @@ final class CalendarMapping {
             for (Row row : phone) {
                 phoneBy.put(text(row, Events._SYNC_ID), row);
             }
-            for (int index = 0; overrides != null && index < overrides.length(); index++) {
-                JSONObject over = overrides.getJSONObject(index);
-                String syncId = context.handle + STANDALONE
-                        + standaloneKey(over.optJSONObject("recurrenceId"));
+            for (PhoneComponent over : overrides) {
+                String syncId = context.handle + STANDALONE + standaloneKey(over.recurrenceId());
                 Row row = phoneBy.get(syncId);
                 if (row == null) {
                     edited = true;
                     continue;
                 }
-                JSONObject component = copy(over);
+                PhoneComponent.Builder component = new PhoneComponent.Builder(over);
                 Row heldRow = null;
                 for (Row candidate : held) {
                     if (syncId.equals(text(candidate, Events._SYNC_ID))) {
@@ -708,12 +691,11 @@ final class CalendarMapping {
                     }
                 }
                 edited |= component(component, heldRow, row, over, context, false, false, false);
-                out.put(component);
+                out.add(component.build());
             }
         }
-        merged.put("overrides", out);
 
-        return edited ? merged : null;
+        return edited ? new PhoneEvent(mergedUid, mergedMaster, List.copyOf(out), false) : null;
     }
 
     /**
@@ -722,18 +704,16 @@ final class CalendarMapping {
      * <p>The merge does not take those: its rows are put back as the base
      * projects them.
      */
-    static boolean reverts(JSONObject base, List<Row> phone, Phone context)
-            throws JSONException {
-        JSONObject master = base.optJSONObject("master");
+    static boolean reverts(PhoneEvent base, List<Row> phone, Phone context) {
+        PhoneComponent master = base.master();
         Row held = master(rows(base, context));
         Row row = master(phone);
-        if (!base.optBoolean("listed") || master == null || held == null || row == null) {
+        if (!base.listed() || master == null || held == null || row == null) {
             return false;
         }
-        JSONObject start = master.optJSONObject("start");
+        PhoneTime start = master.start();
         return !startKey(held, start).equals(startKey(row, start))
-                || !endKey(held, master.optJSONObject("end")).equals(
-                        endKey(row, master.optJSONObject("end")))
+                || !endKey(held, master.end()).equals(endKey(row, master.end()))
                 || !text(held, Events.RRULE).equals(text(row, Events.RRULE))
                 || !days(instants(text(held, Events.RDATE)), false)
                         .equals(days(instants(text(row, Events.RDATE)), false))
@@ -748,57 +728,56 @@ final class CalendarMapping {
      * dates out, {@code fresh} is a new override (status defaulted).
      */
     private static boolean component(
-            JSONObject into,
+            PhoneComponent.Builder into,
             Row held,
             Row phone,
-            JSONObject like,
+            PhoneComponent like,
             Phone context,
             boolean master,
             boolean listed,
-            boolean fresh)
-            throws JSONException {
+            boolean fresh) {
         Row base = held == null ? neutral() : held;
         boolean edited = false;
 
-        for (String[] pair :
-                new String[][] {
-                    {Events.TITLE, "summary"},
-                    {Events.DESCRIPTION, "description"},
-                    {Events.EVENT_LOCATION, "location"},
-                }) {
-            if (!text(base, pair[0]).equals(text(phone, pair[0]))) {
-                into.put(pair[1], text(phone, pair[0]));
-                edited = true;
-            }
+        if (!text(base, Events.TITLE).equals(text(phone, Events.TITLE))) {
+            into.summary = text(phone, Events.TITLE);
+            edited = true;
+        }
+        if (!text(base, Events.DESCRIPTION).equals(text(phone, Events.DESCRIPTION))) {
+            into.description = text(phone, Events.DESCRIPTION);
+            edited = true;
+        }
+        if (!text(base, Events.EVENT_LOCATION).equals(text(phone, Events.EVENT_LOCATION))) {
+            into.location = text(phone, Events.EVENT_LOCATION);
+            edited = true;
         }
         if (!Objects.equals(base.url == null ? "" : base.url, phone.url == null ? "" : phone.url)) {
-            into.put("url", phone.url == null ? "" : phone.url);
+            into.url = phone.url == null ? "" : phone.url;
             edited = true;
         }
 
         int status = number(phone, Events.STATUS, Events.STATUS_CONFIRMED);
         if (!fresh && number(base, Events.STATUS, Events.STATUS_CONFIRMED) != status) {
-            into.put(
-                    "status",
+            into.status =
                     status == Events.STATUS_CANCELED
                             ? "CANCELLED"
-                            : status == Events.STATUS_CONFIRMED ? "CONFIRMED" : "TENTATIVE");
+                            : status == Events.STATUS_CONFIRMED ? "CONFIRMED" : "TENTATIVE";
             edited = true;
         }
         int free = number(phone, Events.AVAILABILITY, Events.AVAILABILITY_BUSY);
         if (busy(number(base, Events.AVAILABILITY, Events.AVAILABILITY_BUSY)) != busy(free)) {
-            into.put("transp", busy(free) ? "OPAQUE" : "TRANSPARENT");
+            into.transp = busy(free) ? "OPAQUE" : "TRANSPARENT";
             edited = true;
         }
         int access = number(phone, Events.ACCESS_LEVEL, Events.ACCESS_DEFAULT);
         if (number(base, Events.ACCESS_LEVEL, Events.ACCESS_DEFAULT) != access) {
-            into.put("class", access == Events.ACCESS_PUBLIC ? "PUBLIC"
+            into.classification = access == Events.ACCESS_PUBLIC ? "PUBLIC"
                     : access == Events.ACCESS_CONFIDENTIAL ? "CONFIDENTIAL"
-                    : access == Events.ACCESS_PRIVATE ? "PRIVATE" : "");
+                    : access == Events.ACCESS_PRIVATE ? "PRIVATE" : "";
             edited = true;
         }
         if (!text(base, Events.EVENT_COLOR_KEY).equals(text(phone, Events.EVENT_COLOR_KEY))) {
-            into.put("color", text(phone, Events.EVENT_COLOR_KEY));
+            into.color = text(phone, Events.EVENT_COLOR_KEY);
             edited = true;
         }
 
@@ -809,7 +788,7 @@ final class CalendarMapping {
         String heldOrganizer = text(base, Events.ORGANIZER);
         if ((!heldOrganizer.isEmpty() || !guests.isEmpty())
                 && !heldOrganizer.equalsIgnoreCase(organizer)) {
-            into.put("organizer", organizer);
+            into.organizer = organizer;
             edited = true;
         }
 
@@ -823,12 +802,12 @@ final class CalendarMapping {
         List<Long> heldMinutes = minutes(base);
         List<Long> phoneMinutes = minutes(phone);
         if (!heldMinutes.equals(phoneMinutes)) {
-            into.put("alarms", alarms(like, base, phone));
+            into.alarms = alarms(like, base, phone);
             edited = true;
         }
 
         if (!guestKeys(guests(base, base)).equals(guestKeys(guests))) {
-            into.put("attendees", attendees(like, base, guests));
+            into.attendees = attendees(like, base, guests);
             edited = true;
         }
         return edited;
@@ -836,10 +815,10 @@ final class CalendarMapping {
 
     /** The start and the end, taken together when the phone moved either. */
     private static boolean times(
-            JSONObject into, Row held, Row phone, JSONObject like, Phone context)
-            throws JSONException {
-        JSONObject start = like == null ? null : like.optJSONObject("start");
-        JSONObject end = like == null ? null : like.optJSONObject("end");
+            PhoneComponent.Builder into, Row held, Row phone, PhoneComponent like,
+            Phone context) {
+        PhoneTime start = like == null ? null : like.start();
+        PhoneTime end = like == null ? null : like.end();
         boolean moved =
                 held == null
                         || !startKey(held, start).equals(startKey(phone, start))
@@ -861,20 +840,20 @@ final class CalendarMapping {
         if (heldEndZone.isEmpty()) {
             heldEndZone = heldZone;
         }
-        into.put("start", timeOf(from, zone, allDay, start, heldZone, context.device));
-        into.put("end", timeOf(until, endZone, allDay, end, heldEndZone, context.device));
+        into.start = timeOf(from, zone, allDay, start, heldZone, context.device);
+        into.end = timeOf(until, endZone, allDay, end, heldEndZone, context.device);
         return true;
     }
 
     /** The master's rules and dates, each compared parsed as a set. */
     private static boolean series(
-            JSONObject into, Row held, Row phone, JSONObject like, Phone context)
-            throws JSONException {
+            PhoneComponent.Builder into, Row held, Row phone, PhoneComponent like,
+            Phone context) {
         Row base = held == null ? neutral() : held;
-        JSONObject startLike = like == null ? null : like.optJSONObject("start");
+        PhoneTime startLike = like == null ? null : like.start();
         // NOTE: a date the phone adds is written in the start the merge keeps,
         // which is the phone's own on a created event.
-        JSONObject newStart = into.has("start") ? into.optJSONObject("start") : startLike;
+        PhoneTime newStart = into.start != null ? into.start : startLike;
         if (startLike == null) {
             startLike = newStart;
         }
@@ -883,57 +862,61 @@ final class CalendarMapping {
 
         if (!rules(text(base, Events.RRULE), startLike, allDay, context.device)
                 .equals(rules(text(phone, Events.RRULE), startLike, allDay, context.device))) {
-            JSONArray rules = new JSONArray();
+            List<String> rules = new ArrayList<>();
             for (String rule : lines(text(phone, Events.RRULE))) {
-                rules.put(coerced(rule, startLike, allDay, context.device));
+                rules.add(coerced(rule, startLike, allDay, context.device));
             }
-            into.put("rrules", rules);
+            into.rrules = rules;
             edited = true;
         }
 
         EventTime start = time(startLike);
         long phoneStart = millis(phone, Events.DTSTART);
-        String[][] lists = {{Events.RDATE, "rdates"}, {Events.EXDATE, "exdates"}};
-        for (String[] pair : lists) {
-            Set<Long> was = days(instants(text(base, pair[0])), allDay);
-            Set<Long> now = days(instants(text(phone, pair[0])), allDay);
+        for (String column : new String[] {Events.RDATE, Events.EXDATE}) {
+            boolean rdates = Events.RDATE.equals(column);
+            Set<Long> was = days(instants(text(base, column)), allDay);
+            Set<Long> now = days(instants(text(phone, column)), allDay);
             if (was.equals(now)) {
                 continue;
             }
-            JSONArray dates = new JSONArray();
-            JSONArray kept = like == null ? null : like.optJSONArray(pair[1]);
+            List<PhoneTime> dates = new ArrayList<>();
+            List<PhoneTime> kept =
+                    like == null ? List.of() : listOf(rdates ? like.rdates() : like.exdates());
             Set<Long> covered = new TreeSet<>();
-            for (int index = 0; kept != null && start != null && index < kept.length(); index++) {
-                long at = day(aligned(time(kept.getJSONObject(index)), start, context.device),
-                        allDay);
+            for (PhoneTime date : start == null ? List.<PhoneTime>of() : kept) {
+                long at = day(aligned(date.eventTime(), start, context.device), allDay);
                 if (now.contains(at)) {
-                    dates.put(kept.getJSONObject(index));
+                    dates.add(date);
                     covered.add(at);
                 }
             }
             for (long at : now) {
                 if (covered.contains(at) || was.contains(at)
-                        || (Events.RDATE.equals(pair[0]) && at == day(phoneStart, allDay))) {
+                        || (rdates && at == day(phoneStart, allDay))) {
                     continue;
                 }
-                dates.put(dateOf(at, allDay, newStart, context.device));
+                dates.add(dateOf(at, allDay, newStart, context.device));
             }
-            into.put(pair[1], dates);
+            if (rdates) {
+                into.rdates = dates;
+            } else {
+                into.exdates = dates;
+            }
             edited = true;
         }
         return edited;
     }
 
     /** The phone's alarms, reusing the base's at the same offset. */
-    private static JSONArray alarms(JSONObject like, Row base, Row phone) throws JSONException {
-        JSONArray held = like == null ? null : like.optJSONArray("alarms");
+    private static List<PhoneAlarm> alarms(PhoneComponent like, Row base, Row phone) {
+        List<PhoneAlarm> held = like == null ? null : like.alarms();
         List<Long> heldMinutes = new ArrayList<>();
         for (Map<String, Object> reminder : base.reminders) {
             heldMinutes.add(longOf(reminder.get(Reminders.MINUTES)));
         }
         boolean[] used = new boolean[heldMinutes.size()];
 
-        JSONArray alarms = new JSONArray();
+        List<PhoneAlarm> alarms = new ArrayList<>();
         for (long minutes : minutes(phone)) {
             int match = -1;
             for (int index = 0; index < heldMinutes.size(); index++) {
@@ -942,49 +925,45 @@ final class CalendarMapping {
                     break;
                 }
             }
-            if (match >= 0 && held != null && match < held.length()) {
+            if (match >= 0 && held != null && match < held.size()) {
                 used[match] = true;
-                alarms.put(held.getJSONObject(match));
+                alarms.add(held.get(match));
             } else {
-                alarms.put(new JSONObject().put("minutes", minutes));
+                alarms.add(new PhoneAlarm(minutes, null));
             }
         }
         return alarms;
     }
 
     /** The phone's attendees, reusing the base's where unchanged. */
-    private static JSONArray attendees(JSONObject like, Row base, List<Map<String, Object>> guests)
-            throws JSONException {
-        JSONArray held = like == null ? null : like.optJSONArray("attendees");
+    private static List<PhoneAttendee> attendees(
+            PhoneComponent like, Row base, List<Map<String, Object>> guests) {
+        List<PhoneAttendee> held = like == null ? null : like.attendees();
         List<String> heldKeys = new ArrayList<>();
         for (Map<String, Object> guest : base.attendees) {
             heldKeys.add(guestKey(guest));
         }
 
-        JSONArray attendees = new JSONArray();
+        List<PhoneAttendee> attendees = new ArrayList<>();
         for (Map<String, Object> guest : guests) {
             int match = heldKeys.indexOf(guestKey(guest));
-            if (match >= 0 && held != null && match < held.length()) {
-                attendees.put(held.getJSONObject(match));
+            if (match >= 0 && held != null && match < held.size()) {
+                attendees.add(held.get(match));
                 continue;
             }
             int type = number(guest, Attendees.ATTENDEE_TYPE, Attendees.TYPE_NONE);
             int status = number(guest, Attendees.ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_NONE);
-            JSONObject attendee = new JSONObject();
-            attendee.put("email", text(guest, Attendees.ATTENDEE_EMAIL));
-            attendee.put("name", text(guest, Attendees.ATTENDEE_NAME));
-            attendee.put(
-                    "role",
-                    type == Attendees.TYPE_REQUIRED ? "REQ-PARTICIPANT"
-                    : type == Attendees.TYPE_OPTIONAL ? "OPT-PARTICIPANT" : "");
-            attendee.put("cutype", type == Attendees.TYPE_RESOURCE ? "RESOURCE" : "");
-            attendee.put(
-                    "partstat",
-                    status == Attendees.ATTENDEE_STATUS_ACCEPTED ? "ACCEPTED"
-                    : status == Attendees.ATTENDEE_STATUS_DECLINED ? "DECLINED"
-                    : status == Attendees.ATTENDEE_STATUS_TENTATIVE ? "TENTATIVE"
-                    : "NEEDS-ACTION");
-            attendees.put(attendee);
+            attendees.add(
+                    new PhoneAttendee(
+                            text(guest, Attendees.ATTENDEE_EMAIL),
+                            text(guest, Attendees.ATTENDEE_NAME),
+                            type == Attendees.TYPE_REQUIRED ? "REQ-PARTICIPANT"
+                            : type == Attendees.TYPE_OPTIONAL ? "OPT-PARTICIPANT" : "",
+                            type == Attendees.TYPE_RESOURCE ? "RESOURCE" : "",
+                            status == Attendees.ATTENDEE_STATUS_ACCEPTED ? "ACCEPTED"
+                            : status == Attendees.ATTENDEE_STATUS_DECLINED ? "DECLINED"
+                            : status == Attendees.ATTENDEE_STATUS_TENTATIVE ? "TENTATIVE"
+                            : "NEEDS-ACTION"));
         }
         return attendees;
     }
@@ -1085,7 +1064,7 @@ final class CalendarMapping {
      * a floating base (the device's zone is the phone's business); the instant
      * for a zone only the object defines.
      */
-    private static String startKey(Row row, JSONObject like) {
+    private static String startKey(Row row, PhoneTime like) {
         return momentKey(
                 millis(row, Events.DTSTART),
                 text(row, Events.EVENT_TIMEZONE),
@@ -1098,7 +1077,7 @@ final class CalendarMapping {
      *
      * <p>A length on a repeating row, else as its start is.
      */
-    private static String endKey(Row row, JSONObject like) {
+    private static String endKey(Row row, PhoneTime like) {
         boolean allDay = number(row, Events.ALL_DAY, 0) == 1;
         if (isSeries(row)) {
             return "length " + (endOf(row) - millis(row, Events.DTSTART)) / 1000;
@@ -1108,17 +1087,16 @@ final class CalendarMapping {
                 endOf(row), zone.isEmpty() ? text(row, Events.EVENT_TIMEZONE) : zone, allDay, like);
     }
 
-    private static String momentKey(long millis, String tz, boolean allDay, JSONObject like) {
+    private static String momentKey(long millis, String tz, boolean allDay, PhoneTime like) {
         if (allDay) {
             return "day " + Zones.stamp(local(millis, ZoneOffset.UTC), true);
         }
-        String kind = like == null ? "" : like.optString("kind");
+        EventTimeKind kind = like == null ? null : like.kind();
         String civil = Zones.stamp(local(millis, zoneNamed(tz, ZoneOffset.UTC)), false);
-        if (EventTimeKind.FLOATING.wire().equals(kind)) {
+        if (kind == EventTimeKind.FLOATING) {
             return "civil " + civil;
         }
-        if (EventTimeKind.ZONED.wire().equals(kind)
-                && Zones.zoneOf(like.optString("tzid")) == null) {
+        if (kind == EventTimeKind.ZONED && Zones.zoneOf(like.tzid()) == null) {
             return "instant " + Math.floorDiv(millis, 1000L);
         }
         return "civil " + civil + " " + id(zoneNamed(tz, ZoneOffset.UTC));
@@ -1153,51 +1131,46 @@ final class CalendarMapping {
      * when the phone changed it; a zone only the object defines rides with its
      * instant, placed natively.
      */
-    static JSONObject timeOf(
-            long millis, String tz, boolean allDay, JSONObject like, String likeZone,
-            ZoneId device) throws JSONException {
+    static PhoneTime timeOf(
+            long millis, String tz, boolean allDay, PhoneTime like, String likeZone,
+            ZoneId device) {
         if (allDay) {
-            return json(new EventTime(Zones.stamp(local(millis, ZoneOffset.UTC), true),
-                    EventTimeKind.DATE, "", null));
+            return new PhoneTime(Zones.stamp(local(millis, ZoneOffset.UTC), true),
+                    EventTimeKind.DATE, "", null, null);
         }
         ZoneId zone = zoneNamed(tz, device);
         String civil = Zones.stamp(local(millis, zone), false);
-        String kind = like == null ? "" : like.optString("kind");
+        EventTimeKind kind = like == null ? null : like.kind();
         boolean kept = tz.equals(likeZone);
 
-        if (EventTimeKind.FLOATING.wire().equals(kind) && (kept || zone.equals(device))) {
-            return json(new EventTime(civil, EventTimeKind.FLOATING, "", null));
+        if (kind == EventTimeKind.FLOATING && (kept || zone.equals(device))) {
+            return new PhoneTime(civil, EventTimeKind.FLOATING, "", null, null);
         }
-        if (EventTimeKind.ZONED.wire().equals(kind) && kept) {
-            String tzid = like.optString("tzid");
-            JSONObject time = json(new EventTime(civil, EventTimeKind.ZONED, tzid, null));
-            if (Zones.zoneOf(tzid) == null) {
-                time.put("instant", Zones.utc(millis));
-            }
-            return time;
+        if (kind == EventTimeKind.ZONED && kept) {
+            String tzid = like.tzid();
+            String instant = Zones.zoneOf(tzid) == null ? Zones.utc(millis) : null;
+            return new PhoneTime(civil, EventTimeKind.ZONED, tzid, null, instant);
         }
         if (isUtc(zone)) {
-            return json(new EventTime(
+            return new PhoneTime(
                     Zones.stamp(local(millis, ZoneOffset.UTC), false), EventTimeKind.UTC, "",
-                    null));
+                    null, null);
         }
-        return json(new EventTime(civil, EventTimeKind.ZONED, zone.getId(), null));
+        return new PhoneTime(civil, EventTimeKind.ZONED, zone.getId(), null, null);
     }
 
     /** An instant of a series' dates, in the series' start's zone and kind. */
-    private static JSONObject dateOf(long instant, boolean allDay, JSONObject start, ZoneId device)
-            throws JSONException {
+    private static PhoneTime dateOf(long instant, boolean allDay, PhoneTime start, ZoneId device) {
         if (allDay || start == null) {
-            return json(new EventTime(Zones.stamp(local(instant, ZoneOffset.UTC), true),
-                    EventTimeKind.DATE, "", null));
+            return new PhoneTime(Zones.stamp(local(instant, ZoneOffset.UTC), true),
+                    EventTimeKind.DATE, "", null, null);
         }
-        EventTime like = time(start);
+        EventTime like = start.eventTime();
         EventTime at = Zones.at(instant, like, device);
-        JSONObject time = json(new EventTime(at.time(), at.kind(), at.tzid(), like.offset()));
-        if (EventTimeKind.ZONED.equals(like.kind()) && Zones.zoneOf(like.tzid()) == null) {
-            time.put("instant", Zones.utc(instant));
-        }
-        return time;
+        boolean placed =
+                EventTimeKind.ZONED.equals(like.kind()) && Zones.zoneOf(like.tzid()) == null;
+        return new PhoneTime(at.time(), at.kind(), at.tzid(), like.offset(),
+                placed ? Zones.utc(instant) : null);
     }
 
     /**
@@ -1206,10 +1179,9 @@ final class CalendarMapping {
      * <p>The master's fields, the instance's dates, and the recurrence id
      * naming it in the master's zone.
      */
-    static JSONObject instance(JSONObject master, long instant, ZoneId device)
-            throws JSONException {
-        EventTime start = time(master.optJSONObject("start"));
-        EventTime end = time(master.optJSONObject("end"));
+    static PhoneComponent instance(PhoneComponent master, long instant, ZoneId device) {
+        EventTime start = time(master.start());
+        EventTime end = time(master.end());
         long length =
                 end == null
                         ? 0
@@ -1217,30 +1189,27 @@ final class CalendarMapping {
                                 ? day(end.time()) - day(start.time())
                                 : Zones.instant(end, device) - Zones.instant(start, device);
 
-        JSONObject instance = copy(master);
-        for (String series : new String[] {"rrules", "exrules", "rdates", "exdates"}) {
-            instance.put(series, new JSONArray());
-        }
-        JSONObject id = dateOf(instant, start.isDate(), master.optJSONObject("start"), device);
-        instance.put("recurrenceId", id);
-        instance.put("start", id);
-        instance.put(
-                "end",
+        PhoneComponent.Builder instance = new PhoneComponent.Builder(master);
+        instance.rrules = List.of();
+        instance.exrules = List.of();
+        instance.rdates = List.of();
+        instance.exdates = List.of();
+        PhoneTime id = dateOf(instant, start.isDate(), master.start(), device);
+        instance.recurrenceId = id;
+        instance.start = id;
+        instance.end =
                 dateOf(instant + length, start.isDate(),
-                        end == null ? master.optJSONObject("start") : master.optJSONObject("end"),
-                        device));
-        return instance;
+                        end == null ? master.start() : master.end(), device);
+        return instance.build();
     }
 
     /** The base view with one override added, for the row it projects. */
-    private static JSONObject withOverride(JSONObject base, JSONObject over) throws JSONException {
-        JSONObject view = copy(base);
-        view.put("overrides", new JSONArray().put(over));
-        return view;
+    private static PhoneEvent withOverride(PhoneEvent base, PhoneComponent over) {
+        return new PhoneEvent(base.uid(), base.master(), List.of(over), base.listed());
     }
 
     /** A rule cell as compared: each rule's parts a set, its end coerced. */
-    private static Set<String> rules(String cell, JSONObject start, boolean allDay, ZoneId device) {
+    private static Set<String> rules(String cell, PhoneTime start, boolean allDay, ZoneId device) {
         Set<String> rules = new TreeSet<>();
         for (String rule : lines(cell)) {
             Map<String, String> parts = new TreeMap<>();
@@ -1273,7 +1242,7 @@ final class CalendarMapping {
      * <p>In UTC when the start is zoned (RFC 5545 3.3.10): Etar writes a
      * date-time one on all-day series.
      */
-    static String coerced(String rule, JSONObject start, boolean allDay, ZoneId device) {
+    static String coerced(String rule, PhoneTime start, boolean allDay, ZoneId device) {
         StringBuilder out = new StringBuilder();
         for (String part : rule.split(";")) {
             int equals = part.indexOf('=');
@@ -1286,7 +1255,7 @@ final class CalendarMapping {
         return out.toString();
     }
 
-    private static String until(String value, JSONObject start, boolean allDay, ZoneId device) {
+    private static String until(String value, PhoneTime start, boolean allDay, ZoneId device) {
         if (value.length() < 8) {
             return value;
         }
@@ -1295,22 +1264,21 @@ final class CalendarMapping {
         if (allDay) {
             return civil.substring(0, 8);
         }
-        String kind = start == null ? EventTimeKind.UTC.wire() : start.optString("kind");
+        EventTimeKind kind = start == null ? EventTimeKind.UTC : start.kind();
         // NOTE: a date bounds every instance of its day.
         if (civil.length() == 8) {
             civil = civil + "T235959";
             utc = false;
         }
-        if (EventTimeKind.FLOATING.wire().equals(kind)) {
+        if (kind == EventTimeKind.FLOATING) {
             return utc ? Zones.stamp(local(utcMillis(civil), device), false) : civil;
         }
         if (utc) {
             return civil + "Z";
         }
         EventTime local =
-                new EventTime(civil, EventTimeKind.of(kind),
-                        start == null ? "" : start.optString("tzid"),
-                        start == null || start.isNull("offset") ? null : start.optInt("offset"));
+                new EventTime(civil, kind, start == null ? "" : start.tzid(),
+                        start == null ? null : start.offset());
         return Zones.utc(Zones.instant(local, device));
     }
 
@@ -1549,30 +1517,18 @@ final class CalendarMapping {
     }
 
     /** A view's time as an {@link EventTime}, null for none. */
-    static EventTime time(JSONObject time) {
-        if (time == null) {
-            return null;
-        }
-        return new EventTime(
-                time.optString("time"),
-                EventTimeKind.of(time.optString("kind")),
-                time.optString("tzid"),
-                time.has("offset") && !time.isNull("offset") ? time.optInt("offset") : null);
+    static EventTime time(PhoneTime time) {
+        return time == null ? null : time.eventTime();
     }
 
-    static JSONObject json(EventTime time) throws JSONException {
-        JSONObject json = new JSONObject();
-        json.put("time", time.time());
-        json.put("kind", time.kind().wire());
-        json.put("tzid", time.tzid());
-        if (time.offset() != null) {
-            json.put("offset", time.offset());
-        }
-        return json;
+    /** A view's text, empty when absent. */
+    private static String orEmpty(String text) {
+        return text == null ? "" : text;
     }
 
-    private static JSONObject copy(JSONObject object) throws JSONException {
-        return object == null ? new JSONObject() : new JSONObject(object.toString());
+    /** A view's list, empty when absent. */
+    private static <T> List<T> listOf(List<T> list) {
+        return list == null ? List.of() : list;
     }
 
     /** A date's UTC midnight. */
@@ -1604,15 +1560,8 @@ final class CalendarMapping {
         return lines;
     }
 
-    private static String joined(JSONArray values) {
-        if (values == null || values.length() == 0) {
-            return null;
-        }
-        List<String> lines = new ArrayList<>();
-        for (int index = 0; index < values.length(); index++) {
-            lines.add(values.optString(index));
-        }
-        return String.join("\n", lines);
+    private static String joined(List<String> values) {
+        return values == null || values.isEmpty() ? null : String.join("\n", values);
     }
 
     private static LocalDateTime local(long millis, ZoneId zone) {

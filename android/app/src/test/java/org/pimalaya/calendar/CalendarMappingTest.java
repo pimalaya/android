@@ -17,13 +17,17 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.json.JSONArray;
-import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.calendar.CalendarMapping.Row;
 import org.pimalaya.calendar.CalendarMapping.Write;
 import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.EventTimeKind;
+import org.pimalaya.client.PhoneAlarm;
+import org.pimalaya.client.PhoneComponent;
+import org.pimalaya.client.PhoneEdit;
+import org.pimalaya.client.PhoneEvent;
+import org.pimalaya.client.PhoneTime;
 import org.robolectric.RobolectricTestRunner;
 
 /**
@@ -46,7 +50,7 @@ public class CalendarMappingTest {
                 + "END:VCALENDAR\r\n";
     }
 
-    private static JSONObject view(String ical) {
+    private static PhoneEvent view(String ical) {
         return CalendarClient.projectEvent(ical, NOW);
     }
 
@@ -72,23 +76,16 @@ public class CalendarMappingTest {
         return copies;
     }
 
-    private static JSONObject merge(String ical, List<Row> phone) throws Exception {
+    private static PhoneEvent merge(String ical, List<Row> phone) throws Exception {
         return CalendarMapping.merge(view(ical), phone, PHONE);
     }
 
     /** The object with the phone's edit patched onto it, as a read does. */
-    private static String applied(String ical, JSONObject merged, String... vtimezones)
+    private static String applied(String ical, PhoneEvent merged, String... vtimezones)
             throws Exception {
-        JSONObject edit = new JSONObject();
-        edit.put("event", merged);
-        edit.put("stamp", "20261009T120000Z");
-        edit.put("addresses", new JSONArray().put(OWNER));
-        JSONArray zones = new JSONArray();
-        for (String zone : vtimezones) {
-            zones.put(zone);
-        }
-        edit.put("vtimezones", zones);
-        return CalendarClient.applyEvent(ical, edit);
+        return CalendarClient.applyEvent(
+                ical,
+                new PhoneEdit(merged, "20261009T120000Z", List.of(OWNER), List.of(vtimezones)));
     }
 
     private static long at(String local, ZoneId zone) {
@@ -314,10 +311,10 @@ public class CalendarMappingTest {
         List<Row> phone = phone(MEETING);
         phone.get(0).values.put(Events.TITLE, "Retro");
 
-        JSONObject merged = merge(MEETING, phone);
+        PhoneEvent merged = merge(MEETING, phone);
         String written = applied(MEETING, merged);
 
-        assertEquals("Retro", merged.getJSONObject("master").getString("summary"));
+        assertEquals("Retro", merged.master().summary());
         assertTrue(written.contains("SUMMARY:Retro\r\n"));
         assertTrue(written.contains("X-VENDOR;X-PARAM=1:kept\r\n"));
         assertTrue(written.contains("ATTACH:https://example.com/agenda.pdf\r\n"));
@@ -351,7 +348,7 @@ public class CalendarMappingTest {
 
         assertNull(merge(SERIES, confirmed));
         assertEquals(
-                "TENTATIVE", merge(SERIES, tentative).getJSONObject("master").getString("status"));
+                "TENTATIVE", merge(SERIES, tentative).master().status());
     }
 
     @Test
@@ -366,16 +363,16 @@ public class CalendarMappingTest {
         elsewhere.get(0).values.put(Events.DTEND, at("2026-10-12T10:00", york));
         elsewhere.get(0).values.put(Events.EVENT_END_TIMEZONE, "America/New_York");
 
-        JSONObject kept = merge(MEETING, moved).getJSONObject("master");
-        JSONObject changed = merge(MEETING, elsewhere).getJSONObject("master");
+        PhoneComponent kept = merge(MEETING, moved).master();
+        PhoneComponent changed = merge(MEETING, elsewhere).master();
 
-        assertEquals("20261012T100000", kept.getJSONObject("start").getString("time"));
-        assertEquals("Europe/Paris", kept.getJSONObject("start").getString("tzid"));
-        assertEquals("20261012T110000", kept.getJSONObject("end").getString("time"));
+        assertEquals("20261012T100000", kept.start().time());
+        assertEquals("Europe/Paris", kept.start().tzid());
+        assertEquals("20261012T110000", kept.end().time());
         assertTrue(applied(MEETING, merge(MEETING, moved))
                 .contains("DTSTART;TZID=Europe/Paris:20261012T100000\r\n"));
-        assertEquals("America/New_York", changed.getJSONObject("start").getString("tzid"));
-        assertEquals("20261012T090000", changed.getJSONObject("start").getString("time"));
+        assertEquals("America/New_York", changed.start().tzid());
+        assertEquals("20261012T090000", changed.start().time());
     }
 
     @Test
@@ -438,10 +435,10 @@ public class CalendarMappingTest {
 
         List<Row> ended = phone(SERIES);
         ended.get(0).values.put(Events.RRULE, "FREQ=WEEKLY;BYDAY=MO;UNTIL=20261102");
-        JSONArray rules = merge(SERIES, ended).getJSONObject("master").getJSONArray("rrules");
+        List<String> rules = merge(SERIES, ended).master().rrules();
         // NOTE: a date UNTIL against a zoned start bounds its whole day, in
         // UTC (RFC 5545 3.3.10).
-        assertEquals("FREQ=WEEKLY;BYDAY=MO;UNTIL=20261102T225959Z", rules.getString(0));
+        assertEquals("FREQ=WEEKLY;BYDAY=MO;UNTIL=20261102T225959Z", rules.get(0));
     }
 
     @Test
@@ -449,14 +446,14 @@ public class CalendarMappingTest {
         List<Row> phone = phone(SERIES);
         phone.get(0).values.put(Events.EXDATE, "20261019T070000Z,20261026T080000Z");
 
-        JSONArray exdates =
-                merge(SERIES, phone).getJSONObject("master").getJSONArray("exdates");
+        List<PhoneTime> exdates =
+                merge(SERIES, phone).master().exdates();
         String written = applied(SERIES, merge(SERIES, phone));
 
-        assertEquals(2, exdates.length());
-        assertEquals("date", exdates.getJSONObject(0).getString("kind"));
-        assertEquals("20261026T090000", exdates.getJSONObject(1).getString("time"));
-        assertEquals("Europe/Paris", exdates.getJSONObject(1).getString("tzid"));
+        assertEquals(2, exdates.size());
+        assertEquals(EventTimeKind.DATE, exdates.get(0).kind());
+        assertEquals("20261026T090000", exdates.get(1).time());
+        assertEquals("Europe/Paris", exdates.get(1).tzid());
         assertTrue(written.contains("EXDATE;VALUE=DATE:20261019\r\n"));
         assertTrue(written.contains("EXDATE;TZID=Europe/Paris:20261026T090000\r\n"));
     }
@@ -475,11 +472,11 @@ public class CalendarMappingTest {
         alert.put(Reminders.MINUTES, 30);
         alert.put(Reminders.METHOD, Reminders.METHOD_DEFAULT);
         added.get(0).reminders.add(alert);
-        JSONArray alarms = merge(MEETING, added).getJSONObject("master").getJSONArray("alarms");
+        List<PhoneAlarm> alarms = merge(MEETING, added).master().alarms();
 
-        assertEquals(2, alarms.length());
-        assertEquals(15, alarms.getJSONObject(0).getInt("minutes"));
-        assertEquals(30, alarms.getJSONObject(1).getInt("minutes"));
+        assertEquals(2, alarms.size());
+        assertEquals(Long.valueOf(15), alarms.get(0).minutes());
+        assertEquals(Long.valueOf(30), alarms.get(1).minutes());
         assertTrue(applied(MEETING, merge(MEETING, added)).contains("TRIGGER:-PT30M\r\n"));
     }
 
@@ -551,14 +548,14 @@ public class CalendarMappingTest {
         List<Row> phone = phone(SERIES);
         phone.add(moved);
 
-        JSONObject merged = merge(SERIES, phone);
-        JSONObject over = merged.getJSONArray("overrides").getJSONObject(0);
+        PhoneEvent merged = merge(SERIES, phone);
+        PhoneComponent over = merged.overrides().get(0);
         String written = applied(SERIES, merged);
 
-        assertEquals("20261012T090000", over.getJSONObject("recurrenceId").getString("time"));
-        assertEquals("20261012T110000", over.getJSONObject("start").getString("time"));
-        assertFalse("the provider's default status is no edit", over.has("status"));
-        assertFalse(over.has("summary"));
+        assertEquals("20261012T090000", over.recurrenceId().time());
+        assertEquals("20261012T110000", over.start().time());
+        assertNull("the provider's default status is no edit", over.status());
+        assertNull(over.summary());
         assertTrue(written.contains("RECURRENCE-ID;TZID=Europe/Paris:20261012T090000\r\n"));
         assertTrue(written.contains("DTSTART;TZID=Europe/Paris:20261012T110000\r\n"));
     }
@@ -568,9 +565,11 @@ public class CalendarMappingTest {
         List<Row> phone = phone(SERIES);
         phone.add(exception(SERIES, at("2026-10-12T09:00", PARIS)));
 
-        JSONObject over = merge(SERIES, phone).getJSONArray("overrides").getJSONObject(0);
+        PhoneComponent over = merge(SERIES, phone).overrides().get(0);
+        PhoneComponent.Builder alone = new PhoneComponent.Builder();
+        alone.recurrenceId = over.recurrenceId();
 
-        assertEquals("the recurrence id alone", 1, over.length());
+        assertEquals("the recurrence id alone", alone.build(), over);
     }
 
     @Test
@@ -605,9 +604,9 @@ public class CalendarMappingTest {
         List<Row> phone = phone(ical);
         phone.remove(1);
 
-        JSONObject merged = merge(ical, phone);
+        PhoneEvent merged = merge(ical, phone);
 
-        assertEquals(0, merged.getJSONArray("overrides").length());
+        assertEquals(0, merged.overrides().size());
         assertFalse(applied(ical, merged).contains("RECURRENCE-ID"));
     }
 
@@ -616,17 +615,17 @@ public class CalendarMappingTest {
         String ical = object("BEGIN:VEVENT\r\nUID:l\r\nDTSTART:20261005T090000Z\r\n"
                 + "DTEND:20261005T100000Z\r\nRRULE:FREQ=YEARLY;BYWEEKNO=20;BYDAY=MO\r\n"
                 + "SUMMARY:Old\r\nEND:VEVENT\r\n");
-        assertTrue(view(ical).optBoolean("listed"));
+        assertTrue(view(ical).listed());
         List<Row> phone = phone(ical);
         assertNull(phone.get(0).values.get(Events.RRULE));
         phone.get(0).values.put(Events.TITLE, "New");
         phone.get(0).values.put(Events.DTSTART, (Long) phone.get(0).values.get(Events.DTSTART)
                 + 3_600_000L);
 
-        JSONObject master = merge(ical, phone).getJSONObject("master");
+        PhoneComponent master = merge(ical, phone).master();
 
-        assertEquals("New", master.getString("summary"));
-        assertEquals("20261005T090000", master.getJSONObject("start").getString("time"));
+        assertEquals("New", master.summary());
+        assertEquals("20261005T090000", master.start().time());
         assertTrue(CalendarMapping.reverts(view(ical), phone, PHONE));
         assertFalse(CalendarMapping.reverts(view(ical), phone(ical), PHONE));
     }
@@ -646,11 +645,11 @@ public class CalendarMappingTest {
         reminder.put(Reminders.METHOD, Reminders.METHOD_ALERT);
         created.reminders.add(reminder);
 
-        JSONObject merged = CalendarMapping.merge(new JSONObject(), List.of(created), PHONE);
+        PhoneEvent merged = CalendarMapping.merge(PhoneEvent.EMPTY, List.of(created), PHONE);
         String written = applied("", merged, Zones.vtimezone(PARIS, at("2026-10-12T12:00",
                 PARIS)));
 
-        assertEquals("new-uid", merged.getString("uid"));
+        assertEquals("new-uid", merged.uid());
         assertTrue(written.contains("UID:new-uid\r\n"));
         assertTrue(written.contains("SUMMARY:Lunch\r\n"));
         assertTrue(written.contains("DTSTART;TZID=Europe/Paris:20261012T120000\r\n"));

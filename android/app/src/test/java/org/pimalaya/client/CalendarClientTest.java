@@ -20,9 +20,11 @@ import static org.pimalaya.client.CalendarFixtures.ical;
 import static org.pimalaya.client.CalendarFixtures.followingEdit;
 import static org.pimalaya.client.CalendarFixtures.weekly;
 import static org.pimalaya.client.ReplyShape.assertMirrors;
+import static org.pimalaya.client.ReplyShape.assertSameJson;
 import static org.pimalaya.client.ReplyShape.elements;
 import static org.pimalaya.client.ReplyShape.field;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import org.json.JSONArray;
@@ -631,5 +633,72 @@ public class CalendarClientTest {
                                 "[{\"id\":\"a\",\"etag\":\"\\\"e1\\\"\",\"ical\":\"A\"},"
                                         + "{\"id\":\"b\",\"etag\":null,\"ical\":\"B\"}]")));
         assertEquals(List.of(), Event.list(null));
+    }
+
+    @Test
+    public void thePhoneViewReadsAndWritesEveryKeyTheBridgeSends() throws Exception {
+        String ical =
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n" + ROMANCE
+                        + "BEGIN:VEVENT\r\nUID:p\r\nDTSTAMP:20260101T000000Z\r\n"
+                        + "DTSTART;TZID=/example.org/Romance:20260105T090000\r\n"
+                        + "DTEND;TZID=/example.org/Romance:20260105T100000\r\n"
+                        + "RRULE:FREQ=WEEKLY;COUNT=5\r\nEXRULE:FREQ=MONTHLY;COUNT=1\r\n"
+                        + "RDATE:20260108T090000Z\r\nEXDATE;VALUE=DATE:20260112\r\n"
+                        + "SUMMARY:S\r\nDESCRIPTION:D\r\nLOCATION:L\r\nURL:https://u\r\n"
+                        + "STATUS:TENTATIVE\r\nTRANSP:TRANSPARENT\r\nCLASS:PRIVATE\r\n"
+                        + "COLOR:teal\r\nORGANIZER:mailto:o@example.com\r\n"
+                        + "ATTENDEE;CN=A;ROLE=CHAIR;CUTYPE=ROOM;PARTSTAT=ACCEPTED:"
+                        + "mailto:a@example.com\r\n"
+                        + "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT5M\r\nEND:VALARM\r\n"
+                        + "END:VEVENT\r\nBEGIN:VEVENT\r\nUID:p\r\nDTSTAMP:20260101T000000Z\r\n"
+                        + "RECURRENCE-ID;TZID=/example.org/Romance:20260119T090000\r\n"
+                        + "DTSTART:20260119T120000\r\nSUMMARY:O\r\n"
+                        + "BEGIN:VALARM\r\nACTION:DISPLAY\r\n"
+                        + "TRIGGER;VALUE=DATE-TIME:20260119T100000Z\r\nEND:VALARM\r\n"
+                        + "END:VEVENT\r\nEND:VCALENDAR\r\n";
+        String raw = Native.projectEvent(ical, "20260101T000000Z");
+
+        PhoneEvent view = PhoneEvent.from(new JSONObject(raw));
+
+        // NOTE: a null on the wire is an absent field, which writes no key.
+        assertSameJson(withoutNulls(new JSONObject(raw)).toString(), view.toJson().toString());
+        PhoneComponent master = view.master();
+        assertEquals("PRIVATE", master.classification());
+        assertEquals(new PhoneTime("20260105T090000", EventTimeKind.ZONED, ROMANCE_ID, 3600,
+                null), master.start());
+        assertEquals(new PhoneAlarm(5L, null), master.alarms().get(0));
+        assertEquals(
+                new PhoneAttendee("a@example.com", "A", "CHAIR", "ROOM", "ACCEPTED"),
+                master.attendees().get(0));
+        assertEquals(
+                new PhoneAlarm(null, "20260119T100000Z"),
+                view.overrides().get(0).alarms().get(0));
+    }
+
+    private static JSONObject withoutNulls(JSONObject object) throws Exception {
+        JSONObject out = new JSONObject();
+        for (Iterator<String> keys = object.keys(); keys.hasNext(); ) {
+            String key = keys.next();
+            Object value = object.get(key);
+            if (value != JSONObject.NULL) {
+                out.put(key, withoutNulls(value));
+            }
+        }
+        return out;
+    }
+
+    private static Object withoutNulls(Object value) throws Exception {
+        if (value instanceof JSONObject) {
+            return withoutNulls((JSONObject) value);
+        }
+        if (value instanceof JSONArray) {
+            JSONArray array = (JSONArray) value;
+            JSONArray out = new JSONArray();
+            for (int index = 0; index < array.length(); index++) {
+                out.put(withoutNulls(array.get(index)));
+            }
+            return out;
+        }
+        return value;
     }
 }

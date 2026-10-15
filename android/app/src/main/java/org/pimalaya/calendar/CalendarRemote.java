@@ -21,9 +21,9 @@ import android.provider.CalendarContract.Reminders;
 import android.util.Log;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +39,9 @@ import org.pimalaya.calendar.CalendarMapping.Write;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.EventTimeKind;
+import org.pimalaya.client.PhoneEdit;
+import org.pimalaya.client.PhoneEvent;
+import org.pimalaya.client.PhoneTime;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
@@ -447,12 +450,12 @@ final class CalendarRemote implements PhoneSpoke {
         }
 
         String base = phoneBase(collection, handle);
-        JSONObject view =
-                base.isEmpty() ? new JSONObject() : CalendarClient.projectEvent(base, now());
+        PhoneEvent view =
+                base.isEmpty() ? PhoneEvent.EMPTY : CalendarClient.projectEvent(base, now());
         CalendarMapping.Phone phone = phone(target, handle);
 
         boolean revert = !target.writable || CalendarMapping.reverts(view, live, phone);
-        JSONObject merged = target.writable ? CalendarMapping.merge(view, live, phone) : null;
+        PhoneEvent merged = target.writable ? CalendarMapping.merge(view, live, phone) : null;
         String body = merged == null ? base : CalendarClient.applyEvent(base, edit(merged, target));
         if (merged != null) {
             Log.d("pimalaya", "phone edit on " + handle);
@@ -482,48 +485,31 @@ final class CalendarRemote implements PhoneSpoke {
      * <p>Now as the stamp, the user's address, and the definition of every
      * known zone the view names, for a time the phone moved into one.
      */
-    private JSONObject edit(JSONObject merged, Target target) throws JSONException {
+    private static PhoneEdit edit(PhoneEvent merged, Target target) {
         Set<String> zones = new TreeSet<>();
-        zones(merged, zones);
+        for (PhoneTime time : merged.times()) {
+            if (time.kind() == EventTimeKind.ZONED) {
+                zones.add(time.tzid());
+            }
+        }
         long since = System.currentTimeMillis();
-        JSONObject master = merged.optJSONObject("master");
         EventTime start =
-                master == null ? null : CalendarMapping.time(master.optJSONObject("start"));
+                merged.master() == null ? null : CalendarMapping.time(merged.master().start());
         if (start != null && !start.isDate()) {
             since = Math.min(since, Zones.instant(start, ZoneId.systemDefault()));
         }
-        JSONArray vtimezones = new JSONArray();
+        List<String> vtimezones = new ArrayList<>();
         for (String tzid : zones) {
             ZoneId zone = Zones.zoneOf(tzid);
             if (zone != null && zone.getId().equals(tzid)) {
-                vtimezones.put(Zones.vtimezone(zone, since));
+                vtimezones.add(Zones.vtimezone(zone, since));
             }
         }
-
-        JSONObject edit = new JSONObject();
-        edit.put("event", merged);
-        edit.put("stamp", Zones.utc(System.currentTimeMillis()));
-        edit.put("addresses", new JSONArray().put(target.owner));
-        edit.put("vtimezones", vtimezones);
-        return edit;
-    }
-
-    /** Every zone a view's times name. */
-    private static void zones(Object node, Set<String> out) {
-        if (node instanceof JSONObject) {
-            JSONObject object = (JSONObject) node;
-            if (EventTimeKind.ZONED.wire().equals(object.optString("kind"))) {
-                out.add(object.optString("tzid"));
-            }
-            for (Iterator<String> keys = object.keys(); keys.hasNext(); ) {
-                zones(object.opt(keys.next()), out);
-            }
-        } else if (node instanceof JSONArray) {
-            JSONArray array = (JSONArray) node;
-            for (int index = 0; index < array.length(); index++) {
-                zones(array.opt(index), out);
-            }
-        }
+        return new PhoneEdit(
+                merged,
+                Zones.utc(System.currentTimeMillis()),
+                Collections.singletonList(target.owner),
+                vtimezones);
     }
 
     /**
@@ -636,7 +622,7 @@ final class CalendarRemote implements PhoneSpoke {
      */
     private boolean write(Target target, String handle, String body, List<Row> observed)
             throws JSONException {
-        JSONObject view = CalendarClient.projectEvent(body, now());
+        PhoneEvent view = CalendarClient.projectEvent(body, now());
         List<Row> desired = CalendarMapping.rows(view, phone(target, handle));
         String token = PimdirHash.of(body);
         String projected = projected(body);
@@ -963,12 +949,16 @@ final class CalendarRemote implements PhoneSpoke {
         if (body.isEmpty()) {
             return null;
         }
-        JSONObject view = CalendarClient.projectEvent(body, now());
+        PhoneEvent view = CalendarClient.projectEvent(body, now());
+        boolean floating = false;
+        for (PhoneTime time : view.times()) {
+            floating |= time.kind() == EventTimeKind.FLOATING;
+        }
         StringBuilder out = new StringBuilder();
-        if (view.toString().contains("\"kind\":\"" + EventTimeKind.FLOATING.wire() + "\"")) {
+        if (floating) {
             out.append("zone=").append(ZoneId.systemDefault().getId());
         }
-        if (view.optBoolean("listed")) {
+        if (view.listed()) {
             out.append(out.length() == 0 ? "" : ";").append("window=").append(month());
         }
         return out.length() == 0 ? null : out.toString();

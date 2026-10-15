@@ -245,24 +245,22 @@ public class CalendarClient {
     }
 
     /**
-     * The phone view of an object, {@code now} a UTC {@code YYYYMMDDTHHMMSSZ}.
-     *
-     * <p>JSON (recorded exception): {@code {uid, master, overrides, listed}},
-     * each time a {@code {time, kind, tzid, offset}}.
+     * The phone view of an object, {@code now} a UTC {@code YYYYMMDDTHHMMSSZ}
+     * placing the window a series the provider cannot show is listed over.
      */
-    public static JSONObject projectEvent(String ical, String now) {
-        return Replies.object(Native.projectEvent(ical, now));
+    public static PhoneEvent projectEvent(String ical, String now) {
+        return PhoneEvent.from(Replies.object(Native.projectEvent(ical, now)));
     }
 
     /**
      * The object with an edited phone view patched onto it.
      *
-     * <p>{@code edit} is {@code {event, stamp, addresses, vtimezones}}; only
-     * its event's fields differing from the projection change. An empty
+     * <p>Only the edit's fields differing from the projection change. An empty
      * object becomes a new one.
      */
-    public static String applyEvent(String ical, JSONObject edit) {
+    public static String applyEvent(String ical, PhoneEdit edit) {
         // NOTE: the object byte for byte, so not trimmed.
-        return EventIcal.from(Replies.object(Native.applyEvent(ical, edit.toString()))).ical();
+        return EventIcal.from(Replies.object(Native.applyEvent(ical, edit.toJson().toString())))
+                .ical();
     }
 }

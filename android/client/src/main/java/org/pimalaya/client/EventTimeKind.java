@@ -26,12 +26,8 @@ public enum EventTimeKind {
         return wire;
     }
 
-    /**
-     * The kind the bridge spelled {@code wire}.
-     *
-     * <p>Public for the phone view, which carries times as JSON until phase 8.
-     */
-    public static EventTimeKind of(String wire) {
+    /** The kind the bridge spelled {@code wire}. */
+    static EventTimeKind of(String wire) {
         for (EventTimeKind kind : values()) {
             if (kind.wire.equals(wire)) {
                 return kind;
