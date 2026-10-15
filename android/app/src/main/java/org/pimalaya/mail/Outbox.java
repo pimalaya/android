@@ -69,6 +69,11 @@ public final class Outbox {
         return actions;
     }
 
+    /** Whether a collection is an account's outbox ({@link #outboxOf}). */
+    public static boolean holds(String collection) {
+        return collection.endsWith(OUTBOX);
+    }
+
     /** Where one account's outgoing messages wait. */
     public String outboxOf(String accountEmail) {
         return PimdirAccount.collectionId(accounts.idOf(accountEmail), OUTBOX);

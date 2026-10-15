@@ -98,8 +98,9 @@ public final class MailList {
      * What a list shows and a pull syncs under a role chip.
      *
      * <p>Every mailbox of {@code role} of the accounts {@code filter} shows,
-     * ticked or not; the filter's own scope with no chip. The outbox holds no
-     * role, so a chip leaves it out.
+     * ticked or not; the filter's own scope with no chip. The outbox goes
+     * with the sent chip, where its messages are headed; any other chip
+     * leaves it out, neither shown nor drained.
      */
     public static SyncScope narrowed(MergedFilter filter, String role, Map<String, String> roles) {
         if (role == null) {
@@ -113,7 +114,13 @@ public final class MailList {
 
             @Override
             public boolean collection(String email, String collection) {
-                return account(email) && role.equals(roles.get(collection));
+                if (!account(email)) {
+                    return false;
+                }
+                if ("sent".equals(role) && Outbox.holds(collection)) {
+                    return true;
+                }
+                return role.equals(roles.get(collection));
             }
         };
     }

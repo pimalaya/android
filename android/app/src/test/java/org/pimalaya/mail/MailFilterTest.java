@@ -124,7 +124,7 @@ public class MailFilterTest {
         assertEquals(1, count(MailList.narrowed(filter, "trash", store.roles())::collection));
     }
 
-    /** The outbox is a collection of each account, never a role's. */
+    /** The outbox is a collection of each account, going with Sent alone. */
     @Test
     public void eachOutboxIsItsAccounts() {
         List<PimdirCollections.Stored> listed = store.loadMailboxes(List.of(JANE, JOHN));
@@ -136,5 +136,10 @@ public class MailFilterTest {
                 MailList.narrowed(MergedFilter.of(context, PimDomain.MAIL), "trash", store.roles())
                         ::collection;
         assertFalse(trash.test(JANE, store.outbox().outboxOf(JANE)));
+
+        BiPredicate<String, String> sent =
+                MailList.narrowed(MergedFilter.of(context, PimDomain.MAIL), "sent", store.roles())
+                        ::collection;
+        assertTrue(sent.test(JANE, store.outbox().outboxOf(JANE)));
     }
 }
