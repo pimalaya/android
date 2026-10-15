@@ -831,12 +831,12 @@ A message the server answers gone when its body is asked for (a 404 on Gmail or 
 - THEN it is asked once, owed no more, and no later run asks for it until its mailbox is listed again
 
 ### Requirement: An IMAP step widens from the account floor
-An IMAP account's first step SHALL read the 50 newest `Date`s of each mailbox it brings bodies to (A mailbox is listed a chunk at a time), take the 50th newest of them all as its floor, list every mailbox from that floor, the junk and the trash included, so each next pass is a delta, leave that floor as the frontier (all mail when those mailboxes hold 50 or fewer in all), then read whole every message it listed from that floor but the junk's and the trash's: about 50 bodies whatever the mailboxes. A later step SHALL widen the mailbox holding the most recent coverage floor by 50 until about 50 stored messages lie between it and the frontier, move the frontier to the `Date` of the 50th of them by `Date`, ties included, then read whole the messages between the new frontier and the old, one mailbox after another.
+An IMAP account's first step SHALL read the 50 newest `Date`s of each mailbox it brings bodies to (A mailbox is listed a chunk at a time), take the 50th newest of them all as its floor, list every ticked mailbox from that floor (the inbox alone on an account listed for the first time, the filter page's default), the junk and the trash included when ticked, so each next pass is a delta, leave that floor as the frontier (all mail when those mailboxes hold 50 or fewer in all), then read whole every message it listed from that floor but the junk's and the trash's: about 50 bodies whatever the mailboxes. A later step SHALL widen the mailbox holding the most recent coverage floor by 50 until about 50 stored messages lie between it and the frontier, move the frontier to the `Date` of the 50th of them by `Date`, ties included, then read whole the messages between the new frontier and the old, one mailbox after another.
 
 #### Scenario: A first IMAP step
-- GIVEN an IMAP account whose inbox holds 3,000 messages, one an hour, and whose sent mail holds one every three hours
+- GIVEN an IMAP account whose inbox holds 3,000 messages, one an hour, and whose sent mail holds one every three hours, both ticked
 - WHEN its first step runs
-- THEN the account's 50 newest by `Date`, about 37 of the inbox and 13 sent, are on the phone whole, and every mailbox is opened for the next pass's delta
+- THEN the account's 50 newest by `Date`, about 37 of the inbox and 13 sent, are on the phone whole, and every ticked mailbox is opened for the next pass's delta
 
 #### Scenario: Load more on IMAP
 - GIVEN an IMAP account after its first step

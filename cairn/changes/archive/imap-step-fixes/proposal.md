@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: imap-step-fixes
-status: active
+status: landed
 created: 2026-10-11
 ---
 

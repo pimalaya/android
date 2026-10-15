@@ -51,15 +51,10 @@ public class E2eMailStepTest extends E2eCase {
         String floor = MailWindow.since(phone.context, accountId);
         assertNotNull("a frontier left", floor);
         if (target.service.equals("imap")) {
-            // NOTE: an IMAP step floors the account, the 50th newest across
-            // its mailboxes: the scratch mailbox is listed from there,
-            // however much of it lies above.
-            int above = 0;
-            for (int index = 0; index < SEEDED; index++) {
-                String date = E2eMessage.RFC_5322.format(now.minusDays(index + 1));
-                above += PimdirSummary.mailSortKey(date).compareTo(floor) >= 0 ? 1 : 0;
-            }
-            assertEquals("listed from the account's frontier " + floor, above, first);
+            // NOTE: off Gmail the first step takes the mailboxes the filter
+            // ticks, the inbox alone to begin with: the scratch mailbox is
+            // left to its own step, from its own frontier.
+            assertEquals("the scratch mailbox is not ticked", 0, first);
         } else {
             // NOTE: Gmail and JMAP step the account, newest first wherever
             // filed, so other mailboxes' newer mail takes part of the step:

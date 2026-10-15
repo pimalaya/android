@@ -299,23 +299,7 @@ public class ImapStepTest {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 120, 1).mailbox(junk, 0, 1);
         new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
 
-        // NOTE: what the store-wide lookup left: the sent UID 120 filed
-        // with the inbox's UID 120 body, its base moved with it.
-        SQLiteDatabase db = pimdir.getWritableDatabase();
-        String hash;
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT object_hash FROM items WHERE collection = ? AND link_id = '120'",
-                        new String[] {inbox})) {
-            assertTrue(cursor.moveToFirst());
-            hash = cursor.getString(0);
-        }
-        db.execSQL(
-                "UPDATE bindings SET base_object = ? WHERE collection = ? AND link_id = '120'",
-                new Object[] {hash, sent});
-        db.execSQL(
-                "UPDATE items SET object_hash = ? WHERE collection = ? AND link_id = '120'",
-                new Object[] {hash, sent});
+        crossLink("120");
         assertEquals(server.body(inbox, "120"), bodyOf(sent, "120"));
 
         assertEquals("both sides of the link", 2, store.repairLinks(accountId));
@@ -342,6 +326,68 @@ public class ImapStepTest {
         assertEquals(List.of(inbox + "/120", sent + "/120"), server.read);
         assertEquals(server.body(inbox, "120"), bodyOf(inbox, "120"));
         assertEquals(server.body(sent, "120"), bodyOf(sent, "120"));
+    }
+
+    @Test
+    public void theRepairKeepsABodyItsMessageStillNeeds() throws Exception {
+        Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 120, 1).mailbox(junk, 0, 1);
+        new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
+        String own = hashOf(sent, "120");
+        for (String handle : List.of("117", "118", "119", "120")) {
+            crossLink(handle);
+        }
+
+        // NOTE: the sent copies of 118 to 120 need their body as
+        // release_before says: a conflict, a pending create (no base), a
+        // local edit (a base naming another body).
+        SQLiteDatabase db = pimdir.getWritableDatabase();
+        db.execSQL(
+                "UPDATE bindings SET conflicted = 1 WHERE collection = ? AND link_id = '118'",
+                new Object[] {sent});
+        db.execSQL(
+                "UPDATE bindings SET base_present = 0, base_flags = NULL, base_object = NULL,"
+                        + " base_revision = NULL WHERE collection = ? AND link_id = '119'",
+                new Object[] {sent});
+        db.execSQL(
+                "UPDATE bindings SET base_object = ? WHERE collection = ? AND link_id = '120'",
+                new Object[] {own, sent});
+
+        assertEquals("117 on both sides, the inbox's 118 to 120", 5, store.repairLinks(accountId));
+        for (String handle : List.of("117", "118", "119", "120")) {
+            assertNull("released: inbox " + handle, hashOf(inbox, handle));
+        }
+        assertNull("released: sent 117", hashOf(sent, "117"));
+        for (String handle : List.of("118", "119", "120")) {
+            assertNotNull("kept: sent " + handle, hashOf(sent, handle));
+        }
+    }
+
+    /**
+     * What the store-wide lookup left: the sent message filed with the
+     * inbox's body of the same UID, its base moved with it.
+     */
+    private void crossLink(String handle) {
+        String hash = hashOf(inbox, handle);
+        SQLiteDatabase db = pimdir.getWritableDatabase();
+        db.execSQL(
+                "UPDATE bindings SET base_object = ? WHERE collection = ? AND link_id = ?",
+                new Object[] {hash, sent, handle});
+        db.execSQL(
+                "UPDATE items SET object_hash = ? WHERE collection = ? AND link_id = ?",
+                new Object[] {hash, sent, handle});
+    }
+
+    /** The body hash a mailbox's message is stored with, null for none. */
+    private String hashOf(String collection, String handle) {
+        try (Cursor cursor =
+                pimdir.getReadableDatabase()
+                        .rawQuery(
+                                "SELECT object_hash FROM items WHERE collection = ?"
+                                        + " AND link_id = ?",
+                                new String[] {collection, handle})) {
+            assertTrue(cursor.moveToFirst());
+            return cursor.isNull(0) ? null : cursor.getString(0);
+        }
     }
 
     /** The body a mailbox's message is stored with, its headers left out. */

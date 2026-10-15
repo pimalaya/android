@@ -244,6 +244,31 @@ public class MailEngineTest {
     }
 
     @Test
+    public void aLookupAnswersTheAccountsOwnBodiesOnAnAccountWideListingAlone() throws Exception {
+        store.replaceMailboxes("john@example.com", List.of(new Mailbox("INBOX", "")));
+        String theirs = store.collectionOf("john@example.com", "INBOX");
+        fixtures.put(
+                pimdir.getWritableDatabase(),
+                theirs,
+                new ItemFixtures.Row("m-1", "their body", null, ""));
+        fixtures.put(
+                pimdir.getWritableDatabase(),
+                collection,
+                new ItemFixtures.Row("m-2", "our body", null, ""));
+        MailEngine driver = new MailEngine(pimdir, Clients.real(), null, accountId);
+        JSONArray links = new JSONArray().put("m-1").put("m-2");
+
+        // NOTE: an IMAP UID or a Graph id names one mailbox's message.
+        MailPolicy.markAccountWide(pimdir.context(), accountId, false);
+        assertEquals(0, driver.lookup(links).getJSONObject("objects").length());
+
+        MailPolicy.markAccountWide(pimdir.context(), accountId, true);
+        JSONObject objects = driver.lookup(links).getJSONObject("objects");
+        assertEquals("another account's is no fact", 1, objects.length());
+        assertTrue(objects.has("m-2"));
+    }
+
+    @Test
     public void aStagedDeleteIsATombstoneUntilItIsPushed() throws Exception {
         engine.mutateRemove(collection, "42");
 
