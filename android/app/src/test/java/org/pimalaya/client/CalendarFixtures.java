@@ -1,6 +1,8 @@
 package org.pimalaya.client;
 
 import java.util.Map;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 /**
  * Crafted calendar objects the calendar pins run, one per reply shape.
@@ -123,10 +125,10 @@ final class CalendarFixtures {
     static String edited(String ical, String edit, String stamp) {
         // NOTE: the bridge itself, the edit being the literal JSON these
         // fixtures are written in; EventEditTest pins the typed edits on it.
-        return Native.writeEvent(
+        return ical(
+                Native.writeEvent(
                         ical,
-                        "{" + edit + (edit.isEmpty() ? "" : ",") + "\"stamp\":\"" + stamp + "\"}")
-                .trim();
+                        "{" + edit + (edit.isEmpty() ? "" : ",") + "\"stamp\":\"" + stamp + "\"}"));
     }
 
     /** The same, on the occurrence of the 12th alone. */
@@ -135,6 +137,15 @@ final class CalendarFixtures {
                 ical,
                 edit + ",\"scope\":\"this\",\"recurrenceId\":\"20260112T090000\"",
                 stamp);
+    }
+
+    /** The object a text verb's {@code {ical}} reply carries, trimmed. */
+    static String ical(String reply) {
+        try {
+            return new JSONObject(reply).getString("ical").trim();
+        } catch (JSONException error) {
+            throw new AssertionError(reply, error);
+        }
     }
 
     /** A split edit: this and following from the occurrence {@code id}. */

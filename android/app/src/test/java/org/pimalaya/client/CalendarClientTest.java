@@ -16,6 +16,7 @@ import static org.pimalaya.client.CalendarFixtures.ZONED;
 import static org.pimalaya.client.CalendarFixtures.edited;
 import static org.pimalaya.client.CalendarFixtures.editedTwelfth;
 import static org.pimalaya.client.CalendarFixtures.following;
+import static org.pimalaya.client.CalendarFixtures.ical;
 import static org.pimalaya.client.CalendarFixtures.followingEdit;
 import static org.pimalaya.client.CalendarFixtures.weekly;
 import static org.pimalaya.client.ReplyShape.assertMirrors;
@@ -476,14 +477,50 @@ public class CalendarClientTest {
         EventSides sides = new EventSides(SINGLE, here, there);
 
         assertEquals(
-                Native.resolveEvent(SINGLE, here, there, "{\"0\":\"local\"}").trim(),
+                ical(Native.resolveEvent(SINGLE, here, there, "{\"0\":\"local\"}")),
                 CalendarClient.resolveEvent(sides, Map.of(0, EventSide.LOCAL)));
         assertEquals(
-                Native.resolveEvent(SINGLE, here, there, "{\"0\":\"remote\"}").trim(),
+                ical(Native.resolveEvent(SINGLE, here, there, "{\"0\":\"remote\"}")),
                 CalendarClient.resolveEvent(sides, Map.of(0, EventSide.REMOTE)));
         assertEquals(
-                Native.resolveEvent("", here, there, "{}").trim(),
+                ical(Native.resolveEvent("", here, there, "{}")),
                 CalendarClient.resolveEvent(new EventSides(null, here, there), Map.of()));
+    }
+
+    /**
+     * The text verbs answer {@code {ical}}, or the bridge's error object.
+     *
+     * <p>A removal leaving nothing answers a null object.
+     */
+    @Test
+    public void textVerbsAnswerTheirObjectOrTheBridgeError() {
+        String here = edited(SINGLE, "\"summary\":\"Here\"", "20260201T100000Z");
+        String all = following("20260105T090000");
+        String renamed = "{\"summary\":\"R\",\"stamp\":\"20260201T100000Z\"}";
+        for (String raw :
+                List.of(
+                        Native.writeEvent(SINGLE, renamed),
+                        Native.removeEvent(weekly(""), all),
+                        Native.resolveEvent(SINGLE, here, here, "{}"),
+                        Native.newEvent("VTODO", "n", "20260201T100000Z", "20260105", "", ""),
+                        Native.applyEvent(SINGLE, "{\"x\":1}"))) {
+            assertMirrors(EventIcal.class, raw);
+        }
+        assertNull(CalendarClient.removeEvent(weekly(""), followingEdit("20260105T090000")));
+
+        PimalayaException error =
+                assertThrows(
+                        PimalayaException.class,
+                        () -> CalendarClient.writeEvent("garbage", followingEdit("x")));
+        assertEquals("Content line is missing a value separator: garbage", error.getMessage());
+        assertNull(error.status);
+        error =
+                assertThrows(
+                        PimalayaException.class,
+                        () ->
+                                CalendarClient.newEvent(
+                                        new EventDraft("VNOPE", "n", "", "", "", "")));
+        assertEquals("Cannot create a `VNOPE`", error.getMessage());
     }
 
     @Test
@@ -511,10 +548,10 @@ public class CalendarClientTest {
                         "VEVENT", "n1", "20260201T100000Z", "20260105T090000", ROMANCE_ID,
                         ROMANCE);
         assertEquals(
-                Native.newEvent(
+                ical(
+                        Native.newEvent(
                                 "VEVENT", "n1", "20260201T100000Z", "20260105T090000",
-                                ROMANCE_ID, ROMANCE)
-                        .trim(),
+                                ROMANCE_ID, ROMANCE)),
                 CalendarClient.newEvent(draft));
     }
 

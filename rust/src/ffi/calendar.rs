@@ -186,7 +186,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_expandEvent<'local>(
 /// `Native.writeEvent`: applies one edit, returning the new iCalendar text.
 ///
 /// A patch through the concrete syntax tree, so everything the form does
-/// not manage survives; pure.
+/// not manage survives; pure. Returns `{ical}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_writeEvent<'local>(
     mut env: EnvUnowned<'local>,
@@ -198,10 +198,11 @@ pub extern "system" fn Java_org_pimalaya_client_Native_writeEvent<'local>(
         let ical = read_string(env, &ical);
         let edit = read_string(env, &edit);
 
-        // NOTE: the reply is the iCalendar itself, not a JSON wrapper: an
-        // object is a JSON error, and no calendar object starts with a brace.
         let json = match write(&ical, &edit) {
-            Ok(written) => written,
+            Ok(written) => to_string(&IcalReply {
+                ical: Some(written),
+            })
+            .unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 
@@ -239,7 +240,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_splitEvent<'local>(
 
 /// `Native.removeEvent`: removes the occurrences an edit's scope names.
 ///
-/// Returns the iCalendar left, or an empty string when nothing is and the
+/// Returns `{ical}`, the iCalendar left, null when nothing is and the
 /// entry itself goes; pure.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_removeEvent<'local>(
@@ -252,10 +253,9 @@ pub extern "system" fn Java_org_pimalaya_client_Native_removeEvent<'local>(
         let ical = read_string(env, &ical);
         let edit = read_string(env, &edit);
 
-        // NOTE: told apart from an error the way `writeEvent`'s reply is,
-        // and from a removal by being empty.
         let json = match remove(&ical, &edit) {
-            Ok(left) => left.unwrap_or_default(),
+            Ok(left) => to_string(&IcalReply { ical: left })
+                .unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 
@@ -266,7 +266,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_removeEvent<'local>(
 
 /// `Native.updateEvent`: pushes an edited object back, guarded by its ETag.
 ///
-/// Returns the new ETag, or the error the server answered with.
+/// Returns `{etag}`, the new ETag, or the error the server answered with.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_updateEvent<'local>(
     mut env: EnvUnowned<'local>,
@@ -301,7 +301,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateEvent<'local>(
                     account: &account,
                 };
                 match calendars.update_event(&calendar_url, &event) {
-                    Ok(etag) => to_string(&etag).unwrap_or_else(|err| error_json(err.to_string())),
+                    Ok(etag) => to_string(&EtagReply { etag })
+                        .unwrap_or_else(|err| error_json(err.to_string())),
                     Err(err) => error_json(err),
                 }
             }
@@ -341,7 +342,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_projectEvent<'local>(
 /// `Native.applyEvent`: patches a view the phone edited onto the object.
 ///
 /// Only the fields it changed, the rest surviving byte for byte; an empty
-/// object becomes a new one. Pure. Returns the object, or a JSON error.
+/// object becomes a new one. Pure. Returns `{ical}`, the object byte for
+/// byte.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_applyEvent<'local>(
     mut env: EnvUnowned<'local>,
@@ -353,10 +355,11 @@ pub extern "system" fn Java_org_pimalaya_client_Native_applyEvent<'local>(
         let ical = read_string(env, &ical);
         let edit = read_string(env, &edit);
 
-        // NOTE: told apart from an error as `writeEvent`'s reply is: no
-        // calendar object opens on a brace.
         let json = match phone::apply(&ical, &edit) {
-            Ok(written) => written,
+            Ok(written) => to_string(&IcalReply {
+                ical: Some(written),
+            })
+            .unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 
@@ -421,7 +424,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_mergeEvent<'local>(
 /// `Native.resolveEvent`: resolves a conflicted object by its `picks`.
 ///
 /// The merge with each conflict `picks` names taking that side; pure.
-/// Returns the iCalendar text, told apart from an error as `writeEvent`'s.
+/// Returns `{ical}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_resolveEvent<'local>(
     mut env: EnvUnowned<'local>,
@@ -438,7 +441,10 @@ pub extern "system" fn Java_org_pimalaya_client_Native_resolveEvent<'local>(
         let picks = read_string(env, &picks);
 
         let json = match resolve(&base, &local, &remote, &picks) {
-            Ok(resolved) => resolved,
+            Ok(resolved) => to_string(&IcalReply {
+                ical: Some(resolved),
+            })
+            .unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 
@@ -450,7 +456,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_resolveEvent<'local>(
 /// `Native.newEvent`: the iCalendar text a new entry starts from.
 ///
 /// Pure: the id, the two stamps and the start's zone with its `VTIMEZONE`
-/// are the caller's.
+/// are the caller's. Returns `{ical}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_newEvent<'local>(
     mut env: EnvUnowned<'local>,
@@ -470,7 +476,6 @@ pub extern "system" fn Java_org_pimalaya_client_Native_newEvent<'local>(
         let tzid = read_string(env, &tzid);
         let vtimezone = read_string(env, &vtimezone);
 
-        // NOTE: told apart from an error as `writeEvent`'s reply is.
         let draft = EventDraft {
             component: &component,
             uid: &uid,
@@ -480,7 +485,10 @@ pub extern "system" fn Java_org_pimalaya_client_Native_newEvent<'local>(
             vtimezone: &vtimezone,
         };
         let json = match create(&draft) {
-            Ok(created) => created,
+            Ok(created) => to_string(&IcalReply {
+                ical: Some(created),
+            })
+            .unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 
@@ -587,4 +595,17 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteEvent<'local>(
 struct SplitReply {
     master: String,
     series: Option<String>,
+}
+
+/// The reply of the verbs answering one object: `ical` null when none is
+/// left.
+#[derive(Serialize)]
+struct IcalReply {
+    ical: Option<String>,
+}
+
+/// The reply of `updateEvent`: `etag` null when the server named none.
+#[derive(Serialize)]
+struct EtagReply {
+    etag: Option<String>,
 }

@@ -3,7 +3,6 @@ package org.pimalaya.client;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.json.JSONTokener;
 
 /**
  * The bridge reply envelope, its {@code error} thrown as a failure.
@@ -58,26 +57,6 @@ final class Replies {
 
         try {
             return new JSONArray(trimmed);
-        } catch (JSONException error) {
-            throw new PimalayaException("Unreadable bridge reply: " + error.getMessage());
-        }
-    }
-
-    /**
-     * The ETag an update answered, a bare JSON string or null; an object fails.
-     *
-     * <p>Read as a JSON string, not with quotes cut: Google's and Graph's ETags
-     * carry escaped quotes of their own, and a still-escaped ETag matches no
-     * listing, so the next pass would read the entry as changed elsewhere.
-     */
-    static String etag(String reply) {
-        String trimmed = reply.trim();
-        if (trimmed.startsWith("{")) {
-            object(trimmed);
-        }
-        try {
-            Object etag = new JSONTokener(trimmed).nextValue();
-            return etag instanceof String ? (String) etag : null;
         } catch (JSONException error) {
             throw new PimalayaException("Unreadable bridge reply: " + error.getMessage());
         }

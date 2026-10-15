@@ -95,16 +95,9 @@ public class CalendarClient {
      * removed. Pure computation.
      */
     public static String writeEvent(String ical, EventEdit edit) {
-        String written = Native.writeEvent(ical, edit.toJson().toString()).trim();
-
-        // NOTE: the reply is the object itself, so an error has to be
-        // told apart from a body. It is: no calendar object opens with
-        // a brace, so a brace is the bridge's error shape.
-        if (written.startsWith("{")) {
-            Replies.object(written);
-            throw new PimalayaException("Unreadable bridge reply: expected an object");
-        }
-        return written;
+        return EventIcal.from(Replies.object(Native.writeEvent(ical, edit.toJson().toString())))
+                .ical()
+                .trim();
     }
 
     /**
@@ -134,19 +127,15 @@ public class CalendarClient {
             throw new PimalayaException("Unwritable picks: " + error.getMessage());
         }
 
-        String resolved =
-                Native.resolveEvent(
-                                bodies.base() == null ? "" : bodies.base(),
-                                bodies.local(),
-                                bodies.remote(),
-                                sides.toString())
-                        .trim();
-        // NOTE: an object is the bridge's error shape here, as in writeEvent.
-        if (resolved.startsWith("{")) {
-            Replies.object(resolved);
-            throw new PimalayaException("Unreadable bridge reply: expected an object");
-        }
-        return resolved;
+        return EventIcal.from(
+                        Replies.object(
+                                Native.resolveEvent(
+                                        bodies.base() == null ? "" : bodies.base(),
+                                        bodies.local(),
+                                        bodies.remote(),
+                                        sides.toString())))
+                .ical()
+                .trim();
     }
 
     /**
@@ -166,15 +155,10 @@ public class CalendarClient {
      * before it; null means the entry itself goes. Pure computation.
      */
     public static String removeEvent(String ical, EventEdit edit) {
-        String left = Native.removeEvent(ical, edit.toJson().toString()).trim();
-
-        // NOTE: an object is the bridge's error shape here too, for the
-        // same reason it is in writeEvent.
-        if (left.startsWith("{")) {
-            Replies.object(left);
-            throw new PimalayaException("Unreadable bridge reply: expected an object");
-        }
-        return left.isEmpty() ? null : left;
+        String left =
+                EventIcal.from(Replies.object(Native.removeEvent(ical, edit.toJson().toString())))
+                        .ical();
+        return left == null || left.trim().isEmpty() ? null : left.trim();
     }
 
     /**
@@ -186,16 +170,16 @@ public class CalendarClient {
      */
     public String updateEvent(
             Transport transport, Account account, EventTarget target, String ical) {
-        String reply =
-                Native.updateEvent(
-                        transport,
-                        account.toJson().toString(),
-                        target.calendarUrl(),
-                        target.id(),
-                        ical,
-                        target.etag() == null ? "" : target.etag());
-
-        return Replies.etag(reply);
+        return EventEtag.from(
+                        Replies.object(
+                                Native.updateEvent(
+                                        transport,
+                                        account.toJson().toString(),
+                                        target.calendarUrl(),
+                                        target.id(),
+                                        ical,
+                                        target.etag() == null ? "" : target.etag())))
+                .etag();
     }
 
     /**
@@ -206,23 +190,17 @@ public class CalendarClient {
      * computation.
      */
     public static String newEvent(EventDraft draft) {
-        String created =
-                Native.newEvent(
-                                draft.component(),
-                                draft.uid(),
-                                draft.stamp(),
-                                draft.start(),
-                                draft.tzid(),
-                                draft.vtimezone())
-                        .trim();
-
-        // NOTE: an object is the bridge's error shape here too, for the
-        // same reason it is in writeEvent.
-        if (created.startsWith("{")) {
-            Replies.object(created);
-            throw new PimalayaException("Unreadable bridge reply: expected an object");
-        }
-        return created;
+        return EventIcal.from(
+                        Replies.object(
+                                Native.newEvent(
+                                        draft.component(),
+                                        draft.uid(),
+                                        draft.stamp(),
+                                        draft.start(),
+                                        draft.tzid(),
+                                        draft.vtimezone())))
+                .ical()
+                .trim();
     }
 
     /**
@@ -284,14 +262,7 @@ public class CalendarClient {
      * object becomes a new one.
      */
     public static String applyEvent(String ical, JSONObject edit) {
-        String written = Native.applyEvent(ical, edit.toString());
-
-        // NOTE: the object itself, byte for byte, so not trimmed; a brace
-        // is the bridge's error shape, since no calendar object opens on one.
-        if (written.startsWith("{")) {
-            Replies.object(written);
-            throw new PimalayaException("Unreadable bridge reply: expected an object");
-        }
-        return written;
+        // NOTE: the object byte for byte, so not trimmed.
+        return EventIcal.from(Replies.object(Native.applyEvent(ical, edit.toString()))).ical();
     }
 }

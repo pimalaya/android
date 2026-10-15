@@ -54,10 +54,14 @@ public class RepliesTest {
     @Test
     public void anUpdatedEtagIsReadAsTheStringTheReplyEncodes() {
         assertEquals(
-                "\"3583433504310878\"", Replies.etag("\"\\\"3583433504310878\\\"\""));
-        assertEquals("W/\"abc\"", Replies.etag(" \"W/\\\"abc\\\"\" "));
-        assertEquals("e-1", Replies.etag("\"e-1\""));
-        assertNull(Replies.etag("null"));
+                "\"3583433504310878\"", etag("{\"etag\":\"\\\"3583433504310878\\\"\"}"));
+        assertEquals("W/\"abc\"", etag(" {\"etag\":\"W/\\\"abc\\\"\"} "));
+        assertEquals("e-1", etag("{\"etag\":\"e-1\"}"));
+        assertNull(etag("{\"etag\":null}"));
+    }
+
+    private static String etag(String reply) {
+        return EventEtag.from(Replies.object(reply)).etag();
     }
 
     @Test

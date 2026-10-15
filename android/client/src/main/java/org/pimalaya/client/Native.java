@@ -428,7 +428,7 @@ final class Native {
     /**
      * Applies one edit to a calendar object through its syntax tree.
      *
-     * <p>Returns the object itself, or a JSON error object.
+     * <p>Returns {@code {ical}}, the object written.
      */
     static native String writeEvent(String ical, String edit);
 
@@ -443,7 +443,7 @@ final class Native {
     /**
      * Removes the occurrences an edit's scope names from a series.
      *
-     * <p>Returns the object left, empty when none, or a JSON error object.
+     * <p>Returns {@code {ical}}, the object left, null when none.
      */
     static native String removeEvent(String ical, String edit);
 
@@ -457,8 +457,8 @@ final class Native {
     /**
      * Resolves a conflicted calendar object with {@code picks}' sides.
      *
-     * <p>{@code picks}: side by conflict id. Returns the object itself, or a
-     * JSON error object.
+     * <p>{@code picks}: side by conflict id. Returns {@code {ical}}, the
+     * resolution.
      */
     static native String resolveEvent(String base, String local, String remote, String picks);
 
@@ -473,8 +473,8 @@ final class Native {
     /**
      * Patches the phone's edited view onto a calendar object, changes only.
      *
-     * <p>An empty object becomes a new one. Returns the object itself, or a
-     * JSON error object.
+     * <p>An empty object becomes a new one. Returns {@code {ical}}, the
+     * object patched.
      */
     static native String applyEvent(String ical, String edit);
 
@@ -482,7 +482,7 @@ final class Native {
      * Pushes an edited object back to its calendar, guarded by any ETag.
      *
      * <p>The account's address makes Google and JMAP announce a meeting it
-     * organizes. Returns the new ETag as a JSON string, or null.
+     * organizes. Returns {@code {etag}}, the new ETag or null.
      */
     static native String updateEvent(
             Transport transport,
@@ -496,7 +496,7 @@ final class Native {
      * The object a new entry starts from, with RFC 5545's required properties.
      *
      * <p>Its start in {@code tzid} with {@code vtimezone} (none for a date or
-     * floating). Returns the object itself, or a JSON error object.
+     * floating). Returns {@code {ical}}, the new object.
      */
     static native String newEvent(
             String component,

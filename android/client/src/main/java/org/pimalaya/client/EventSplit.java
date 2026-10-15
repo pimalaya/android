@@ -5,7 +5,7 @@ import org.json.JSONObject;
 /**
  * A series split at one occurrence: the old series ended, a new one begun.
  *
- * <p>Mirrors rs/ffi/calendar.rs {@code SplitReply} 588.
+ * <p>Mirrors rs/ffi/calendar.rs {@code SplitReply} 595.
  *
  * @param master the series' object, ended before the occurrence
  * @param series the new series' object, null when the occurrence was first
