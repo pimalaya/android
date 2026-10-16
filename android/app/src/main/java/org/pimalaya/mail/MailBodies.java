@@ -109,6 +109,24 @@ public final class MailBodies {
         return wanted;
     }
 
+    /** The rows of some stored messages whose body is not held yet. */
+    public static List<Row> rowsOf(List<MailStore.StoredMessage> messages) {
+        List<Row> rows = new ArrayList<>();
+        for (MailStore.StoredMessage message : messages) {
+            if (!message.bodied) {
+                rows.add(
+                        new Row(
+                                message.collection,
+                                message.id,
+                                message.sortKey,
+                                false,
+                                message.size,
+                                message.attachment));
+            }
+        }
+        return rows;
+    }
+
     /** Two newest-first lists as one, newest first. */
     static List<Row> merged(List<Row> left, List<Row> right) {
         List<Row> merged = new ArrayList<>(left.size() + right.size());

@@ -557,6 +557,34 @@ public final class SyncPasses {
     }
 
     /**
+     * Downloads the bodies of the messages a background run notifies.
+     *
+     * <p>On the calling thread, on a session of its own: the body step is the
+     * app's, but a notified message is about to be read. Answers the failure,
+     * or null.
+     */
+    public Exception arrivedBodies(AccountEntry account, List<MailStore.StoredMessage> arrived) {
+        Map<String, List<MailBodies.Row>> byCollection = new LinkedHashMap<>();
+        for (MailBodies.Row row : MailBodies.rowsOf(arrived)) {
+            byCollection.computeIfAbsent(row.collection, collection -> new ArrayList<>()).add(row);
+        }
+        if (byCollection.isEmpty()) {
+            return null;
+        }
+        try (MailSession session = openMail(account)) {
+            MailEngine engine =
+                    new MailEngine(pimdir, clients, session, accountIdOf(account.email));
+            for (Map.Entry<String, List<MailBodies.Row>> rows : byCollection.entrySet()) {
+                engine.download(rows.getKey(), rows.getValue());
+            }
+            return null;
+        } catch (Exception error) {
+            Log.w("pimalaya", "arrived bodies failed: " + AccountEntry.redacted(account.email), error);
+            return error;
+        }
+    }
+
+    /**
      * Opens one account's mail session, renewing its token once if refused.
      *
      * <p>The refresh is here, not around each verb: the session is the sign-in,

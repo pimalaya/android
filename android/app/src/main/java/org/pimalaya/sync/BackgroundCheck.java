@@ -256,10 +256,21 @@ public final class BackgroundCheck {
         if (pass.failure != null) {
             Log.w("pimalaya", "background mail sync failed", pass.failure);
         }
-        for (String email : notified) {
-            notify.accept(
-                    email,
-                    arrived(before.get(email), unreadInbox(mail, collections, email), floors));
+        for (AccountEntry account : passes.accountsFor(PimDomain.MAIL)) {
+            if (!notified.contains(account.email)) {
+                continue;
+            }
+            List<MailStore.StoredMessage> arrived =
+                    arrived(
+                            before.get(account.email),
+                            unreadInbox(mail, collections, account.email),
+                            floors);
+            // NOTE: the bodies before the notification, so tapping it opens
+            // a list whose new rows are already downloaded.
+            if (listing && !arrived.isEmpty()) {
+                passes.arrivedBodies(account, arrived);
+            }
+            notify.accept(account.email, arrived);
         }
         if (stopped.getAsBoolean()) {
             return;
