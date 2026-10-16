@@ -7,7 +7,12 @@
 use core::error::Error as StdError;
 
 use io_pim_discovery::{
-    autoconfig::{isp::DiscoveryIsp, mailconf::DiscoveryMailconf, mx::DiscoveryDnsMx},
+    autoconfig::{
+        cname::DiscoveryDnsCname,
+        isp::DiscoveryIsp,
+        mailconf::DiscoveryMailconf,
+        mx::{DiscoveryDnsMx, mx_base_domain},
+    },
     compose::{
         config::{DiscoveryConfigSource, DiscoveryService, DiscoveryServiceConfig},
         providers::DiscoveryKnownProvider,
@@ -134,18 +139,25 @@ impl<H: Host> Client<H> {
 
     /// Fetches the domain's Mozilla autoconfig (IMAP and SMTP) into configs.
     ///
-    /// Tries the ISP URL, its unauthenticated fallback, the ISPDB, then
-    /// mailconf, in spec order; the first answer wins and a failing one is
-    /// skipped, since most domains publish at exactly one of them.
+    /// Tries the ISP URL, the target of its alias, its unauthenticated
+    /// fallback, the ISPDB, then mailconf, in spec order; the first answer
+    /// wins and a failing one is skipped, since most domains publish at
+    /// exactly one of them. A domain publishing none falls back to the
+    /// provider its MX records name, as Thunderbird does.
     pub fn search_autoconfig(
         &mut self,
         email: &str,
         resolver: Option<&str>,
     ) -> Result<Vec<DiscoveryServiceConfig>, BridgeError> {
-        let (local, domain) = search_domain(email)?;
+        let (address, domain) = search_domain(email)?;
+        let resolver = self.search_resolver(resolver)?;
+        let host = format!("autoconfig.{domain}");
 
         let mut located = Vec::new();
-        if let Ok(url) = DiscoveryIsp::main_url(&local, &domain, true) {
+        if let Ok(url) = DiscoveryIsp::host_url(&address, &host, true) {
+            located.push((url, DiscoveryConfigSource::IspMain));
+        }
+        if let Some(url) = self.alias_url(&host, &address, &resolver) {
             located.push((url, DiscoveryConfigSource::IspMain));
         }
         if let Ok(url) = DiscoveryIsp::fallback_url(&domain, true) {
@@ -157,24 +169,80 @@ impl<H: Host> Client<H> {
 
         // NOTE: the mailconf TXT record names the document's URL; https
         // only, since an http one would be answered by an on-path attacker.
-        let mailconf = DiscoveryMailconf::new(&domain, self.search_resolver(resolver)?);
+        let mailconf = DiscoveryMailconf::new(&domain, resolver.clone());
         if let Ok(url) = self.run_mechanism(mailconf)
             && url.scheme() == "https"
         {
             located.push((url, DiscoveryConfigSource::Mailconf));
         }
 
-        for (url, source) in located {
-            let Ok(config) = self.run_mechanism(DiscoveryIsp::new(url)) else {
-                continue;
-            };
-            let configs = DiscoveryServiceConfig::from_autoconfig(&config, email, source);
+        let configs = self.first_autoconfig(located, email);
+        if !configs.is_empty() {
+            return Ok(configs);
+        }
+
+        let mx = DiscoveryDnsMx::new(&domain, resolver.clone());
+        let mut bases: Vec<String> = Vec::new();
+        for record in self.run_mechanism(mx).unwrap_or_default() {
+            let exchange = record.rdata.exchange.to_string();
+            if let Some(base) = mx_base_domain(&exchange)
+                && base != domain
+                && !bases.contains(&base)
+            {
+                bases.push(base);
+            }
+        }
+
+        for base in bases {
+            let host = format!("autoconfig.{base}");
+
+            let mut located = Vec::new();
+            if let Ok(url) = DiscoveryIsp::host_url(&address, &host, true) {
+                located.push((url, DiscoveryConfigSource::Mx));
+            }
+            if let Some(url) = self.alias_url(&host, &address, &resolver) {
+                located.push((url, DiscoveryConfigSource::Mx));
+            }
+            if let Ok(url) = DiscoveryIsp::db_url(&base, true) {
+                located.push((url, DiscoveryConfigSource::Mx));
+            }
+
+            let configs = self.first_autoconfig(located, email);
             if !configs.is_empty() {
                 return Ok(configs);
             }
         }
 
         Ok(Vec::new())
+    }
+
+    /// The ISP URL on the last target of `host`'s alias, if it is one.
+    ///
+    /// A provider aliasing its customers' autoconfig to its own host rarely
+    /// holds a certificate for the alias, so the alias itself fails.
+    fn alias_url(&mut self, host: &str, address: &str, resolver: &Url) -> Option<Url> {
+        let cname = DiscoveryDnsCname::new(host, resolver.clone());
+        let target = self.run_mechanism(cname).ok().flatten()?;
+        DiscoveryIsp::host_url(address, target, true).ok()
+    }
+
+    /// The configs of the first located autoconfig document that has any.
+    fn first_autoconfig(
+        &mut self,
+        located: Vec<(Url, DiscoveryConfigSource)>,
+        email: &str,
+    ) -> Vec<DiscoveryServiceConfig> {
+        for (url, source) in located {
+            let Ok(config) = self.run_mechanism(DiscoveryIsp::new(url)) else {
+                continue;
+            };
+            let configs = DiscoveryServiceConfig::from_autoconfig(&config, email, source);
+            if !configs.is_empty() {
+                return configs;
+            }
+        }
+
+        Vec::new()
     }
 
     /// Resolves the domain's JMAP session URL (RFC 8620) into a config.

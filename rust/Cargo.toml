@@ -63,4 +63,5 @@ ical-rs = { git = "https://github.com/pimalaya/ical", rev = "caa14225152a7aff6d8
 io-http = { git = "https://github.com/pimalaya/io-http", rev = "e1815307771c1ec65a86b77256d46c33241d3038" }
 io-imap = { git = "https://github.com/pimalaya/io-imap", rev = "b1ab38ea9f24578b46dda56aa009600571b6b9ef" }
 io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "189db408bdbeee33c1c535709c5f40f3464c7ecb" }
+io-pim-discovery = { git = "https://github.com/pimalaya/io-pim-discovery", rev = "6ceeaf43e655da1f0dac87e844f652c56c1c5d7a" }
 io-webdav = { git = "https://github.com/pimalaya/io-webdav", rev = "62fad898d1ecb3ebb25c37826a79eb72fcd54d7f" }

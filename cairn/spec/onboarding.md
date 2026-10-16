@@ -132,6 +132,14 @@ The protocol sweep SHALL run the fixed provider rules (by domain, then by MX) be
 - WHEN discovery runs
 - THEN mail (IMAP, Gmail API), sending (SMTP), contacts (CardDAV, People API) and calendars (CalDAV, Calendar API) are offered
 
+### Requirement: A domain with no autoconfig is asked of its MX provider
+When the address's domain publishes no autoconfig, the protocol sweep SHALL ask the provider its MX records name (the registrable domain of each MX host, never a public suffix) for its autoconfig, and SHALL follow an `autoconfig.<domain>` alias to its target when the alias itself fails, over https only.
+
+#### Scenario: A Migadu-hosted domain
+- GIVEN `test@migadu.net`, whose only record is an MX at `flatmail.com`
+- WHEN discovery runs
+- THEN mail (IMAP, `imap.migadu.com:993`) and sending (SMTP, `smtp.migadu.com:465`) are offered
+
 ### Requirement: A provider grant is the app's own
 A browser grant against Google's or Microsoft's authorization server SHALL run with the app's registered client only when every endpoint the token will be presented to (each domain's base and the submission server) is that provider's own, and SHALL then ask only for that provider's fixed scopes; any other SHALL run as a generic grant. It SHALL NOT send an RFC 8707 resource. Domains SHALL share one grant only when their scopes address the same API.
 
