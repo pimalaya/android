@@ -240,8 +240,9 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- Reader: what is done to the open message as a whole, one
-             tonal pill of the two. The star stays beside the subject. -->
+        <!-- Reader: what is done to the open message, one tonal pill:
+             the destructive end first, the answers last, under the
+             thumb. -->
         <LinearLayout
             android:id="@+id/message_actions"
             android:layout_width="wrap_content"
@@ -250,26 +251,62 @@
             android:background="@drawable/button_tonal"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
+            android:paddingStart="2dp"
+            android:paddingEnd="2dp"
             android:visibility="gone">
 
             <ImageButton
-                android:id="@+id/message_view_unread"
-                android:layout_width="40dp"
-                android:layout_height="36dp"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/message_mark_unread"
-                android:src="@drawable/ic_visibility_off"
-                android:tint="?android:attr/textColorPrimary" />
-
-            <ImageButton
                 android:id="@+id/message_view_delete"
-                android:layout_width="40dp"
+                android:layout_width="38dp"
                 android:layout_height="36dp"
                 android:background="@drawable/ripple_circle"
                 android:contentDescription="@string/message_delete"
                 android:src="@drawable/ic_delete_bar"
+                android:tint="?android:attr/textColorPrimary" />
+
+            <ImageButton
+                android:id="@+id/message_view_move"
+                android:layout_width="38dp"
+                android:layout_height="36dp"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/message_move"
+                android:src="@drawable/ic_move_item"
+                android:tint="?android:attr/textColorPrimary" />
+
+            <ImageButton
+                android:id="@+id/message_view_copy"
+                android:layout_width="38dp"
+                android:layout_height="36dp"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/message_copy"
+                android:src="@drawable/ic_content_copy"
+                android:tint="?android:attr/textColorPrimary" />
+
+            <ImageButton
+                android:id="@+id/message_view_flags"
+                android:layout_width="38dp"
+                android:layout_height="36dp"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/message_flags"
+                android:src="@drawable/ic_flag"
+                android:tint="?android:attr/textColorPrimary" />
+
+            <ImageButton
+                android:id="@+id/message_view_forward"
+                android:layout_width="38dp"
+                android:layout_height="36dp"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/message_forward"
+                android:src="@drawable/ic_forward"
+                android:tint="?android:attr/textColorPrimary" />
+
+            <ImageButton
+                android:id="@+id/message_view_reply"
+                android:layout_width="38dp"
+                android:layout_height="36dp"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/message_reply"
+                android:src="@drawable/ic_reply"
                 android:tint="?android:attr/textColorPrimary" />
 
         </LinearLayout>

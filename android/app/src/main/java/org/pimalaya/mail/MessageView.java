@@ -8,6 +8,8 @@ import android.os.Build;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
@@ -30,6 +32,7 @@ import org.pimalaya.file.FileStore;
 import org.pimalaya.file.FilesList;
 import org.pimalaya.file.OpenedCopies;
 import org.pimalaya.pimdir.ItemLinks;
+import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.MailDate;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.Dates;
@@ -76,15 +79,26 @@ public final class MessageView implements FilesList.Origins {
     private MailStore.StoredMessage current;
 
     /**
-     * What the open message's two toggles stand at.
+     * What the open message's markers stand at.
      *
      * <p>Held beside the row, which is the listing's answer while the reader
-     * moves both; the store is written in the same pass, so they agree with no
+     * moves them; the store is written in the same pass, so they agree with no
      * re-read per tap.
      */
     private boolean seen;
 
     private boolean flagged;
+
+    private boolean answered;
+
+    /** Whether the header card shows the recipients, the date and links. */
+    private boolean unfolded;
+
+    /** How many links the open message has, -1 while unknown or unlinkable. */
+    private int links;
+
+    /** When the open message was sent, 0 for unknown. */
+    private long stamp;
 
     /** The open message as read, quoted by replies; null until it loads. */
     private MessageBody loaded;
@@ -109,11 +123,15 @@ public final class MessageView implements FilesList.Origins {
         loaded = null;
         seen = message.seen();
         flagged = message.flagged();
+        answered = message.answered();
+        unfolded = false;
+        links = -1;
+        stamp = message.stamp;
 
         header(message);
         badges(new ArrayList<>());
-        host.findViewById(R.id.message_view_linked).setVisibility(View.GONE);
         actions();
+        fold();
         loading();
         host.show(Panels.MESSAGE);
 
@@ -134,10 +152,43 @@ public final class MessageView implements FilesList.Origins {
         ((TextView) host.findViewById(R.id.message_view_from)).setText(sender(message));
         ((TextView) host.findViewById(R.id.message_view_mailbox))
                 .setText(message.mailboxLabel + " · " + message.accountEmail);
-        // NOTE: the recipients come with the body, and a line of the
-        // previous message's must not linger until then.
-        host.findViewById(R.id.message_view_recipients).setVisibility(View.GONE);
-        date(message.stamp);
+
+        // NOTE: the text scrolls sideways, so it takes the tap itself.
+        View.OnClickListener toggle =
+                view -> {
+                    unfolded = !unfolded;
+                    fold();
+                };
+        host.findViewById(R.id.message_view_card).setOnClickListener(toggle);
+        host.findViewById(R.id.message_view_meta).setOnClickListener(toggle);
+    }
+
+    /**
+     * Draws the header card folded or not.
+     *
+     * <p>Folded: the sender and how long ago. Unfolded: the recipients once
+     * the body brought them, the exact date and the Linked badge.
+     */
+    private void fold() {
+        boolean recipients = unfolded && loaded != null && !loaded.to().isEmpty();
+        host.findViewById(R.id.message_view_recipients)
+                .setVisibility(recipients ? View.VISIBLE : View.GONE);
+        host.findViewById(R.id.message_view_linked)
+                .setVisibility(unfolded && links >= 0 ? View.VISIBLE : View.GONE);
+
+        TextView date = host.findViewById(R.id.message_view_date);
+        if (stamp <= 0) {
+            date.setText("");
+        } else if (unfolded) {
+            date.setText(Dates.full(host, stamp) + " (" + Dates.relative(host, stamp) + ")");
+        } else {
+            date.setText(Dates.relative(host, stamp));
+        }
+
+        ImageView chevron = host.findViewById(R.id.message_view_fold);
+        chevron.setImageResource(unfolded ? R.drawable.ic_expand_less : R.drawable.ic_expand_more);
+        host.findViewById(R.id.message_view_card)
+                .setContentDescription(host.getString(R.string.message_details));
     }
 
     /** The sender as the header names them: the name over the address. */
@@ -146,16 +197,6 @@ public final class MessageView implements FilesList.Origins {
             return message.fromAddress;
         }
         return message.fromName + " <" + message.fromAddress + ">";
-    }
-
-    /** The exact date, with how long ago it was beside it. */
-    private void date(long stamp) {
-        TextView date = host.findViewById(R.id.message_view_date);
-        if (stamp <= 0) {
-            date.setText("");
-            return;
-        }
-        date.setText(Dates.full(host, stamp) + " (" + Dates.relative(host, stamp) + ")");
     }
 
     /**
@@ -276,11 +317,13 @@ public final class MessageView implements FilesList.Origins {
     /**
      * The badge opening the message's Linked card, counting its links.
      *
-     * <p>Hidden for a message that cannot be linked ({@code count} -1).
+     * <p>Hidden for a message that cannot be linked ({@code count} -1), and
+     * while the header card is folded.
      */
     private void linked(MailStore.StoredMessage message, int count) {
-        android.widget.TextView badge = host.findViewById(R.id.message_view_linked);
-        badge.setVisibility(count < 0 ? View.GONE : View.VISIBLE);
+        links = count;
+        fold();
+        TextView badge = host.findViewById(R.id.message_view_linked);
         badge.setText(
                 count == 0
                         ? host.getString(R.string.linked_link_to)
@@ -400,39 +443,47 @@ public final class MessageView implements FilesList.Origins {
                 });
     }
 
-    /** The action row: the two toggles as the message stands, and delete. */
+    /**
+     * The bar's icons, as the message stands: delete, move, copy, flags,
+     * forward, reply.
+     */
     private void actions() {
-        // NOTE: a message still in the outbox has no markers to move. It
-        // has never been anywhere that keeps any, and offering the toggles
-        // would promise a state nothing would remember.
+        // NOTE: a message still in the outbox has no markers to move and is
+        // filed nowhere. It has never been anywhere that keeps any, and
+        // offering them would promise a state nothing would remember.
         boolean pending = current != null && current.pending();
-
-        ImageButton unread = host.findViewById(R.id.message_view_unread);
-        unread.setVisibility(pending ? View.GONE : View.VISIBLE);
-        unread.setContentDescription(
-                host.getString(seen ? R.string.message_mark_unread : R.string.message_mark_read));
-        unread.setImageResource(seen ? R.drawable.ic_visibility_off : R.drawable.ic_check);
-        unread.setOnClickListener(view -> write(Flags.Marker.SEEN, !seen));
-
-        ImageButton flag = host.findViewById(R.id.message_view_flag);
-        flag.setVisibility(pending ? View.GONE : View.VISIBLE);
-        flag.setContentDescription(
-                host.getString(flagged ? R.string.message_unflag : R.string.message_flag));
-        starOf(host, flag, flagged);
-        flag.setOnClickListener(view -> write(Flags.Marker.FLAGGED, !flagged));
-
-        host.findViewById(R.id.message_view_delete).setOnClickListener(view -> confirmDelete());
-
         // NOTE: a waiting message has nothing to answer yet; one that may
         // have gone is sent again only when the user says so.
         boolean uncertain = current != null && current.uncertain;
-        host.findViewById(R.id.message_view_replies)
-                .setVisibility(pending && !uncertain ? View.GONE : View.VISIBLE);
-        TextView reply = host.findViewById(R.id.message_view_reply);
-        reply.setTextColor(host.accentContrast());
-        reply.setCompoundDrawableTintList(
-                android.content.res.ColorStateList.valueOf(host.accentContrast()));
-        reply.setText(uncertain ? R.string.message_send_again : R.string.message_reply);
+
+        host.findViewById(R.id.message_view_delete).setOnClickListener(view -> confirmDelete());
+
+        View move = host.findViewById(R.id.message_view_move);
+        move.setVisibility(pending ? View.GONE : View.VISIBLE);
+        move.setOnClickListener(view -> chooseMailbox(false));
+
+        View copy = host.findViewById(R.id.message_view_copy);
+        copy.setVisibility(pending ? View.GONE : View.VISIBLE);
+        copy.setOnClickListener(view -> chooseMailbox(true));
+
+        ImageButton flags = host.findViewById(R.id.message_view_flags);
+        flags.setVisibility(pending ? View.GONE : View.VISIBLE);
+        flags.setImageTintList(
+                android.content.res.ColorStateList.valueOf(
+                        flagged
+                                ? host.getColor(R.color.star)
+                                : host.ui.resolveColor(android.R.attr.textColorPrimary)));
+        flags.setOnClickListener(view -> chooseFlags());
+
+        View forward = host.findViewById(R.id.message_view_forward);
+        forward.setVisibility(pending ? View.GONE : View.VISIBLE);
+        forward.setOnClickListener(view -> compose.open(forward(current, loaded)));
+
+        ImageButton reply = host.findViewById(R.id.message_view_reply);
+        reply.setVisibility(pending && !uncertain ? View.GONE : View.VISIBLE);
+        reply.setImageResource(uncertain ? R.drawable.ic_send : R.drawable.ic_reply);
+        reply.setContentDescription(
+                host.getString(uncertain ? R.string.message_send_again : R.string.message_reply));
         reply.setOnClickListener(
                 view -> {
                     if (uncertain) {
@@ -441,9 +492,163 @@ public final class MessageView implements FilesList.Origins {
                         compose.open(reply(current, loaded));
                     }
                 });
-        View forward = host.findViewById(R.id.message_view_forward);
-        forward.setVisibility(uncertain ? View.GONE : View.VISIBLE);
-        forward.setOnClickListener(view -> compose.open(forward(current, loaded)));
+    }
+
+    /**
+     * Asks which markers the open message carries, then stages the changes.
+     *
+     * <p>Read, important, and answered where the backend keeps it.
+     */
+    private void chooseFlags() {
+        MailStore.StoredMessage message = current;
+        AccountEntry account = accountOf(message.accountEmail);
+        boolean keepsAnswered =
+                account != null
+                        && account.server(PimDomain.MAIL) != null
+                        && account.server(PimDomain.MAIL).info().keepsAnswered();
+
+        List<Flags.Marker> markers = new ArrayList<>(List.of(Flags.Marker.SEEN, Flags.Marker.FLAGGED));
+        List<CharSequence> labels =
+                new ArrayList<>(
+                        List.of(
+                                host.getString(R.string.message_flag_seen),
+                                host.getString(R.string.message_flagged)));
+        if (keepsAnswered) {
+            markers.add(Flags.Marker.ANSWERED);
+            labels.add(host.getString(R.string.message_flag_answered));
+        }
+        boolean[] checked = new boolean[markers.size()];
+        for (int index = 0; index < markers.size(); index++) {
+            checked[index] = on(markers.get(index));
+        }
+
+        new AlertDialog.Builder(host)
+                .setTitle(R.string.message_flags)
+                .setMultiChoiceItems(
+                        labels.toArray(new CharSequence[0]),
+                        checked,
+                        (dialog, which, isChecked) -> checked[which] = isChecked)
+                .setPositiveButton(
+                        android.R.string.ok,
+                        (dialog, which) -> {
+                            for (int index = 0; index < markers.size(); index++) {
+                                if (checked[index] != on(markers.get(index))) {
+                                    write(markers.get(index), checked[index]);
+                                }
+                            }
+                        })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /** Whether the open message carries one marker, as the reader holds it. */
+    private boolean on(Flags.Marker marker) {
+        switch (marker) {
+            case SEEN:
+                return seen;
+            case FLAGGED:
+                return flagged;
+            case ANSWERED:
+                return answered;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * Asks which of its account's mailboxes the open message goes to.
+     *
+     * <p>Every one but its own, the outbox and Gmail's All Mail, under the
+     * names the list shows; then stages a move, or a {@code copy}.
+     */
+    private void chooseMailbox(boolean copy) {
+        MailStore.StoredMessage message = current;
+        host.io.execute(
+                () -> {
+                    String allMail =
+                            MailStore.allMailOf(parts.mail().accountIdOf(message.accountEmail));
+                    String outbox = parts.mail().outbox().outboxOf(message.accountEmail);
+                    List<String> targets = new ArrayList<>();
+                    List<String> names = new ArrayList<>();
+                    for (PimdirCollections.Stored mailbox :
+                            parts.mail().loadMailboxes(List.of(message.accountEmail))) {
+                        if (mailbox.id.equals(message.collection)
+                                || mailbox.id.equals(outbox)
+                                || mailbox.id.equals(allMail)) {
+                            continue;
+                        }
+                        targets.add(mailbox.id);
+                        names.add(parts.mail().mailboxLabel(mailbox));
+                    }
+                    host.postAlive(
+                            () -> {
+                                if (current != message) {
+                                    return;
+                                }
+                                if (targets.isEmpty()) {
+                                    host.toast(host.getString(R.string.message_no_other_mailbox));
+                                    return;
+                                }
+                                new AlertDialog.Builder(host)
+                                        .setTitle(
+                                                copy
+                                                        ? R.string.message_copy_to
+                                                        : R.string.message_move_to)
+                                        .setItems(
+                                                names.toArray(new CharSequence[0]),
+                                                (dialog, which) ->
+                                                        file(
+                                                                message,
+                                                                targets.get(which),
+                                                                names.get(which),
+                                                                copy))
+                                        .setNegativeButton(android.R.string.cancel, null)
+                                        .show();
+                            });
+                });
+    }
+
+    /**
+     * Stages a move or a copy of {@code message} into {@code target}.
+     *
+     * <p>Store only, as every action: the next sync carries it out as a server
+     * move or copy. A move leaves the reader, the message gone from where it
+     * was opened.
+     */
+    private void file(MailStore.StoredMessage message, String target, String name, boolean copy) {
+        host.io.execute(
+                () -> {
+                    Exception failure = null;
+                    try {
+                        MailStager stager = new MailStager(parts.pimdir(), parts.clients());
+                        if (copy) {
+                            stager.stageCopy(message, target);
+                        } else {
+                            stager.stageMove(message, target);
+                        }
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "message " + (copy ? "copy" : "move") + " failed", error);
+                        failure = error;
+                    }
+                    Exception error = failure;
+                    host.postAlive(
+                            () -> {
+                                if (error != null) {
+                                    host.showError(error, R.string.message_write_failed);
+                                    return;
+                                }
+                                host.toast(
+                                        host.getString(
+                                                copy
+                                                        ? R.string.message_copied
+                                                        : R.string.message_moved,
+                                                name));
+                                mailList.reload();
+                                if (!copy && current == message) {
+                                    host.showBack(Panels.MAIL);
+                                }
+                            });
+                });
     }
 
     /**
@@ -566,6 +771,8 @@ public final class MessageView implements FilesList.Origins {
                         seen = add;
                     } else if (flag == Flags.Marker.FLAGGED) {
                         flagged = add;
+                    } else if (flag == Flags.Marker.ANSWERED) {
+                        answered = add;
                     }
                     actions();
                     mailList.reload();
@@ -784,16 +991,13 @@ public final class MessageView implements FilesList.Origins {
     /** Fills the header in from the fetch, then shows the body. */
     private void render(MessageBody message) {
         loaded = message;
-        if (!message.to().isEmpty()) {
-            TextView recipients = host.findViewById(R.id.message_view_recipients);
-            recipients.setText(recipients(message));
-            recipients.setVisibility(View.VISIBLE);
+        ((TextView) host.findViewById(R.id.message_view_recipients))
+                .setText(recipients(message));
+        long sent = MailDate.toStamp(message.date());
+        if (sent > 0) {
+            stamp = sent;
         }
-
-        long stamp = MailDate.toStamp(message.date());
-        if (stamp > 0) {
-            date(stamp);
-        }
+        fold();
 
         if (MessageBody.HTML.equals(message.kind())) {
             body(html(message.body()));
@@ -854,7 +1058,15 @@ public final class MessageView implements FilesList.Origins {
         return frame;
     }
 
-    /** A plain body: selectable text, scrolling on its own. */
+    /** How far a plain body's text pinches, from its 15sp. */
+    private static final float MIN_TEXT = 10f;
+
+    private static final float MAX_TEXT = 40f;
+
+    /**
+     * A plain body: selectable text, wrapped to the width, scrolling on its
+     * own, pinched to zoom.
+     */
     private View text(String body) {
         TextView view = new TextView(host);
         view.setText(body);
@@ -863,7 +1075,34 @@ public final class MessageView implements FilesList.Origins {
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         view.setPadding(host.dp(16), 0, host.dp(16), host.dp(16));
 
-        ScrollView scroll = new ScrollView(host);
+        float density = host.getResources().getDisplayMetrics().scaledDensity;
+        ScaleGestureDetector pinch =
+                new ScaleGestureDetector(
+                        host,
+                        new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                            @Override
+                            public boolean onScale(ScaleGestureDetector detector) {
+                                float size =
+                                        view.getTextSize() / density * detector.getScaleFactor();
+                                view.setTextSize(
+                                        TypedValue.COMPLEX_UNIT_SP,
+                                        Math.max(MIN_TEXT, Math.min(MAX_TEXT, size)));
+                                return true;
+                            }
+                        });
+        ScrollView scroll =
+                new ScrollView(host) {
+                    @Override
+                    public boolean dispatchTouchEvent(MotionEvent event) {
+                        pinch.onTouchEvent(event);
+                        // NOTE: a second finger down is a pinch, not a scroll
+                        // nor a selection.
+                        if (event.getPointerCount() > 1) {
+                            return true;
+                        }
+                        return super.dispatchTouchEvent(event);
+                    }
+                };
         scroll.addView(view);
         return scroll;
     }
@@ -886,6 +1125,10 @@ public final class MessageView implements FilesList.Origins {
         view.getSettings().setAllowContentAccess(false);
         view.getSettings().setUseWideViewPort(true);
         view.getSettings().setLoadWithOverviewMode(true);
+        // NOTE: pinch to zoom, for a layout shrunk to fit or small print.
+        view.getSettings().setSupportZoom(true);
+        view.getSettings().setBuiltInZoomControls(true);
+        view.getSettings().setDisplayZoomControls(false);
 
         // NOTE: a link opens outside the message, and only one the reader
         // tapped in the message itself (linkIntent), never a refresh or a
@@ -951,17 +1194,19 @@ public final class MessageView implements FilesList.Origins {
     /**
      * Wraps a message's HTML so nothing exceeds the viewport.
      *
-     * <p>Desktop layouts then reflow instead of scrolling sideways.
+     * <p>Desktop layouts then reflow instead of scrolling sideways. One that
+     * still runs wider is shrunk to fit: no initial scale is set, so the
+     * overview mode zooms out to the content's width.
      */
     private static String fitToWidth(String body) {
         return "<!DOCTYPE html><html><head>"
-                + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+                + "<meta name=\"viewport\" content=\"width=device-width\">"
                 + "<style>"
                 + "html, body { margin: 0; padding: 0; background: #ffffff; color: #000000; }"
                 + "body { padding: 12px; overflow-wrap: break-word; word-break: break-word; }"
-                + "* { max-width: 100% !important; box-sizing: border-box; }"
+                + "* { max-width: 100% !important; min-width: 0 !important; box-sizing: border-box; }"
                 + "img, video { height: auto !important; }"
-                + "table { table-layout: fixed !important; width: 100% !important; }"
+                + "table { width: 100% !important; }"
                 + "td, th { overflow-wrap: break-word; word-break: break-word; }"
                 + "pre { white-space: pre-wrap; word-wrap: break-word; }"
                 + "</style></head><body>"

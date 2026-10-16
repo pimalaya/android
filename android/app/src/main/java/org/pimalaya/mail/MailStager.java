@@ -59,6 +59,16 @@ public final class MailStager extends Stager {
                 mail().flagsOf(message.collection, message.id).with(flag, add));
     }
 
+    /** Stages one message's move into the {@code target} collection. */
+    public void stageMove(MailStore.StoredMessage message, String target) throws JSONException {
+        mutateMove(message.collection, offline.handleFor(message.collection, message.id), target);
+    }
+
+    /** Stages one message's copy into the {@code target} collection. */
+    public void stageCopy(MailStore.StoredMessage message, String target) throws JSONException {
+        mutateCopy(message.collection, offline.handleFor(message.collection, message.id), target);
+    }
+
     /** What deleting one message staged, which its row and toast say. */
     public enum Deletion {
         /** A submission withdrawn, with the sent copy staged beside it. */

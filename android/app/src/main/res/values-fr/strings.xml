@@ -532,6 +532,17 @@
     <string name="message_mark_read">Marquer comme lu</string>
     <string name="message_flag">Marquer comme important</string>
     <string name="message_unflag">Ne plus marquer comme important</string>
+    <string name="message_move">Déplacer</string>
+    <string name="message_copy">Copier</string>
+    <string name="message_move_to">Déplacer vers</string>
+    <string name="message_copy_to">Copier vers</string>
+    <string name="message_moved">Déplacé vers %s</string>
+    <string name="message_copied">Copié vers %s</string>
+    <string name="message_no_other_mailbox">Ce compte n\'a pas d\'autre boîte aux lettres</string>
+    <string name="message_flags">Indicateurs</string>
+    <string name="message_flag_seen">Lu</string>
+    <string name="message_flag_answered">Répondu</string>
+    <string name="message_details">Détails</string>
     <string name="message_delete">Supprimer</string>
     <string name="message_delete_unrestorable">Ce message n\'est pas sur ce téléphone : il ne pourra pas être restauré une fois supprimé. L\'ouvrir permet de le restaurer.</string>
     <string name="message_deleted">Déplacé vers %s</string>

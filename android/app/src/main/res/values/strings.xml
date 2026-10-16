@@ -490,6 +490,17 @@
     <string name="message_mark_read">Mark read</string>
     <string name="message_flag">Mark important</string>
     <string name="message_unflag">Unmark important</string>
+    <string name="message_move">Move</string>
+    <string name="message_copy">Copy</string>
+    <string name="message_move_to">Move to</string>
+    <string name="message_copy_to">Copy to</string>
+    <string name="message_moved">Moved to %s</string>
+    <string name="message_copied">Copied to %s</string>
+    <string name="message_no_other_mailbox">This account has no other mailbox</string>
+    <string name="message_flags">Flags</string>
+    <string name="message_flag_seen">Read</string>
+    <string name="message_flag_answered">Answered</string>
+    <string name="message_details">Details</string>
     <string name="message_delete">Delete</string>
     <string name="message_delete_unrestorable">This message is not on this phone, so it cannot be restored once deleted. Opening it keeps it restorable.</string>
     <string name="message_deleted">Moved to %s</string>

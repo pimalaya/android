@@ -255,6 +255,22 @@ public class MailMoveTest {
     }
 
     @Test
+    public void aCopyKeepsItsSourceAndIsPushedAsAServerCopy() throws Exception {
+        stager().mutateCopy(inbox, "42", sent);
+
+        assertEquals("the source stays", "0",
+                scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '42'", inbox));
+        assertEquals("the target holds it, live", "0",
+                scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '42'", sent));
+        assertEquals(2, MailFixtures.merged(store, 10).size());
+
+        Server server = new Server();
+        sync(server, sent);
+
+        assertEquals("no body uploaded", List.of("copy INBOX 42 Sent"), server.calls);
+    }
+
+    @Test
     public void aMoveTargetWaitsForItsSource() throws Exception {
         fixtures.putObject(inbox, "42", "Subject: Hello\r\n\r\nbody\r\n".getBytes(StandardCharsets.UTF_8));
         stager().mutateMove(inbox, "42", trash);

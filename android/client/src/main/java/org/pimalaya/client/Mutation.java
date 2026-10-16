@@ -45,6 +45,8 @@ public record Mutation(
         REMOVE("remove"),
         /** A move to {@code target}: create there, tombstone here (SYNC §3). */
         MOVE("move"),
+        /** A copy into {@code target}, the source kept: a server-side copy. */
+        COPY("copy"),
         /** A content edit of the placement's body. */
         EDIT("edit"),
         /** A locally authored item. */
@@ -77,6 +79,12 @@ public record Mutation(
     /** A move of one placement into {@code target}. */
     public static Mutation move(String handle, String target) {
         return new Mutation(Op.MOVE, handle, null, target, null, null, null, null, null, null,
+                null);
+    }
+
+    /** A copy of one placement into {@code target}. */
+    public static Mutation copy(String handle, String target) {
+        return new Mutation(Op.COPY, handle, null, target, null, null, null, null, null, null,
                 null);
     }
 

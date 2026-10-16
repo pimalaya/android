@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Symbols Outlined (Apache-2.0); tinted at use site. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M200-120v-680h343l19 86h238v370H544l-19-85H280v309h-80Zm300-400Zm86 125h134v-210H510l-19-85H280v210h287l19 85Z" />
+    </group>
+</vector>

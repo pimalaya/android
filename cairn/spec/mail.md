@@ -199,12 +199,32 @@ The app SHALL compose a message from the composer's fields: `Date`, `Message-ID`
 - THEN the message carries it in a `Bcc` header, which RFC 5322 section 3.6.3 provides for a message prepared for sending
 
 ### Requirement: The reader replies and forwards
-The reader SHALL offer Reply and Forward under the message. Reply SHALL answer everyone on it: the sender, and every other address in its `To` and `Cc`, the account's own left out; a message the account sent itself answers its recipients. The reply SHALL be sent from the message's account, carry the subject behind one `Re:`, quote the text under a line naming who wrote it and when, and carry `In-Reply-To` and `References` built from the `Message-ID` and `In-Reply-To` the store keeps for the message. Once queued, it SHALL mark the parent `\Answered` where the backend keeps that marker. Forward SHALL open on no recipient, the subject behind one `Fwd:`, and the message's headers over its text; the attachments stay behind.
+The reader SHALL offer Reply and Forward in its bar (The reader leaves the page to the message). Reply SHALL answer everyone on it: the sender, and every other address in its `To` and `Cc`, the account's own left out; a message the account sent itself answers its recipients. The reply SHALL be sent from the message's account, carry the subject behind one `Re:`, quote the text under a line naming who wrote it and when, and carry `In-Reply-To` and `References` built from the `Message-ID` and `In-Reply-To` the store keeps for the message. Once queued, it SHALL mark the parent `\Answered` where the backend keeps that marker. Forward SHALL open on no recipient, the subject behind one `Fwd:`, and the message's headers over its text; the attachments stay behind.
 
 #### Scenario: Replying to a message with a copy
 - GIVEN a message from Ada to the account and Bob, copying Carol
 - WHEN Reply is pressed
 - THEN the composer goes to Ada and Bob, copies Carol, and the account's own address is on neither line
+
+### Requirement: The reader leaves the page to the message
+The reader SHALL give the page to the message: the subject on at most two lines with no star beside it, the mailbox and account under it, then a sender card folded by default to the avatar, the sender and how long ago it was sent. A tap on the card SHALL unfold the recipients, the exact date and the Linked badge, and another fold them away. Only the card's text SHALL scroll sideways when an address runs past it, the avatar staying put. Every action on the message SHALL sit as an icon in the bar, from left to right: delete, move, copy, flags, forward and reply, the flags icon yellow while the message is important. A message in the outbox SHALL offer delete alone, and reply standing for *Send again* when its submission may have gone.
+
+The flags icon SHALL open a dialog ticking the markers the message carries, read and important, and answered where the backend keeps that marker, each change staged as a marker write (A message's markers can be written).
+
+An HTML body SHALL fit the screen's width, reflowed where its layout allows and shrunk to fit where it does not, so it never scrolls sideways, and SHALL zoom on a pinch. A plain body SHALL wrap to the width, and a pinch SHALL scale its text.
+
+#### Scenario: Reading a wide newsletter
+- GIVEN an HTML message laid out 800 pixels wide
+- WHEN the reader opens it
+- THEN it shows whole across the width, scrolls only up and down, and a pinch zooms into it
+
+### Requirement: A message is moved or copied
+Move and copy SHALL list the message's account's mailboxes under the names the list shows, all but the one it is in, the outbox and Gmail's All Mail, and SHALL stage, in the store alone, a move or a copy into the one picked. A move SHALL show the message in its new mailbox at once and leave the reader; a copy SHALL keep it where it is and show it in both. The next sync SHALL carry a move out as deleting into the trash does (A message is deleted into the account's trash), and a copy as a server-side copy with no body uploaded: IMAP `UID COPY`, a Graph `copy`, a Gmail label added, a JMAP mailbox added to `mailboxIds`.
+
+#### Scenario: Copying a message
+- GIVEN a message in the inbox
+- WHEN the reader copies it to Archive
+- THEN it shows in both at once, and the next sync copies it on the server without uploading it
 
 ### Requirement: A message is sent through an outbox
 Submitting SHALL compose the message on the device and stage it as one action on the store's queue: the app's own `submit` kind, a versioned payload naming the sender and what a listing draws, and the composed message written to the blob directory and pinned by the enqueue, all in the one transaction the standard prescribes for a producer. The payload carries the subject and the date because a waiting message is not an item and has no summary row beside it, and parsing a message to draw a list is what the sort key exists to avoid.

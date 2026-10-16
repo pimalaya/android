@@ -2076,7 +2076,7 @@ public class MainActivity extends Host
         padBottom(R.id.signin_actions, 16, bottom);
         padBottom(R.id.oauth_actions, 16, bottom);
         padBottom(R.id.books_actions, 16, bottom);
-        padBottom(R.id.message_view_replies, 12, bottom);
+        padBottom(R.id.message_view_body, 0, bottom);
     }
 
     private void padTop(int id, int top) {
