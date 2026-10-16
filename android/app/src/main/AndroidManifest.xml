@@ -79,9 +79,8 @@
             </intent-filter>
         </activity>
 
-        <!-- Registers Pimalaya's account type (one account per synced
-             addressbook, one per address whose calendars the phone
-             shows); bound by the system's AccountManager. -->
+        <!-- Registers the books' account type (one account per synced
+             addressbook); bound by the system's AccountManager. -->
         <service
             android:name=".AuthenticatorService"
             android:exported="true">
@@ -91,6 +90,20 @@
             <meta-data
                 android:name="android.accounts.AccountAuthenticator"
                 android:resource="@xml/authenticator" />
+        </service>
+
+        <!-- Registers the calendars' account type (one account per address
+             whose calendars the phone shows), apart from the books' so
+             contacts apps never list them. -->
+        <service
+            android:name=".CalendarAuthenticatorService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accounts.AccountAuthenticator" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accounts.AccountAuthenticator"
+                android:resource="@xml/authenticator_calendar" />
         </service>
 
         <!-- Associates the account type with the contacts authority and
@@ -111,8 +124,8 @@
                 android:resource="@xml/contacts" />
         </service>
 
-        <!-- Associates the account type with the calendar authority, for
-             the per-address calendar accounts. The adapter runs their
+        <!-- Associates the calendars' account type with the calendar
+             authority. The adapter runs their
              phone pass for the syncs the OS schedules. -->
         <service
             android:name=".CalendarSyncService"

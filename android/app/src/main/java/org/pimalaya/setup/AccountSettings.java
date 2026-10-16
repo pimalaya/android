@@ -905,10 +905,31 @@ public final class AccountSettings {
                 .setPositiveButton(
                         R.string.delete_account,
                         (dialog, which) -> {
-                            deleteAccount(email);
-                            if (host.screen == Panels.ACCOUNT) {
-                                leave();
+                            // NOTE: a Contacts-app edit not yet in would go
+                            // with the books' accounts, so their phone pass
+                            // runs first and a failure removes nothing.
+                            List<String> urls = new ArrayList<>();
+                            for (BookEntry entry : sync.passes().phoneSyncedBooks()) {
+                                if (entry.accountEmail.equals(email)) {
+                                    urls.add(entry.book.url());
+                                }
                             }
+                            sync.lastPhonePass(
+                                    urls,
+                                    ran -> {
+                                        if (!ran) {
+                                            host.toast(host.getString(R.string.delete_account_phone_failed));
+                                            return;
+                                        }
+                                        if (sync.isSyncing()) {
+                                            host.toast(host.getString(R.string.sync_busy));
+                                            return;
+                                        }
+                                        deleteAccount(email);
+                                        if (host.screen == Panels.ACCOUNT) {
+                                            leave();
+                                        }
+                                    });
                         })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();

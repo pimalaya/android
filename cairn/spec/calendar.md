@@ -190,3 +190,11 @@ The agenda SHALL read and expand its entries on a thread of its own and draw the
 - GIVEN 10k stored entries
 - WHEN the app returns to the foreground
 - THEN the screen stays responsive while the agenda rebuilds, and only entries a sync changed are expanded again
+
+### Requirement: Calendar accounts stay out of contacts apps
+The Android accounts holding the phone's calendars SHALL be of a type of their own, bound to the calendar adapter alone, so no contacts app lists them. Calendar accounts of the books' type left by an earlier build SHALL be migrated: their calendars' phone pass first, then the account removed and recreated under the calendar type.
+
+#### Scenario: Picking where a new contact goes
+- GIVEN an address whose books and calendars both show on the phone
+- WHEN the Contacts app lists the accounts a contact can be saved into
+- THEN it lists the books' accounts and no calendar account

@@ -71,11 +71,15 @@ public class SyncService extends Service {
             }
             Context context = getContext();
 
+            // NOTE: no book behind the account (an earlier build's calendar
+            // account): its contacts reach nowhere, so say so.
             String url = Accounts.url(context, account);
-            Log.d("pimalaya", "phone sync for " + account.name + ", url " + url);
             if (url == null) {
+                Log.w("pimalaya", "phone sync on an account with no book, its contacts stay unsynced");
+                result.stats.numSkippedEntries++;
                 return;
             }
+            Log.d("pimalaya", "phone sync for " + url);
 
             try {
                 PimdirDb pimdir = App.of(context).pimdir();

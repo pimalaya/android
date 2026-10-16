@@ -25,16 +25,25 @@ import org.pimalaya.client.Addressbook;
  * AccountManager plumbing for the two kinds of Android account the app keeps.
  *
  * <p>One per synced book, keyed by its URL (removing it purges its contacts);
- * one per address whose calendars the phone shows ({@code CalendarRows}). Each
- * kind's reconcile leaves the other's alone.
+ * one per address whose calendars the phone shows ({@code CalendarRows}), of a
+ * type of its own so contacts apps never list it. Each kind's reconcile leaves
+ * the other's alone.
  */
 public final class Accounts {
-    /** Matches android:accountType in res/xml/authenticator.xml. */
+    /** The books' type; matches res/xml/authenticator.xml. */
     public static final String TYPE = "org.pimalaya";
+
+    /** The calendars' type; matches res/xml/authenticator_calendar.xml. */
+    public static final String CALENDAR_TYPE = "org.pimalaya.calendar";
 
     private static final String DATA_URL = "url";
 
-    /** A calendar account's address; never set on a book's account. */
+    /**
+     * A calendar account's address; never set on a book's account.
+     *
+     * <p>Earlier builds made calendar accounts of the books' type, told apart
+     * by this alone; {@link #reconcileCalendars} moves them to their own.
+     */
     private static final String DATA_CALENDARS = "calendars";
 
     /** Set once the content trigger was on; the user's choice stands after. */
@@ -46,7 +55,8 @@ public final class Accounts {
      * Creates an Android account per subscribed book, removes the others.
      *
      * <p>Pass the full subscribed set at once: accounts absent from it are
-     * purged. Calendar accounts are left alone.
+     * purged, unless they hold a phone edit not yet in ({@link #purge}).
+     * Calendar accounts, an earlier build's included, are left alone.
      */
     public static void reconcile(Context context, Map<Addressbook, String> accountByBook) {
         AccountManager manager = AccountManager.get(context);
@@ -61,7 +71,7 @@ public final class Accounts {
                 wanted |= book.url().equals(url);
             }
             if (!wanted) {
-                manager.removeAccountExplicitly(account);
+                purge(context, account);
             }
         }
 
@@ -89,9 +99,6 @@ public final class Accounts {
             if (ContentResolver.getIsSyncable(account, ContactsContract.AUTHORITY) <= 0) {
                 ContentResolver.setIsSyncable(account, ContactsContract.AUTHORITY, 1);
             }
-            if (ContentResolver.getIsSyncable(account, CalendarContract.AUTHORITY) != 0) {
-                ContentResolver.setIsSyncable(account, CalendarContract.AUTHORITY, 0);
-            }
         }
     }
 
@@ -99,14 +106,18 @@ public final class Accounts {
      * Creates an account per address with mirrored calendars, removing others.
      *
      * <p>Removing one takes its calendars off the phone: the caller runs their
-     * phone pass first. Book accounts are left alone.
+     * phone pass first, the earlier builds' calendar accounts included, which
+     * all go. Book accounts are left alone.
      */
     public static void reconcileCalendars(Context context, Set<String> addresses) {
         AccountManager manager = AccountManager.get(context);
 
-        for (Account account : manager.getAccountsByType(TYPE)) {
+        for (Account account : legacyCalendarAccounts(context)) {
+            manager.removeAccountExplicitly(account);
+        }
+        for (Account account : manager.getAccountsByType(CALENDAR_TYPE)) {
             String address = manager.getUserData(account, DATA_CALENDARS);
-            if (address != null && !addresses.contains(address)) {
+            if (address == null || !addresses.contains(address)) {
                 manager.removeAccountExplicitly(account);
             }
         }
@@ -114,7 +125,7 @@ public final class Accounts {
         for (String address : addresses) {
             Account account = findCalendars(context, address);
             if (account == null) {
-                account = new Account(address, TYPE);
+                account = new Account(address, CALENDAR_TYPE);
                 Bundle data = new Bundle();
                 data.putString(DATA_CALENDARS, address);
                 if (!manager.addAccountExplicitly(account, null, data)) {
@@ -130,13 +141,8 @@ public final class Accounts {
                 manager.setUserData(account, DATA_AUTO, "1");
             }
 
-            // NOTE: the contacts adapter is always syncable for our type,
-            // which would list a calendar account in the Contacts app.
             if (ContentResolver.getIsSyncable(account, CalendarContract.AUTHORITY) <= 0) {
                 ContentResolver.setIsSyncable(account, CalendarContract.AUTHORITY, 1);
-            }
-            if (ContentResolver.getIsSyncable(account, ContactsContract.AUTHORITY) != 0) {
-                ContentResolver.setIsSyncable(account, ContactsContract.AUTHORITY, 0);
             }
         }
     }
@@ -187,8 +193,8 @@ public final class Accounts {
                         .query(
                                 Calendars.CONTENT_URI,
                                 new String[] {Calendars.ACCOUNT_NAME},
-                                Calendars.ACCOUNT_TYPE + " != ?",
-                                new String[] {TYPE},
+                                Calendars.ACCOUNT_TYPE + " NOT IN (?, ?)",
+                                new String[] {TYPE, CALENDAR_TYPE},
                                 null)) {
             while (cursor != null && cursor.moveToNext()) {
                 names.add(cursor.getString(0));
@@ -222,7 +228,7 @@ public final class Accounts {
      */
     public static Account findCalendars(Context context, String address) {
         AccountManager manager = AccountManager.get(context);
-        for (Account account : manager.getAccountsByType(TYPE)) {
+        for (Account account : manager.getAccountsByType(CALENDAR_TYPE)) {
             if (address.equals(manager.getUserData(account, DATA_CALENDARS))) {
                 return account;
             }
@@ -232,6 +238,23 @@ public final class Accounts {
 
     /** Every calendar account, whichever address it holds. */
     public static List<Account> calendarAccounts(Context context) {
+        AccountManager manager = AccountManager.get(context);
+        List<Account> accounts = new ArrayList<>();
+        for (Account account : manager.getAccountsByType(CALENDAR_TYPE)) {
+            if (manager.getUserData(account, DATA_CALENDARS) != null) {
+                accounts.add(account);
+            }
+        }
+        return accounts;
+    }
+
+    /**
+     * The calendar accounts earlier builds made of the books' type.
+     *
+     * <p>Contacts apps list them as empty books; {@link #reconcileCalendars}
+     * removes them once their calendars' phone pass ran.
+     */
+    public static List<Account> legacyCalendarAccounts(Context context) {
         AccountManager manager = AccountManager.get(context);
         List<Account> accounts = new ArrayList<>();
         for (Account account : manager.getAccountsByType(TYPE)) {
@@ -249,11 +272,62 @@ public final class Accounts {
 
     /**
      * Removes the book URL's Android account; the provider purges its contacts.
+     *
+     * <p>Kept while it holds a phone edit not yet in ({@link #purge}).
      */
     public static void remove(Context context, String url) {
         Account account = findByUrl(context, url);
         if (account != null) {
-            AccountManager.get(context).removeAccountExplicitly(account);
+            purge(context, account);
+        }
+    }
+
+    /**
+     * Removes a book's account unless it holds a phone edit the store lacks.
+     *
+     * <p>Android deletes an account's raw contacts with it, so one created or
+     * edited in a contacts app and not yet brought in would be lost. Kept, it
+     * waits for a phone pass; answers whether the account went.
+     */
+    static boolean purge(Context context, Account account) {
+        if (unsynced(context, account)) {
+            Log.w("pimalaya", "phone account kept: it holds contacts not yet synced");
+            return false;
+        }
+        return AccountManager.get(context).removeAccountExplicitly(account);
+    }
+
+    /**
+     * Whether a book's raw contacts hold a creation or an edit not yet in.
+     *
+     * <p>False without the contacts permission, which no phone pass could
+     * read either. A pending deletion does not count: lost, the contact only
+     * comes back.
+     */
+    static boolean unsynced(Context context, Account account) {
+        if (!PhoneMirror.CONTACTS.granted(context)) {
+            return false;
+        }
+        try (Cursor cursor =
+                context.getContentResolver()
+                        .query(
+                                RawContacts.CONTENT_URI,
+                                new String[] {RawContacts._ID},
+                                RawContacts.ACCOUNT_NAME
+                                        + " = ? AND "
+                                        + RawContacts.ACCOUNT_TYPE
+                                        + " = ? AND "
+                                        + RawContacts.DELETED
+                                        + " = 0 AND ("
+                                        + RawContacts.DIRTY
+                                        + " = 1 OR "
+                                        + RawContacts.SOURCE_ID
+                                        + " IS NULL OR "
+                                        + RawContacts.SOURCE_ID
+                                        + " = '')",
+                                new String[] {account.name, account.type},
+                                null)) {
+            return cursor != null && cursor.moveToFirst();
         }
     }
 

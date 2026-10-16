@@ -42,14 +42,17 @@ public class HardeningTest {
     @Test
     public void theSyncAdaptersServeTheirOwnAccountsAndAuthorityAlone() {
         Account own = new Account("bob@example.org", Accounts.TYPE);
+        Account calendars = new Account("bob@example.org", Accounts.CALENDAR_TYPE);
         Account other = new Account("bob@example.org", "com.google");
 
         assertTrue(SyncService.serves(own, ContactsContract.AUTHORITY));
         assertFalse(SyncService.serves(own, CalendarContract.AUTHORITY));
         assertFalse(SyncService.serves(other, ContactsContract.AUTHORITY));
         assertFalse(SyncService.serves(null, ContactsContract.AUTHORITY));
-        assertTrue(CalendarSyncService.serves(own, CalendarContract.AUTHORITY));
-        assertFalse(CalendarSyncService.serves(own, ContactsContract.AUTHORITY));
+        assertTrue(CalendarSyncService.serves(calendars, CalendarContract.AUTHORITY));
+        assertFalse(CalendarSyncService.serves(own, CalendarContract.AUTHORITY));
+        assertFalse(CalendarSyncService.serves(calendars, ContactsContract.AUTHORITY));
+        assertFalse(SyncService.serves(calendars, ContactsContract.AUTHORITY));
         assertFalse(CalendarSyncService.serves(other, CalendarContract.AUTHORITY));
         assertFalse(CalendarSyncService.serves(null, CalendarContract.AUTHORITY));
     }

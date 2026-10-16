@@ -1376,10 +1376,36 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
+     * Books about to leave the phone: their last phone pass, off main.
+     *
+     * <p>Brings a Contacts-app edit into the store before the books' accounts
+     * go, which take their raw contacts along; {@code done} learns on main
+     * whether every pass ran.
+     */
+    public void lastPhonePass(List<String> urls, Consumer<Boolean> done) {
+        host.io.execute(
+                () -> {
+                    boolean ran = true;
+                    for (String url : urls) {
+                        try {
+                            new ContactPhonePass(pimdir, clients)
+                                    .sync(url, new ContactEngine.Report());
+                        } catch (Exception error) {
+                            Log.w("pimalaya", "last phone pass failed for " + url, error);
+                            ran = false;
+                        }
+                    }
+                    boolean all = ran;
+                    host.postAlive(() -> done.accept(all));
+                });
+    }
+
+    /**
      * A book's phone switch off: one last phone pass, then its account goes.
      *
      * <p>The pass keeps a Contacts-app edit not yet in; the account takes its
-     * raw contacts with it. The contacts stay in the store.
+     * raw contacts with it. The contacts stay in the store. A failed pass
+     * keeps the account, so the edit waits for the next one.
      */
     public void hideFromPhone(String url) {
         host.io.execute(
@@ -1388,7 +1414,8 @@ public final class SyncCoordinator implements MailSync {
                         new ContactPhonePass(pimdir, clients)
                                 .sync(url, new ContactEngine.Report());
                     } catch (Exception error) {
-                        Log.w("pimalaya", "last phone pass failed for " + url, error);
+                        Log.w("pimalaya", "last phone pass failed for " + url + ", account kept", error);
+                        return;
                     }
                     Accounts.remove(host, url);
                     host.postAlive(() -> screens.reload(PimDomain.CONTACTS));

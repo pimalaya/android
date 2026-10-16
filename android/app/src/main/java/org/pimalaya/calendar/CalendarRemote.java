@@ -157,11 +157,19 @@ final class CalendarRemote implements PhoneSpoke {
                                     Calendars.ACCOUNT_NAME,
                                     Calendars.CALENDAR_ACCESS_LEVEL,
                                     Calendars.OWNER_ACCOUNT,
-                                    Calendars.CAL_SYNC3
+                                    Calendars.CAL_SYNC3,
+                                    Calendars.ACCOUNT_TYPE
                                 },
-                                Calendars.ACCOUNT_TYPE + " = ? AND " + Calendars._SYNC_ID + " = ?",
+                                // NOTE: an earlier build's account too, for
+                                // the last pass before it moves.
+                                Calendars.ACCOUNT_TYPE
+                                        + " IN (?, ?) AND "
+                                        + Calendars._SYNC_ID
+                                        + " = ?",
                                 new String[] {
-                                    Accounts.TYPE, PimdirStorage.collectionOf(collection)
+                                    Accounts.CALENDAR_TYPE,
+                                    Accounts.TYPE,
+                                    PimdirStorage.collectionOf(collection)
                                 },
                                 null)) {
             if (cursor == null || !cursor.moveToFirst()) {
@@ -169,7 +177,7 @@ final class CalendarRemote implements PhoneSpoke {
             }
             String hidden = cursor.isNull(4) ? "0" : cursor.getString(4);
             return new Target(
-                    new Account(cursor.getString(1), Accounts.TYPE),
+                    new Account(cursor.getString(1), cursor.getString(5)),
                     cursor.getLong(0),
                     cursor.getInt(2) >= Calendars.CAL_ACCESS_CONTRIBUTOR,
                     cursor.isNull(3) ? cursor.getString(1) : cursor.getString(3),

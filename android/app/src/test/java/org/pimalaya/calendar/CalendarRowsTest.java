@@ -37,7 +37,7 @@ import java.util.Set;
 @RunWith(RobolectricTestRunner.class)
 public class CalendarRowsTest {
     private static final String EMAIL = "jane@example.com";
-    private static final Account ACCOUNT = new Account(EMAIL, Accounts.TYPE);
+    private static final Account ACCOUNT = new Account(EMAIL, Accounts.CALENDAR_TYPE);
 
     private static PimdirCollections.Stored calendar(
             String name, String color, String role, boolean writable) {
@@ -52,7 +52,7 @@ public class CalendarRowsTest {
                         ACCOUNT, calendar("Work", "#3366CC", "default", true), true, "Europe/Paris");
 
         assertEquals(EMAIL, values.getAsString(Calendars.ACCOUNT_NAME));
-        assertEquals(Accounts.TYPE, values.getAsString(Calendars.ACCOUNT_TYPE));
+        assertEquals(Accounts.CALENDAR_TYPE, values.getAsString(Calendars.ACCOUNT_TYPE));
         assertEquals("acc1:https://dav.example.com/cal/work/", values.getAsString(Calendars._SYNC_ID));
         assertEquals("Work", values.getAsString(Calendars.NAME));
         assertEquals("Work", values.getAsString(Calendars.CALENDAR_DISPLAY_NAME));
@@ -211,7 +211,7 @@ public class CalendarRowsTest {
         Set<String> keys = new HashSet<>();
         for (ContentValues values : colors) {
             assertEquals(EMAIL, values.getAsString(Colors.ACCOUNT_NAME));
-            assertEquals(Accounts.TYPE, values.getAsString(Colors.ACCOUNT_TYPE));
+            assertEquals(Accounts.CALENDAR_TYPE, values.getAsString(Colors.ACCOUNT_TYPE));
             assertEquals(Colors.TYPE_EVENT, (int) values.getAsInteger(Colors.COLOR_TYPE));
             assertEquals(0xff, values.getAsInteger(Colors.COLOR) >>> 24);
             keys.add(values.getAsString(Colors.COLOR_KEY));

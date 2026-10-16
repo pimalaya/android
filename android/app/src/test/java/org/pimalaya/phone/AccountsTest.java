@@ -29,7 +29,7 @@ import java.util.Set;
  * A mirrored book's account syncs automatically, so Contacts edits come back.
  *
  * <p>Turned on once per account (earlier builds' too), then the system setting
- * stands. Calendar and book accounts each sync their own authority alone. An
+ * stands. Calendar accounts are of their own type, an earlier build's moved. An
  * address named by another app's account is elsewhere.
  */
 @RunWith(RobolectricTestRunner.class)
@@ -97,20 +97,10 @@ public class AccountsTest {
         Accounts.reconcileCalendars(context, Set.of(EMAIL));
 
         Account account = Accounts.findCalendars(context, EMAIL);
-        assertEquals(new Account(EMAIL, Accounts.TYPE), account);
+        assertEquals(new Account(EMAIL, Accounts.CALENDAR_TYPE), account);
         assertEquals(EMAIL, Accounts.calendarAddress(context, account));
         assertEquals(1, ContentResolver.getIsSyncable(account, CalendarContract.AUTHORITY));
-        assertEquals(0, ContentResolver.getIsSyncable(account, ContactsContract.AUTHORITY));
         assertTrue(ContentResolver.getSyncAutomatically(account, CalendarContract.AUTHORITY));
-    }
-
-    @Test
-    public void aBookAccountNeverSyncsCalendars() {
-        Accounts.reconcile(context, BookEntry.accounts(books));
-
-        Account account = Accounts.findByUrl(context, URL);
-        assertNull(Accounts.calendarAddress(context, account));
-        assertEquals(0, ContentResolver.getIsSyncable(account, CalendarContract.AUTHORITY));
     }
 
     @Test
@@ -127,6 +117,21 @@ public class AccountsTest {
         assertNull(Accounts.findCalendars(context, EMAIL));
         assertNotNull(Accounts.findByUrl(context, URL));
         assertEquals(1, manager.getAccountsByType(Accounts.TYPE).length);
+    }
+
+    @Test
+    public void anEarlierBuildsCalendarAccountMovesToItsOwnType() {
+        Account legacy = new Account(EMAIL, Accounts.TYPE);
+        Bundle data = new Bundle();
+        data.putString("calendars", EMAIL);
+        manager.addAccountExplicitly(legacy, null, data);
+        assertEquals(List.of(legacy), Accounts.legacyCalendarAccounts(context));
+
+        Accounts.reconcileCalendars(context, Set.of(EMAIL));
+
+        assertEquals(0, manager.getAccountsByType(Accounts.TYPE).length);
+        assertTrue(Accounts.legacyCalendarAccounts(context).isEmpty());
+        assertEquals(new Account(EMAIL, Accounts.CALENDAR_TYPE), Accounts.findCalendars(context, EMAIL));
     }
 
     @Test

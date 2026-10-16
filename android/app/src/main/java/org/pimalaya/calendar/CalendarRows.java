@@ -72,6 +72,13 @@ public final class CalendarRows {
                     }
                 }
             }
+            // NOTE: an earlier build's account goes whole; its calendars
+            // come back under the new one, projected whole.
+            for (Account account : Accounts.legacyCalendarAccounts(context)) {
+                for (String collection : rows(context, account).keySet()) {
+                    leave(pimdir, collection);
+                }
+            }
         }
         Accounts.reconcileCalendars(context, shown.keySet());
         if (!granted) {

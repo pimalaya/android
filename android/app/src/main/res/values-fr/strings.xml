@@ -623,6 +623,7 @@
     <string name="delete_account_confirm">Retirer ce compte de ce téléphone ?</string>
     <string name="delete_account_contacts">Ses contacts restent sur ce téléphone.</string>
     <string name="delete_account_all">Ses contacts sont déplacés sur ce téléphone. Ses e-mails et événements sont supprimés.</string>
+    <string name="delete_account_phone_failed">Les contacts modifiés sur ce téléphone n\'ont pas pu être enregistrés, rien n\'a été supprimé. Réessayez.</string>
     <!-- Vérification en arrière-plan (BackgroundCheck, BackgroundJob). -->
     <string name="account_background">Arrière-plan</string>
     <string name="background_sync">Synchroniser en arrière-plan</string>

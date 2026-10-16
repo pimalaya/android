@@ -766,6 +766,7 @@
     <string name="delete_account_confirm">Remove this account from this phone?</string>
     <string name="delete_account_contacts">Its contacts stay on this phone.</string>
     <string name="delete_account_all">Its contacts move to this phone. Its mail and events are removed.</string>
+    <string name="delete_account_phone_failed">Contacts edited on this phone could not be saved, so nothing was removed. Try again.</string>
     <!-- Background check (BackgroundCheck, BackgroundJob). -->
     <string name="account_background">Background</string>
     <string name="background_sync">Sync in the background</string>

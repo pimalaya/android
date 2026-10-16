@@ -4,7 +4,6 @@ import android.accounts.Account;
 import android.app.Service;
 import android.content.AbstractThreadedSyncAdapter;
 import android.content.ContentProviderClient;
-import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SyncResult;
@@ -46,12 +45,11 @@ public class CalendarSyncService extends Service {
      * Whether the adapter runs a sync: a calendar sync of one of our accounts.
      *
      * <p>The service is exported, and before the 2022 security patch any app
-     * could ask it for any account and authority, which would have turned
-     * another authority's sync off for a book.
+     * could ask it for any account and authority.
      */
     static boolean serves(Account account, String authority) {
         return account != null
-                && Accounts.TYPE.equals(account.type)
+                && Accounts.CALENDAR_TYPE.equals(account.type)
                 && CalendarContract.AUTHORITY.equals(authority);
     }
 
@@ -72,10 +70,8 @@ public class CalendarSyncService extends Service {
             }
             Context context = getContext();
 
-            // NOTE: a book's account, asked whether it syncs calendars (an
-            // initialization sync): it never does.
             if (Accounts.calendarAddress(context, account) == null) {
-                ContentResolver.setIsSyncable(account, authority, 0);
+                Log.w("pimalaya", "calendar sync on an account with no address");
                 return;
             }
             if (!PhoneMirror.CALENDAR.granted(context)) {

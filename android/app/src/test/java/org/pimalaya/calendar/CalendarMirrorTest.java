@@ -56,7 +56,7 @@ public class CalendarMirrorTest {
     private static final String COLLECTION = "acct/Work";
     private static final String SPOKE = PimdirStorage.phoneCollection(COLLECTION);
     private static final String OWNER = "jane@example.com";
-    private static final Account ACCOUNT = new Account(OWNER, Accounts.TYPE);
+    private static final Account ACCOUNT = new Account(OWNER, Accounts.CALENDAR_TYPE);
     private static final ZoneId PARIS = ZoneId.of("Europe/Paris");
 
     private static String object(String body) {
@@ -196,7 +196,7 @@ public class CalendarMirrorTest {
     private long showCalendar(int access) {
         ContentValues values = new ContentValues();
         values.put(Calendars.ACCOUNT_NAME, OWNER);
-        values.put(Calendars.ACCOUNT_TYPE, Accounts.TYPE);
+        values.put(Calendars.ACCOUNT_TYPE, Accounts.CALENDAR_TYPE);
         values.put(Calendars._SYNC_ID, COLLECTION);
         values.put(Calendars.CALENDAR_ACCESS_LEVEL, access);
         values.put(Calendars.OWNER_ACCOUNT, OWNER);
