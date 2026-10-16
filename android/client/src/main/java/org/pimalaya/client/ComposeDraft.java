@@ -17,6 +17,7 @@ import org.json.JSONObject;
  * @param bcc the blind carbon copies, which reach the envelope and no header
  * @param subject the subject, as typed
  * @param body the text, as typed
+ * @param markdown whether the text is Markdown, sent with its HTML beside it
  * @param date now, as an RFC 5322 date
  * @param messageId the {@code Message-ID} to stamp, angle brackets included
  * @param inReplyTo the {@code Message-ID} replied to, or empty
@@ -31,6 +32,7 @@ public record ComposeDraft(
         String bcc,
         String subject,
         String body,
+        boolean markdown,
         String date,
         String messageId,
         String inReplyTo,
@@ -45,6 +47,7 @@ public record ComposeDraft(
                     .put("bcc", bcc)
                     .put("subject", subject)
                     .put("body", body)
+                    .put("markdown", markdown)
                     .put("date", date)
                     .put("messageId", messageId)
                     .put("inReplyTo", inReplyTo)

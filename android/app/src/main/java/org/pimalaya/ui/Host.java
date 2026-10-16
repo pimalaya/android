@@ -67,6 +67,9 @@ public abstract class Host extends Activity {
     /** Dismisses the soft keyboard, e.g. when leaving the edit form. */
     public abstract void hideKeyboard();
 
+    /** Raises the soft keyboard for the focused field. */
+    public abstract void showKeyboard();
+
     /** Enables or disables an auth continue FAB, dimming its disc. */
     public abstract void setFabEnabled(int id, boolean enabled);
 

@@ -9,8 +9,8 @@
 //! JMAP in [`gmail_step`] and [`jmap_step`].
 //!
 //! Message bytes are the protocol-free part: [`compose`] builds them,
-//! [`read`] resolves them for a reader, and [`listing`] is the page every
-//! backend answers an `enumerate` yield with.
+//! [`read`] resolves them for a reader, [`markdown`] renders a rich draft, and
+//! [`listing`] is the page every backend answers an `enumerate` yield with.
 
 pub mod compose;
 pub mod gmail;
@@ -19,6 +19,7 @@ pub mod imap;
 mod jmap;
 pub mod jmap_step;
 pub mod listing;
+pub mod markdown;
 pub mod msgraph;
 pub mod read;
 pub mod session;

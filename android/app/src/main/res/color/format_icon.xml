@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A formatting button's glyph: the accent while in its style. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="?android:attr/colorAccent" android:state_activated="true" />
+    <item android:color="?android:attr/textColorPrimary" />
+</selector>

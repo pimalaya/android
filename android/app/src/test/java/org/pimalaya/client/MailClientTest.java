@@ -515,6 +515,7 @@ public class MailClientTest {
                             "",
                             "Hi",
                             "the body",
+                            false,
                             "Wed, 14 Oct 2026 10:00:00 +0200",
                             "<fixed-16@example.com>",
                             "",
@@ -527,6 +528,7 @@ public class MailClientTest {
                             "eve@example.org",
                             "Re: Hi",
                             "line one\nline two\n",
+                            false,
                             "Wed, 14 Oct 2026 10:00:00 +0200",
                             "<fixed-16@example.com>",
                             "<a@example.org>",
@@ -540,6 +542,7 @@ public class MailClientTest {
                             "Réunion de l’équipe — ordre du jour très long qui doit être"
                                     + " replié sur plusieurs lignes",
                             "Bonjour à tous,\n\nvoici l’ordre du jour : café ☕.\n",
+                            false,
                             "Wed, 14 Oct 2026 10:00:00 +0200",
                             "<fixed-14@example.com>",
                             "",
@@ -552,6 +555,7 @@ public class MailClientTest {
                             "",
                             "",
                             "",
+                            false,
                             "Wed, 14 Oct 2026 10:00:00 +0200",
                             "<fixed-16@example.com>",
                             null,
@@ -564,6 +568,7 @@ public class MailClientTest {
                             "hidden@example.org",
                             "Fwd: report",
                             "a very long line " + "x".repeat(200) + "\n",
+                            false,
                             "Wed, 14 Oct 2026 10:00:00 +0200",
                             "<fixed-16@example.com>",
                             "",
@@ -572,28 +577,28 @@ public class MailClientTest {
     /** What MailSubmit wrote for each of {@link #DRAFTS}, captured. */
     private static final List<String> DRAFT_JSON =
             List.of(
-                    "{\"from\":\"jane@example.com\",\"fromName\":\"Jane\",\"to\":\"bob@examp"
+                    "{\"markdown\":false,\"from\":\"jane@example.com\",\"fromName\":\"Jane\",\"to\":\"bob@examp"
                         + "le.org\",\"cc\":\"\",\"bcc\":\"\",\"subject\":\"Hi\",\"body\":\"the body\",\"d"
                         + "ate\":\"Wed, 14 Oct 2026 10:00:00 +0200\",\"messageId\":\"<fixed-1"
                         + "6@example.com>\",\"inReplyTo\":\"\",\"references\":\"\"}",
-                    "{\"from\":\"jane@example.com\",\"fromName\":\"\",\"to\":\"bob@example.o"
+                    "{\"markdown\":false,\"from\":\"jane@example.com\",\"fromName\":\"\",\"to\":\"bob@example.o"
                         + "rg, carol@example.org\",\"cc\":\"dan@example.org\",\"bcc\":\"eve@exa"
                         + "mple.org\",\"subject\":\"Re: Hi\",\"body\":\"line one\\nline two\\n\",\""
                         + "date\":\"Wed, 14 Oct 2026 10:00:00 +0200\",\"messageId\":\"<fixed-"
                         + "16@example.com>\",\"inReplyTo\":\"<a@example.org>\",\"references\":"
                         + "\"<root@example.org> <a@example.org>\"}",
-                    "{\"from\":\"zoe@example.fr\",\"fromName\":\"Zoé Dupré\",\"to\":\"Élodie"
+                    "{\"markdown\":false,\"from\":\"zoe@example.fr\",\"fromName\":\"Zoé Dupré\",\"to\":\"Élodie"
                         + " <elodie@example.fr>\",\"cc\":\"\",\"bcc\":\"\",\"subject\":\"Réunion de"
                         + " l’équipe — ordre du jour très long qui doit être replié sur"
                         + " plusieurs lignes\",\"body\":\"Bonjour à tous,\\n\\nvoici l’ordre "
                         + "du jour : café ☕.\\n\",\"date\":\"Wed, 14 Oct 2026 10:00:00 +0200"
                         + "\",\"messageId\":\"<fixed-14@example.com>\",\"inReplyTo\":\"\",\"refer"
                         + "ences\":\"\"}",
-                    "{\"from\":\"jane@example.com\",\"fromName\":\"Jane\",\"to\":\"bob@examp"
+                    "{\"markdown\":false,\"from\":\"jane@example.com\",\"fromName\":\"Jane\",\"to\":\"bob@examp"
                         + "le.org\",\"cc\":\"\",\"bcc\":\"\",\"subject\":\"\",\"body\":\"\",\"date\":\"Wed,"
                         + " 14 Oct 2026 10:00:00 +0200\",\"messageId\":\"<fixed-16@example."
                         + "com>\"}",
-                    "{\"from\":\"jane@example.com\",\"fromName\":\"Doe, Jane\",\"to\":\"\\\"Sm"
+                    "{\"markdown\":false,\"from\":\"jane@example.com\",\"fromName\":\"Doe, Jane\",\"to\":\"\\\"Sm"
                         + "ith, Bob\\\" <bob@example.org>\",\"cc\":\"\",\"bcc\":\"hidden@example."
                         + "org\",\"subject\":\"Fwd: report\",\"body\":\"a very long line xxxxxx"
                         + "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"

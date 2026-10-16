@@ -706,12 +706,16 @@ public final class MessageView implements FilesList.Origins {
             prefill.references = MailReply.references(thread);
         }
         if (body != null) {
+            // NOTE: a reply follows the original: an HTML one is quoted as
+            // Markdown in a rich reply, a plain one as text in a plain one.
+            prefill.rich = html(body);
             prefill.body =
                     "\n\n"
                             + host.getString(
                                     R.string.compose_quote_intro, when(message), sender(message))
                             + "\n"
-                            + MailReply.quoted(plain(body));
+                            + MailReply.quoted(
+                                    prefill.rich ? SpannedMarkdown.html(body.body()) : plain(body));
         }
         return prefill;
     }
@@ -719,7 +723,7 @@ public final class MessageView implements FilesList.Origins {
     /**
      * A forward: no recipient, the subject marked, headers over the text.
      *
-     * <p>Attachments stay behind: the composer writes plain text only.
+     * <p>Attachments stay behind: the composer attaches nothing yet.
      */
     private MessageCompose.Prefill forward(MailStore.StoredMessage message, MessageBody body) {
         MessageCompose.Prefill prefill = new MessageCompose.Prefill();
@@ -735,10 +739,16 @@ public final class MessageView implements FilesList.Origins {
             if (!body.cc().isEmpty()) {
                 text.append("Cc: ").append(body.cc()).append('\n');
             }
-            text.append('\n').append(plain(body));
+            prefill.rich = html(body);
+            text.append('\n').append(prefill.rich ? SpannedMarkdown.html(body.body()) : plain(body));
         }
         prefill.body = text.toString();
         return prefill;
+    }
+
+    /** Whether the message is HTML, which a rich reply or forward carries. */
+    private static boolean html(MessageBody body) {
+        return MessageBody.HTML.equals(body.kind());
     }
 
     /** The message's text, an HTML body read down to what it says. */

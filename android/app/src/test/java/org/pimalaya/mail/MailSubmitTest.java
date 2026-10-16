@@ -53,6 +53,7 @@ public class MailSubmitTest {
                         "",
                         "Re: Hi",
                         "the body",
+                        false,
                         "<a@example.org>",
                         "<root@example.org> <a@example.org>"));
 
@@ -80,6 +81,7 @@ public class MailSubmitTest {
                         "eve@example.org",
                         "Re: Hi",
                         "line one\nline two\n",
+                        false,
                         "Wed, 14 Oct 2026 10:00:00 +0200",
                         "<fixed-16@example.com>",
                         "<a@example.org>",

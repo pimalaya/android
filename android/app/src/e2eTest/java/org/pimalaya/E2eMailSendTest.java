@@ -158,6 +158,7 @@ public class E2eMailSendTest extends E2eCase {
                 bcc,
                 subject,
                 "Sent by the Pimalaya Android end-to-end suite, " + tag + ".",
+                false,
                 MailSubmit.now(),
                 MailSubmit.messageId(address),
                 "",

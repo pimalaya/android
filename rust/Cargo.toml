@@ -45,6 +45,7 @@ jni = "0.22"
 log = { version = "0.4", default-features = false }
 mail-parser = { version = "0.11", default-features = false, features = ["full_encoding"] }
 percent-encoding = "2"
+pulldown-cmark = { version = "0.13", default-features = false }
 rand = "0.10"
 secrecy = { version = "0.10", default-features = false, features = ["serde"] }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }

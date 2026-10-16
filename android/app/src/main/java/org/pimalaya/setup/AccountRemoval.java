@@ -14,6 +14,7 @@ import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.mail.MailStore;
+import org.pimalaya.mail.ComposeFormat;
 import org.pimalaya.mail.SenderName;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.PimdirCollections;
@@ -90,6 +91,7 @@ final class AccountRemoval {
         mail.forget(email);
         FirstSync.forget(context, email);
         SenderName.set(context, email, "");
+        ComposeFormat.set(context, email, true);
         BackgroundCheck.forget(context, email);
         events.forget(email);
         return urls;

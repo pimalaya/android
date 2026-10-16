@@ -40,7 +40,8 @@ public final class MailSubmit {
     /**
      * What the composer's fields say, read on the main thread.
      *
-     * <p>Address fields comma separated; the reply's headers empty outside one.
+     * <p>Address fields comma separated; the reply's headers empty outside one;
+     * the body Markdown when the message is rich.
      */
     public record Draft(
             String from,
@@ -50,6 +51,7 @@ public final class MailSubmit {
             String bcc,
             String subject,
             String body,
+            boolean markdown,
             String inReplyTo,
             String references) {}
 
@@ -69,6 +71,7 @@ public final class MailSubmit {
                         draft.bcc(),
                         draft.subject(),
                         draft.body(),
+                        draft.markdown(),
                         now(),
                         messageId(draft.from()),
                         draft.inReplyTo(),

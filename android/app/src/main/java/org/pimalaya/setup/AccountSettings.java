@@ -34,6 +34,7 @@ import org.pimalaya.client.Protocol;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.mail.MailScope;
+import org.pimalaya.mail.ComposeFormat;
 import org.pimalaya.mail.SenderName;
 import org.pimalaya.mail.WindowPicker;
 import org.pimalaya.phone.Accounts;
@@ -253,7 +254,8 @@ public final class AccountSettings {
     }
 
     /**
-     * The mail card: sender name, sync bound, window and submission server.
+     * The mail card: sender name, rich by default, sync bound, window and
+     * submission server.
      *
      * <p>The window is since when its mail is on the phone ({@link
      * org.pimalaya.mail.MailWindow}).
@@ -269,6 +271,17 @@ public final class AccountSettings {
                         name.isEmpty() ? host.getString(R.string.sender_name_none) : name,
                         chevron(),
                         () -> promptSenderName(email)));
+
+        Switch rich = new Switch(host);
+        rich.setChecked(ComposeFormat.rich(host, email));
+        rich.setOnCheckedChangeListener(
+                (view, checked) -> ComposeFormat.set(host, email, checked));
+        rows.add(
+                switchRow(
+                        sections,
+                        host.getString(R.string.compose_rich_default),
+                        host.getString(R.string.compose_rich_default_line),
+                        rich));
 
         String[] scopes = host.getResources().getStringArray(R.array.mail_scopes);
         int scope = scopeIndex(parts.mail().monthsOf(email));

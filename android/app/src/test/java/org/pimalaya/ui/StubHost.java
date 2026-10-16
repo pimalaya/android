@@ -37,6 +37,9 @@ public class StubHost extends Host {
     public void hideKeyboard() {}
 
     @Override
+    public void showKeyboard() {}
+
+    @Override
     public void setFabEnabled(int id, boolean enabled) {}
 
     @Override

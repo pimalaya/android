@@ -345,6 +345,14 @@ final class Native {
     static native String composeMessage(String draft);
 
     /**
+     * A rich draft's Markdown as its editor shows it, offline.
+     *
+     * <p>Returns {@code {text, styles}} as {@link MarkdownText}, offsets in
+     * UTF-16 units.
+     */
+    static native String markdownRich(String markdown);
+
+    /**
      * Hands one stored message over, to the account's submit URL or the
      * session's API.
      *

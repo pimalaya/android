@@ -1,9 +1,11 @@
 package org.pimalaya.mail;
 
 import android.app.AlertDialog;
+import android.text.InputType;
 import android.util.Log;
 import android.view.View;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import org.pimalaya.R;
@@ -13,6 +15,7 @@ import org.pimalaya.client.Account;
 import org.pimalaya.client.Flags;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
+import org.pimalaya.ui.PillField;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,8 +23,9 @@ import java.util.List;
 /**
  * The composer: who it is from, who it goes to, and what it says.
  *
- * <p>Plain text, no draft: leaving loses what was typed, and says so. Sending
- * queues for the next sync, offline too. The account is fixed once opened (a
+ * <p>Rich (styled, with a formatting bar, sent with its Markdown) or plain; no
+ * draft: leaving loses what was typed, and says so. Sending queues for the
+ * next sync, offline too. The account is fixed once opened (a
  * server checks the sender), so with several the picker comes first.
  */
 public final class MessageCompose {
@@ -46,6 +50,9 @@ public final class MessageCompose {
     /** What the composer opened on, so leaving untouched asks nothing. */
     private Prefill opened;
 
+    /** The text as it opened, as Markdown, so leaving untouched asks nothing. */
+    private String loaded = "";
+
     /**
      * What the composer opens with: blank, or a parent's reply or forward.
      */
@@ -57,6 +64,9 @@ public final class MessageCompose {
         String cc = "";
         String subject = "";
         String body = "";
+
+        /** Whether it starts rich; null for the account's default. */
+        Boolean rich;
 
         /** The parent's `Message-ID`, in brackets; empty outside a reply. */
         String inReplyTo = "";
@@ -75,6 +85,40 @@ public final class MessageCompose {
         this.messageView = messageView;
         this.mailList = mailList;
         messageView.compose = this;
+
+        MarkdownField body = body();
+        body.setOnStateChanged(this::formatBar);
+        body.setOnFocusChangeListener((view, focused) -> formatBar());
+        inline(R.id.compose_bold, "strong");
+        inline(R.id.compose_italic, "emphasis");
+        inline(R.id.compose_strike, "strike");
+        inline(R.id.compose_code, "code");
+        lines(R.id.compose_bullets, "bullet");
+        lines(R.id.compose_numbers, "ordered");
+        lines(R.id.compose_quote, "quote");
+        host.findViewById(R.id.compose_link).setOnClickListener(view -> link());
+        host.findViewById(R.id.compose_clear).setOnClickListener(view -> body.clearInline());
+
+        // NOTE: a label puts the caret in its field, as a form's label does.
+        for (int[] pair :
+                new int[][] {
+                    {R.id.compose_to_label, R.id.compose_to},
+                    {R.id.compose_cc_label, R.id.compose_cc},
+                    {R.id.compose_bcc_label, R.id.compose_bcc},
+                    {R.id.compose_subject_label, R.id.compose_subject},
+                }) {
+            View field = host.findViewById(pair[1]);
+            host.findViewById(pair[0])
+                    .setOnClickListener(
+                            view -> {
+                                if (field instanceof RecipientField recipients) {
+                                    recipients.focus();
+                                } else {
+                                    field.requestFocus();
+                                }
+                                host.showKeyboard();
+                            });
+        }
     }
 
     /** Opens the composer on a blank message. */
@@ -139,8 +183,11 @@ public final class MessageCompose {
         ((RecipientField) host.findViewById(R.id.compose_cc)).set(prefill.cc);
         ((RecipientField) host.findViewById(R.id.compose_bcc)).clear();
         ((EditText) host.findViewById(R.id.compose_subject)).setText(prefill.subject);
-        EditText body = host.findViewById(R.id.compose_body);
-        body.setText(prefill.body);
+        MarkdownField body = body();
+        boolean rich = prefill.rich != null ? prefill.rich : ComposeFormat.rich(host, account.email);
+        body.open(prefill.body, rich);
+        formatBar();
+        loaded = body.markdown();
         // NOTE: the caret above a quote, where a reply is written.
         body.setSelection(0);
 
@@ -186,7 +233,7 @@ public final class MessageCompose {
                 && recipients(R.id.compose_cc).equals(normalized(prefill.cc))
                 && recipients(R.id.compose_bcc).isEmpty()
                 && value(R.id.compose_subject).equals(prefill.subject.trim())
-                && value(R.id.compose_body).equals(prefill.body.trim());
+                && body().markdown().trim().equals(loaded.trim());
     }
 
     /** Addresses as a recipient field reads them back once chipped. */
@@ -223,7 +270,8 @@ public final class MessageCompose {
                         recipients(R.id.compose_cc),
                         recipients(R.id.compose_bcc),
                         value(R.id.compose_subject),
-                        value(R.id.compose_body),
+                        body().markdown().trim(),
+                        body().isRich(),
                         opened != null ? opened.inReplyTo : "",
                         opened != null ? opened.references : "");
 
@@ -270,6 +318,89 @@ public final class MessageCompose {
                                 }
                             });
                 });
+    }
+
+    /**
+     * The formatting bar: shown while a rich text has the focus, each button
+     * pressed while the caret sits in its style.
+     */
+    private void formatBar() {
+        MarkdownField body = body();
+        boolean shown = body.isRich() && body.hasFocus();
+        host.findViewById(R.id.compose_format_bar)
+                .setVisibility(shown ? View.VISIBLE : View.GONE);
+        if (!shown) {
+            return;
+        }
+        int[] ids = {
+            R.id.compose_bold, R.id.compose_italic, R.id.compose_strike, R.id.compose_code,
+            R.id.compose_link, R.id.compose_bullets, R.id.compose_numbers, R.id.compose_quote
+        };
+        String[] kinds = {
+            "strong", "emphasis", "strike", "code", "link", "bullet", "ordered", "quote"
+        };
+        for (int index = 0; index < ids.length; index++) {
+            host.findViewById(ids[index]).setActivated(body.active(kinds[index]));
+        }
+    }
+
+    /** A button toggling an inline style's markers. */
+    private void inline(int id, String kind) {
+        host.findViewById(id).setOnClickListener(view -> body().toggle(kind));
+    }
+
+    /** A button toggling a list or a quote over the selected lines. */
+    private void lines(int id, String kind) {
+        host.findViewById(id).setOnClickListener(view -> body().toggleLines(kind));
+    }
+
+    /**
+     * The link sheet: the text and the address of the link the caret sits
+     * in, or of a new one around the selection.
+     */
+    private void link() {
+        MarkdownField body = body();
+        MarkdownField.Link current = body.link();
+        PillField text =
+                PillField.of(
+                        host,
+                        R.string.compose_link_text,
+                        current != null ? current.text() : body.selected(),
+                        false,
+                        true);
+        text.input.setInputType(InputType.TYPE_CLASS_TEXT);
+        PillField url =
+                PillField.of(
+                        host, R.string.compose_link_url, current != null ? current.url() : "", false, true);
+
+        LinearLayout fields = new LinearLayout(host);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(host.ui.dp(24), 0, host.ui.dp(24), 0);
+        fields.addView(text.view);
+        fields.addView(url.view);
+
+        AlertDialog.Builder dialog =
+                new AlertDialog.Builder(host)
+                        .setTitle(R.string.compose_link_title)
+                        .setView(fields)
+                        .setPositiveButton(
+                                R.string.compose_link_apply,
+                                (shown, which) -> {
+                                    String label = text.text().isEmpty() ? url.text() : text.text();
+                                    body.writeLink(current, label, url.text());
+                                })
+                        .setNegativeButton(android.R.string.cancel, null);
+        if (current != null) {
+            dialog.setNeutralButton(
+                    R.string.compose_link_remove,
+                    (shown, which) -> body.writeLink(current, current.text(), ""));
+        }
+        dialog.show();
+        (current == null && !body.selected().isEmpty() ? url : text).input.requestFocus();
+    }
+
+    private MarkdownField body() {
+        return host.findViewById(R.id.compose_body);
     }
 
     private String value(int id) {

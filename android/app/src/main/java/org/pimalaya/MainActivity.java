@@ -1947,6 +1947,16 @@ public class MainActivity extends Host
         }
     }
 
+    /** Raises the soft keyboard for whatever holds the focus. */
+    @Override
+    public void showKeyboard() {
+        View focus = getCurrentFocus();
+        if (focus != null) {
+            ((android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
+                    .showSoftInput(focus, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        }
+    }
+
     /** Dismisses the soft keyboard, e.g. when leaving the edit form. */
     @Override
     public void hideKeyboard() {
@@ -2077,6 +2087,9 @@ public class MainActivity extends Host
         padBottom(R.id.oauth_actions, 16, bottom);
         padBottom(R.id.books_actions, 16, bottom);
         padBottom(R.id.message_view_body, 0, bottom);
+        // NOTE: the composer hides the bottom navigation, so its page takes
+        // the whole inset, its formatting bar riding above the keyboard.
+        padBottom(R.id.compose_page, 0, bottom);
     }
 
     private void padTop(int id, int top) {

@@ -92,7 +92,12 @@ public final class RecipientField extends ViewGroup {
                         commit(input.getText().toString());
                     }
                 });
-        setOnClickListener(view -> input.requestFocus());
+        setOnClickListener(view -> focus());
+    }
+
+    /** Puts the caret in the input. */
+    public void focus() {
+        input.requestFocus();
     }
 
     /**

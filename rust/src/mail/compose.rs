@@ -7,9 +7,10 @@
 //! business, and header encoding on both sides of JNI would be two places
 //! to be wrong. The twin of [`crate::mail::read`], which reads the bytes.
 //!
-//! Plain text only, deliberately: a composer offering no formatting has
-//! nothing for HTML to say, and a `multipart/alternative` repeating the
-//! text is a larger message saying the same. Attachments will change that.
+//! A rich draft is Markdown: sent as written for its text/plain part, with
+//! an HTML part rendered from it ([`markdown::html`]) as
+//! `multipart/alternative`. A draft using no formatting, rich or not, is
+//! its text alone: an HTML part repeating it says nothing more.
 
 use std::fmt::Write as _;
 
@@ -18,7 +19,7 @@ use serde::Deserialize;
 
 use crate::{
     error::BridgeError,
-    mail::{base64, base64_len},
+    mail::{base64, base64_len, markdown},
 };
 
 /// How long a header line may run before it folds (RFC 5322 section
@@ -29,6 +30,12 @@ const MAX_LINE: usize = 78;
 /// line it sits on stays under [`MAX_LINE`] (RFC 2047 section 2 caps an
 /// encoded word at 75 anyway).
 const MAX_ENCODED_WORD: usize = 45;
+
+/// The boundary between a rich message's two parts.
+///
+/// Fixed, as no quoted-printable line can hold it: an `=` is always
+/// encoded or a soft break, never followed by `_` (RFC 2045 section 6.7).
+const BOUNDARY: &str = "=_pimalaya_alternative";
 
 /// What the composer hands over: the envelope, the headers a reader
 /// sees, and the text.
@@ -54,6 +61,9 @@ pub struct Draft {
     /// The text, as typed.
     #[serde(default)]
     pub body: String,
+    /// Whether the text is Markdown, sent with its HTML beside it.
+    #[serde(default)]
+    pub markdown: bool,
     /// Now, as an RFC 5322 date.
     ///
     /// Passed in rather than read here, so composing stays a pure function
@@ -126,14 +136,35 @@ pub fn compose(draft: &Draft) -> Result<Vec<u8>, BridgeError> {
     }
     headers.push_str(&header("Subject", &draft.subject));
     headers.push_str("MIME-Version: 1.0\r\n");
-    headers.push_str("Content-Type: text/plain; charset=utf-8\r\n");
-    headers.push_str("Content-Transfer-Encoding: quoted-printable\r\n");
 
-    let mut message = headers.into_bytes();
-    message.extend_from_slice(b"\r\n");
-    message.extend_from_slice(quoted_printable(&draft.body).as_bytes());
+    let mut message = headers;
+    if draft.markdown && markdown::formatted(&draft.body) {
+        let _ = write!(
+            message,
+            "Content-Type: multipart/alternative; boundary=\"{BOUNDARY}\"\r\n\r\n"
+        );
+        for (kind, text) in [
+            ("plain", draft.body.clone()),
+            ("html", markdown::html(&draft.body)),
+        ] {
+            let _ = write!(message, "--{BOUNDARY}\r\n");
+            message.push_str(&text_part(kind, &text));
+        }
+        let _ = write!(message, "--{BOUNDARY}--\r\n");
+    } else {
+        message.push_str(&text_part("plain", &draft.body));
+    }
 
-    Ok(message)
+    Ok(message.into_bytes())
+}
+
+/// One text part, its headers, the blank line and its body.
+fn text_part(kind: &str, text: &str) -> String {
+    format!(
+        "Content-Type: text/{kind}; charset=utf-8\r\n\
+         Content-Transfer-Encoding: quoted-printable\r\n\r\n{}",
+        quoted_printable(text)
+    )
 }
 
 /// One stored message as it is handed over: the envelope its address
@@ -367,6 +398,7 @@ mod tests {
             bcc: String::new(),
             subject: "Hello".into(),
             body: "Hi there".into(),
+            markdown: false,
             date: "Mon, 5 Jan 2026 09:00:00 +0000".into(),
             message_id: "<abc@pimalaya>".into(),
             in_reply_to: String::new(),
@@ -587,5 +619,37 @@ mod tests {
         draft.to = "  ,  ".into();
 
         assert!(compose(&draft).is_err());
+    }
+
+    #[test]
+    fn a_rich_draft_sends_its_markdown_beside_its_html() {
+        let mut draft = draft();
+        draft.markdown = true;
+        draft.body = "See **this** [page](https://example.org)".into();
+        let raw = compose(&draft).unwrap();
+
+        let parsed = MessageParser::default().parse(&raw).unwrap();
+        assert_eq!(
+            parsed.body_text(0).unwrap(),
+            "See **this** [page](https://example.org)"
+        );
+        let html = parsed.body_html(0).unwrap();
+        assert!(html.contains("<strong>this</strong>"));
+        assert!(html.contains("<a href=\"https://example.org\">page</a>"));
+        assert!(
+            String::from_utf8(raw)
+                .unwrap()
+                .contains("multipart/alternative")
+        );
+    }
+
+    #[test]
+    fn a_rich_draft_with_no_formatting_is_its_text_alone() {
+        let mut draft = draft();
+        draft.markdown = true;
+        let message = text(&draft);
+
+        assert!(!message.contains("multipart"));
+        assert!(message.ends_with("\r\n\r\nHi there\r\n"));
     }
 }

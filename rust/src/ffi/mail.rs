@@ -31,7 +31,7 @@ use crate::{
         self,
         compose::{self, Draft},
         listing::{Floor, MailRequest, Named},
-        read,
+        markdown, read,
         session::{
             FlagWrite, Mail, MailSession, MailStep, MailStepRequest, MessageAppend, MessageFetch,
             MessageTransfer, Refused,
@@ -630,6 +630,26 @@ pub extern "system" fn Java_org_pimalaya_client_Native_composeMessage<'local>(
             .unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.markdownRich`: a rich draft's Markdown as its editor shows it.
+///
+/// Returns `{text, styles}`, each style `{kind, start, end, url?}` in UTF-16
+/// units ([`markdown::rich`]). Offline and infallible: any text is Markdown.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_markdownRich<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    text: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let text = read_string(env, &text);
+        let json =
+            to_string(&markdown::rich(&text)).unwrap_or_else(|err| error_json(err.to_string()));
 
         Ok(env.new_string(json)?.into())
     })
