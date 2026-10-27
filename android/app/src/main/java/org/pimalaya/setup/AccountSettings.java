@@ -28,6 +28,7 @@ import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.Endpoints;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.PhoneCalendars;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Protocol;
@@ -44,6 +45,7 @@ import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.SyncCoordinator;
 import org.pimalaya.sync.SyncPasses;
 import org.pimalaya.sync.SyncStamps;
+import org.pimalaya.task.TaskStore;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
@@ -183,6 +185,7 @@ public final class AccountSettings {
         addBooks(sections, email);
         if (account.covers(PimDomain.CALENDAR)) {
             addCalendars(sections, email);
+            addTasks(sections, email);
         }
         addServers(sections, account);
 
@@ -616,6 +619,77 @@ public final class AccountSettings {
             rows.add(item);
         }
         sections.section(R.string.calendar_title, R.drawable.ic_domain_calendar, rows, null, false);
+    }
+
+    /**
+     * The tasks card: which of the account's calendars take tasks, and the
+     * one captures go to, picked by a tap.
+     *
+     * <p>An account none of whose calendars take tasks gets the line saying
+     * why instead (cairn/changes/gtd: the point of use, besides the capture
+     * sheet and onboarding).
+     */
+    private void addTasks(Sections sections, String email) {
+        List<EventStore.StoredCalendar> calendars = new ArrayList<>();
+        boolean any = false;
+        for (EventStore.StoredCalendar calendar : parts.events().loadCalendars()) {
+            if (calendar.accountEmail.equals(email)) {
+                calendars.add(calendar);
+                any |= TaskStore.takesTasks(calendar);
+            }
+        }
+        if (calendars.isEmpty()) {
+            return;
+        }
+        List<View> rows = new ArrayList<>();
+        if (!any) {
+            rows.add(note(noTasksReason(calendars.get(0).url)));
+            sections.section(R.string.tasks_title, R.drawable.ic_component_todo, rows, null, false);
+            return;
+        }
+        List<EventStore.StoredCalendar> targets = TaskStore.targets(parts.events(), host);
+        String here = targets.isEmpty() ? null : targets.get(0).id;
+        for (EventStore.StoredCalendar calendar : calendars) {
+            if (!TaskStore.takesTasks(calendar)) {
+                rows.add(
+                        sections.row(
+                                calendar.name,
+                                host.getString(R.string.account_tasks_events_only),
+                                null,
+                                null));
+                continue;
+            }
+            boolean chosen = calendar.id.equals(here);
+            RadioButton radio = new RadioButton(host);
+            radio.setChecked(chosen);
+            radio.setClickable(false);
+            radio.setFocusable(false);
+            rows.add(
+                    sections.row(
+                            calendar.name,
+                            host.getString(
+                                    chosen
+                                            ? R.string.account_tasks_captures_here
+                                            : R.string.account_tasks_takes),
+                            radio,
+                            () -> {
+                                TaskStore.captureTo(host, calendar.id);
+                                render();
+                            }));
+        }
+        sections.section(R.string.tasks_title, R.drawable.ic_component_todo, rows, null, false);
+    }
+
+    /** Why an account's calendars take no tasks, by the service they are on. */
+    private static int noTasksReason(String url) {
+        String base = url == null ? "" : url;
+        if (base.startsWith("msgraph:")) {
+            return R.string.account_tasks_none_microsoft;
+        }
+        if (base.startsWith("google:")) {
+            return R.string.account_tasks_none_google;
+        }
+        return R.string.account_tasks_none;
     }
 
     /**

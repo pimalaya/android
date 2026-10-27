@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.BiPredicate;
 
 /**
  * The calendar screen: one agenda over every account, a card per day.
@@ -80,6 +81,14 @@ public final class CalendarList {
 
     /** Whether the Default chip narrows to the accounts' default calendars. */
     private boolean defaultOnly;
+
+    /**
+     * Opens a to-do row on the task page, false when it did not, which
+     * leaves the row to the entry page.
+     *
+     * <p>Set by the activity, as the calendar does not know the Tasks tab.
+     */
+    public BiPredicate<EventStore.StoredEvent, EventStore.StoredCalendar> todoOpened;
 
     /** Builds the agenda; {@code pull} runs a pull to refresh. */
     public CalendarList(Host host, CalendarParts parts, EventView eventView, Runnable pull) {
@@ -142,7 +151,14 @@ public final class CalendarList {
         list.setOnItemClickListener(
                 (parent, view, position, id) -> {
                     Row row = sections.row(header.rowAt(position));
-                    if (row != null) {
+                    if (row == null) {
+                        return;
+                    }
+                    // NOTE: a conflicted to-do keeps the entry page, which
+                    // alone resolves a conflict.
+                    boolean todo =
+                            "VTODO".equals(row.occurrence.component()) && !row.event.conflicted;
+                    if (!todo || todoOpened == null || !todoOpened.test(row.event, row.calendar)) {
                         eventView.open(row.occurrence, row.event, row.calendar);
                     }
                 });

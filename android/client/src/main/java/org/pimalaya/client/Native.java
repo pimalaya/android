@@ -440,6 +440,13 @@ final class Native {
     static native String writeEvent(String ical, String edit);
 
     /**
+     * Every to-do among {@code [{key, ical}]}, the GTD way.
+     *
+     * <p>Returns {@code [{key, task}]}, the objects holding no VTODO left out.
+     */
+    static native String readTasks(String objects);
+
+    /**
      * Splits a series at the occurrence an edit names.
      *
      * <p>Returns {@code {master, series}}, series null when the occurrence

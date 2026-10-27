@@ -78,6 +78,11 @@ public final class MessageView implements FilesList.Origins {
     /** The row the reader opened, and what the header is drawn from. */
     private MailStore.StoredMessage current;
 
+    /** The message the reader shows, null when none. */
+    public MailStore.StoredMessage current() {
+        return current;
+    }
+
     /**
      * What the open message's markers stand at.
      *

@@ -24,6 +24,7 @@ mod occurrence;
 pub mod phone;
 pub mod read;
 pub mod series;
+pub mod task;
 mod zone;
 
 use ical::{

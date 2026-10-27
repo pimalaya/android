@@ -3,10 +3,11 @@ package org.pimalaya;
 import org.pimalaya.ui.Panels;
 
 /**
- * The four list tabs: their bottom navigation order, names and glyphs.
+ * The five list tabs: their bottom navigation order, names and glyphs.
  *
- * <p>The one place saying which four and in what order. Files is a tab and
- * not a {@link org.pimalaya.account.PimDomain}: no account connects it.
+ * <p>The one place saying which five and in what order. Tasks and Files are
+ * tabs and not a {@link org.pimalaya.account.PimDomain}: tasks live in the
+ * calendars, and no account connects files.
  */
 public final class Domains {
     /** The list screens, in the order the bottom navigation offers them. */
@@ -14,6 +15,7 @@ public final class Domains {
         Panels.MAIL,
         Panels.CONTACTS,
         Panels.CALENDAR,
+        Panels.TASKS,
         Panels.FILES,
     };
 
@@ -24,6 +26,8 @@ public final class Domains {
                 return R.id.nav_mail;
             case Panels.CALENDAR:
                 return R.id.nav_calendar;
+            case Panels.TASKS:
+                return R.id.nav_tasks;
             case Panels.FILES:
                 return R.id.nav_files;
             default:
@@ -38,6 +42,8 @@ public final class Domains {
                 return R.string.mail_title;
             case Panels.CALENDAR:
                 return R.string.calendar_title;
+            case Panels.TASKS:
+                return R.string.tasks_title;
             case Panels.FILES:
                 return R.string.files_title;
             default:
@@ -52,6 +58,8 @@ public final class Domains {
                 return R.drawable.ic_domain_mail;
             case Panels.CALENDAR:
                 return R.drawable.ic_domain_calendar;
+            case Panels.TASKS:
+                return R.drawable.ic_component_todo;
             case Panels.FILES:
                 return R.drawable.ic_folder_open;
             default:

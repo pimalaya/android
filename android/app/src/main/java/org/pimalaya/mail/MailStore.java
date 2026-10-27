@@ -490,12 +490,19 @@ public final class MailStore {
         return new ArrayList<>(found.values());
     }
 
+    /** A message's own `Message-ID`, bare; null when the store has none. */
+    public String messageIdOf(String collection, String linkId) {
+        List<String> thread = threadOf(collection, linkId);
+        return thread.isEmpty() ? null : PimdirSummary.bare(thread.get(thread.size() - 1));
+    }
+
     /**
      * A reply's `References`, oldest first, ending with the parent's id.
      *
      * <p>Angle-bracketed, empty with no id. The parent's `In-Reply-To` stands
      * in for its `References`, unkept (RFC 5322 3.6.4 allows it).
      */
+
     List<String> threadOf(String collection, String linkId) {
         List<String> thread = new ArrayList<>();
         try (Cursor cursor =

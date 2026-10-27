@@ -48,6 +48,13 @@ import org.pimalaya.contact.VcfTransfer;
 import org.pimalaya.file.FileActions;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.file.FilesList;
+import org.pimalaya.task.CaptureSheet;
+import org.pimalaya.task.Clarify;
+import org.pimalaya.task.TaskPage;
+import org.pimalaya.task.TaskStore;
+import org.pimalaya.task.TaskWrites;
+import org.pimalaya.task.TasksList;
+import org.pimalaya.task.WeeklyReview;
 import org.pimalaya.file.OpenedCopies;
 import org.pimalaya.filter.FilterPage;
 import org.pimalaya.filter.Filters;
@@ -81,6 +88,7 @@ import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.SyncDock;
 import org.pimalaya.ui.SyncPill;
+import org.pimalaya.ui.Ui;
 
 /**
  * The single activity, building every screen and walking them in a flipper.
@@ -160,6 +168,21 @@ public class MainActivity extends Host
     FilesList filesList;
 
     FileActions fileActions;
+
+    /** The Tasks tab, its page and its steps (cairn/changes/gtd). */
+    TasksList tasksList;
+
+    TaskPage taskPage;
+
+    Clarify clarify;
+
+    WeeklyReview review;
+
+    CaptureSheet capture;
+
+    TaskWrites taskWrites;
+
+    TaskStore taskStore;
 
     /** References between items, and the Linked card every item page shows. */
     ItemLinks links;
@@ -245,6 +268,15 @@ public class MainActivity extends Host
         CalendarParts calendarParts = new CalendarParts(pimdir, clients, events);
         eventView = new EventView(this, calendarParts, linked);
         calendarList = new CalendarList(this, calendarParts, eventView, this::syncCalendars);
+        // NOTE: the task screens open a source mail in the reader, built
+        // below, so they read its field late.
+        tasksList = new TasksList(this, calendarParts);
+        taskPage = new TaskPage(this, calendarParts, tasksList, this::openMailAt);
+        clarify = new Clarify(this, calendarParts, tasksList, this::openMailAt);
+        review = new WeeklyReview(this, tasksList, () -> showInstant(Panels.CALENDAR));
+        capture = new CaptureSheet(this, calendarParts, this::tasksChanged);
+        taskWrites = new TaskWrites(calendarParts);
+        taskStore = new TaskStore(calendarParts);
         // NOTE: the reader shows the Linked card and offers the file
         // actions, so it is built after both; the list and the composer
         // bind themselves into it.
@@ -296,6 +328,13 @@ public class MainActivity extends Host
         contactsList.setUp();
         calendarList.setUp();
         filesList.setUp();
+        tasksList.setUp(taskPage, clarify, review);
+        tasksList.inboxCounted = count -> CaptureWidget.count(this, count);
+        tasksList.nextListed = next -> NextWidget.list(this, next);
+        tasksList.reload();
+        compose.waiting = this::waitForReply;
+        calendarList.todoOpened = this::openTodo;
+        findViewById(R.id.message_view_task).setOnClickListener(view -> captureMessage());
         if (savedInstanceState != null) {
             fileActions.restore(savedInstanceState);
             filesList.restore(savedInstanceState);
@@ -340,6 +379,7 @@ public class MainActivity extends Host
         ((TextView) findViewById(R.id.bar_send))
                 .setCompoundDrawableTintList(ColorStateList.valueOf(accentContrast()));
         findViewById(R.id.bar_send).setOnClickListener(view -> compose.send());
+        findViewById(R.id.bar_send).setOnLongClickListener(view -> sendMenu(view));
         findViewById(R.id.bar_back).setOnClickListener(view -> onBarBack());
         findViewById(R.id.bar_menu).setOnClickListener(view -> openAccountsDrawer());
         for (int panel : Domains.PANELS) {
@@ -417,11 +457,187 @@ public class MainActivity extends Host
         // redirect recreates the activity from scratch).
         oauth.handleRedirect(getIntent());
 
+        if (savedInstanceState == null) {
+            captureFrom(getIntent());
+        }
+
         // NOTE: an intent carrying data is an OAuth redirect being
         // processed, not a fresh start to open the connection flow on.
         if (savedInstanceState == null && getIntent().getData() == null && !hasRealAccount()) {
             startAuth();
         }
+    }
+
+    /** What a launcher shortcut or the capture widget asks for. */
+    public static final String ACTION_CAPTURE = "org.pimalaya.action.CAPTURE";
+
+    /** What the capture widget's count asks for: the Tasks inbox. */
+    public static final String ACTION_INBOX = "org.pimalaya.action.INBOX";
+
+    /** What a Next widget row asks for: its task, by {@link #EXTRA_TASK}. */
+    public static final String ACTION_TASK = "org.pimalaya.action.TASK";
+
+    /** The UID of the task {@link #ACTION_TASK} opens. */
+    public static final String EXTRA_TASK = "org.pimalaya.extra.TASK";
+
+    /** What the Next widget's header asks for: the Next list. */
+    public static final String ACTION_NEXT = "org.pimalaya.action.NEXT";
+
+    /**
+     * Opens the capture sheet when an intent asks for it: the shortcut and
+     * widget's action, or text shared from another app (ACTION_SEND).
+     */
+    private void captureFrom(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        if (ACTION_CAPTURE.equals(intent.getAction())) {
+            intent.setAction(Intent.ACTION_MAIN);
+            capture.open();
+            return;
+        }
+        if (ACTION_INBOX.equals(intent.getAction())) {
+            intent.setAction(Intent.ACTION_MAIN);
+            tasksList.show(org.pimalaya.client.Task.INBOX);
+            showInstant(Panels.TASKS);
+            return;
+        }
+        if (ACTION_NEXT.equals(intent.getAction())) {
+            intent.setAction(Intent.ACTION_MAIN);
+            tasksList.show(org.pimalaya.client.Task.NEXT);
+            showInstant(Panels.TASKS);
+            return;
+        }
+        if (ACTION_TASK.equals(intent.getAction())) {
+            String uid = intent.getStringExtra(EXTRA_TASK);
+            intent.setAction(Intent.ACTION_MAIN);
+            showInstant(Panels.TASKS);
+            if (uid != null) {
+                tasksList.openTask(uid);
+            }
+            return;
+        }
+        if (Intent.ACTION_SEND.equals(intent.getAction())) {
+            String subject = intent.getStringExtra(Intent.EXTRA_SUBJECT);
+            String text = intent.getStringExtra(Intent.EXTRA_TEXT);
+            intent.setAction(Intent.ACTION_MAIN);
+            String shared =
+                    subject == null || subject.isEmpty()
+                            ? text == null ? "" : text
+                            : text == null || text.isEmpty() ? subject : subject + "\n" + text;
+            capture.open(shared.trim(), null, null);
+        }
+    }
+
+    /** A task write landed: the Tasks tab and the widget follow. */
+    private void tasksChanged() {
+        tasksList.reload();
+        CaptureWidget.refresh(this);
+    }
+
+    /** Opens the mail filed under a collection and link id in the reader. */
+    private void openMailAt(String collection, String linkId) {
+        io.execute(
+                () -> {
+                    MailStore.StoredMessage message = mail.message(collection, linkId);
+                    postAlive(
+                            () -> {
+                                if (message == null) {
+                                    toast(getString(R.string.task_mail_gone));
+                                    return;
+                                }
+                                messageView.open(message);
+                            });
+                });
+    }
+
+    /**
+     * The reader's Add to tasks: the capture sheet, the mail linked by its
+     * {@code Message-ID} and left where it is filed.
+     */
+    private void captureMessage() {
+        MailStore.StoredMessage message = messageView.current();
+        if (message == null) {
+            return;
+        }
+        io.execute(
+                () -> {
+                    String messageId = mail.messageIdOf(message.collection, message.id);
+                    String from =
+                            message.fromName.isEmpty() ? message.fromAddress : message.fromName;
+                    postAlive(() -> capture.open(message.subject, messageId, from));
+                });
+    }
+
+    /**
+     * An agenda to-do opened on the task page, which goes back to the agenda;
+     * false when it does not read as a task, left to the entry page.
+     */
+    private boolean openTodo(
+            org.pimalaya.calendar.EventStore.StoredEvent event,
+            org.pimalaya.calendar.EventStore.StoredCalendar calendar) {
+        // NOTE: one object, parsed on the main thread as the entry page's
+        // own open does.
+        TaskStore.Stored stored = TaskStore.read(event, calendar);
+        if (stored == null) {
+            return false;
+        }
+        taskPage.open(stored, Panels.CALENDAR);
+        return true;
+    }
+
+    /**
+     * Files the Waiting For a send that waits asks for: the subject, on its
+     * first recipient, linked to the sent message. On the composer's thread.
+     */
+    private void waitForReply(String subject, String recipient, String messageId) {
+        java.util.List<org.pimalaya.calendar.EventStore.StoredCalendar> targets =
+                taskStore.targets(this);
+        if (targets.isEmpty()) {
+            postAlive(() -> toast(getString(R.string.capture_no_calendar)));
+            return;
+        }
+        String name = recipient;
+        String address = recipient;
+        int open = recipient.indexOf('<');
+        int close = recipient.indexOf('>', open + 1);
+        if (open >= 0 && close > open) {
+            name = recipient.substring(0, open).trim().replace("\"", "");
+            address = recipient.substring(open + 1, close).trim();
+        } else if (recipient.contains("@")) {
+            name = "";
+        }
+        try {
+            taskWrites.waitFor(
+                    targets.get(0),
+                    subject == null || subject.isEmpty() ? getString(R.string.event_untitled) : subject,
+                    name,
+                    address,
+                    messageId);
+        } catch (Exception error) {
+            android.util.Log.w("pimalaya", "waiting for failed", error);
+            return;
+        }
+        postAlive(
+                () -> {
+                    toast(getString(R.string.task_waiting_added));
+                    tasksChanged();
+                });
+    }
+
+    /** The send button's long press: send, or send and wait for a reply. */
+    private boolean sendMenu(View anchor) {
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
+        Ui.item(menu, R.string.compose_send, () -> compose.send());
+        Ui.item(menu, R.string.compose_send_wait, () -> compose.sendAndWait());
+        menu.show();
+        return true;
+    }
+
+    /** Leaves the clarify flow; what was clarified stays clarified. */
+    private void leaveClarify() {
+        tasksList.reload();
+        showBack(Panels.TASKS);
     }
 
     /** Enters the connection flow over the screen, closing the drawer. */
@@ -609,6 +825,7 @@ public class MainActivity extends Host
         super.onNewIntent(intent);
         setIntent(intent);
         oauth.handleRedirect(intent);
+        captureFrom(intent);
     }
 
     @Override
@@ -1214,6 +1431,7 @@ public class MainActivity extends Host
             case Panels.CONTACTS:
                 return PimDomain.CONTACTS;
             case Panels.CALENDAR:
+            case Panels.TASKS:
                 return PimDomain.CALENDAR;
             default:
                 return null;
@@ -1399,6 +1617,9 @@ public class MainActivity extends Host
         if (panel == Panels.FILES) {
             return filesList.header();
         }
+        if (panel == Panels.TASKS) {
+            return tasksList.header();
+        }
         return panel == Panels.CALENDAR ? calendarList.header() : contactsList.header();
     }
 
@@ -1554,6 +1775,7 @@ public class MainActivity extends Host
         calendarList.reload();
         mailList.reload();
         filesList.reload();
+        tasksList.reload();
     }
 
     /** Navigates forward: the panels slide in from the right. */
@@ -1774,6 +1996,51 @@ public class MainActivity extends Host
                 };
         filesScreen.fab = () -> filesList.newFolder();
         screens.put(Panels.FILES, filesScreen);
+
+        Screen tasks = new Screen();
+        tasks.chrome =
+                () -> {
+                    listFab(R.string.capture_title, R.drawable.ic_add);
+                    showDomainBar(Panels.TASKS);
+                    tasksList.reload();
+                };
+        tasks.fab = () -> capture.open();
+        screens.put(Panels.TASKS, tasks);
+
+        Screen task = new Screen();
+        task.chrome =
+                () -> {
+                    ((TextView) findViewById(R.id.bar_title)).setText(taskPage.title());
+                    findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
+                    addFab(R.drawable.ic_save, R.string.event_save);
+                };
+        task.fab = () -> taskPage.save();
+        task.barBack = () -> showBack(taskPage.back());
+        task.systemBack = () -> showBack(taskPage.back());
+        screens.put(Panels.TASK, task);
+
+        Screen clarifying = new Screen();
+        clarifying.chrome =
+                () -> {
+                    ((TextView) findViewById(R.id.bar_title)).setText(clarify.title());
+                    findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
+                    findViewById(R.id.fab).setVisibility(View.GONE);
+                };
+        clarifying.barBack = this::leaveClarify;
+        clarifying.systemBack = this::leaveClarify;
+        screens.put(Panels.CLARIFY, clarifying);
+
+        Screen reviewing = new Screen();
+        reviewing.chrome =
+                () -> {
+                    ((TextView) findViewById(R.id.bar_title)).setText(R.string.task_review);
+                    findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
+                    findViewById(R.id.fab).setVisibility(View.GONE);
+                    review.refresh();
+                };
+        reviewing.barBack = () -> showBack(Panels.TASKS);
+        reviewing.systemBack = () -> showBack(Panels.TASKS);
+        screens.put(Panels.REVIEW, reviewing);
 
         Screen composer = new Screen();
         composer.chrome =

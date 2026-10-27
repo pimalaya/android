@@ -6,5 +6,8 @@
     <color name="surface">#2A2A2A</color>
 
     <color name="star">#F2BE3C</color>
+    <color name="widget_ground">#1C1E21</color>
+    <color name="widget_text">#E6E1E5</color>
+    <color name="widget_text_secondary">#AEAAAE</color>
 
 </resources>

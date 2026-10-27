@@ -306,7 +306,7 @@ public final class Zones {
     }
 
     /** The instant a time names, in the device's zone when it names none. */
-    static long instant(EventTime time) {
+    public static long instant(EventTime time) {
         return instant(time, ZoneId.systemDefault());
     }
 
@@ -392,7 +392,7 @@ public final class Zones {
     }
 
     /** A civil moment as a stamp, its date alone or with its time. */
-    static String stamp(LocalDateTime moment, boolean date) {
+    public static String stamp(LocalDateTime moment, boolean date) {
         String day =
                 String.format(
                         Locale.US,

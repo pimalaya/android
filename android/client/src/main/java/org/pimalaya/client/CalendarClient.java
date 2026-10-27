@@ -1,6 +1,7 @@
 package org.pimalaya.client;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.json.JSONArray;
@@ -98,6 +99,42 @@ public class CalendarClient {
         return EventIcal.from(Replies.object(Native.writeEvent(ical, edit.toJson().toString())))
                 .ical()
                 .trim();
+    }
+
+    /**
+     * Applies one to-do edit, GTD properties included, returning the new text.
+     *
+     * <p>The same patch as {@link #writeEvent}. Pure computation.
+     */
+    public static String writeTask(String ical, TaskEdit edit) {
+        return EventIcal.from(Replies.object(Native.writeEvent(ical, edit.toJson().toString())))
+                .ical()
+                .trim();
+    }
+
+    /**
+     * Reads the to-dos among objects, keyed by the caller.
+     *
+     * <p>One call for a whole list; an object holding no VTODO, or one that
+     * does not parse, is left out. Pure computation.
+     */
+    public static Map<String, Task> readTasks(Map<String, String> objects) {
+        JSONArray input = new JSONArray();
+        try {
+            for (Map.Entry<String, String> object : objects.entrySet()) {
+                input.put(new JSONObject().put("key", object.getKey()).put("ical", object.getValue()));
+            }
+        } catch (org.json.JSONException error) {
+            throw new PimalayaException("Unwritable task listing: " + error.getMessage());
+        }
+
+        JSONArray reply = Replies.array(Native.readTasks(input.toString()));
+        Map<String, Task> tasks = new LinkedHashMap<>();
+        for (int index = 0; index < reply.length(); index++) {
+            JSONObject row = Json.object(reply, index);
+            tasks.put(row.optString("key"), Task.from(row.optJSONObject("task")));
+        }
+        return tasks;
     }
 
     /**

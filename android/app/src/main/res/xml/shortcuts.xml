@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher's long-press shortcuts: Capture opens the capture sheet
+     (MainActivity.ACTION_CAPTURE). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_capture"
+        android:shortcutId="capture"
+        android:shortcutLongLabel="@string/capture_title"
+        android:shortcutShortLabel="@string/capture_title">
+        <intent
+            android:action="org.pimalaya.action.CAPTURE"
+            android:targetClass="org.pimalaya.MainActivity"
+            android:targetPackage="org.pimalaya" />
+    </shortcut>
+</shortcuts>

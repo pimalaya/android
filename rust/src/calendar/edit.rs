@@ -6,9 +6,9 @@
 use ical::{
     param::IcalParam,
     prop::{
-        IcalProp, IcalPropKind, IcalPropName, categories::CATEGORIES, description::DESCRIPTION,
-        location::LOCATION, percent_complete::PERCENT_COMPLETE, priority::PRIORITY, status::STATUS,
-        summary::SUMMARY, url::URL,
+        IcalProp, IcalPropKind, IcalPropName, categories::CATEGORIES, contact::CONTACT,
+        description::DESCRIPTION, location::LOCATION, percent_complete::PERCENT_COMPLETE,
+        priority::PRIORITY, status::STATUS, summary::SUMMARY, url::URL,
     },
     tree::{
         cst::{IcalCst, IcalItem},
@@ -17,6 +17,7 @@ use ical::{
     },
     value::{
         IcalValue,
+        binary::IcalBinary,
         datetime::{IcalDate, IcalDateTime},
         integer::IcalInteger,
         text::{IcalText, IcalTextList},
@@ -27,7 +28,9 @@ use serde::Deserialize;
 
 use crate::{
     calendar::{
-        PRODID, cst_of, line, line_mut, scheduled, series, text,
+        PRODID, child, child_mut, cst_of, line, line_mut, scheduled, series,
+        task::{self, TaskContact},
+        text,
         zone::{EventTime, EventTimeKind, Zones},
     },
     error::BridgeError,
@@ -55,6 +58,18 @@ pub struct EventEdit {
     /// a UTC DATE-TIME by RFC 5545 3.8.2.1.
     pub completed: Option<DateEdit>,
     pub percent_complete: Option<String>,
+    /// The GTD list (`X-PIMALAYA-GTD`), one of [`task::LISTS`]; empty
+    /// makes the to-do a next action.
+    pub gtd: Option<String>,
+    /// The `UID` of the project, a `RELATED-TO` of type `PARENT`; empty
+    /// detaches it, other relations kept.
+    pub parent: Option<String>,
+    /// Who a Waiting For item waits on (`CONTACT`); empty name and
+    /// address remove it.
+    pub contact: Option<TaskContact>,
+    /// The `Message-ID` of the mail it came from, an `ATTACH` of its
+    /// `mid:` URI; empty removes that link, other attachments kept.
+    pub source: Option<String>,
     /// Now, a UTC `YYYYMMDDTHHMMSSZ` stamp for `DTSTAMP` and
     /// `LAST-MODIFIED`, passed in so this stays a pure function.
     pub stamp: Option<String>,
@@ -139,10 +154,19 @@ pub fn create(draft: &EventDraft) -> Result<String, BridgeError> {
         other => return Err(format!("Cannot create a `{other}`").into()),
     };
 
+    // NOTE: a to-do needs no date (RFC 5545 3.6.2): a capture is not
+    // placed on a day until it is clarified into one.
+    if start.is_empty() && kind != "VTODO" {
+        return Err(format!("A `{kind}` needs a start").into());
+    }
     let (dtstart, zone) = match (start.len(), tzid.is_empty()) {
-        (8, _) => (format!("DTSTART;VALUE=DATE:{start}"), ""),
-        (_, true) => (format!("DTSTART:{start}"), ""),
-        _ => (format!("DTSTART;TZID={tzid}:{start}"), vtimezone.trim_end()),
+        (0, _) => (String::new(), ""),
+        (8, _) => (format!("DTSTART;VALUE=DATE:{start}\r\n"), ""),
+        (_, true) => (format!("DTSTART:{start}\r\n"), ""),
+        _ => (
+            format!("DTSTART;TZID={tzid}:{start}\r\n"),
+            vtimezone.trim_end(),
+        ),
     };
     let zone = match zone.is_empty() {
         true => String::new(),
@@ -157,7 +181,7 @@ pub fn create(draft: &EventDraft) -> Result<String, BridgeError> {
          BEGIN:{kind}\r\n\
          UID:{uid}\r\n\
          DTSTAMP:{stamp}\r\n\
-         {dtstart}\r\n\
+         {dtstart}\
          END:{kind}\r\n\
          END:VCALENDAR\r\n"
     );
@@ -166,7 +190,7 @@ pub fn create(draft: &EventDraft) -> Result<String, BridgeError> {
     // from the caller, and an object this refused to read would be one
     // the page then opens on nothing.
     let cst = cst_of(object.as_str())?;
-    if !tzid.is_empty() && start.len() != 8 && Zones::of_cst(&cst).find(tzid).is_none() {
+    if !tzid.is_empty() && start.len() > 8 && Zones::of_cst(&cst).find(tzid).is_none() {
         return Err(format!("No definition of the zone `{tzid}`").into());
     }
 
@@ -184,10 +208,19 @@ pub fn write(ical: &str, edit: &str) -> Result<String, BridgeError> {
     let cst = cst_of(ical)?;
     let mut cst = cst.into_static();
 
-    match edit.scope {
-        EventScope::All => series::all(&mut cst, &edit)?,
-        EventScope::This => series::this(&mut cst, &edit)?,
-        EventScope::Following => return Err("Splitting a series writes two objects".into()),
+    // NOTE: a to-do with no date is no series (RFC 5545 3.6.2): nothing
+    // to rebase or recur, so its one component is patched as it is.
+    let undated = scheduled(&cst).first().copied().filter(|index| {
+        let component = child(&cst, *index);
+        ["DTSTART", "DUE", "RRULE"]
+            .iter()
+            .all(|name| line(component, name).is_none())
+    });
+    match (edit.scope, undated) {
+        (EventScope::All, Some(index)) => patch(child_mut(&mut cst, index), &edit),
+        (EventScope::All, None) => series::all(&mut cst, &edit)?,
+        (EventScope::This, _) => series::this(&mut cst, &edit)?,
+        (EventScope::Following, _) => return Err("Splitting a series writes two objects".into()),
     }
     define_zone(&mut cst, &edit)?;
 
@@ -253,7 +286,81 @@ pub fn patch(component: &mut IcalCst<'static>, edit: &EventEdit) {
         replace_date(component, IcalPropKind::Completed, &utc);
     }
 
+    patch_task(component, edit);
     touch(component, edit);
+}
+
+/// Replaces the GTD properties of a to-do (cairn/changes/gtd), each on
+/// its own so what another client relates or attaches stays.
+fn patch_task(component: &mut IcalCst<'static>, edit: &EventEdit) {
+    if let Some(list) = &edit.gtd {
+        remove_named(component, task::GTD);
+        let list = list.trim().to_ascii_uppercase();
+        if task::LISTS.contains(&list.as_str()) {
+            component.push(IcalProp {
+                name: IcalPropName::Unknown(task::GTD.into()),
+                params: Vec::new(),
+                value: IcalValue::Text(IcalText(list.into())),
+            });
+        }
+    }
+
+    if let Some(parent) = &edit.parent {
+        component.items.retain(|item| match item {
+            IcalItem::Prop(line) if line.name.get().eq_ignore_ascii_case("RELATED-TO") => {
+                let decoded = line.decode(ical::version::IcalVersion::V2_0);
+                !decoded.params.iter().all(|param| match param {
+                    IcalParam::RelType(kind) => kind.eq_ignore_ascii_case("PARENT"),
+                    _ => true,
+                })
+            }
+            _ => true,
+        });
+        if !parent.trim().is_empty() {
+            component.push(prop(
+                IcalPropKind::RelatedTo,
+                vec![IcalParam::RelType("PARENT".into())],
+                IcalValue::Text(IcalText(parent.trim().to_string().into())),
+            ));
+        }
+    }
+
+    if let Some(contact) = &edit.contact {
+        component.remove::<CONTACT>();
+        let name = contact.name.trim();
+        let address = contact.address.trim();
+        if !name.is_empty() || !address.is_empty() {
+            let params = match address.is_empty() {
+                true => Vec::new(),
+                false => vec![IcalParam::AltRep(format!("mailto:{address}").into())],
+            };
+            let text = match name.is_empty() {
+                true => address,
+                false => name,
+            };
+            component.push(prop(
+                IcalPropKind::Contact,
+                params,
+                IcalValue::Text(IcalText(text.to_string().into())),
+            ));
+        }
+    }
+
+    if let Some(source) = &edit.source {
+        component.items.retain(|item| match item {
+            IcalItem::Prop(line) if line.name.get().eq_ignore_ascii_case("ATTACH") => {
+                task::message_id_of(&line.value.decode()).is_none()
+            }
+            _ => true,
+        });
+        if !source.trim().is_empty() {
+            component.push(prop(
+                IcalPropKind::Attach,
+                Vec::new(),
+                IcalValue::Binary(IcalBinary::Uri(task::mid_uri(source).into())),
+            ));
+        }
+    }
 }
 
 /// Stamps a component as edited now.

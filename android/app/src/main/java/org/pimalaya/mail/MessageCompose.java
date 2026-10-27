@@ -13,6 +13,7 @@ import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Flags;
+import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.PillField;
@@ -247,8 +248,28 @@ public final class MessageCompose {
         return String.join(", ", all);
     }
 
+    /**
+     * Told of a mail sent with {@link #sendAndWait}: its subject, its first
+     * recipient and the `Message-ID` it was queued under, bare.
+     */
+    public interface Waiting {
+        void sent(String subject, String recipient, String messageId);
+    }
+
+    /** Who files a Waiting For on a send that waits; set by the host. */
+    public Waiting waiting;
+
     /** Composes what is on screen into the outbox ({@link MailSubmit}). */
     public void send() {
+        send(false);
+    }
+
+    /** Sends, then files a Waiting For on the reply ({@link #waiting}). */
+    public void sendAndWait() {
+        send(true);
+    }
+
+    private void send(boolean wait) {
         if (account == null) {
             return;
         }
@@ -284,11 +305,19 @@ public final class MessageCompose {
                 () -> {
                     Exception failure = null;
                     try {
-                        new MailSubmit(
-                                        parts.clients().mail(),
-                                        parts.mail(),
-                                        new MailStager(parts.pimdir(), parts.clients()))
-                                .queue(draft);
+                        String queued =
+                                new MailSubmit(
+                                                parts.clients().mail(),
+                                                parts.mail(),
+                                                new MailStager(parts.pimdir(), parts.clients()))
+                                        .queue(draft);
+                        if (wait && waiting != null) {
+                            String to = draft.to() == null ? "" : draft.to();
+                            waiting.sent(
+                                    draft.subject(),
+                                    to.split(",")[0].trim(),
+                                    PimdirSummary.bare(queued));
+                        }
                     } catch (Exception error) {
                         Log.w("pimalaya", "compose failed: " + AccountEntry.redacted(sender.email), error);
                         failure = error;

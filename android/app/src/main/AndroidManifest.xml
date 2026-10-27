@@ -48,6 +48,25 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- The launcher shortcuts (long press on the icon): Capture,
+                 handled by onCreate and onNewIntent (MainActivity). -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+
+            <!-- Capture, from the shortcut and the widget. -->
+            <intent-filter>
+                <action android:name="org.pimalaya.action.CAPTURE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+
+            <!-- Text shared from another app lands in the capture sheet. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
             <!-- Catches the Google OAuth redirect (reversed-client-id
                  custom scheme) and hands it to onNewIntent. -->
             <intent-filter>
@@ -137,6 +156,36 @@
                 android:name="android.content.SyncAdapter"
                 android:resource="@xml/syncadapter_calendar" />
         </service>
+
+        <!-- The capture widget: a bar opening the capture sheet, with the
+             Inbox count (CaptureWidget). -->
+        <receiver
+            android:name=".CaptureWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/capture_widget" />
+        </receiver>
+
+        <!-- The Next widget: the open next actions, a row opening its task
+             (NextWidget), its rows served by NextWidget.Rows. -->
+        <receiver
+            android:name=".NextWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/next_widget" />
+        </receiver>
+        <service
+            android:name=".NextWidget$Rows"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
 
         <!-- A device zone change: the phone pass of every calendar the phone
              shows, which projects its floating events again (ZoneChange). -->

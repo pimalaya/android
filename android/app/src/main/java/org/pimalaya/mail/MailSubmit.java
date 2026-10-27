@@ -59,9 +59,11 @@ public final class MailSubmit {
      * Queues a draft stamped now under a fresh `Message-ID`.
      *
      * <p>Minted here so composition stays a pure function: the device's clock,
-     * an id under the sender's domain (RFC 5322 section 3.6.4).
+     * an id under the sender's domain (RFC 5322 section 3.6.4). Returns that
+     * id, angle-bracketed.
      */
-    public void queue(Draft draft) throws JSONException {
+    public String queue(Draft draft) throws JSONException {
+        String messageId = messageId(draft.from());
         queue(
                 new ComposeDraft(
                         draft.from(),
@@ -73,9 +75,10 @@ public final class MailSubmit {
                         draft.body(),
                         draft.markdown(),
                         now(),
-                        messageId(draft.from()),
+                        messageId,
                         draft.inReplyTo(),
                         draft.references()));
+        return messageId;
     }
 
     /**

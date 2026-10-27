@@ -198,3 +198,12 @@ The Android accounts holding the phone's calendars SHALL be of a type of their o
 - GIVEN an address whose books and calendars both show on the phone
 - WHEN the Contacts app lists the accounts a contact can be saved into
 - THEN it lists the books' accounts and no calendar account
+
+### Requirement: An agenda to-do opens on the task page
+A dated to-do tapped in the agenda SHALL open on the task page, which goes back to the agenda. A conflicted one, or one that does not read as a task, SHALL keep the entry page.
+
+#### Scenario: A due to-do
+- GIVEN a to-do due on Friday
+- WHEN its row is tapped in Friday's agenda
+- THEN the task page opens, and back returns to the agenda
+

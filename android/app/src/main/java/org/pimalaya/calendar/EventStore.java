@@ -85,13 +85,13 @@ public final class EventStore {
 
         /** Its display name. */
         public final String name;
-        final String color;
+        public final String color;
 
         /** Whether its source names it the account's default calendar. */
-        final boolean isDefault;
+        public final boolean isDefault;
 
         /** Whether the user may write events into it. */
-        final boolean writable;
+        public final boolean writable;
 
         StoredCalendar(
                 String url,

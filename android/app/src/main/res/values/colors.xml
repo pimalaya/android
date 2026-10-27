@@ -10,5 +10,8 @@
     <!-- A starred message's star: the one fixed hue, since a yellow
          star is what marks importance whatever the theme's accent. -->
     <color name="star">#F2BE3C</color>
+    <color name="widget_ground">#FFFFFF</color>
+    <color name="widget_text">#1C1B1F</color>
+    <color name="widget_text_secondary">#5E5E62</color>
 
 </resources>

@@ -708,10 +708,14 @@ public final class OnboardingFlow {
                             : null;
             LinearLayout row = domainRow(setup.domain, status, false, tick);
             // NOTE: the domain's option under it, shown while it is ticked.
-            View option =
+            View phone =
                     setup.domain == PimDomain.MAIL
                             ? notifyRow()
                             : phoneRow(PhoneMirror.of(setup.domain));
+            View option =
+                    setup.domain == PimDomain.CALENDAR && !takesTasks(setup.selected)
+                            ? withTasksNote(phone)
+                            : phone;
             row.setOnClickListener(
                     view -> {
                         if (verifying) {
@@ -730,6 +734,35 @@ public final class OnboardingFlow {
             card.addView(option);
         }
         return card;
+    }
+
+    /**
+     * Whether a calendar option holds tasks: CalDAV alone in this first
+     * draft, as the Tasks tab writes VTODOs (cairn/changes/gtd).
+     *
+     * <p>Google, Microsoft and JMAP calendars are told by their base, a
+     * marker scheme rather than https.
+     */
+    private static boolean takesTasks(SetupOption option) {
+        String base = option == null || option.baseUrl == null ? "" : option.baseUrl;
+        return base.startsWith("https://") || base.startsWith("http://");
+    }
+
+    /**
+     * The calendar's option with the line saying its tasks are not
+     * supported, the one place onboarding says it.
+     */
+    private View withTasksNote(View option) {
+        LinearLayout both = new LinearLayout(host);
+        both.setOrientation(LinearLayout.VERTICAL);
+        both.addView(option);
+        TextView note = new TextView(host);
+        note.setText(R.string.onboarding_no_tasks);
+        note.setTextSize(13);
+        note.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
+        note.setPadding(host.ui.dp(60), 0, host.ui.dp(16), host.ui.dp(12));
+        both.addView(note);
+        return both;
     }
 
     /**

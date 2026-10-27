@@ -26,6 +26,7 @@ use crate::{
         phone,
         read::read,
         series::{remove, split},
+        task,
     },
     client::Client,
     ffi::{ErrorReply, error_json, host::JniHost, parse_account, read_string},
@@ -385,6 +386,29 @@ pub extern "system" fn Java_org_pimalaya_client_Native_readEvent<'local>(
 
         let json = match read(&ical, &recurrence_id) {
             Ok(detail) => to_string(&detail).unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.readTasks`: every to-do among a list of objects, the GTD way.
+///
+/// Takes `[{key, ical}]` and returns `[{key, task}]` for the objects
+/// holding a VTODO, the rest left out; pure. One call for a whole list.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_readTasks<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    objects: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let objects = read_string(env, &objects);
+
+        let json = match task::tasks(&objects) {
+            Ok(rows) => to_string(&rows).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 
