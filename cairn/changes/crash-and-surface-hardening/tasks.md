@@ -39,3 +39,4 @@ Java paths are relative to android/app/src/main/java/org/pimalaya/.
 
 - [ ] Device check of the WebView link handling (meta refresh, iframe)
 - [ ] OauthFlow loopback listener (S1 L2), with the network-trust change
+- [ ] Optional: a UTC variant (`DTSTART:19700101T000000Z`) of `a_secondly_series_from_1970_jumps_to_the_window` beside it in rust/src/calendar/expand.rs:641, the three SECONDLY tests there being floating only (S3 crash input bridge-calendar-expand-secondly.ics)
