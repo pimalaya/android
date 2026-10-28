@@ -17,10 +17,10 @@ import java.util.Set;
 /**
  * The weekly review: GTD's checklist, each step a count over the last load.
  *
- * <p>Nothing guessed: the Inbox left, the calendar, next actions done this
- * week, Waiting For by age with the replies received, projects with no next
- * action, Someday. A step opens what it counts and is ticked; Finish keeps the
- * day on the device, which the Tasks header then counts from.
+ * <p>Nothing guessed: the Inbox left, the calendar, the open next actions,
+ * Waiting For by age with the replies received, Someday. A step opens what
+ * it counts and is ticked; Finish keeps the day on the device, which the
+ * Tasks header then counts from.
  */
 public final class WeeklyReview {
     private enum Step {
@@ -28,7 +28,6 @@ public final class WeeklyReview {
         CALENDAR,
         NEXT,
         WAITING,
-        PROJECTS,
         SOMEDAY,
     }
 
@@ -65,38 +64,22 @@ public final class WeeklyReview {
         int waiting = 0;
         int replied = 0;
         int late = 0;
-        int projects = 0;
-        int stuck = 0;
         int someday = 0;
         long now = System.currentTimeMillis();
         for (TaskStore.Stored stored : open) {
-            switch (stored.task.list()) {
-                case Task.INBOX:
-                    inbox++;
-                    break;
-                case Task.NEXT:
-                    next++;
-                    break;
-                case Task.WAITING:
-                    waiting++;
-                    if (list.replied(stored)) {
-                        replied++;
-                    }
-                    long since = TaskStore.capturedAt(stored.task);
-                    if (since > 0 && now - since > 14 * 86_400_000L) {
-                        late++;
-                    }
-                    break;
-                case Task.PROJECT:
-                    projects++;
-                    if (list.nextActionOf(stored) == null) {
-                        stuck++;
-                    }
-                    break;
-                case Task.SOMEDAY:
-                    someday++;
-                    break;
-                default:
+            Task task = stored.task;
+            inbox += task.in(Task.INBOX) ? 1 : 0;
+            next += task.in(Task.NEXT) ? 1 : 0;
+            someday += task.in(Task.SOMEDAY) ? 1 : 0;
+            if (task.in(Task.WAITING)) {
+                waiting++;
+                if (list.replied(stored)) {
+                    replied++;
+                }
+                long since = TaskStore.capturedAt(task);
+                if (since > 0 && now - since > 14 * 86_400_000L) {
+                    late++;
+                }
             }
         }
 
@@ -119,9 +102,6 @@ public final class WeeklyReview {
         steps.add(step(Step.WAITING, R.string.review_waiting,
                 host.getString(R.string.review_waiting_line, waiting, replied, late),
                 () -> showList(Task.WAITING)));
-        steps.add(step(Step.PROJECTS, R.string.review_projects,
-                host.getString(R.string.review_projects_line, projects, stuck),
-                () -> showList(Task.PROJECT)));
         steps.add(step(Step.SOMEDAY, R.string.review_someday,
                 host.getString(R.string.review_someday_line, someday),
                 () -> showList(Task.SOMEDAY)));

@@ -11,12 +11,14 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.calendar.CalendarParts;
+import org.pimalaya.calendar.CalendarStager;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.Task;
@@ -31,7 +33,8 @@ import java.util.List;
  * What the Tasks tab writes and reads back, on the real bridge and store.
  *
  * <p>A capture, a clarification and a close, each a staged VTODO the next
- * load reads the GTD way (cairn/changes/gtd).
+ * load reads the GTD way, the state a reserved category
+ * (cairn/changes/gtd-by-categories).
  */
 @RunWith(RobolectricTestRunner.class)
 public class TaskWritesTest {
@@ -40,6 +43,7 @@ public class TaskWritesTest {
     private Context context;
     private TaskStore store;
     private TaskWrites writes;
+    private CalendarParts parts;
     private EventStore.StoredCalendar calendar;
 
     @Before
@@ -64,7 +68,7 @@ public class TaskWritesTest {
                 calendar = stored;
             }
         }
-        CalendarParts parts =
+        parts =
                 new CalendarParts(
                         pimdir,
                         new Clients(
@@ -91,7 +95,8 @@ public class TaskWritesTest {
         // agenda does not show it.
         assertNull(task.start());
         assertNull(task.due());
-        assertTrue(tasks.get(0).event.ical.contains("X-PIMALAYA-GTD:INBOX"));
+        assertTrue(tasks.get(0).event.ical.contains("CATEGORIES:inbox\r\n"));
+        assertFalse(tasks.get(0).event.ical.contains("X-PIMALAYA-GTD"));
     }
 
     @Test
@@ -117,20 +122,88 @@ public class TaskWritesTest {
     }
 
     @Test
-    public void aNextActionCarriesNoListAndKeepsItsContexts() throws Exception {
+    public void aNextActionCarriesNoStateAndKeepsItsCategories() throws Exception {
         writes.capture(calendar, "Buy ink", null, null);
         TaskStore.Stored captured = store.load(context).get(0);
 
         writes.edit(
                 captured,
-                TaskEdit.at(TaskWrites.now()).withList(Task.NEXT).withContexts("@errands,@home"));
+                TaskEdit.at(TaskWrites.now())
+                        .withList(Task.NEXT)
+                        .withCategories("@errands,@home"));
         TaskStore.Stored next = store.load(context).get(0);
 
         assertEquals(Task.NEXT, next.task.list());
-        assertEquals(List.of("@errands", "@home"), next.task.contexts());
-        // NOTE: a next action is what a to-do with no list is, so another
-        // client's tasks read as next actions too.
-        assertFalse(next.event.ical.contains("X-PIMALAYA-GTD"));
+        assertEquals(List.of("@errands", "@home"), next.task.categories());
+        assertTrue(next.task.in(Task.NEXT));
+        // NOTE: a next action is an open to-do with none of the states, so
+        // another client's tasks read as next actions too.
+        assertFalse(next.event.ical.toLowerCase(java.util.Locale.ROOT).contains("inbox"));
+    }
+
+    @Test
+    public void anotherClientsStateIsReadAndOnlyItMoves() throws Exception {
+        new CalendarStager(parts.pimdir(), parts.clients())
+                .mutateAdd(
+                        calendar.id,
+                        "other.ics",
+                        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//other//EN\r\n"
+                                + "BEGIN:VTODO\r\nUID:other\r\nSUMMARY:Ask Sam\r\n"
+                                + "CATEGORIES:@home,Waiting\r\nX-OTHER:keep\r\n"
+                                + "END:VTODO\r\nEND:VCALENDAR\r\n",
+                        Flags.none(),
+                        null,
+                        "");
+        TaskStore.Stored waiting = store.load(context).get(0);
+        assertTrue(waiting.task.in(Task.WAITING));
+        assertEquals(List.of("@home"), waiting.task.categories());
+
+        writes.edit(waiting, TaskEdit.at(TaskWrites.now()).withList(Task.NEXT));
+        TaskStore.Stored next = store.load(context).get(0);
+
+        assertTrue(next.task.in(Task.NEXT));
+        assertTrue(next.event.ical.contains("CATEGORIES:@home\r\nX-OTHER:keep\r\n"));
+    }
+
+    @Test
+    public void aCaptureFiledInAnotherCalendarIsThereOnly() throws Exception {
+        EventStore events = parts.events();
+        events.replaceCalendars(
+                EMAIL,
+                List.of(
+                        new Calendar(
+                                "work", "Work", "https://dav.example.org/cal/", "", null, "",
+                                true),
+                        new Calendar(
+                                "home", "Home", "https://dav.example.org/home/", "", null, "",
+                                true)));
+        EventStore.StoredCalendar home = null;
+        for (EventStore.StoredCalendar stored : events.loadCalendars()) {
+            if (stored.name.equals("Work")) {
+                calendar = stored;
+            } else if (stored.name.equals("Home")) {
+                home = stored;
+            }
+        }
+        writes.capture(calendar, "Fix the gate", null, null);
+        TaskStore.Stored captured = store.load(context).get(0);
+
+        writes.moveTo(captured, home, TaskEdit.at(TaskWrites.now()).withList(Task.NEXT));
+        List<TaskStore.Stored> tasks = store.load(context);
+
+        assertEquals(1, tasks.size());
+        assertEquals("Home", tasks.get(0).calendar.name);
+        assertEquals(captured.task.uid(), tasks.get(0).task.uid());
+        assertTrue(tasks.get(0).task.in(Task.NEXT));
+    }
+
+    @Test
+    public void aDeletedCaptureLeavesTheLists() throws Exception {
+        writes.capture(calendar, "Not worth it", null, null);
+
+        writes.remove(store.load(context).get(0));
+
+        assertTrue(store.load(context).isEmpty());
     }
 
     @Test
@@ -181,8 +254,8 @@ public class TaskWritesTest {
     public void theCaptureTimeIsReadFromItsStamp() {
         Task task =
                 new Task(
-                        "u", "", "", "", Task.WAITING, List.of(), null, 0, null, null, null, "",
-                        "", null, "20261020T093000Z");
+                        "u", "", "", "", Task.WAITING, List.of("waiting"), List.of(), null, 0,
+                        null, null, null, "", "", null, "20261020T093000Z");
 
         assertEquals(1792488600000L, TaskStore.capturedAt(task));
     }

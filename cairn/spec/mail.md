@@ -1066,7 +1066,7 @@ A new message SHALL start in the account's default format; a reply SHALL start r
 - THEN the composer opens in plain text
 
 ### Requirement: The composer sends and waits for a reply
-A long press on Send SHALL offer Send and Send and wait for a reply; the latter SHALL queue the mail as Send does and file a Waiting For item on its first recipient, linked to the `Message-ID` it was queued under.
+A long press on Send SHALL offer Send and Send and wait for a reply; the latter SHALL queue the mail as Send does and file a task carrying `CATEGORIES:waiting` in the calendar the last capture went to, its first recipient as `CONTACT` and the `Message-ID` it was queued under as an `ATTACH` `mid:` URI.
 
 #### Scenario: Waiting on a recipient
 - GIVEN a mail to Léa Martin

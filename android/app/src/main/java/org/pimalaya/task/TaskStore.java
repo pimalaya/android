@@ -24,15 +24,16 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The to-dos of every calendar, read the GTD way (cairn/changes/gtd).
+ * The to-dos of every calendar, read the GTD way
+ * (cairn/changes/gtd-by-categories).
  *
  * <p>No store of its own: a task is a VTODO the calendar sync already keeps,
- * its list, contexts and project read off the object at load time
+ * its state, categories and parent read off the object at load time
  * ({@link CalendarClient#readTasks}), as the contacts list reads a phone off
  * its card.
  */
 public final class TaskStore {
-    /** Where the calendar captures go to is kept, in the Tasks preferences. */
+    /** The calendar the last capture went to, in the Tasks preferences. */
     private static final String TARGET = "capture_target";
 
     private final CalendarParts parts;
@@ -160,7 +161,7 @@ public final class TaskStore {
         SQLiteDatabase db = new PimdirItems(parts.pimdir()).readable();
         for (Stored stored : tasks) {
             Task task = stored.task;
-            if (!Task.WAITING.equals(task.list()) || task.closed() || task.source() == null) {
+            if (!task.in(Task.WAITING) || task.closed() || task.source() == null) {
                 continue;
             }
             try (Cursor cursor =
@@ -203,18 +204,14 @@ public final class TaskStore {
     }
 
     /**
-     * The calendars a capture can go to, the one captures go to first.
+     * The calendars a capture can go to, the one the last capture went to
+     * first.
      *
-     * <p>That is the one last picked, in the sheet or in account settings,
-     * else a default calendar.
+     * <p>No default: a person with several picks one in the sheet once, and
+     * the next capture goes there too.
      */
     public List<EventStore.StoredCalendar> targets(Context context) {
-        return targets(parts.events(), context);
-    }
-
-    /** The same over {@code events}, for a page holding no calendar parts. */
-    public static List<EventStore.StoredCalendar> targets(EventStore events, Context context) {
-        List<EventStore.StoredCalendar> targets = targetsOf(events);
+        List<EventStore.StoredCalendar> targets = targetsOf(parts.events());
         String chosen = captureTarget(context);
         for (int index = 0; index < targets.size(); index++) {
             if (targets.get(index).id.equals(chosen)) {
@@ -224,13 +221,13 @@ public final class TaskStore {
         return targets;
     }
 
-    /** The calendar captures go to, as last picked; null when never picked. */
+    /** The calendar the last capture went to; null before the first. */
     public static String captureTarget(Context context) {
         return context.getSharedPreferences(TasksList.PREFERENCES, Context.MODE_PRIVATE)
                 .getString(TARGET, null);
     }
 
-    /** Sends the next captures to {@code calendarId}, kept on the device. */
+    /** Keeps {@code calendarId} as the one the next capture goes to. */
     public static void captureTo(Context context, String calendarId) {
         context.getSharedPreferences(TasksList.PREFERENCES, Context.MODE_PRIVATE)
                 .edit()
@@ -238,7 +235,7 @@ public final class TaskStore {
                 .apply();
     }
 
-    /** The calendars a capture can go to, defaults first. */
+    /** The calendars a capture can go to, in the store's order. */
     public List<EventStore.StoredCalendar> targets() {
         return targetsOf(parts.events());
     }
@@ -247,11 +244,7 @@ public final class TaskStore {
         List<EventStore.StoredCalendar> targets = new ArrayList<>();
         for (EventStore.StoredCalendar calendar : events.loadCalendars()) {
             if (takesTasks(calendar)) {
-                if (calendar.isDefault) {
-                    targets.add(0, calendar);
-                } else {
-                    targets.add(calendar);
-                }
+                targets.add(calendar);
             }
         }
         return targets;

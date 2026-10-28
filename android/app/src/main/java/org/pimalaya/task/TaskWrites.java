@@ -19,7 +19,8 @@ import java.util.UUID;
  *
  * <p>A patch of the stored VTODO through the bridge, then a staged add or
  * edit the next calendar sync pushes: a capture is on the phone at once,
- * offline included.
+ * offline included. A state is a category ({@code inbox}, {@code waiting},
+ * {@code someday}), so another client reads and sets it too.
  */
 public final class TaskWrites {
     private final CalendarParts parts;
@@ -46,12 +47,11 @@ public final class TaskWrites {
         String ical =
                 CalendarClient.newEvent(new EventDraft("VTODO", uid, edit.stamp(), "", "", ""));
         String written = CalendarClient.writeTask(ical, edit);
-        new CalendarStager(parts.pimdir(), parts.clients())
-                .mutateAdd(calendar.id, uid + ".ics", written, Flags.none(), null, "");
+        stager().mutateAdd(calendar.id, uid + ".ics", written, Flags.none(), null, "");
         return uid;
     }
 
-    /** Captures {@code title} into the Inbox of {@code calendar}. */
+    /** Captures {@code title} into {@code calendar}: {@code CATEGORIES:inbox}. */
     public String capture(
             EventStore.StoredCalendar calendar, String title, String note, String source)
             throws JSONException {
@@ -67,7 +67,8 @@ public final class TaskWrites {
 
     /**
      * Files a Waiting For item on a mail just sent: {@code title}, waiting
-     * on {@code name} at {@code address}, linked to the sent message.
+     * on {@code name} at {@code address} ({@code CONTACT}), linked to the
+     * sent message by {@code mid:}.
      */
     public String waitFor(
             EventStore.StoredCalendar calendar,
@@ -88,7 +89,34 @@ public final class TaskWrites {
     /** Applies {@code edit} to a stored to-do. */
     public void edit(TaskStore.Stored stored, TaskEdit edit) throws JSONException {
         String written = CalendarClient.writeTask(stored.event.ical, edit);
-        new CalendarStager(parts.pimdir(), parts.clients())
-                .mutateEdit(stored.event.collectionId, stored.event.handle, written, null, "");
+        stager().mutateEdit(stored.event.collectionId, stored.event.handle, written, null, "");
+    }
+
+    /**
+     * Applies {@code edit} to a stored to-do and files it in {@code target}.
+     *
+     * <p>An add there, then a removal here once the add was accepted (pimdir
+     * GUIDE §17), rather than a move: a refused create throws before the
+     * removal, so the capture is never lost. The {@code UID} stays.
+     */
+    public void moveTo(TaskStore.Stored stored, EventStore.StoredCalendar target, TaskEdit edit)
+            throws JSONException {
+        String written = CalendarClient.writeTask(stored.event.ical, edit);
+        CalendarStager stager = stager();
+        stager.mutateAdd(
+                target.id, UUID.randomUUID() + ".ics", written, Flags.none(), null, "");
+        stager.mutateRemove(stored.event.collectionId, stored.event.handle);
+    }
+
+    /**
+     * Deletes a stored to-do: a tombstone the next sync pushes, the item
+     * restorable from Deleted items until a purge.
+     */
+    public void remove(TaskStore.Stored stored) throws JSONException {
+        stager().mutateRemove(stored.event.collectionId, stored.event.handle);
+    }
+
+    private CalendarStager stager() {
+        return new CalendarStager(parts.pimdir(), parts.clients());
     }
 }

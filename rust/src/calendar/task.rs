@@ -1,10 +1,11 @@
 //! # Tasks
 //!
-//! A to-do read the GTD way (cairn/changes/gtd): which list it sits in,
-//! its contexts, its project, who it waits on and the mail it came from.
-//! Each is a standard VTODO property but the list, which RFC 5545 has no
-//! word for and `X-PIMALAYA-GTD` carries. A to-do without one is a next
-//! action, which is what a task another client created is.
+//! A to-do read the GTD way (cairn/changes/gtd-by-categories, pimdir GUIDE
+//! §17): its state, its categories, its parent, who it waits on and the
+//! mail it came from, each a standard VTODO property. The state is three
+//! reserved `CATEGORIES` values, `inbox`, `waiting` and `someday`; an open
+//! to-do carrying none is a next action, which is what a task another
+//! client created is.
 
 use ical::{
     component::{IcalComponent, IcalComponentKind},
@@ -22,15 +23,23 @@ use crate::{
     error::BridgeError,
 };
 
-/// The property naming the GTD list a to-do sits in.
-pub const GTD: &str = "X-PIMALAYA-GTD";
+/// The reserved `CATEGORIES` values, in the order a to-do carrying several
+/// is listed by: captured, someone else's, not a commitment.
+///
+/// Written as these English literals in every locale, compared folded
+/// ([`state_of`]); every other value is the person's own.
+pub const STATES: [&str; 3] = ["inbox", "waiting", "someday"];
 
-/// The lists [`GTD`] names; anything else reads as a next action.
-pub const LISTS: [&str; 5] = ["INBOX", "WAITING", "SOMEDAY", "PROJECT", "REFERENCE"];
-
-/// The list of a to-do carrying no [`GTD`], or one this side does not
-/// know.
+/// The list of an open to-do carrying none of [`STATES`].
 pub const NEXT: &str = "NEXT";
+
+/// The reserved value a category is, folded as pimdir folds `fn` (Unicode
+/// lowercase, locale-independent, trimmed), [`None`] for the person's own.
+pub fn state_of(category: &str) -> Option<&'static str> {
+    let folded = category.to_lowercase();
+    let folded = folded.trim();
+    STATES.iter().find(|state| **state == folded).copied()
+}
 
 /// One to-do as the Tasks tab lists it.
 #[derive(Debug, Serialize)]
@@ -41,11 +50,16 @@ pub struct Task {
     pub description: String,
     /// `STATUS`, uppercased, empty when the to-do carries none.
     pub status: String,
-    /// One of [`LISTS`], or [`NEXT`].
+    /// The first of [`STATES`] it carries, uppercased, else [`NEXT`].
     pub list: String,
-    /// Every `CATEGORIES` value, in order, each a context.
-    pub contexts: Vec<String>,
-    /// The `UID` a `RELATED-TO` of type `PARENT` names: the project.
+    /// Every one of [`STATES`] it carries, in that order: a to-do another
+    /// client marked twice shows in both lists.
+    pub states: Vec<String>,
+    /// Every other `CATEGORIES` value, in order: contexts, projects,
+    /// anything.
+    pub categories: Vec<String>,
+    /// The `UID` a `RELATED-TO` of type `PARENT` names, which shows it
+    /// under that task and decides nothing else.
     pub parent: Option<String>,
     /// `PRIORITY`, 0 being undefined (RFC 5545 3.8.1.9).
     pub priority: u8,
@@ -130,9 +144,22 @@ pub fn task(ical: &str) -> Result<Option<Task>, BridgeError> {
         return Ok(None);
     };
 
-    let list = unknown_text(todo, GTD)
-        .map(|value| value.trim().to_ascii_uppercase())
-        .filter(|value| LISTS.contains(&value.as_str()))
+    let mut states = Vec::new();
+    let mut categories = Vec::new();
+    for value in categories_of(todo) {
+        match state_of(&value) {
+            Some(state) => states.push(state),
+            None => categories.push(value),
+        }
+    }
+    let states: Vec<String> = STATES
+        .iter()
+        .filter(|state| states.contains(*state))
+        .map(|state| state.to_string())
+        .collect();
+    let list = states
+        .first()
+        .map(|state| state.to_ascii_uppercase())
         .unwrap_or_else(|| NEXT.to_string());
 
     Ok(Some(Task {
@@ -143,7 +170,8 @@ pub fn task(ical: &str) -> Result<Option<Task>, BridgeError> {
             .unwrap_or_default()
             .to_ascii_uppercase(),
         list,
-        contexts: contexts_of(todo),
+        states,
+        categories,
         parent: parent_of(todo),
         priority: text_of(todo, IcalPropKind::Priority)
             .and_then(|value| value.trim().parse().ok())
@@ -160,8 +188,9 @@ pub fn task(ical: &str) -> Result<Option<Task>, BridgeError> {
     }))
 }
 
-/// Every value of every `CATEGORIES`, as a to-do may carry several.
-fn contexts_of(component: &IcalComponent) -> Vec<String> {
+/// Every value of every `CATEGORIES`, as a to-do may carry several,
+/// deduplicated in order.
+fn categories_of(component: &IcalComponent) -> Vec<String> {
     let mut contexts = Vec::new();
     for prop in kinds(component, IcalPropKind::Categories) {
         let values: Vec<String> = match &prop.value {
@@ -291,25 +320,6 @@ fn percent_decode(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// The text of the first property of a name outside the closed
-/// vocabulary, an `X-` one.
-fn unknown_text(component: &IcalComponent, name: &str) -> Option<String> {
-    component
-        .props
-        .iter()
-        .find(|prop| matches!(&prop.name, IcalPropName::Unknown(found) if found.eq_ignore_ascii_case(name)))
-        .and_then(|prop| match &prop.value {
-            // NOTE: a name outside the vocabulary has no value type to
-            // decode to, so its text comes as raw components.
-            IcalValue::Unknown(value) => value
-                .components
-                .first()
-                .and_then(|parts| parts.first())
-                .map(|text| text.to_string()),
-            _ => raw_value(prop),
-        })
-}
-
 fn kinds<'c>(
     component: &'c IcalComponent<'c>,
     kind: IcalPropKind,
@@ -322,17 +332,17 @@ fn kinds<'c>(
 
 #[cfg(test)]
 mod tests {
-    use crate::calendar::{task::*, tests::object};
+    use crate::calendar::{edit::write, task::*, tests::object};
 
     #[test]
-    fn a_todo_without_a_list_is_a_next_action() {
+    fn a_todo_without_a_state_is_a_next_action() {
         let ical = object("BEGIN:VTODO\r\nUID:1\r\nSUMMARY:Buy ink\r\nEND:VTODO\r\n");
 
         let task = task(&ical).unwrap().unwrap();
 
         assert_eq!(task.list, NEXT);
         assert_eq!(task.summary, "Buy ink");
-        assert!(task.contexts.is_empty());
+        assert!(task.categories.is_empty());
         assert!(task.parent.is_none());
     }
 
@@ -340,7 +350,7 @@ mod tests {
     fn reads_every_gtd_field() {
         let ical = object(
             "BEGIN:VTODO\r\nUID:2\r\nDTSTAMP:20261027T090000Z\r\nSUMMARY:Feedback on the filter page\r\n\
-             X-PIMALAYA-GTD:waiting\r\nCATEGORIES:@computer,@phone\r\nCATEGORIES:@phone,@home\r\n\
+             CATEGORIES:@computer,waiting\r\nCATEGORIES:@phone,@home\r\n\
              RELATED-TO;RELTYPE=SIBLING:other\r\nRELATED-TO:project-1\r\nPRIORITY:3\r\n\
              CONTACT;ALTREP=\"mailto:lea@example.net\":Léa Martin\r\n\
              ATTACH:mid:abc%2F1@example.net\r\nDUE;VALUE=DATE:20261030\r\nEND:VTODO\r\n",
@@ -349,9 +359,10 @@ mod tests {
         let task = task(&ical).unwrap().unwrap();
 
         assert_eq!(task.list, "WAITING");
-        // NOTE: every CATEGORIES line, deduplicated in order.
-        assert_eq!(task.contexts, ["@computer", "@phone", "@home"]);
-        // NOTE: a sibling is not a project; no RELTYPE means PARENT.
+        // NOTE: every CATEGORIES line, deduplicated in order, the state
+        // aside.
+        assert_eq!(task.categories, ["@computer", "@phone", "@home"]);
+        // NOTE: a sibling is not a parent; no RELTYPE means PARENT.
         assert_eq!(task.parent.as_deref(), Some("project-1"));
         assert_eq!(task.priority, 3);
         let contact = task.contact.unwrap();
@@ -363,10 +374,109 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_list_reads_as_a_next_action() {
-        let ical = object("BEGIN:VTODO\r\nUID:3\r\nX-PIMALAYA-GTD:LATER\r\nEND:VTODO\r\n");
+    fn each_state_reads_from_its_category() {
+        for (category, list) in [
+            ("inbox", "INBOX"),
+            ("waiting", "WAITING"),
+            ("someday", "SOMEDAY"),
+        ] {
+            let ical = object(&format!(
+                "BEGIN:VTODO\r\nUID:3\r\nCATEGORIES:@home,{category}\r\nEND:VTODO\r\n"
+            ));
 
-        assert_eq!(task(&ical).unwrap().unwrap().list, NEXT);
+            let task = task(&ical).unwrap().unwrap();
+
+            assert_eq!(task.list, list);
+            assert_eq!(task.states, [category]);
+            assert_eq!(task.categories, ["@home"]);
+        }
+    }
+
+    #[test]
+    fn a_cased_state_reads_folded() {
+        let ical = object("BEGIN:VTODO\r\nUID:3\r\nCATEGORIES: Inbox\r\nEND:VTODO\r\n");
+
+        let task = task(&ical).unwrap().unwrap();
+
+        assert_eq!(task.list, "INBOX");
+        assert!(task.categories.is_empty());
+    }
+
+    #[test]
+    fn an_x_pimalaya_gtd_task_is_a_next_action_written_back_untouched() {
+        let ical = object(
+            "BEGIN:VTODO\r\nUID:3\r\nX-PIMALAYA-GTD:WAITING\r\nCATEGORIES:@home\r\nEND:VTODO\r\n",
+        );
+
+        let read = task(&ical).unwrap().unwrap();
+        let written = write(&ical, r#"{"gtd":"someday"}"#).unwrap();
+
+        assert_eq!(read.list, NEXT);
+        assert_eq!(read.categories, ["@home"]);
+        assert!(written.contains("X-PIMALAYA-GTD:WAITING\r\nCATEGORIES:@home\r\n"));
+        assert_eq!(task(&written).unwrap().unwrap().list, "SOMEDAY");
+    }
+
+    #[test]
+    fn each_state_writes_as_its_category_and_clears() {
+        for state in STATES {
+            let ical = object("BEGIN:VTODO\r\nUID:3\r\nX-VENDOR:keep\r\nEND:VTODO\r\n");
+
+            let written =
+                write(&ical, &format!(r#"{{"gtd":"{}"}}"#, state.to_uppercase())).unwrap();
+            let cleared = write(&written, r#"{"gtd":""}"#).unwrap();
+
+            assert!(written.contains(&format!("CATEGORIES:{state}\r\n")));
+            assert!(!written.contains("X-PIMALAYA-GTD"));
+            assert_eq!(task(&written).unwrap().unwrap().states, [state]);
+            assert_eq!(cleared, ical);
+        }
+    }
+
+    #[test]
+    fn a_state_takes_the_place_of_the_one_before() {
+        let ical = object(
+            "BEGIN:VTODO\r\nUID:3\r\nCATEGORIES:@home,inbox,Work\r\nCATEGORIES:@phone\r\n\
+             END:VTODO\r\n",
+        );
+
+        let written = write(&ical, r#"{"gtd":"waiting"}"#).unwrap();
+        let task = task(&written).unwrap().unwrap();
+
+        assert!(written.contains("CATEGORIES:@home,waiting,Work\r\nCATEGORIES:@phone\r\n"));
+        assert_eq!(task.list, "WAITING");
+        assert_eq!(task.categories, ["@home", "Work", "@phone"]);
+    }
+
+    #[test]
+    fn clearing_the_state_leaves_the_rest_byte_for_byte() {
+        let ical = object(
+            "BEGIN:VTODO\r\nUID:3\r\nCATEGORIES:Inbox\r\nX-VENDOR:keep\r\n\
+             CATEGORIES:@home\r\nEND:VTODO\r\n",
+        );
+
+        let written = write(&ical, r#"{"gtd":""}"#).unwrap();
+
+        assert_eq!(written, ical.replace("CATEGORIES:Inbox\r\n", ""));
+    }
+
+    #[test]
+    fn a_task_in_its_state_already_is_left_untouched() {
+        let ical = object("BEGIN:VTODO\r\nUID:3\r\nCATEGORIES:Waiting,@home\r\nEND:VTODO\r\n");
+
+        assert_eq!(write(&ical, r#"{"gtd":"waiting"}"#).unwrap(), ical);
+    }
+
+    #[test]
+    fn editing_the_categories_keeps_the_state() {
+        let ical = object("BEGIN:VTODO\r\nUID:3\r\nCATEGORIES:inbox,@home\r\nEND:VTODO\r\n");
+
+        let written = write(&ical, r#"{"categories":"@work, someday"}"#).unwrap();
+        let task = task(&written).unwrap().unwrap();
+
+        assert_eq!(task.list, "INBOX");
+        assert_eq!(task.states, ["inbox"]);
+        assert_eq!(task.categories, ["@work"]);
     }
 
     #[test]
@@ -405,16 +515,17 @@ mod tests {
             "source": "<abc@example.net>",
         });
 
-        let written = crate::calendar::edit::write(&ical, &edit.to_string()).unwrap();
+        let written = write(&ical, &edit.to_string()).unwrap();
         let task = task(&written).unwrap().unwrap();
 
-        assert!(written.contains("X-PIMALAYA-GTD:WAITING\r\n"));
+        assert!(written.contains("CATEGORIES:@computer,@phone\r\n"));
+        assert!(written.contains("CATEGORIES:waiting\r\n"));
         assert!(written.contains("RELATED-TO;RELTYPE=PARENT:project-1\r\n"));
         assert!(written.contains("ATTACH:mid:abc@example.net\r\n"));
         assert!(written.contains("X-VENDOR:keep\r\n"));
         assert_eq!(task.list, "WAITING");
         assert_eq!(task.parent.as_deref(), Some("project-1"));
-        assert_eq!(task.contexts, ["@computer", "@phone"]);
+        assert_eq!(task.categories, ["@computer", "@phone"]);
         assert_eq!(task.contact.unwrap().address, "lea@example.net");
         assert_eq!(task.source.as_deref(), Some("abc@example.net"));
     }
@@ -422,21 +533,21 @@ mod tests {
     #[test]
     fn clearing_keeps_what_another_client_relates_or_attaches() {
         let ical = object(
-            "BEGIN:VTODO\r\nUID:8\r\nX-PIMALAYA-GTD:WAITING\r\n\
+            "BEGIN:VTODO\r\nUID:8\r\nCATEGORIES:waiting\r\n\
              RELATED-TO;RELTYPE=PARENT:project-1\r\nRELATED-TO;RELTYPE=SIBLING:other\r\n\
              CONTACT:Sam\r\nATTACH:mid:abc@example.net\r\n\
              ATTACH:https://example.org/plan.pdf\r\nEND:VTODO\r\n",
         );
         let edit = r#"{"gtd":"","parent":"","contact":{},"source":""}"#;
 
-        let written = crate::calendar::edit::write(&ical, edit).unwrap();
+        let written = write(&ical, edit).unwrap();
         let task = task(&written).unwrap().unwrap();
 
         assert_eq!(task.list, NEXT);
         assert!(task.parent.is_none());
         assert!(task.contact.is_none());
         assert!(task.source.is_none());
-        assert!(!written.contains("X-PIMALAYA-GTD"));
+        assert!(!written.contains("CATEGORIES"));
         assert!(written.contains("RELATED-TO;RELTYPE=SIBLING:other\r\n"));
         assert!(written.contains("ATTACH:https://example.org/plan.pdf\r\n"));
     }
@@ -444,11 +555,10 @@ mod tests {
     #[test]
     fn an_untouched_todo_round_trips_byte_for_byte() {
         let ical = object(
-            "BEGIN:VTODO\r\nUID:9\r\nX-PIMALAYA-GTD:SOMEDAY\r\nCATEGORIES:@home\r\n\
-             RELATED-TO:p\r\nEND:VTODO\r\n",
+            "BEGIN:VTODO\r\nUID:9\r\nCATEGORIES:someday,@home\r\nRELATED-TO:p\r\nEND:VTODO\r\n",
         );
 
-        assert_eq!(crate::calendar::edit::write(&ical, "{}").unwrap(), ical);
+        assert_eq!(write(&ical, "{}").unwrap(), ical);
     }
 
     #[test]

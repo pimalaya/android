@@ -24,8 +24,8 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 
 /**
- * A task's page: its list, context, project, due date, who it waits on and
- * the mail it came from, edited and saved as one write.
+ * A task's page: its list, categories, parent task, due date, who it waits on
+ * and the mail it came from, edited and saved as one write.
  *
  * <p>The working values start as opened; a save sends only what moved, so
  * what another client set and this page does not show survives (the bridge
@@ -34,7 +34,7 @@ import java.util.function.BiConsumer;
 public final class TaskPage {
     /** The lists a task can move to from its page, in GTD's order. */
     private static final String[] LISTS = {
-        Task.INBOX, Task.NEXT, Task.WAITING, Task.SOMEDAY, Task.PROJECT, Task.REFERENCE,
+        Task.INBOX, Task.NEXT, Task.WAITING, Task.SOMEDAY,
     };
 
     private static final int[] LIST_LABELS = {
@@ -42,8 +42,6 @@ public final class TaskPage {
         R.string.task_list_next,
         R.string.task_list_waiting,
         R.string.task_list_someday,
-        R.string.task_list_project,
-        R.string.task_list_reference,
     };
 
     /** The priorities offered: none, high, medium, low (RFC 5545 3.8.1.9). */
@@ -72,7 +70,7 @@ public final class TaskPage {
     private String summary;
     private String description;
     private String listed;
-    private List<String> contexts;
+    private List<String> categories;
     private String parent;
     private String due;
     private String priority;
@@ -114,7 +112,7 @@ public final class TaskPage {
         summary = task.summary();
         description = task.description();
         listed = task.list();
-        contexts = new ArrayList<>(task.contexts());
+        categories = new ArrayList<>(task.categories());
         parent = task.parent() == null ? "" : task.parent();
         due = task.due() == null ? "" : task.due().time().substring(0, 8);
         priority = task.priority() == 0 ? "" : String.valueOf(task.priority());
@@ -159,23 +157,21 @@ public final class TaskPage {
         List<View> organise = new ArrayList<>();
         organise.add(
                 sections.row(
-                        host.getString(R.string.task_field_context),
-                        contexts.isEmpty()
+                        host.getString(R.string.task_field_categories),
+                        categories.isEmpty()
                                 ? host.getString(R.string.task_none)
-                                : String.join(", ", contexts),
+                                : String.join(", ", categories),
                         null,
-                        this::pickContexts));
-        if (!Task.PROJECT.equals(listed)) {
-            TaskStore.Stored project = list.projectOf(parent);
-            organise.add(
-                    sections.row(
-                            host.getString(R.string.task_field_project),
-                            project == null
-                                    ? host.getString(R.string.task_none)
-                                    : project.task.summary(),
-                            null,
-                            this::pickProject));
-        }
+                        this::pickCategories));
+        TaskStore.Stored above = list.taskOf(parent);
+        organise.add(
+                sections.row(
+                        host.getString(R.string.task_field_parent),
+                        above == null
+                                ? host.getString(R.string.task_none)
+                                : above.task.summary(),
+                        null,
+                        this::pickParent));
         organise.add(
                 sections.row(
                         host.getString(R.string.task_field_due),
@@ -300,35 +296,35 @@ public final class TaskPage {
         });
     }
 
-    private void pickContexts() {
-        Set<String> known = new LinkedHashSet<>(list.contexts());
-        known.addAll(contexts);
+    private void pickCategories() {
+        Set<String> known = new LinkedHashSet<>(list.categories());
+        known.addAll(categories);
         List<String> names = new ArrayList<>(known);
         CharSequence[] labels = names.toArray(new CharSequence[0]);
         boolean[] checked = new boolean[names.size()];
         for (int index = 0; index < names.size(); index++) {
-            checked[index] = contexts.contains(names.get(index));
+            checked[index] = categories.contains(names.get(index));
         }
         new AlertDialog.Builder(host)
-                .setTitle(R.string.task_field_context)
+                .setTitle(R.string.task_field_categories)
                 .setMultiChoiceItems(labels, checked, (dialog, which, on) -> checked[which] = on)
                 .setPositiveButton(
                         android.R.string.ok,
                         (dialog, which) -> {
-                            contexts.clear();
+                            categories.clear();
                             for (int index = 0; index < names.size(); index++) {
                                 if (checked[index]) {
-                                    contexts.add(names.get(index));
+                                    categories.add(names.get(index));
                                 }
                             }
                             render();
                         })
                 .setNeutralButton(
-                        R.string.task_context_new,
+                        R.string.task_category_new,
                         (dialog, which) ->
-                                TaskDialogs.text(host, R.string.task_context_new, "@", false, value -> {
-                                    if (!value.isEmpty() && !contexts.contains(value)) {
-                                        contexts.add(value);
+                                TaskDialogs.text(host, R.string.task_category_new, "", false, value -> {
+                                    if (!value.isEmpty() && !categories.contains(value)) {
+                                        categories.add(value);
                                     }
                                     render();
                                 }))
@@ -336,19 +332,19 @@ public final class TaskPage {
                 .show();
     }
 
-    private void pickProject() {
-        List<TaskStore.Stored> projects = list.projects();
-        CharSequence[] labels = new CharSequence[projects.size() + 1];
+    private void pickParent() {
+        List<TaskStore.Stored> parents = list.parentsFor(opened);
+        CharSequence[] labels = new CharSequence[parents.size() + 1];
         labels[0] = host.getString(R.string.task_none);
         int checked = 0;
-        for (int index = 0; index < projects.size(); index++) {
-            labels[index + 1] = projects.get(index).task.summary();
-            if (projects.get(index).task.uid().equals(parent)) {
+        for (int index = 0; index < parents.size(); index++) {
+            labels[index + 1] = parents.get(index).task.summary();
+            if (parents.get(index).task.uid().equals(parent)) {
                 checked = index + 1;
             }
         }
-        TaskDialogs.pick(host, R.string.task_field_project, labels, checked, picked -> {
-            parent = picked == 0 ? "" : projects.get(picked - 1).task.uid();
+        TaskDialogs.pick(host, R.string.task_field_parent, labels, checked, picked -> {
+            parent = picked == 0 ? "" : parents.get(picked - 1).task.uid();
             render();
         });
     }
@@ -389,8 +385,8 @@ public final class TaskPage {
         if (!listed.equals(task.list())) {
             edit = edit.withList(listed);
         }
-        if (!contexts.equals(task.contexts())) {
-            edit = edit.withContexts(String.join(",", contexts));
+        if (!categories.equals(task.categories())) {
+            edit = edit.withCategories(String.join(",", categories));
         }
         if (!parent.equals(task.parent() == null ? "" : task.parent())) {
             edit = edit.withParent(parent);

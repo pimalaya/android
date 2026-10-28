@@ -8,6 +8,7 @@ import android.widget.TextView;
 
 import org.pimalaya.R;
 import org.pimalaya.calendar.CalendarParts;
+import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.DateEdit;
 import org.pimalaya.client.EventTimeKind;
 import org.pimalaya.client.Task;
@@ -25,17 +26,18 @@ import java.util.function.BiConsumer;
 /**
  * The Inbox, clarified one item at a time in GTD's order.
  *
- * <p>Actionable? Under two minutes? Someone else's? More than one step? Then
- * the next action. Every outcome puts the item somewhere and none puts it back:
- * a skip leaves it first in line for the next pass. The answers build a
- * {@link Clarification}, applied as one write when the flow ends.
+ * <p>Actionable? Under two minutes? Someone else's? Then the next action.
+ * Every outcome is an edit of the same item, its {@code inbox} category
+ * replaced by {@code waiting}, {@code someday} or nothing (pimdir GUIDE §17),
+ * and none puts it back: a skip leaves it first in line for the next pass.
+ * The answers build a {@link Clarification}, applied as one write when the
+ * flow ends; filing it in another calendar is the one outcome that is two.
  */
 public final class Clarify {
     private enum Step {
         ACTIONABLE,
         TWO_MINUTES,
         DELEGATED,
-        PROJECT,
         NEXT_ACTION,
     }
 
@@ -47,6 +49,9 @@ public final class Clarify {
 
     /** The items left to clarify, the shown one first. */
     private final List<TaskStore.Stored> queue = new ArrayList<>();
+
+    /** The calendars an item can be filed in, read as the flow opens. */
+    private List<EventStore.StoredCalendar> targets = List.of();
 
     private int total;
     private Step step;
@@ -70,8 +75,16 @@ public final class Clarify {
         queue.clear();
         queue.addAll(items);
         total = items.size();
-        begin();
-        host.show(Panels.CLARIFY);
+        host.io.execute(
+                () -> {
+                    List<EventStore.StoredCalendar> read = list.store().targets();
+                    host.postAlive(
+                            () -> {
+                                targets = read;
+                                begin();
+                                host.show(Panels.CLARIFY);
+                            });
+                });
     }
 
     /** What the bar says: which item of how many. */
@@ -83,9 +96,10 @@ public final class Clarify {
     private void begin() {
         TaskStore.Stored item = queue.get(0);
         answer = new Clarification();
-        answer.nextAction = item.task.summary();
-        answer.contexts.addAll(item.task.contexts());
+        answer.title = item.task.summary();
+        answer.categories.addAll(item.task.categories());
         answer.parent = item.task.parent() == null ? "" : item.task.parent();
+        answer.target = item.calendar;
         step = Step.ACTIONABLE;
         render();
     }
@@ -96,15 +110,19 @@ public final class Clarify {
         TaskStore.Stored item = queue.get(0);
         LinearLayout page = host.findViewById(R.id.clarify_page);
 
+        // NOTE: the title is rephrased in place at any step, as clarifying
+        // often starts by saying what the capture really is.
         List<View> shown = new ArrayList<>();
         shown.add(
                 sections.row(
-                        item.task.summary().isEmpty()
+                        answer.title.isEmpty()
                                 ? host.getString(R.string.event_untitled)
-                                : item.task.summary(),
-                        item.task.description(),
+                                : answer.title,
+                        item.task.description().isEmpty()
+                                ? host.getString(R.string.clarify_rephrase)
+                                : item.task.description(),
                         null,
-                        null));
+                        this::rephrase));
         if (item.task.source() != null) {
             shown.add(
                     sections.row(
@@ -137,16 +155,11 @@ public final class Clarify {
                             answer.kept = Clarification.Kept.SOMEDAY;
                             apply();
                         }, answer.kept == Clarification.Kept.SOMEDAY),
-                        option(R.string.clarify_reference, R.string.clarify_reference_hint, () -> {
+                        option(R.string.clarify_drop, R.string.clarify_drop_hint, () -> {
                             answer.actionable = false;
-                            answer.kept = Clarification.Kept.REFERENCE;
+                            answer.kept = Clarification.Kept.DELETED;
                             apply();
-                        }, answer.kept == Clarification.Kept.REFERENCE),
-                        option(R.string.clarify_drop, 0, () -> {
-                            answer.actionable = false;
-                            answer.kept = Clarification.Kept.DROPPED;
-                            apply();
-                        }, answer.kept == Clarification.Kept.DROPPED));
+                        }, answer.kept == Clarification.Kept.DELETED));
                 break;
             case TWO_MINUTES:
                 question(page, R.string.clarify_two_minutes, R.string.clarify_two_minutes_hint);
@@ -163,7 +176,7 @@ public final class Clarify {
             case DELEGATED:
                 question(page, R.string.clarify_delegate, R.string.clarify_delegate_hint);
                 options(
-                        option(R.string.clarify_delegate_yes, 0, () ->
+                        option(R.string.clarify_delegate_yes, R.string.clarify_delegate_who, () ->
                                 TaskDialogs.text(
                                         host,
                                         R.string.task_field_waiting_on,
@@ -176,21 +189,8 @@ public final class Clarify {
                                         }), Boolean.TRUE.equals(answer.delegated)),
                         option(R.string.clarify_mine, 0, () -> {
                             answer.delegated = false;
-                            go(Step.PROJECT);
+                            go(Step.NEXT_ACTION);
                         }, Boolean.FALSE.equals(answer.delegated)));
-                break;
-            case PROJECT:
-                question(page, R.string.clarify_project, R.string.clarify_project_hint);
-                options(
-                        option(R.string.clarify_project_yes, R.string.clarify_project_yes_hint, () -> {
-                            answer.project = true;
-                            answer.nextAction = "";
-                            go(Step.NEXT_ACTION);
-                        }, Boolean.TRUE.equals(answer.project)),
-                        option(R.string.clarify_one_step, 0, () -> {
-                            answer.project = false;
-                            go(Step.NEXT_ACTION);
-                        }, Boolean.FALSE.equals(answer.project)));
                 break;
             default:
                 nextAction(page);
@@ -204,6 +204,15 @@ public final class Clarify {
     private void go(Step next) {
         step = next;
         render();
+    }
+
+    private void rephrase() {
+        TaskDialogs.text(host, R.string.event_field_summary, answer.title, false, value -> {
+            if (!value.isEmpty()) {
+                answer.title = value;
+            }
+            render();
+        });
     }
 
     private void question(LinearLayout page, int text, int hint) {
@@ -241,44 +250,38 @@ public final class Clarify {
         sections.section(0, 0, items, null, false);
     }
 
-    /** The last step: the next action, where it is done, its project. */
+    /**
+     * The last step: the next action, its categories, the task it sits
+     * under, its due date and the calendar it is filed in.
+     */
     private void nextAction(LinearLayout page) {
         question(page, R.string.clarify_next_action, R.string.clarify_next_action_hint);
         List<View> rows = new ArrayList<>();
         rows.add(
                 sections.row(
-                        answer.nextAction.isEmpty()
+                        answer.title.isEmpty()
                                 ? host.getString(R.string.clarify_next_action_empty)
-                                : answer.nextAction,
+                                : answer.title,
                         host.getString(R.string.clarify_next_action_edit),
                         null,
-                        () -> TaskDialogs.text(
-                                host, R.string.clarify_next_action, answer.nextAction, false,
-                                value -> {
-                                    answer.nextAction = value;
-                                    render();
-                                })));
-        Set<String> known = new LinkedHashSet<>(list.contexts());
-        known.addAll(answer.contexts);
+                        this::rephrase));
+        Set<String> known = new LinkedHashSet<>(list.categories());
+        known.addAll(answer.categories);
         rows.add(
                 sections.row(
-                        host.getString(R.string.task_field_context),
-                        answer.contexts.isEmpty()
+                        host.getString(R.string.task_field_categories),
+                        answer.categories.isEmpty()
                                 ? host.getString(R.string.task_none)
-                                : String.join(", ", answer.contexts),
+                                : String.join(", ", answer.categories),
                         null,
-                        () -> pickContexts(new ArrayList<>(known))));
-        if (!Boolean.TRUE.equals(answer.project)) {
-            TaskStore.Stored project = list.projectOf(answer.parent);
-            rows.add(
-                    sections.row(
-                            host.getString(R.string.task_field_project),
-                            project == null
-                                    ? host.getString(R.string.task_none)
-                                    : project.task.summary(),
-                            null,
-                            this::pickProject));
-        }
+                        () -> pickCategories(new ArrayList<>(known))));
+        TaskStore.Stored above = list.taskOf(answer.parent);
+        rows.add(
+                sections.row(
+                        host.getString(R.string.task_field_parent),
+                        above == null ? host.getString(R.string.task_none) : above.task.summary(),
+                        null,
+                        this::pickParent));
         rows.add(
                 sections.row(
                         host.getString(R.string.task_field_due),
@@ -290,6 +293,17 @@ public final class Clarify {
                             answer.due = picked;
                             render();
                         })));
+        if (targets.size() > 1) {
+            rows.add(
+                    sections.row(
+                            host.getString(R.string.task_section_calendar),
+                            host.getString(
+                                    R.string.capture_target_item,
+                                    answer.target.name,
+                                    answer.target.accountEmail),
+                            null,
+                            this::pickTarget));
+        }
         sections.section(0, 0, rows, null, false);
 
         List<View> save = new ArrayList<>();
@@ -299,7 +313,7 @@ public final class Clarify {
                         null,
                         null,
                         () -> {
-                            if (answer.nextAction.isEmpty()) {
+                            if (answer.title.isEmpty()) {
                                 host.toast(host.getString(R.string.clarify_next_action_empty));
                                 return;
                             }
@@ -308,28 +322,28 @@ public final class Clarify {
         sections.section(0, 0, save, null, false);
     }
 
-    private void pickContexts(List<String> names) {
+    private void pickCategories(List<String> names) {
         CharSequence[] labels = names.toArray(new CharSequence[0]);
         boolean[] checked = new boolean[names.size()];
         for (int index = 0; index < names.size(); index++) {
-            checked[index] = answer.contexts.contains(names.get(index));
+            checked[index] = answer.categories.contains(names.get(index));
         }
         new android.app.AlertDialog.Builder(host)
-                .setTitle(R.string.task_field_context)
+                .setTitle(R.string.task_field_categories)
                 .setMultiChoiceItems(labels, checked, (dialog, which, on) -> checked[which] = on)
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                    answer.contexts.clear();
+                    answer.categories.clear();
                     for (int index = 0; index < names.size(); index++) {
                         if (checked[index]) {
-                            answer.contexts.add(names.get(index));
+                            answer.categories.add(names.get(index));
                         }
                     }
                     render();
                 })
-                .setNeutralButton(R.string.task_context_new, (dialog, which) ->
-                        TaskDialogs.text(host, R.string.task_context_new, "@", false, value -> {
-                            if (!value.isEmpty() && !answer.contexts.contains(value)) {
-                                answer.contexts.add(value);
+                .setNeutralButton(R.string.task_category_new, (dialog, which) ->
+                        TaskDialogs.text(host, R.string.task_category_new, "", false, value -> {
+                            if (!value.isEmpty() && !answer.categories.contains(value)) {
+                                answer.categories.add(value);
                             }
                             render();
                         }))
@@ -337,19 +351,36 @@ public final class Clarify {
                 .show();
     }
 
-    private void pickProject() {
-        List<TaskStore.Stored> projects = list.projects();
-        CharSequence[] labels = new CharSequence[projects.size() + 1];
+    private void pickParent() {
+        List<TaskStore.Stored> parents = list.parentsFor(queue.get(0));
+        CharSequence[] labels = new CharSequence[parents.size() + 1];
         labels[0] = host.getString(R.string.task_none);
         int checked = 0;
-        for (int index = 0; index < projects.size(); index++) {
-            labels[index + 1] = projects.get(index).task.summary();
-            if (projects.get(index).task.uid().equals(answer.parent)) {
+        for (int index = 0; index < parents.size(); index++) {
+            labels[index + 1] = parents.get(index).task.summary();
+            if (parents.get(index).task.uid().equals(answer.parent)) {
                 checked = index + 1;
             }
         }
-        TaskDialogs.pick(host, R.string.task_field_project, labels, checked, picked -> {
-            answer.parent = picked == 0 ? "" : projects.get(picked - 1).task.uid();
+        TaskDialogs.pick(host, R.string.task_field_parent, labels, checked, picked -> {
+            answer.parent = picked == 0 ? "" : parents.get(picked - 1).task.uid();
+            render();
+        });
+    }
+
+    private void pickTarget() {
+        CharSequence[] labels = new CharSequence[targets.size()];
+        int checked = 0;
+        for (int index = 0; index < targets.size(); index++) {
+            EventStore.StoredCalendar target = targets.get(index);
+            labels[index] =
+                    host.getString(R.string.capture_target_item, target.name, target.accountEmail);
+            if (target.id.equals(answer.target.id)) {
+                checked = index;
+            }
+        }
+        TaskDialogs.pick(host, R.string.task_section_calendar, labels, checked, picked -> {
+            answer.target = targets.get(picked);
             render();
         });
     }
@@ -385,19 +416,16 @@ public final class Clarify {
 
     /** The write a clarification makes; off the main thread. */
     private void write(TaskStore.Stored item, Clarification decided, String now) throws Exception {
+        if (decided.kept == Clarification.Kept.DELETED) {
+            writes.remove(item);
+            return;
+        }
         TaskEdit edit = TaskEdit.at(now);
-        if (Boolean.FALSE.equals(decided.actionable)) {
-            switch (decided.kept) {
-                case SOMEDAY:
-                    edit = edit.withList(Task.SOMEDAY);
-                    break;
-                case REFERENCE:
-                    edit = edit.withList(Task.REFERENCE);
-                    break;
-                default:
-                    edit = edit.withCancelled();
-            }
-            writes.edit(item, edit);
+        if (!decided.title.equals(item.task.summary())) {
+            edit = edit.withText(decided.title, null);
+        }
+        if (decided.kept == Clarification.Kept.SOMEDAY) {
+            writes.edit(item, edit.withList(Task.SOMEDAY));
             return;
         }
         if (Boolean.TRUE.equals(decided.twoMinutes)) {
@@ -406,43 +434,27 @@ public final class Clarify {
         }
         if (Boolean.TRUE.equals(decided.delegated)) {
             String who = decided.delegateTo == null ? "" : decided.delegateTo;
-            boolean address = who.contains("@") && !who.contains(" ");
-            writes.edit(
-                    item,
-                    edit.withList(Task.WAITING)
-                            .withContact(address ? "" : who, address ? who : ""));
-            return;
-        }
-
-        DateEdit due =
-                decided.due.isEmpty()
-                        ? null
-                        : new DateEdit(decided.due, EventTimeKind.DATE, "");
-        if (Boolean.TRUE.equals(decided.project)) {
-            // NOTE: the captured item becomes the project, its outcome; the
-            // next action is a new to-do under it, in the same calendar.
-            writes.edit(item, edit.withList(Task.PROJECT));
-            TaskEdit action =
-                    TaskEdit.at(now)
-                            .withText(decided.nextAction, null)
-                            .withContexts(String.join(",", decided.contexts))
-                            .withParent(item.task.uid());
-            if (due != null) {
-                action = action.withDue(due);
+            edit = edit.withList(Task.WAITING);
+            if (!who.isEmpty()) {
+                boolean address = who.contains("@") && !who.contains(" ");
+                edit = edit.withContact(address ? "" : who, address ? who : "");
             }
-            writes.create(item.calendar, action);
+            writes.edit(item, edit);
             return;
         }
 
         edit =
                 edit.withList(Task.NEXT)
-                        .withText(decided.nextAction, null)
-                        .withContexts(String.join(",", decided.contexts))
+                        .withCategories(String.join(",", decided.categories))
                         .withParent(decided.parent);
-        if (due != null) {
-            edit = edit.withDue(due);
+        if (!decided.due.isEmpty()) {
+            edit = edit.withDue(new DateEdit(decided.due, EventTimeKind.DATE, ""));
         }
-        writes.edit(item, edit);
+        if (decided.target.id.equals(item.calendar.id)) {
+            writes.edit(item, edit);
+        } else {
+            writes.moveTo(item, decided.target, edit);
+        }
     }
 
     private void next() {

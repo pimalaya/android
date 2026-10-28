@@ -2,24 +2,27 @@ package org.pimalaya.client;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
  * One to-do as the Tasks tab lists it, read the GTD way.
  *
- * <p>Mirrors rs/calendar/task.rs {@code Task}. The list is {@code
- * X-PIMALAYA-GTD}, {@link #NEXT} when the to-do carries none, as one another
- * client created does.
+ * <p>Mirrors rs/calendar/task.rs {@code Task}. Its state is three reserved
+ * {@code CATEGORIES} values, {@code inbox}, {@code waiting} and {@code
+ * someday} (pimdir GUIDE §17); an open to-do carrying none is a next action,
+ * as one another client created is.
  *
  * @param uid the {@code UID}
  * @param summary the {@code SUMMARY}, empty when none
  * @param description the {@code DESCRIPTION}, empty when none
  * @param status the {@code STATUS}, uppercased, empty when none
- * @param list one of {@link #INBOX}, {@link #NEXT}, {@link #WAITING},
- *     {@link #SOMEDAY}, {@link #PROJECT}, {@link #REFERENCE}
- * @param contexts every {@code CATEGORIES} value, each a context
- * @param parent the {@code UID} of the project, null when none
+ * @param list the first state it carries: {@link #INBOX}, {@link #WAITING} or
+ *     {@link #SOMEDAY}; else {@link #NEXT}
+ * @param states every state it carries, lowercase, in that order
+ * @param categories every other {@code CATEGORIES} value, the person's own
+ * @param parent the {@code UID} of the task it sits under, null when none
  * @param priority the {@code PRIORITY}, 0 for undefined
  * @param start the {@code DTSTART}, null when none
  * @param due the {@code DUE}, null when none
@@ -36,7 +39,8 @@ public record Task(
         String description,
         String status,
         String list,
-        List<String> contexts,
+        List<String> states,
+        List<String> categories,
         String parent,
         int priority,
         EventTime start,
@@ -46,30 +50,33 @@ public record Task(
         String contactAddress,
         String source,
         String created) {
-    /** Captured, not clarified yet. */
+    /** Captured, not clarified yet: {@code CATEGORIES:inbox}. */
     public static final String INBOX = "INBOX";
-    /** A next action: what a to-do with no list is. */
+    /** A next action: an open to-do carrying none of the states. */
     public static final String NEXT = "NEXT";
-    /** Someone else owes it. */
+    /** Someone else owes it: {@code CATEGORIES:waiting}. */
     public static final String WAITING = "WAITING";
-    /** Kept for the weekly review. */
+    /** Kept for the weekly review: {@code CATEGORIES:someday}. */
     public static final String SOMEDAY = "SOMEDAY";
-    /** An outcome needing more than one action. */
-    public static final String PROJECT = "PROJECT";
-    /** Not actionable, kept to be found again. */
-    public static final String REFERENCE = "REFERENCE";
 
     /** Whether it is done or dropped, out of every open list. */
     public boolean closed() {
         return "COMPLETED".equals(status) || "CANCELLED".equals(status);
     }
 
+    /**
+     * Whether it belongs in {@code list}, its state aside from openness.
+     *
+     * <p>A to-do another client marked with two states is in both lists, as
+     * the views are one query each (pimdir GUIDE §17).
+     */
+    public boolean in(String list) {
+        return NEXT.equals(list)
+                ? states.isEmpty()
+                : states.contains(list.toLowerCase(Locale.ROOT));
+    }
+
     static Task from(JSONObject task) {
-        JSONArray contexts = task.optJSONArray("contexts");
-        List<String> names = new ArrayList<>();
-        if (contexts != null) {
-            names.addAll(Json.strings(contexts));
-        }
         JSONObject contact = task.optJSONObject("contact");
         return new Task(
                 task.optString("uid"),
@@ -77,7 +84,8 @@ public record Task(
                 task.optString("description"),
                 task.optString("status"),
                 task.optString("list", NEXT),
-                List.copyOf(names),
+                strings(task.optJSONArray("states")),
+                strings(task.optJSONArray("categories")),
                 task.isNull("parent") ? null : task.optString("parent"),
                 task.optInt("priority"),
                 EventTime.from(task.optJSONObject("start")),
@@ -87,5 +95,13 @@ public record Task(
                 contact == null ? "" : contact.optString("address"),
                 task.isNull("source") ? null : task.optString("source"),
                 task.optString("created"));
+    }
+
+    private static List<String> strings(JSONArray array) {
+        List<String> names = new ArrayList<>();
+        if (array != null) {
+            names.addAll(Json.strings(array));
+        }
+        return List.copyOf(names);
     }
 }

@@ -7,7 +7,10 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.EditText;
+import android.widget.Spinner;
 import android.widget.TextView;
 
 import org.pimalaya.R;
@@ -15,14 +18,19 @@ import org.pimalaya.calendar.CalendarParts;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.ui.Host;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The capture sheet: a line saved to the Inbox at once, offline included.
+ * The capture sheet: a line saved to the Inbox at once, offline included, as
+ * a to-do carrying {@code CATEGORIES:inbox}.
  *
  * <p>One sheet for every way in: the Tasks button, the home-screen widget and
  * launcher shortcut, the share sheet, and a mail's Add to tasks, which links
- * the message by {@code mid:} and leaves it where it is.
+ * the message by {@code mid:} and leaves it where it is. Its target is a
+ * dropdown of the task calendars, each named with its account, the one the
+ * last capture went to preselected; hidden when there is one, and the sheet
+ * says why when there is none.
  */
 public final class CaptureSheet {
     private final Host host;
@@ -63,11 +71,7 @@ public final class CaptureSheet {
             String source,
             String sourceLabel,
             List<EventStore.StoredCalendar> targets) {
-        if (targets.isEmpty()) {
-            host.toast(host.getString(R.string.capture_no_calendar));
-            return;
-        }
-        EventStore.StoredCalendar[] target = {targets.get(0)};
+        EventStore.StoredCalendar[] target = {targets.isEmpty() ? null : targets.get(0)};
 
         Dialog dialog = new Dialog(host, R.style.SyncSheet);
         dialog.setContentView(R.layout.capture_sheet);
@@ -96,44 +100,51 @@ public final class CaptureSheet {
                     note.requestFocus();
                 });
 
-        TextView where = dialog.findViewById(R.id.capture_target);
-        Runnable drawTarget =
-                () -> where.setText(
-                        host.ui.twoLine(
-                                host.getString(R.string.capture_into, target[0].name),
-                                target[0].accountEmail));
-        drawTarget.run();
-        where.setOnClickListener(
-                view -> {
-                    CharSequence[] labels = new CharSequence[targets.size()];
-                    for (int index = 0; index < labels.length; index++) {
-                        labels[index] =
-                                host.ui.twoLine(
-                                        targets.get(index).name, targets.get(index).accountEmail);
-                    }
-                    TaskDialogs.pick(
-                            host,
-                            R.string.capture_where,
-                            labels,
-                            targets.indexOf(target[0]),
-                            picked -> {
-                                target[0] = targets.get(picked);
-                                drawTarget.run();
-                            });
-                });
+        Spinner where = dialog.findViewById(R.id.capture_target);
+        if (targets.size() > 1) {
+            List<CharSequence> labels = new ArrayList<>();
+            for (EventStore.StoredCalendar calendar : targets) {
+                labels.add(
+                        host.getString(
+                                R.string.capture_target_item,
+                                calendar.name,
+                                calendar.accountEmail));
+            }
+            ArrayAdapter<CharSequence> adapter =
+                    new ArrayAdapter<>(host, android.R.layout.simple_spinner_item, labels);
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            where.setAdapter(adapter);
+            where.setOnItemSelectedListener(
+                    new AdapterView.OnItemSelectedListener() {
+                        @Override
+                        public void onItemSelected(
+                                AdapterView<?> parent, View view, int position, long id) {
+                            target[0] = targets.get(position);
+                        }
+
+                        @Override
+                        public void onNothingSelected(AdapterView<?> parent) {}
+                    });
+            where.setVisibility(View.VISIBLE);
+            dialog.findViewById(R.id.capture_where).setVisibility(View.VISIBLE);
+        }
+        View save = dialog.findViewById(R.id.capture_save);
+        if (targets.isEmpty()) {
+            dialog.findViewById(R.id.capture_none).setVisibility(View.VISIBLE);
+            save.setEnabled(false);
+        }
 
         dialog.findViewById(R.id.capture_cancel).setOnClickListener(view -> dialog.dismiss());
-        dialog.findViewById(R.id.capture_save)
-                .setOnClickListener(
-                        view -> {
-                            String title = input.getText().toString().trim();
-                            if (title.isEmpty()) {
-                                input.setError(host.getString(R.string.capture_empty));
-                                return;
-                            }
-                            dialog.dismiss();
-                            save(target[0], title, note.getText().toString().trim(), source);
-                        });
+        save.setOnClickListener(
+                view -> {
+                    String title = input.getText().toString().trim();
+                    if (title.isEmpty()) {
+                        input.setError(host.getString(R.string.capture_empty));
+                        return;
+                    }
+                    dialog.dismiss();
+                    save(target[0], title, note.getText().toString().trim(), source);
+                });
         dialog.show();
         input.requestFocus();
     }

@@ -27,6 +27,7 @@ import org.pimalaya.ui.SectionsAdapter;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -36,9 +37,11 @@ import java.util.concurrent.Executors;
 /**
  * The Tasks tab: the GTD lists over every calendar's to-dos.
  *
- * <p>Inbox, Next by context, Waiting For, Projects and Someday, each a filter
- * of the one load ({@link TaskStore}). A row's tick closes it; a tap opens its
- * page ({@link TaskPage}).
+ * <p>Inbox, Next, Waiting For and Someday, each a filter of the one load
+ * ({@link TaskStore}) across accounts and calendars, the state a reserved
+ * category (pimdir GUIDE §17); a category filter narrows all four. A row's
+ * tick closes it; a tap opens its page ({@link TaskPage}), or clarifies it
+ * from the Inbox.
  */
 public final class TasksList {
     /** Days after which a weekly review is due again. */
@@ -51,14 +54,13 @@ public final class TasksList {
 
     /** The lists the chips switch between, in GTD's order. */
     private static final String[] LISTS = {
-        Task.INBOX, Task.NEXT, Task.WAITING, Task.PROJECT, Task.SOMEDAY,
+        Task.INBOX, Task.NEXT, Task.WAITING, Task.SOMEDAY,
     };
 
     private static final int[] LABELS = {
         R.string.task_list_inbox,
         R.string.task_list_next,
         R.string.task_list_waiting,
-        R.string.task_list_projects,
         R.string.task_list_someday,
     };
 
@@ -66,7 +68,6 @@ public final class TasksList {
         R.drawable.ic_task_inbox,
         R.drawable.ic_arrow_forward,
         R.drawable.ic_task_waiting,
-        R.drawable.ic_folder_open,
         R.drawable.ic_task_someday,
     };
 
@@ -102,14 +103,14 @@ public final class TasksList {
 
     private ListHeader header;
     private final List<TextView> listChips = new ArrayList<>();
-    private LinearLayout contextRow;
+    private LinearLayout categoryRow;
     private TextView clarifyButton;
 
     /** The list on screen, one of {@link #LISTS}. */
     private String shown = Task.NEXT;
 
-    /** The context Next narrows to, null for every one. */
-    private String context;
+    /** The category every list narrows to, null for every one. */
+    private String category;
 
     /** Every to-do of the last load. */
     private List<TaskStore.Stored> all = new ArrayList<>();
@@ -160,7 +161,6 @@ public final class TasksList {
             chip.setOnClickListener(
                     view -> {
                         shown = target;
-                        context = null;
                         render();
                         list.setSelection(0);
                     });
@@ -170,14 +170,15 @@ public final class TasksList {
                 chip(chips, host.getString(R.string.task_review), R.drawable.ic_task_review);
         reviewChip.setOnClickListener(view -> review.open());
 
-        // NOTE: a second row under the lists, Next's contexts, which the
-        // header's one chip row has no room for.
+        // NOTE: a second row under the lists, the categories, which the
+        // header's one chip row has no room for. It narrows every list, so
+        // switching lists keeps it.
         HorizontalScrollView scroll = new HorizontalScrollView(host);
         scroll.setHorizontalScrollBarEnabled(false);
         scroll.setPadding(host.dp(16), host.dp(10), host.dp(16), 0);
         scroll.setClipToPadding(false);
-        contextRow = new LinearLayout(host);
-        scroll.addView(contextRow);
+        categoryRow = new LinearLayout(host);
+        scroll.addView(categoryRow);
         ((ViewGroup) header.view).addView(scroll);
 
         clarifyButton = new TextView(host, null, 0, R.style.Chip);
@@ -197,7 +198,7 @@ public final class TasksList {
                     if (row == null) {
                         return;
                     }
-                    if (Task.INBOX.equals(row.stored.task.list())) {
+                    if (Task.INBOX.equals(shown)) {
                         clarify.open(List.of(row.stored));
                     } else {
                         page.open(row.stored);
@@ -210,10 +211,10 @@ public final class TasksList {
         return header;
     }
 
-    /** The list shown, as the tab opens on it. */
+    /** The list shown, as the tab opens on it, every category shown. */
     public void show(String list) {
         shown = list;
-        context = null;
+        category = null;
         reload();
     }
 
@@ -271,7 +272,7 @@ public final class TasksList {
     private static List<Task> nextActions(List<TaskStore.Stored> open) {
         List<TaskStore.Stored> next = new ArrayList<>();
         for (TaskStore.Stored stored : open) {
-            if (Task.NEXT.equals(listOf(stored))) {
+            if (stored.task.in(Task.NEXT)) {
                 next.add(stored);
             }
         }
@@ -287,7 +288,7 @@ public final class TasksList {
     List<TaskStore.Stored> inbox() {
         List<TaskStore.Stored> inbox = new ArrayList<>();
         for (TaskStore.Stored stored : all) {
-            if (!stored.task.closed() && Task.INBOX.equals(stored.task.list())) {
+            if (!stored.task.closed() && stored.task.in(Task.INBOX)) {
                 inbox.add(stored);
             }
         }
@@ -328,10 +329,13 @@ public final class TasksList {
 
     private void render() {
         List<TaskStore.Stored> open = open();
+        renderCategories(open);
         int[] counts = new int[LISTS.length];
+        int inboxCount = 0;
         for (TaskStore.Stored stored : open) {
+            inboxCount += stored.task.in(Task.INBOX) ? 1 : 0;
             for (int index = 0; index < LISTS.length; index++) {
-                if (LISTS[index].equals(listOf(stored))) {
+                if (stored.task.in(LISTS[index]) && narrowed(stored)) {
                     counts[index]++;
                 }
             }
@@ -346,9 +350,7 @@ public final class TasksList {
         }
 
         header.meta(reviewLine());
-        renderContexts(open);
 
-        int inboxCount = counts[0];
         if (inboxCounted != null) {
             inboxCounted.accept(inboxCount);
         }
@@ -366,68 +368,98 @@ public final class TasksList {
         ((TextView) host.findViewById(R.id.tasks_empty_text)).setText(emptyOf(shown));
     }
 
-    /** The list a to-do shows in: a project's actions are in Next. */
-    private static String listOf(TaskStore.Stored stored) {
-        return stored.task.list();
+    /** Whether a to-do passes the category filter. */
+    private boolean narrowed(TaskStore.Stored stored) {
+        return category == null || stored.task.categories().contains(category);
     }
 
     private List<Row> rowsOf(List<TaskStore.Stored> open) {
+        List<TaskStore.Stored> listed = new ArrayList<>();
+        for (TaskStore.Stored stored : open) {
+            if (stored.task.in(shown) && narrowed(stored)) {
+                listed.add(stored);
+            }
+        }
         List<Row> rows = new ArrayList<>();
-        switch (shown) {
-            case Task.NEXT:
-                {
-                    List<TaskStore.Stored> next = new ArrayList<>();
-                    for (TaskStore.Stored stored : open) {
-                        if (Task.NEXT.equals(listOf(stored))
-                                && (context == null
-                                        || stored.task.contexts().contains(context))) {
-                            next.add(stored);
-                        }
-                    }
-                    next.sort(TasksList::byDueThenPriority);
-                    String due = host.getString(R.string.task_section_due);
-                    String actions = host.getString(R.string.task_section_next);
-                    for (TaskStore.Stored stored : next) {
-                        rows.add(new Row(stored, stored.task.due() != null ? due : actions));
-                    }
-                    break;
-                }
-            case Task.PROJECT:
-                {
-                    String stuck = host.getString(R.string.task_section_stuck);
-                    String active = host.getString(R.string.task_section_active);
-                    List<Row> stuckRows = new ArrayList<>();
-                    List<Row> activeRows = new ArrayList<>();
-                    for (TaskStore.Stored stored : open) {
-                        if (!Task.PROJECT.equals(listOf(stored))) {
-                            continue;
-                        }
-                        if (nextActionOf(stored) == null) {
-                            stuckRows.add(new Row(stored, stuck));
-                        } else {
-                            activeRows.add(new Row(stored, active));
-                        }
-                    }
-                    rows.addAll(stuckRows);
-                    rows.addAll(activeRows);
-                    break;
-                }
-            default:
-                {
-                    String section = host.getString(R.string.task_section_oldest);
-                    List<TaskStore.Stored> listed = new ArrayList<>();
-                    for (TaskStore.Stored stored : open) {
-                        if (shown.equals(listOf(stored))) {
-                            listed.add(stored);
-                        }
-                    }
-                    listed.sort(Comparator.comparing(stored -> stored.task.created()));
-                    for (TaskStore.Stored stored : listed) {
-                        rows.add(new Row(stored, section));
-                    }
-                }
+        if (Task.NEXT.equals(shown)) {
+            listed.sort(TasksList::byDueThenPriority);
+            String due = host.getString(R.string.task_section_due);
+            String actions = host.getString(R.string.task_section_next);
+            for (TaskStore.Stored stored : nested(listed)) {
+                rows.add(new Row(stored, sectionOf(stored, listed, due, actions)));
+            }
+            return rows;
+        }
+        listed.sort(Comparator.comparing(stored -> stored.task.created()));
+        String section = host.getString(R.string.task_section_oldest);
+        for (TaskStore.Stored stored : nested(listed)) {
+            rows.add(new Row(stored, section));
         }
         return rows;
+    }
+
+    /**
+     * Next's section of a row: due or not, a subtask taking its top task's,
+     * so it stays under it.
+     */
+    private static String sectionOf(
+            TaskStore.Stored stored, List<TaskStore.Stored> listed, String due, String actions) {
+        TaskStore.Stored top = stored;
+        Set<String> seen = new HashSet<>();
+        while (top.task.parent() != null && seen.add(top.task.uid())) {
+            TaskStore.Stored above = find(listed, top.task.parent());
+            if (above == null) {
+                break;
+            }
+            top = above;
+        }
+        return top.task.due() != null ? due : actions;
+    }
+
+    /**
+     * The rows in their order, each subtask moved under the task its {@code
+     * RELATED-TO} names when that one is in the same list.
+     */
+    private static List<TaskStore.Stored> nested(List<TaskStore.Stored> listed) {
+        List<TaskStore.Stored> ordered = new ArrayList<>();
+        Set<String> placed = new HashSet<>();
+        for (TaskStore.Stored stored : listed) {
+            if (stored.task.parent() == null || find(listed, stored.task.parent()) == null) {
+                place(stored, listed, ordered, placed);
+            }
+        }
+        // NOTE: what a cycle of parents left out still shows, at the end.
+        for (TaskStore.Stored stored : listed) {
+            if (!placed.contains(stored.task.uid())) {
+                place(stored, listed, ordered, placed);
+            }
+        }
+        return ordered;
+    }
+
+    private static void place(
+            TaskStore.Stored stored,
+            List<TaskStore.Stored> listed,
+            List<TaskStore.Stored> ordered,
+            Set<String> placed) {
+        if (!placed.add(stored.task.uid())) {
+            return;
+        }
+        ordered.add(stored);
+        for (TaskStore.Stored child : listed) {
+            if (stored.task.uid().equals(child.task.parent())) {
+                place(child, listed, ordered, placed);
+            }
+        }
+    }
+
+    private static TaskStore.Stored find(List<TaskStore.Stored> tasks, String uid) {
+        for (TaskStore.Stored stored : tasks) {
+            if (stored.task.uid().equals(uid)) {
+                return stored;
+            }
+        }
+        return null;
     }
 
     /** Due ones first, soonest first; then by priority, 1 highest. */
@@ -451,96 +483,56 @@ public final class TasksList {
         return priority == 0 ? 10 : priority;
     }
 
-    /** A project's first open next action, null when it has none. */
-    TaskStore.Stored nextActionOf(TaskStore.Stored project) {
-        TaskStore.Stored found = null;
+    /** The task a UID names, null when none is loaded. */
+    TaskStore.Stored taskOf(String uid) {
+        return uid == null ? null : find(all, uid);
+    }
+
+    /** Every open to-do but {@code stored}, for a parent picker. */
+    List<TaskStore.Stored> parentsFor(TaskStore.Stored stored) {
+        List<TaskStore.Stored> parents = new ArrayList<>();
+        for (TaskStore.Stored other : open()) {
+            if (!other.task.uid().equals(stored.task.uid())) {
+                parents.add(other);
+            }
+        }
+        return parents;
+    }
+
+    /** Every category an open to-do names, in first-seen order. */
+    Set<String> categories() {
+        Set<String> categories = new LinkedHashSet<>();
         for (TaskStore.Stored stored : open()) {
-            if (project.task.uid().equals(stored.task.parent())
-                    && Task.NEXT.equals(stored.task.list())
-                    && (found == null || byDueThenPriority(stored, found) < 0)) {
-                found = stored;
-            }
+            categories.addAll(stored.task.categories());
         }
-        return found;
+        return categories;
     }
 
-    /** The actions of a project, done ones included. */
-    int[] progressOf(TaskStore.Stored project) {
-        int done = 0;
-        int total = 0;
-        for (TaskStore.Stored stored : all) {
-            if (project.task.uid().equals(stored.task.parent())
-                    && !"CANCELLED".equals(stored.task.status())) {
-                total++;
-                if (stored.task.closed()) {
-                    done++;
-                }
-            }
-        }
-        return new int[] {done, total};
-    }
-
-    /** The project named by a UID, null when none is loaded. */
-    TaskStore.Stored projectOf(String uid) {
-        if (uid == null) {
-            return null;
-        }
-        for (TaskStore.Stored stored : all) {
-            if (uid.equals(stored.task.uid())) {
-                return stored;
-            }
-        }
-        return null;
-    }
-
-    /** Every open project, for a picker. */
-    List<TaskStore.Stored> projects() {
-        List<TaskStore.Stored> projects = new ArrayList<>();
-        for (TaskStore.Stored stored : open()) {
-            if (Task.PROJECT.equals(stored.task.list())) {
-                projects.add(stored);
-            }
-        }
-        return projects;
-    }
-
-    /** Every context an open to-do names, in first-seen order. */
-    Set<String> contexts() {
-        Set<String> contexts = new LinkedHashSet<>();
-        for (TaskStore.Stored stored : open()) {
-            contexts.addAll(stored.task.contexts());
-        }
-        return contexts;
-    }
-
-    private void renderContexts(List<TaskStore.Stored> open) {
-        contextRow.removeAllViews();
-        Set<String> contexts = new LinkedHashSet<>();
+    private void renderCategories(List<TaskStore.Stored> open) {
+        categoryRow.removeAllViews();
+        Set<String> categories = new LinkedHashSet<>();
         for (TaskStore.Stored stored : open) {
-            if (Task.NEXT.equals(listOf(stored))) {
-                contexts.addAll(stored.task.contexts());
-            }
+            categories.addAll(stored.task.categories());
         }
-        ((View) contextRow.getParent())
-                .setVisibility(
-                        Task.NEXT.equals(shown) && !contexts.isEmpty() ? View.VISIBLE : View.GONE);
-        if (context != null && !contexts.contains(context)) {
-            context = null;
+        ((View) categoryRow.getParent())
+                .setVisibility(categories.isEmpty() ? View.GONE : View.VISIBLE);
+        if (category != null && !categories.contains(category)) {
+            category = null;
         }
 
-        TextView every = chip(contextRow, host.getString(R.string.task_context_all), 0);
-        draw(every, 0, context == null);
+        TextView every = chip(categoryRow, host.getString(R.string.task_context_all), 0);
+        draw(every, 0, category == null);
         every.setOnClickListener(
                 view -> {
-                    context = null;
+                    category = null;
                     render();
                 });
-        for (String name : contexts) {
-            TextView chip = chip(contextRow, name, 0);
-            draw(chip, 0, name.equals(context));
+        for (String name : categories) {
+            TextView chip = chip(categoryRow, name, 0);
+            draw(chip, 0, name.equals(category));
             chip.setOnClickListener(
                     view -> {
-                        context = name.equals(context) ? null : name;
+                        category = name.equals(category) ? null : name;
                         render();
                     });
         }
@@ -566,8 +558,6 @@ public final class TasksList {
                 return R.string.tasks_empty_inbox;
             case Task.WAITING:
                 return R.string.tasks_empty_waiting;
-            case Task.PROJECT:
-                return R.string.tasks_empty_projects;
             case Task.SOMEDAY:
                 return R.string.tasks_empty_someday;
             default:
@@ -602,20 +592,11 @@ public final class TasksList {
         chip.setCompoundDrawableTintList(ColorStateList.valueOf(color));
     }
 
-    /** The second line of a row: where it belongs. */
+    /** The second line of a row: where it belongs, by the list shown. */
     private String lineOf(TaskStore.Stored stored) {
         Task task = stored.task;
         List<String> parts = new ArrayList<>();
-        if (Task.PROJECT.equals(task.list())) {
-            TaskStore.Stored next = nextActionOf(stored);
-            int[] progress = progressOf(stored);
-            if (next != null) {
-                parts.add(host.getString(R.string.task_project_next, next.task.summary()));
-            }
-            parts.add(host.getString(R.string.task_project_progress, progress[0], progress[1]));
-            return String.join(" · ", parts);
-        }
-        if (Task.WAITING.equals(task.list())) {
+        if (Task.WAITING.equals(shown)) {
             String who = task.contactName().isEmpty() ? task.contactAddress() : task.contactName();
             if (!who.isEmpty()) {
                 parts.add(who);
@@ -626,7 +607,7 @@ public final class TasksList {
             }
             return String.join(" · ", parts);
         }
-        if (Task.INBOX.equals(task.list())) {
+        if (Task.INBOX.equals(shown)) {
             long at = TaskStore.capturedAt(task);
             if (at > 0) {
                 parts.add(Dates.day(host, at).toString());
@@ -636,10 +617,10 @@ public final class TasksList {
             }
             return String.join(" · ", parts);
         }
-        parts.addAll(task.contexts());
-        TaskStore.Stored project = projectOf(task.parent());
-        if (project != null) {
-            parts.add(project.task.summary());
+        parts.addAll(task.categories());
+        TaskStore.Stored parent = taskOf(task.parent());
+        if (parent != null) {
+            parts.add(parent.task.summary());
         }
         if (parts.isEmpty()) {
             parts.add(stored.calendar.name);
@@ -650,7 +631,7 @@ public final class TasksList {
     /** What the right of a row says: when it is due, or how long it waited. */
     private String whenOf(TaskStore.Stored stored) {
         Task task = stored.task;
-        if (Task.WAITING.equals(task.list())) {
+        if (Task.WAITING.equals(shown)) {
             long since = TaskStore.capturedAt(task);
             if (since <= 0) {
                 return "";
@@ -695,8 +676,9 @@ public final class TasksList {
 
             TextView when = view.findViewById(R.id.task_when);
             when.setText(whenOf(row.stored));
+            boolean waiting = Task.WAITING.equals(shown);
             boolean late =
-                    Task.WAITING.equals(task.list())
+                    waiting
                             && TaskStore.capturedAt(task) > 0
                             && System.currentTimeMillis() - TaskStore.capturedAt(task)
                                     > 14 * 86_400_000L;
@@ -705,21 +687,16 @@ public final class TasksList {
                             late ? android.R.attr.colorError : android.R.attr.textColorSecondary));
 
             TextView badge = view.findViewById(R.id.task_badge);
-            if (Task.WAITING.equals(task.list()) && replied(row.stored)) {
+            if (waiting && replied(row.stored)) {
                 badge.setText(R.string.task_reply_received);
-                badge.setVisibility(View.VISIBLE);
-            } else if (Task.PROJECT.equals(task.list()) && nextActionOf(row.stored) == null) {
-                badge.setText(R.string.task_no_next_action);
                 badge.setVisibility(View.VISIBLE);
             } else {
                 badge.setVisibility(View.GONE);
             }
 
-            // NOTE: a capture is clarified rather than ticked off, and a
-            // project closes when its outcome does, from its page.
+            // NOTE: a capture is clarified rather than ticked off.
             ImageButton done = view.findViewById(R.id.task_done);
-            boolean tickable =
-                    !Task.INBOX.equals(task.list()) && !Task.PROJECT.equals(task.list());
+            boolean tickable = !Task.INBOX.equals(shown);
             done.setVisibility(tickable ? View.VISIBLE : View.INVISIBLE);
             done.setOnClickListener(tickable ? button -> done(row.stored, true) : null);
             return view;

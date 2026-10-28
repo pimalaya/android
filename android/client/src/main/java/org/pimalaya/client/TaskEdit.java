@@ -1,5 +1,6 @@
 package org.pimalaya.client;
 
+import java.util.Locale;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -13,14 +14,16 @@ import org.json.JSONObject;
  * @param summary the {@code SUMMARY}
  * @param description the {@code DESCRIPTION}
  * @param status the {@code STATUS}
- * @param categories the contexts, comma-separated {@code CATEGORIES}
+ * @param categories the person's own {@code CATEGORIES}, comma-separated;
+ *     a to-do's state stays whatever they are
  * @param priority the {@code PRIORITY}
  * @param due the {@code DUE}
  * @param completed the {@code COMPLETED}, civil UTC
  * @param percentComplete the {@code PERCENT-COMPLETE}
- * @param list the {@code X-PIMALAYA-GTD} list; empty or {@link Task#NEXT}
- *     makes it a next action
- * @param parent the {@code UID} of the project; empty detaches it
+ * @param list the state, {@link Task#INBOX}, {@link Task#WAITING} or {@link
+ *     Task#SOMEDAY}, written as its category in place of the one before;
+ *     empty or {@link Task#NEXT} makes it a next action
+ * @param parent the {@code UID} of the task it sits under; empty detaches it
  * @param contactName who a Waiting For item waits on; with an empty address,
  *     empty removes the {@code CONTACT}
  * @param contactAddress their address
@@ -50,7 +53,7 @@ public record TaskEdit(
                 stamp);
     }
 
-    /** This edit moving the to-do to {@code list}. */
+    /** This edit moving the to-do to {@code list}, its state. */
     public TaskEdit withList(String list) {
         return new TaskEdit(
                 summary, description, status, categories, priority, due, completed,
@@ -64,14 +67,14 @@ public record TaskEdit(
                 percentComplete, list, parent, contactName, contactAddress, source, stamp);
     }
 
-    /** This edit setting the contexts, comma-separated. */
-    public TaskEdit withContexts(String categories) {
+    /** This edit setting the person's categories, comma-separated. */
+    public TaskEdit withCategories(String categories) {
         return new TaskEdit(
                 summary, description, status, categories, priority, due, completed,
                 percentComplete, list, parent, contactName, contactAddress, source, stamp);
     }
 
-    /** This edit setting the project. */
+    /** This edit setting the task it sits under. */
     public TaskEdit withParent(String parent) {
         return new TaskEdit(
                 summary, description, status, categories, priority, due, completed,
@@ -152,7 +155,9 @@ public record TaskEdit(
             edit.put("percentComplete", percentComplete);
             edit.put(
                     "gtd",
-                    list == null ? null : Task.NEXT.equals(list) ? "" : list);
+                    list == null
+                            ? null
+                            : Task.NEXT.equals(list) ? "" : list.toLowerCase(Locale.ROOT));
             edit.put("parent", parent);
             if (contactName != null || contactAddress != null) {
                 JSONObject contact = new JSONObject();

@@ -622,12 +622,13 @@ public final class AccountSettings {
     }
 
     /**
-     * The tasks card: which of the account's calendars take tasks, and the
-     * one captures go to, picked by a tap.
+     * The tasks card: which of the account's calendars take tasks.
      *
-     * <p>An account none of whose calendars take tasks gets the line saying
-     * why instead (cairn/changes/gtd: the point of use, besides the capture
-     * sheet and onboarding).
+     * <p>Where a capture goes is picked in the capture sheet, which keeps the
+     * last one: there is no default to set here
+     * (cairn/changes/gtd-by-categories). An account none of whose calendars
+     * take tasks gets the line saying why instead (cairn/changes/gtd: the
+     * point of use, besides the capture sheet and onboarding).
      */
     private void addTasks(Sections sections, String email) {
         List<EventStore.StoredCalendar> calendars = new ArrayList<>();
@@ -647,35 +648,16 @@ public final class AccountSettings {
             sections.section(R.string.tasks_title, R.drawable.ic_component_todo, rows, null, false);
             return;
         }
-        List<EventStore.StoredCalendar> targets = TaskStore.targets(parts.events(), host);
-        String here = targets.isEmpty() ? null : targets.get(0).id;
         for (EventStore.StoredCalendar calendar : calendars) {
-            if (!TaskStore.takesTasks(calendar)) {
-                rows.add(
-                        sections.row(
-                                calendar.name,
-                                host.getString(R.string.account_tasks_events_only),
-                                null,
-                                null));
-                continue;
-            }
-            boolean chosen = calendar.id.equals(here);
-            RadioButton radio = new RadioButton(host);
-            radio.setChecked(chosen);
-            radio.setClickable(false);
-            radio.setFocusable(false);
             rows.add(
                     sections.row(
                             calendar.name,
                             host.getString(
-                                    chosen
-                                            ? R.string.account_tasks_captures_here
-                                            : R.string.account_tasks_takes),
-                            radio,
-                            () -> {
-                                TaskStore.captureTo(host, calendar.id);
-                                render();
-                            }));
+                                    TaskStore.takesTasks(calendar)
+                                            ? R.string.account_tasks_takes
+                                            : R.string.account_tasks_events_only),
+                            null,
+                            null));
         }
         sections.section(R.string.tasks_title, R.drawable.ic_component_todo, rows, null, false);
     }

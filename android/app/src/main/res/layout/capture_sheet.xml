@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The capture sheet, on the sync sheet's ground (sync_sheet.xml): what
-     is on the person's mind, an optional note, where it goes, and the
-     mail it was captured from when there is one (CaptureSheet). -->
+     is on the person's mind, an optional note, the mail it was captured
+     from when there is one, and the task calendar it goes to: a dropdown
+     when there are several, why it cannot go anywhere when there are none
+     (CaptureSheet). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -73,15 +75,31 @@
         android:visibility="gone" />
 
     <TextView
+        android:id="@+id/capture_where"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/capture_where"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    <Spinner
         android:id="@+id/capture_target"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/capture_none"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:background="?android:attr/selectableItemBackground"
-        android:paddingTop="10dp"
-        android:paddingBottom="10dp"
-        android:textColor="?android:attr/textColorPrimary"
-        android:textSize="15sp" />
+        android:text="@string/capture_no_calendar"
+        android:textColor="?android:attr/colorError"
+        android:textSize="14sp"
+        android:visibility="gone" />
 
     <TextView
         android:layout_width="match_parent"

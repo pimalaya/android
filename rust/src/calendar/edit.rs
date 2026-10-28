@@ -11,6 +11,7 @@ use ical::{
         priority::PRIORITY, status::STATUS, summary::SUMMARY, url::URL,
     },
     tree::{
+        codec::mode::Escaper,
         cst::{IcalCst, IcalItem},
         prop::lens::IcalPropLens,
         value::cursor::IcalValueCursor,
@@ -23,6 +24,7 @@ use ical::{
         text::{IcalText, IcalTextList},
         uri::IcalUri,
     },
+    version::IcalVersion,
 };
 use serde::Deserialize;
 
@@ -58,10 +60,11 @@ pub struct EventEdit {
     /// a UTC DATE-TIME by RFC 5545 3.8.2.1.
     pub completed: Option<DateEdit>,
     pub percent_complete: Option<String>,
-    /// The GTD list (`X-PIMALAYA-GTD`), one of [`task::LISTS`]; empty
-    /// makes the to-do a next action.
+    /// The GTD state, one of [`task::STATES`] written as a category in
+    /// place of the one it replaces; empty, or anything else, makes the
+    /// to-do a next action. Every other category is kept.
     pub gtd: Option<String>,
-    /// The `UID` of the project, a `RELATED-TO` of type `PARENT`; empty
+    /// The `UID` of the parent task, a `RELATED-TO` of type `PARENT`; empty
     /// detaches it, other relations kept.
     pub parent: Option<String>,
     /// Who a Waiting For item waits on (`CONTACT`); empty name and
@@ -246,12 +249,26 @@ pub fn patch(component: &mut IcalCst<'static>, edit: &EventEdit) {
     }
 
     if let Some(value) = &edit.categories {
+        // NOTE: on a to-do the GTD state is a category the form does not
+        // show, so it stays: only `gtd` sets it (pimdir GUIDE §17).
+        let todo = is_todo(component);
+        let kept: Vec<String> = match todo {
+            true => categories(component)
+                .into_iter()
+                .flat_map(|(_, values)| values)
+                .filter(|value| task::state_of(value).is_some())
+                .collect(),
+            false => Vec::new(),
+        };
         component.remove::<CATEGORIES>();
         let items: Vec<_> = value
             .split(',')
             .map(str::trim)
             .filter(|item| !item.is_empty())
-            .map(|item| item.to_string().into())
+            .filter(|item| !todo || task::state_of(item).is_none())
+            .map(str::to_string)
+            .chain(kept)
+            .map(Into::into)
             .collect();
         if !items.is_empty() {
             component.push(prop(
@@ -290,25 +307,17 @@ pub fn patch(component: &mut IcalCst<'static>, edit: &EventEdit) {
     touch(component, edit);
 }
 
-/// Replaces the GTD properties of a to-do (cairn/changes/gtd), each on
-/// its own so what another client relates or attaches stays.
+/// Replaces the GTD properties of a to-do (cairn/changes/gtd-by-categories),
+/// each on its own so what another client relates or attaches stays.
 fn patch_task(component: &mut IcalCst<'static>, edit: &EventEdit) {
-    if let Some(list) = &edit.gtd {
-        remove_named(component, task::GTD);
-        let list = list.trim().to_ascii_uppercase();
-        if task::LISTS.contains(&list.as_str()) {
-            component.push(IcalProp {
-                name: IcalPropName::Unknown(task::GTD.into()),
-                params: Vec::new(),
-                value: IcalValue::Text(IcalText(list.into())),
-            });
-        }
+    if let Some(state) = &edit.gtd {
+        set_state(component, task::state_of(state));
     }
 
     if let Some(parent) = &edit.parent {
         component.items.retain(|item| match item {
             IcalItem::Prop(line) if line.name.get().eq_ignore_ascii_case("RELATED-TO") => {
-                let decoded = line.decode(ical::version::IcalVersion::V2_0);
+                let decoded = line.decode(IcalVersion::V2_0);
                 !decoded.params.iter().all(|param| match param {
                     IcalParam::RelType(kind) => kind.eq_ignore_ascii_case("PARENT"),
                     _ => true,
@@ -361,6 +370,106 @@ fn patch_task(component: &mut IcalCst<'static>, edit: &EventEdit) {
             ));
         }
     }
+}
+
+/// Sets the GTD state of a to-do to `state`, [`None`] making it a next
+/// action.
+///
+/// Only the reserved values move (pimdir GUIDE §17): every other category
+/// stays in order, and a line holding none of them stays byte for byte.
+/// The state takes the place of the first reserved value it replaces, else
+/// a line of its own; a to-do already in that state is left untouched, its
+/// casing included.
+fn set_state(component: &mut IcalCst<'static>, state: Option<&'static str>) {
+    let lines = categories(component);
+    let mut present: Vec<&str> = lines
+        .iter()
+        .flat_map(|(_, values)| values)
+        .filter_map(|value| task::state_of(value))
+        .collect();
+    present.sort_unstable();
+    present.dedup();
+    if present == state.into_iter().collect::<Vec<_>>() {
+        return;
+    }
+
+    let mut placed = state.is_none();
+    let mut emptied = Vec::new();
+    for (index, values) in lines {
+        if values.iter().all(|value| task::state_of(value).is_none()) {
+            continue;
+        }
+        let mut kept = Vec::new();
+        for value in values {
+            match task::state_of(&value) {
+                None => kept.push(value),
+                Some(_) if !placed => {
+                    kept.extend(state.map(str::to_string));
+                    placed = true;
+                }
+                Some(_) => {}
+            }
+        }
+        match kept.is_empty() {
+            true => emptied.push(index),
+            false => replace_categories(component, index, kept),
+        }
+    }
+    for index in emptied.into_iter().rev() {
+        component.items.remove(index);
+    }
+    if let (false, Some(state)) = (placed, state) {
+        component.push(prop(
+            IcalPropKind::Categories,
+            Vec::new(),
+            IcalValue::TextList(IcalTextList(vec![state.into()])),
+        ));
+    }
+}
+
+/// Every `CATEGORIES` line of a component: where it sits among the items,
+/// and its values, decoded.
+fn categories(component: &IcalCst<'static>) -> Vec<(usize, Vec<String>)> {
+    component
+        .items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| match item {
+            IcalItem::Prop(line) if line.name.get().eq_ignore_ascii_case("CATEGORIES") => {
+                let values = match line.decode(IcalVersion::V2_0).value {
+                    IcalValue::TextList(list) => {
+                        list.0.iter().map(|value| value.to_string()).collect()
+                    }
+                    _ => vec![line.value.decode().to_string()],
+                };
+                Some((index, values))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Writes `values` over the `CATEGORIES` line at `index`, its parameters
+/// kept.
+fn replace_categories(component: &mut IcalCst<'static>, index: usize, values: Vec<String>) {
+    let IcalItem::Prop(line) = &component.items[index] else {
+        return;
+    };
+    let encoded = IcalProp {
+        name: IcalPropName::Kind(IcalPropKind::Categories),
+        params: line.decode(IcalVersion::V2_0).params,
+        value: IcalValue::TextList(IcalTextList(values.into_iter().map(Into::into).collect())),
+    }
+    .encode(Escaper::default());
+    component.items[index] = IcalItem::Prop(encoded);
+}
+
+/// Whether a component is a to-do, the one kind carrying a GTD state.
+fn is_todo(component: &IcalCst<'static>) -> bool {
+    component
+        .begin
+        .as_ref()
+        .is_some_and(|begin| begin.raw_value_str().eq_ignore_ascii_case("VTODO"))
 }
 
 /// Stamps a component as edited now.
