@@ -6,13 +6,16 @@ import android.util.Log;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
 
+import org.json.JSONArray;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.calendar.CalendarParts;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.PimdirSql;
 import org.pimalaya.client.Task;
+import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirItems;
 
 import java.util.ArrayList;
@@ -149,35 +152,53 @@ public final class TaskStore {
     /**
      * The UIDs of the Waiting For items a reply arrived to.
      *
-     * <p>A mail whose {@code In-Reply-To} names the message the item came
-     * from: computed from the store, never written, so it holds whichever
-     * client closes the item.
+     * <p>A live mail whose {@code In-Reply-To} names the message the item came
+     * from, the person's own under {@code sent} or {@code drafts} answering
+     * nothing: io-pimdir's {@code PimdirReader::replied}, its canonical
+     * {@code list_replied} run once for every item. Computed from the store,
+     * never written, so it holds whichever client closes the item.
      */
     public Set<String> replied(List<Stored> tasks) {
-        Set<String> replied = new HashSet<>();
-        SQLiteDatabase db = new PimdirItems(parts.pimdir()).readable();
+        Map<String, Set<String>> waiting = new HashMap<>();
         for (Stored stored : tasks) {
             Task task = stored.task;
             if (!task.in(Task.WAITING) || task.closed() || task.source() == null) {
                 continue;
             }
-            try (Cursor cursor =
-                    db.rawQuery(
-                            "SELECT 1 FROM mail_summary m"
-                                    + " JOIN items i ON i.collection = m.collection"
-                                    + " AND i.link_id = m.link_id"
-                                    + " WHERE i.deleted = 0 AND m.in_reply_to IS NOT NULL"
-                                    + " AND EXISTS (SELECT 1 FROM json_each(m.in_reply_to)"
-                                    + " WHERE value = ?) LIMIT 1",
-                            new String[] {task.source()})) {
-                if (cursor.moveToNext()) {
-                    replied.add(task.uid());
-                }
-            } catch (Exception error) {
-                Log.w("pimalaya", "reply lookup failed: " + task.uid(), error);
+            String id = bare(task.source());
+            if (!id.isEmpty()) {
+                waiting.computeIfAbsent(id, any -> new HashSet<>()).add(task.uid());
             }
         }
+        Set<String> replied = new HashSet<>();
+        if (waiting.isEmpty()) {
+            return replied;
+        }
+        PimdirSql.Bound bound =
+                PimdirSql.bind(
+                        "LIST_REPLIED",
+                        Map.of("ids", new JSONArray(waiting.keySet()).toString()));
+        SQLiteDatabase db = new PimdirItems(parts.pimdir()).readable();
+        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+            while (cursor.moveToNext()) {
+                replied.addAll(waiting.getOrDefault(cursor.getString(0), Set.of()));
+            }
+        } catch (Exception error) {
+            Log.w("pimalaya", "reply lookup failed", error);
+        }
         return replied;
+    }
+
+    /**
+     * A {@code Message-ID} as {@code list_replied} compares it, as io-pimdir's
+     * reader takes it: trimmed, one pair of enclosing angle brackets stripped.
+     */
+    private static String bare(String messageId) {
+        String id = messageId.trim();
+        if (id.startsWith("<") && id.endsWith(">") && id.length() > 1) {
+            id = id.substring(1, id.length() - 1);
+        }
+        return id.trim();
     }
 
     /**

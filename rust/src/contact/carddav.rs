@@ -7,6 +7,7 @@ use std::{borrow::Cow, collections::BTreeSet};
 
 use io_pim_discovery::rfc6764::{service::DiscoveryDavService, well_known::DiscoveryWellKnown};
 use io_webdav::{
+    rfc4918::collection_path,
     rfc6352::{
         addressbook::{CarddavAddressbook as DavAddressbook, list::CarddavAddressbookList},
         card::{
@@ -198,14 +199,11 @@ pub fn normalize_vcard(vcard: &str) -> Cow<'_, str> {
 /// An io-webdav addressbook as an [`Addressbook`].
 ///
 /// The name defaults to the id, and the collection URL is rebuilt from
-/// the home set, io-webdav keeping only the last path segment.
+/// the home set and the id ([`collection_path`]): the last path segment of
+/// a book under the home set, the path itself of one outside it.
 fn into_addressbook(home_set: &Url, book: DavAddressbook) -> Addressbook {
     let mut url = home_set.clone();
-    url.set_path(&format!(
-        "{}/{}/",
-        home_set.path().trim_end_matches('/'),
-        book.id
-    ));
+    url.set_path(&collection_path(home_set.path(), &book.id));
 
     Addressbook {
         name: book.display_name.unwrap_or_else(|| book.id.clone()),

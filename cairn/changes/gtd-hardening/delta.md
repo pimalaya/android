@@ -3,7 +3,7 @@ cairn: delta
 change: gtd-hardening
 ---
 
-Folds into spec/tasks.md and spec/offline-store.md.
+Folds into spec/tasks.md, spec/calendar.md and spec/offline-store.md.
 
 ## ADDED Requirements
 
@@ -67,7 +67,7 @@ A capture SHALL be staged at once as a dateless VTODO carrying `CATEGORIES:inbox
 - THEN the Inbox holds a task carrying `CATEGORIES:inbox` and `CREATED`, linked to the mail's `Message-ID`, and the mail is still in INBOX
 
 ### Requirement: Only CalDAV calendars take tasks
-A capture SHALL be offered only writable calendars served over CalDAV for which no source syncing them states `x-vtodo` `none` (pimdir STORAGE §15.6); a Microsoft, Google or JMAP calendar and the phone's local calendar SHALL NOT be offered. A CalDAV listing SHALL declare `x-vtodo` `none` for a calendar whose `supported-calendar-component-set` names components but not `VTODO`, and `full` otherwise. A create or a move of a task into a calendar not taking tasks SHALL be refused before anything is staged.
+A capture SHALL be offered only writable calendars served over CalDAV for which no source syncing them states `x-vtodo` `none` (pimdir STORAGE §15.6); a Microsoft, Google or JMAP calendar and the phone's local calendar SHALL NOT be offered. A CalDAV listing SHALL declare `x-vtodo` `none` for a calendar whose `supported-calendar-component-set` names components but not `VTODO`, and `full` otherwise, and SHALL record the server source as syncing each calendar it lists, a calendar's sync state kept as it stands (none before its first round), so the declaration counts from the listing on, before the calendar's first sync. A create or a move of a task into a calendar not taking tasks SHALL be refused before anything is staged.
 
 #### Scenario: No CalDAV calendar
 - GIVEN accounts whose calendars are all Graph or Google
@@ -75,7 +75,7 @@ A capture SHALL be offered only writable calendars served over CalDAV for which 
 - THEN the capture sheet says no calendar takes tasks yet and offers no save
 
 #### Scenario: An events-only CalDAV calendar
-- GIVEN a CalDAV calendar whose `supported-calendar-component-set` names `VEVENT` alone, synced once
+- GIVEN a CalDAV calendar whose `supported-calendar-component-set` names `VEVENT` alone, listed and never synced
 - WHEN Capture is pressed
 - THEN the capture sheet does not offer it
 
@@ -93,17 +93,92 @@ The Tasks tab SHALL offer, under its lists, a filter over the categories the ope
 - THEN Next lists both, and the filter offers Work once
 
 ### Requirement: Filing a capture elsewhere never loses it
-Clarifying an item into another task calendar SHALL stage, in one transaction, its edited body as an add in the target superseding the source item (pimdir STORAGE §15.3) and the source's tombstone, rather than a move: the source's delete SHALL NOT be pushed while the add is a pending create, so a refused create SHALL leave the capture on its server. The `UID` and the link id SHALL stay.
+Clarifying an item into another task calendar SHALL stage, in one transaction, its edited body as an add in the target superseding the source item (pimdir STORAGE §15.3) and the source's tombstone, rather than a move: the source's delete SHALL NOT be pushed while the add is a pending create, so a refused create SHALL leave the capture on its server. The `UID` and the link id SHALL stay. When the server syncing the target holds the source item in a calendar of the same account, the next sync SHALL deliver the add by a WebDAV `MOVE` of that item into the target, `If-Match` its last-synced ETag, then a write of the edited body over it, so the `UID` never lives in two calendars (pimdir SYNC §4); a move the server answers as one it cannot do (405, 501, 404) SHALL be an upload instead, and a move refused for the `UID` or the ETag SHALL refuse the add as a refused upload does, uploading nothing. The source's delete that follows SHALL count as done when the item is already gone.
 
 #### Scenario: Another calendar
 - GIVEN an Inbox item in Work and a second task calendar, Home
 - WHEN it is clarified into a next action filed in Home
 - THEN the store holds it once, in Home, under the same `UID`, and Work no more
 
-#### Scenario: The server refuses the create
-- GIVEN an Inbox item in Work clarified into Home, and a server refusing the create there
+#### Scenario: A server keeping one UID per account
+- GIVEN an Inbox item in Work clarified into Home, on a server refusing a create of a `UID` another of its calendars holds, as Fastmail does
 - WHEN the calendars sync
-- THEN Work still holds the item on the server
+- THEN Work's item is moved into Home and carries the clarification there, nothing is uploaded, and Work no longer holds it
+
+#### Scenario: A server that cannot move
+- GIVEN an Inbox item in Work clarified into Home, on a server answering `MOVE` with 404, as Google does
+- WHEN the calendars sync
+- THEN Home receives the item by an upload, and Work's copy is deleted once Home holds it
+
+#### Scenario: The server refuses the create
+- GIVEN an Inbox item in Work clarified into Home, and a server refusing the move and the create there with 403 for the `UID`
+- WHEN the calendars sync
+- THEN both passes succeed, the add stays staged, and Work still holds the item on the server
+
+### Requirement: A calendar entry can be created
+The app SHALL create a calendar entry from the entry page in the store alone: a fresh object carrying the `UID`, `DTSTAMP` and `DTSTART` RFC 5545 section 3.6.1 requires and nothing else, staged as a pending create. The next sync SHALL PUT it to a resource named after its `UID`, guarded by `If-None-Match: *`. A create the server refuses as such, with 403, 409, 412 or 422, SHALL stay staged for the sync that follows and the pass SHALL go on with the calendar's other changes, so one refused item never fails the calendar's pass; a 401, a throttle (a 403 naming a rate limit or a quota) and every other failure SHALL fail the pass as before. A refusal SHALL cross the bridge with its status whichever refusal io-webdav reads it as, a duplicate `UID` (`no-uid-conflict`, `unique-scheduling-object-resource`) included.
+
+#### Scenario: A new entry
+- GIVEN a writable calendar
+- WHEN the agenda's add button is used and the page is saved
+- THEN the entry appears in the agenda at once, with no network
+- AND the next sync creates it on the server
+
+#### Scenario: The resource already exists
+- GIVEN a server already holding that resource
+- WHEN the sync pushes the create
+- THEN the server refuses it, nothing is overwritten, and the create stays staged
+
+#### Scenario: One create refused among others
+- GIVEN a calendar with two staged creates, the server answering the first with 403 "WebDAV collection already holds a resource with the same UID" or with 409
+- WHEN the calendar syncs
+- THEN the pass succeeds, the second is created, and the first stays staged
+
+#### Scenario: A refused token
+- GIVEN a staged create the server answers with 401
+- WHEN the calendar syncs
+- THEN the pass fails, so the token is renewed
+
+#### Scenario: Several calendars
+- GIVEN more than one writable calendar
+- WHEN a new entry is started
+- THEN the calendar it lands in is asked for, and taken silently when there is only one
+
+### Requirement: A calendar entry can be deleted
+The app SHALL stage a calendar entry's deletion, after asking, and the entry SHALL leave the agenda at once. The next sync SHALL delete it guarded by the ETag it was read at; a delete the server refuses SHALL leave the removal staged for the sync that follows. A delete finding the entry already gone SHALL count as done: a 404, or a 412 when the server, read back, holds no entry of that name (an `If-Match` on an object gone being false, RFC 9110 section 13.1.1).
+
+#### Scenario: Deleting an entry
+- GIVEN an entry open on its page
+- WHEN it is deleted
+- THEN it leaves the agenda at once, and the next sync tells the server
+
+#### Scenario: The entry moved under it
+- GIVEN an entry another client has edited since it was read
+- WHEN the sync pushes the delete
+- THEN the server refuses on the precondition and the removal stays staged
+
+#### Scenario: The entry already gone
+- GIVEN a deleted entry another client deleted on the server after the sync listed it, on a server answering 412 to the guarded delete of an object gone
+- WHEN the sync pushes the delete
+- THEN the removal is done and nothing stays staged
+
+#### Scenario: An entry the server has never seen
+- GIVEN a new entry that has not been saved
+- WHEN it is deleted
+- THEN the page closes and nothing is ever sent
+
+### Requirement: A reply marks a Waiting For
+A Waiting For item linked to a mail SHALL show a reply received when the store holds a live mail whose `In-Reply-To` names that mail, a mail filed under the `sent` or `drafts` role being the person's own and answering nothing, as io-pimdir's `PimdirReader::replied` reads it (the canonical `list_replied`, one statement for every item listed). That SHALL be computed at load, never written.
+
+#### Scenario: Send and wait
+- GIVEN a mail sent with Send and wait for a reply
+- WHEN a reply to it is synced
+- THEN its Waiting For item shows Reply received
+
+#### Scenario: The person's own follow-up
+- GIVEN a Waiting For item linked to a mail, and the person's follow-up to that mail in Sent
+- WHEN the Tasks tab loads
+- THEN the item shows no reply received
 
 ### Requirement: An item carries the standard's summary
 The store SHALL record what a reader lists an item from in its kind's summary table and the people it names in `item_address`, as pimdir STORAGE Annex A defines them, written through the canonical statements. It SHALL NOT keep a summary convention of its own in the item row, and SHALL derive one through io-pimdir wherever the body is on hand: a calendar object listed from its server or the phone, or staged by the app, SHALL carry the summary and sort key its body derives.

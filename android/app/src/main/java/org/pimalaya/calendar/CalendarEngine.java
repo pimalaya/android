@@ -22,6 +22,7 @@ import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.pimdir.PimdirEngine;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -40,6 +41,9 @@ public final class CalendarEngine extends PimdirEngine {
      * and Graph and Google count requests per user.
      */
     public static final int WORKERS = 3;
+
+    /** What a throttled 403 names (rust/src/error.rs, refused_for_good). */
+    private static final String[] THROTTLES = {"rate limit", "ratelimit", "quota", "usage limit"};
 
     private final Account account;
 
@@ -263,6 +267,13 @@ public final class CalendarEngine extends PimdirEngine {
                 if (row == null) {
                     return result(handle, false, null, null);
                 }
+                JSONObject supersedes = change.optJSONObject("supersedes");
+                if (supersedes != null) {
+                    JSONObject moved = moveInto(url, handle, supersedes, row.getString("vcard"));
+                    if (moved != null) {
+                        return moved;
+                    }
+                }
                 // NOTE: the resource name, never the handle: a staged create
                 // waits under a provisional handle until this push assigns one
                 // (SYNC §2). The handle is what came back: the name a CalDAV
@@ -284,7 +295,7 @@ public final class CalendarEngine extends PimdirEngine {
                     if (isPreconditionFailure(failure)) {
                         return result(handle, false, null, null);
                     }
-                    if (isRefusal(failure)) {
+                    if (isRefusal(failure) || isCreateRefusal(failure)) {
                         return result(handle, false, null, null);
                     }
                     throw failure;
@@ -327,9 +338,16 @@ public final class CalendarEngine extends PimdirEngine {
                             transport, account, new EventTarget(url, handle, ifMatch));
                 } catch (RuntimeException failure) {
                     if (isGone(failure)) {
-                        // NOTE: already gone upstream: the removal converged.
+                        // NOTE: already gone upstream: the removal converged,
+                        // a create delivered by a move having taken it along
+                        // (pimdir SYNC §4).
                     } else if (isPreconditionFailure(failure)) {
-                        return result(handle, false, null, null);
+                        // NOTE: an If-Match on a resource gone is false (RFC
+                        // 9110 13.1.1), so a strict server (SabreDAV) answers
+                        // 412 rather than 404.
+                        if (!absent(url, handle)) {
+                            return result(handle, false, null, null);
+                        }
                     } else if (isRefusal(failure)) {
                         return result(handle, false, null, null);
                     } else {
@@ -365,6 +383,93 @@ public final class CalendarEngine extends PimdirEngine {
     }
 
     /**
+     * Delivers a create superseding a member of its identity by moving that
+     * member here, then writing the create's body over it (pimdir SYNC §4).
+     *
+     * <p>The member itself moves, gated on its last-synced ETag, so its {@code
+     * UID} never lives in two calendars: Fastmail refuses a create of a {@code
+     * UID} another of its calendars holds (403), so filing a task elsewhere by
+     * an upload never lands there. Accepted with the moved member's name and
+     * the write's revision; the source's tombstone, held until then, then
+     * finds it gone. Answers null when the server cannot move it (405, 501,
+     * a 404 for the member, as Google answers, a calendar of another account):
+     * the caller uploads the body instead. A move refused for the member's
+     * identity or its ETag refuses the create, as a refused upload does.
+     */
+    private JSONObject moveInto(String url, String handle, JSONObject member, String ical)
+            throws JSONException {
+        String from = member.getString("collection");
+        // NOTE: the store's server source is every account's, so the member
+        // may be another account's calendar, which no move here reaches.
+        if (PimdirAccount.nameOf(accountId, from).equals(from)) {
+            return null;
+        }
+        String ifMatch = member.isNull("ifMatch") ? null : member.getString("ifMatch");
+        EventRef moved;
+        try {
+            moved =
+                    clients.calendar().moveEvent(
+                            transport,
+                            account,
+                            new EventTarget(urlOf(from), member.getString("handle"), ifMatch),
+                            url);
+        } catch (RuntimeException failure) {
+            if (isUnmovable(failure)) {
+                return null;
+            }
+            if (isPreconditionFailure(failure) || isRefusal(failure)
+                    || isCreateRefusal(failure)) {
+                return result(handle, false, null, null);
+            }
+            throw failure;
+        }
+        try {
+            String etag =
+                    clients.calendar().updateEvent(
+                            transport,
+                            account,
+                            new EventTarget(url, moved.id(), moved.etag()),
+                            ical);
+            return result(handle, true, moved.id(), landed(url, moved.id(), etag));
+        } catch (RuntimeException failure) {
+            // NOTE: the member is here with its old body. Left a pending
+            // create, the next listing lands it on that member, whose body the
+            // staged one then updates (SYNC §6).
+            if (isPreconditionFailure(failure) || isRefusal(failure)
+                    || isCreateRefusal(failure)) {
+                return result(handle, false, null, null);
+            }
+            throw failure;
+        }
+    }
+
+    /**
+     * Whether a move was answered as one the server cannot do: 405, 501, or
+     * a 404, Google's answer to {@code MOVE} (pimdir SYNC §4).
+     */
+    private static boolean isUnmovable(Exception failure) {
+        Integer status = status(failure);
+        return Integer.valueOf(405).equals(status)
+                || Integer.valueOf(501).equals(status)
+                || Integer.valueOf(404).equals(status);
+    }
+
+    /**
+     * Whether the server holds no object {@code id} at {@code url}, read
+     * back; false when the read fails, the object then not known gone.
+     */
+    private boolean absent(String url, String id) {
+        try {
+            return clients.calendar()
+                    .multigetEvents(transport, account, url, List.of(id))
+                    .isEmpty();
+        } catch (RuntimeException failure) {
+            Log.w("pimalaya", "whether " + id + " is gone not read back", failure);
+            return false;
+        }
+    }
+
+    /**
      * Whether the change was refused for good: a 422.
      *
      * <p>By the server, or by the bridge for an object no write of the backend
@@ -372,5 +477,34 @@ public final class CalendarEngine extends PimdirEngine {
      */
     private static boolean isRefusal(Exception failure) {
         return Integer.valueOf(422).equals(status(failure));
+    }
+
+    /**
+     * Whether a create was refused as such: a 403 or a 409.
+     *
+     * <p>Fastmail answers 403 to a second resource of one {@code UID} in a
+     * calendar home, RFC 4791 5.3.2 a 409 to one in the calendar, and a
+     * calendar the user may not write a 403: that item's, so it stays a
+     * pending create and the pass goes on, as io-pimdir's engine keeps a
+     * rejected add (a source it supersedes stays on its server). A 403
+     * naming a rate limit or a quota is a throttle, which fails the pass as
+     * the bridge's {@code refused_for_good} reads it: a throttled server
+     * serves no other write either.
+     */
+    private static boolean isCreateRefusal(Exception failure) {
+        Integer status = status(failure);
+        if (Integer.valueOf(409).equals(status)) {
+            return true;
+        }
+        if (!Integer.valueOf(403).equals(status)) {
+            return false;
+        }
+        String message = String.valueOf(failure.getMessage()).toLowerCase(Locale.ROOT);
+        for (String throttle : THROTTLES) {
+            if (message.contains(throttle)) {
+                return false;
+            }
+        }
+        return true;
     }
 }

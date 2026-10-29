@@ -267,6 +267,32 @@ public class CalendarClient {
     }
 
     /**
+     * Moves one object into the calendar at {@code targetUrl}, guarded by its
+     * ETag; returns where it landed, its ETag when the server sent one.
+     *
+     * <p>CalDAV alone moves a member: on another backend, and to a calendar on
+     * another server, it fails with a 501, a move the backend cannot do.
+     */
+    public EventRef moveEvent(
+            Transport transport, Account account, EventTarget target, String targetUrl) {
+        JSONObject moved =
+                Replies.object(
+                        Native.moveEvent(
+                                transport,
+                                account.toJson().toString(),
+                                target.calendarUrl(),
+                                target.id(),
+                                target.etag() == null ? "" : target.etag(),
+                                targetUrl));
+        try {
+            return new EventRef(
+                    moved.getString("id"), moved.isNull("etag") ? null : moved.getString("etag"));
+        } catch (JSONException error) {
+            throw new PimalayaException("Unreadable moved event: " + error.getMessage());
+        }
+    }
+
+    /**
      * Removes one object from its calendar, guarded by its ETag.
      *
      * <p>Guarded and addressed as {@link #updateEvent} is.

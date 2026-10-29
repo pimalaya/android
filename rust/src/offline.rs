@@ -332,6 +332,11 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
                 }),
                 unstamped: loaded.unstamped.into_iter().map(PimdirHandle).collect(),
                 held: loaded.held.into_iter().map(PimdirHandle).collect(),
+                superseded: loaded
+                    .superseded
+                    .into_iter()
+                    .map(|create| (PimdirHandle(create.handle), create.supersedes.into()))
+                    .collect(),
             })
         }
         PimdirYield::WantsLookupObject(_) => {
@@ -464,7 +469,12 @@ mod tests {
     };
     use serde_json::{Value, to_value};
 
-    use crate::offline::{enumerate_json, parse_arg, wire::WriteOpJson};
+    use io_pimdir::{
+        coroutine::{PimdirCoroutine, PimdirCoroutineState},
+        sync::{PimdirSync, PimdirSyncOptions},
+    };
+
+    use crate::offline::{enumerate_json, parse_arg, wire::WriteOpJson, yield_json};
 
     #[test]
     fn the_yield_carries_the_listing_and_the_scope() {
@@ -527,5 +537,54 @@ mod tests {
         .unwrap();
         assert_eq!(stored["bodyBase64"], "/wBh");
         assert_eq!(stored.get("body"), None, "never a lossy copy beside it");
+    }
+
+    /// A pending create superseding a member of its identity, as the Java
+    /// store loads it, is pushed naming that member, so the calendar driver
+    /// can deliver it by a move (pimdir SYNC §3, §4).
+    #[test]
+    fn a_superseding_create_is_pushed_naming_the_member_it_moves() {
+        let opts = PimdirSyncOptions {
+            push: true,
+            ..Default::default()
+        };
+        let mut sync = PimdirSync::new("acct/home", opts);
+        let loaded = r#"{"placements": [{"collection": "acct/home",
+            "handle": "\u0001gate.ics", "linkId": "gate.ics", "object": "h1",
+            "level": "full", "status": "created"}],
+            "superseded": [{"handle": "\u0001gate.ics", "supersedes":
+            {"collection": "acct/work", "handle": "gate.ics", "ifMatch": "e0"}}]}"#;
+        let mut pushed = Vec::new();
+        let mut arg = None;
+
+        loop {
+            let yielded = match sync.resume(arg.take()) {
+                PimdirCoroutineState::Yielded(yielded) => yielded,
+                PimdirCoroutineState::Complete(done) => {
+                    done.unwrap();
+                    break;
+                }
+            };
+            let envelope: Value = serde_json::from_str(&yield_json(&yielded)).unwrap();
+            let reply = match envelope["op"].as_str().unwrap() {
+                "load" => loaded.to_string(),
+                "enumerate" => r#"{"items": [], "complete": true}"#.to_string(),
+                "push" => {
+                    pushed.extend(envelope["changes"].as_array().unwrap().clone());
+                    r#"{"results": [{"handle": "\u0001gate.ics", "accepted": true,
+                        "assigned": "gate.ics", "revision": "e1"}]}"#
+                        .to_string()
+                }
+                _ => "{}".to_string(),
+            };
+            arg = Some(parse_arg(&yielded, &reply).unwrap());
+        }
+
+        assert_eq!(pushed.len(), 1, "{pushed:?}");
+        assert_eq!(pushed[0]["op"], "add");
+        assert_eq!(
+            pushed[0]["supersedes"],
+            serde_json::json!({"collection": "acct/work", "handle": "gate.ics", "ifMatch": "e0"}),
+        );
     }
 }

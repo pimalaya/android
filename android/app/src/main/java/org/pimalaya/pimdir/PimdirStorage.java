@@ -181,7 +181,52 @@ public final class PimdirStorage {
             }
         }
         held(db, stored, placements, reply);
+        superseded(db, stored, source, placements, reply);
         return reply;
+    }
+
+    /**
+     * Writes the member each loaded pending create may be moved from into a
+     * load reply (SYNC §3): the create superseded an item of its own identity
+     * in another collection, which this source binds there with a base. Read
+     * by the canonical {@code list_superseded_bindings}, by link id, answered
+     * by the create's handle with the member's engine collection, handle and
+     * base revision, which a connector able to move delivers the create from.
+     */
+    private static void superseded(SQLiteDatabase db, String collection, String source,
+            JSONArray placements, JSONObject reply) throws JSONException {
+        Map<String, JSONObject> members = new HashMap<>();
+        PimdirSql.Bound bound =
+                PimdirSql.bind(
+                        "LIST_SUPERSEDED_BINDINGS",
+                        Map.of("collection", collection, "source", source));
+        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+            while (cursor.moveToNext()) {
+                String from = cursor.getString(1);
+                JSONObject member = new JSONObject();
+                member.put("collection", PHONE.equals(source) ? phoneCollection(from) : from);
+                member.put("handle", cursor.getString(2));
+                if (!cursor.isNull(3)) {
+                    member.put("ifMatch", cursor.getString(3));
+                }
+                members.put(cursor.getString(0), member);
+            }
+        }
+        if (members.isEmpty()) {
+            return;
+        }
+        JSONArray superseded = new JSONArray();
+        for (int index = 0; index < placements.length(); index++) {
+            JSONObject placement = placements.getJSONObject(index);
+            JSONObject member = members.get(placement.optString("linkId"));
+            if (member != null && "created".equals(placement.optString("status"))) {
+                superseded.put(
+                        new JSONObject()
+                                .put("handle", placement.getString("handle"))
+                                .put("supersedes", member));
+            }
+        }
+        reply.put("superseded", superseded);
     }
 
     /**

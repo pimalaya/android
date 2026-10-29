@@ -57,7 +57,7 @@ The store SHALL reach a newer schema version by running every canonical migratio
 - THEN migration 2 runs, `store_meta.version` reads 2, and the edit and the message are still there
 
 ### Requirement: An item carries the standard's summary
-The store SHALL record what a reader lists an item from in its kind's summary table and the people it names in `item_address`, as pimdir STORAGE Annex A defines them, written through the canonical statements. It SHALL NOT keep a summary convention of its own in the item row, and SHALL derive one through io-pimdir wherever the body is on hand.
+The store SHALL record what a reader lists an item from in its kind's summary table and the people it names in `item_address`, as pimdir STORAGE Annex A defines them, written through the canonical statements. It SHALL NOT keep a summary convention of its own in the item row, and SHALL derive one through io-pimdir wherever the body is on hand: a calendar object listed from its server or the phone, or staged by the app, SHALL carry the summary and sort key its body derives.
 
 #### Scenario: A card is written
 - GIVEN a vCard with a `FN`, a `UID` and two `EMAIL` properties
@@ -68,6 +68,11 @@ The store SHALL record what a reader lists an item from in its kind's summary ta
 - GIVEN an IMAP envelope and no body
 - WHEN the mail mirror writes the row
 - THEN `mail_summary` holds the same fields the body's derivation would, built from the envelope
+
+#### Scenario: A to-do listed
+- GIVEN a CalDAV calendar holding a VTODO carrying `CATEGORIES:waiting,@home` and `PRIORITY:2`
+- WHEN it syncs
+- THEN `task_summary` holds its summary, its priority and both categories
 
 #### Scenario: A summary the writer did not restate
 - GIVEN an item whose summary is stored

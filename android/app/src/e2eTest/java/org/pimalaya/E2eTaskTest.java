@@ -1,7 +1,9 @@
 package org.pimalaya;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -42,7 +44,7 @@ public class E2eTaskTest extends E2eCase {
     @E2eScenario({
         "tasks: A capture is on the phone at once / Capturing a mail",
         "tasks: A task write patches the object / Nothing to write",
-        "tasks: Filing a capture elsewhere never loses it / The server refuses the create",
+        "tasks: Filing a capture elsewhere never loses it / A server keeping one UID per account",
     })
     public void aTaskIsCapturedClarifiedFiledAndWaitedOn() throws Exception {
         // NOTE: task calendars: a Fastmail calendar made with no component
@@ -129,29 +131,39 @@ public class E2eTaskTest extends E2eCase {
         assertEquals(sent, seen.task.source());
 
         // Filed into the other calendar: one add superseding the source, whose
-        // delete waits on it. A server holding one UID per calendar home
-        // (Fastmail) refuses the add, and the capture stays where it was.
-        writes.moveTo(taskOf(store, uid), home, TaskEdit.at(TaskWrites.now()).withList(Task.NEXT));
+        // delete waits on it. A server holding one UID per account (Fastmail)
+        // refuses its upload while the source holds it, so the add moves the
+        // source's member there (WebDAV MOVE) and writes the edit over it.
+        writes.moveTo(
+                taskOf(store, uid), home, TaskEdit.at(TaskWrites.now()).withList(Task.SOMEDAY));
         Exception first = phone.syncCalendars(address);
         Exception second = phone.syncCalendars(address);
-        String inSource = objectOf(inbox, uid);
-        String inTarget = objectOf(other, uid);
         System.out.println(
                 "e2e " + target.id + ": filing elsewhere left the task "
-                        + (inTarget != null ? "in the target" : "in the source")
+                        + (objectOf(other, uid) != null ? "in the target" : "not in the target")
+                        + (objectOf(inbox, uid) != null ? ", in the source" : ", not in the source")
                         + (first == null ? "" : "; the pass answered " + first.getMessage())
                         + (second == null ? "" : "; the next " + second.getMessage()));
-        assertTrue("the task is on the server somewhere", inSource != null || inTarget != null);
-        if (inTarget == null) {
-            assertNotNull("a refused add keeps the source", inSource);
-        } else {
-            settles(
-                    "the source goes once the add is pushed",
-                    () -> {
-                        sync();
-                        return objectOf(inbox, uid) == null ? null : "still in the source";
-                    });
-        }
+        assertNull("the pass succeeds", first);
+        assertNull("the next pass succeeds", second);
+        settles(
+                "the task is filed in the target alone",
+                () -> {
+                    String inSource = objectOf(inbox, uid);
+                    String inTarget = objectOf(other, uid);
+                    if (inSource == null && inTarget != null) {
+                        return null;
+                    }
+                    sync();
+                    return "in the source " + (inSource != null) + ", in the target "
+                            + (inTarget != null);
+                });
+        String moved = objectOf(other, uid);
+        assertTrue("the edit written over it", moved.contains("CATEGORIES:someday\r\n"));
+        assertTrue(moved, moved.contains("CATEGORIES:@errands\r\n"));
+        TaskStore.Stored filedTask = taskOf(store, uid);
+        assertEquals(home.name, filedTask.calendar.name);
+        assertTrue(filedTask.task.in(Task.SOMEDAY));
     }
 
     /** A device's calendar of that name, which must be listed. */

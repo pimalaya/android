@@ -19,7 +19,7 @@ use serde_json::{from_str, to_string};
 
 use crate::{
     calendar::{
-        Calendars, EventCreate, EventDelete, EventUpdate,
+        Calendars, EventCreate, EventDelete, EventMove, EventUpdate,
         conflict::{merge, resolve},
         edit::{EventDraft, create, write},
         expand::expand,
@@ -558,6 +558,57 @@ pub extern "system" fn Java_org_pimalaya_client_Native_createEvent<'local>(
                 match calendars.create_event(&calendar_url, &event) {
                     Ok(created) => {
                         to_string(&created).unwrap_or_else(|err| error_json(err.to_string()))
+                    }
+                    Err(err) => error_json(err),
+                }
+            }
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.moveEvent`: moves one object into another calendar of the
+/// account, guarded by its ETag.
+///
+/// Returns `{id, etag}`, the resource it landed under, or the error the
+/// server answered with (a 501 for a backend that moves nothing).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_moveEvent<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    account: JString<'local>,
+    calendar_url: JString<'local>,
+    id: JString<'local>,
+    etag: JString<'local>,
+    target_url: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let account = read_string(env, &account);
+        let calendar_url = read_string(env, &calendar_url);
+        let id = read_string(env, &id);
+        let etag = read_string(env, &etag);
+        let target_url = read_string(env, &target_url);
+
+        let json = match parse_account(&account) {
+            Err(err) => error_json(err),
+            Ok(owned) => {
+                let account = owned.account();
+                let event = EventMove {
+                    id: &id,
+                    etag: (!etag.is_empty()).then_some(etag.as_str()),
+                    target_url: &target_url,
+                };
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let mut calendars = Calendars {
+                    client: &mut client,
+                    account: &account,
+                };
+                match calendars.move_event(&calendar_url, &event) {
+                    Ok(moved) => {
+                        to_string(&moved).unwrap_or_else(|err| error_json(err.to_string()))
                     }
                     Err(err) => error_json(err),
                 }

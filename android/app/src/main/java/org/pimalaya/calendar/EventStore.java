@@ -95,6 +95,12 @@ public final class EventStore {
      * per collection rather than the source's whole declaration: the
      * server source is every account's, and a calendar listed again
      * restates its own.
+     *
+     * <p>The server source syncs every calendar it lists, and is recorded as
+     * syncing it from the listing on ({@link #ensureSynced}): a declaration
+     * counts only for a source syncing the collection ({@code
+     * load_capabilities}), and before a first round none would, so nothing
+     * would refuse a task there.
      */
     private void declareTasks(String account, List<Calendar> calendars) {
         SQLiteDatabase db = items.writable();
@@ -104,11 +110,12 @@ public final class EventStore {
                 if (!isCaldav(calendar.url())) {
                     continue;
                 }
+                String collection = PimdirAccount.collectionId(account, calendar.url());
                 boolean refused = Boolean.FALSE.equals(calendar.vtodo());
                 Map<String, Object> values = new HashMap<>();
                 values.put("account", account);
                 values.put("source", PimdirStorage.SERVER);
-                values.put("collection", PimdirAccount.collectionId(account, calendar.url()));
+                values.put("collection", collection);
                 values.put("capability", X_VTODO);
                 values.put("support", refused ? "none" : "full");
                 values.put(
@@ -116,11 +123,35 @@ public final class EventStore {
                         refused ? "its supported-calendar-component-set names no VTODO" : null);
                 PimdirSql.Bound bound = PimdirSql.bind("SET_CAPABILITY", values);
                 db.execSQL(bound.sql, bound.args);
+                ensureSynced(db, collection);
             }
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
         }
+    }
+
+    /**
+     * Records the server source as syncing {@code collection}, its sync state
+     * kept when it has one.
+     *
+     * <p>A {@code sources} row with no checkpoint, which a load reads as no
+     * state at all, through the canonical {@code load_checkpoint} then
+     * {@code upsert_checkpoint} only when there is no row, in the caller's
+     * transaction: the upsert alone would drop the sync token a round left.
+     */
+    private static void ensureSynced(SQLiteDatabase db, String collection) {
+        Map<String, Object> key = new HashMap<>();
+        key.put("collection", collection);
+        key.put("source", PimdirStorage.SERVER);
+        PimdirSql.Bound load = PimdirSql.bind("LOAD_CHECKPOINT", key);
+        try (Cursor cursor = PimdirDb.typed(db, load.sql, load.args)) {
+            if (cursor.moveToFirst()) {
+                return;
+            }
+        }
+        PimdirSql.Bound upsert = PimdirSql.bind("UPSERT_CHECKPOINT", key);
+        db.execSQL(upsert.sql, upsert.args);
     }
 
     /** Whether a calendar address is served over CalDAV (RFC 4791). */

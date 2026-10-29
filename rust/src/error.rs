@@ -78,12 +78,19 @@ pub fn coroutine_error(err: &(impl StdError + 'static)) -> BridgeError {
 ///
 /// Some coroutines fail with their own status variant sourcing nothing,
 /// read by name: JMAP's session get (its 401 must refresh the token),
-/// blob upload (a 413 is too large for good) and blob download.
+/// blob upload (a 413 is too large for good) and blob download. A write
+/// io-webdav reads as a duplicate `UID` keeps the status it came in:
+/// Fastmail's 403 to a second resource of one `UID` is that item's
+/// refusal, not the pass's.
 fn http_status(err: &(dyn StdError + 'static)) -> Option<u16> {
     let mut cause = Some(err);
 
     while let Some(err) = cause {
-        if let Some(WebdavSendError::HttpStatus { status, .. }) = err.downcast_ref() {
+        if let Some(
+            WebdavSendError::HttpStatus { status, .. }
+            | WebdavSendError::DuplicateUid { status, .. },
+        ) = err.downcast_ref()
+        {
             return Some(*status);
         }
         if let Some(WebdavFollowRedirectsError::HttpStatus { status, .. }) = err.downcast_ref() {

@@ -44,7 +44,7 @@ The entry page SHALL draw the rows describing the occurrence that was tapped onl
 - THEN it draws without the countdown and without naming an occurrence
 
 ### Requirement: A calendar entry can be created
-The app SHALL create a calendar entry from the entry page in the store alone: a fresh object carrying the `UID`, `DTSTAMP` and `DTSTART` RFC 5545 section 3.6.1 requires and nothing else, staged as a pending create. The next sync SHALL PUT it to a resource named after its `UID`, guarded by `If-None-Match: *`.
+The app SHALL create a calendar entry from the entry page in the store alone: a fresh object carrying the `UID`, `DTSTAMP` and `DTSTART` RFC 5545 section 3.6.1 requires and nothing else, staged as a pending create. The next sync SHALL PUT it to a resource named after its `UID`, guarded by `If-None-Match: *`. A create the server refuses as such, with 403, 409, 412 or 422, SHALL stay staged for the sync that follows and the pass SHALL go on with the calendar's other changes, so one refused item never fails the calendar's pass; a 401, a throttle (a 403 naming a rate limit or a quota) and every other failure SHALL fail the pass as before. A refusal SHALL cross the bridge with its status whichever refusal io-webdav reads it as, a duplicate `UID` (`no-uid-conflict`, `unique-scheduling-object-resource`) included.
 
 #### Scenario: A new entry
 - GIVEN a writable calendar
@@ -56,6 +56,16 @@ The app SHALL create a calendar entry from the entry page in the store alone: a 
 - GIVEN a server already holding that resource
 - WHEN the sync pushes the create
 - THEN the server refuses it, nothing is overwritten, and the create stays staged
+
+#### Scenario: One create refused among others
+- GIVEN a calendar with two staged creates, the server answering the first with 403 "WebDAV collection already holds a resource with the same UID" or with 409
+- WHEN the calendar syncs
+- THEN the pass succeeds, the second is created, and the first stays staged
+
+#### Scenario: A refused token
+- GIVEN a staged create the server answers with 401
+- WHEN the calendar syncs
+- THEN the pass fails, so the token is renewed
 
 #### Scenario: Several calendars
 - GIVEN more than one writable calendar
@@ -76,7 +86,7 @@ The app SHALL stage an edit against the ETag the entry was read at, and the agen
 - THEN the server refuses on the precondition and the edit stays staged
 
 ### Requirement: A calendar entry can be deleted
-The app SHALL stage a calendar entry's deletion, after asking, and the entry SHALL leave the agenda at once. The next sync SHALL delete it guarded by the ETag it was read at; a delete the server refuses SHALL leave the removal staged for the sync that follows.
+The app SHALL stage a calendar entry's deletion, after asking, and the entry SHALL leave the agenda at once. The next sync SHALL delete it guarded by the ETag it was read at; a delete the server refuses SHALL leave the removal staged for the sync that follows. A delete finding the entry already gone SHALL count as done: a 404, or a 412 when the server, read back, holds no entry of that name (an `If-Match` on an object gone being false, RFC 9110 section 13.1.1).
 
 #### Scenario: Deleting an entry
 - GIVEN an entry open on its page
@@ -87,6 +97,11 @@ The app SHALL stage a calendar entry's deletion, after asking, and the entry SHA
 - GIVEN an entry another client has edited since it was read
 - WHEN the sync pushes the delete
 - THEN the server refuses on the precondition and the removal stays staged
+
+#### Scenario: The entry already gone
+- GIVEN a deleted entry another client deleted on the server after the sync listed it, on a server answering 412 to the guarded delete of an object gone
+- WHEN the sync pushes the delete
+- THEN the removal is done and nothing stays staged
 
 #### Scenario: An entry the server has never seen
 - GIVEN a new entry that has not been saved
@@ -206,4 +221,3 @@ A dated to-do tapped in the agenda SHALL open on the task page, which goes back 
 - GIVEN a to-do due on Friday
 - WHEN its row is tapped in Friday's agenda
 - THEN the task page opens, and back returns to the agenda
-

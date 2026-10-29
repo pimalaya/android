@@ -190,6 +190,16 @@ pub struct EventDelete<'a> {
     pub address: &'a str,
 }
 
+/// The object [`Calendars::move_event`] moves into another calendar.
+pub struct EventMove<'a> {
+    /// The event's resource name.
+    pub id: &'a str,
+    /// The ETag guarding the move, [`None`] when unknown.
+    pub etag: Option<&'a str>,
+    /// The URL of the calendar it moves into.
+    pub target_url: &'a str,
+}
+
 /// The protocol-agnostic calendar API, each method routed to the CalDAV,
 /// Graph, JMAP or Google backend behind the account's base URL.
 impl<H: Host> Calendars<'_, H> {
@@ -462,6 +472,37 @@ impl<H: Host> Calendars<'_, H> {
                 auth: account.auth,
             }
             .update_event(&parse_url(calendar_url)?, event.id, event.ical, event.etag),
+        }
+    }
+
+    /// Moves one object into another calendar of the account, answering the
+    /// resource it landed under.
+    ///
+    /// CalDAV alone moves a member (WebDAV `MOVE`); Graph, Google and JMAP
+    /// answer a 501, a move their backend cannot do, which a caller meets
+    /// by uploading the object instead (pimdir SYNC §4).
+    pub fn move_event(
+        &mut self,
+        calendar_url: &str,
+        event: &EventMove,
+    ) -> Result<EventRef, BridgeError> {
+        let account = self.account;
+
+        match account.backend {
+            Backend::Jmap | Backend::Graph | Backend::Google => Err(BridgeError {
+                message: format!("Cannot move {} on this backend", event.id),
+                status: Some(501),
+            }),
+            _ => Webdav {
+                client: self.client,
+                auth: account.auth,
+            }
+            .move_event(
+                &parse_url(calendar_url)?,
+                event.id,
+                &parse_url(event.target_url)?,
+                event.etag,
+            ),
         }
     }
 

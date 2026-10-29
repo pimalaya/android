@@ -533,6 +533,20 @@ final class Native {
             String ical);
 
     /**
+     * Moves one object into another calendar of the account, guarded by any
+     * ETag (WebDAV {@code MOVE}).
+     *
+     * <p>Returns {@code {id, etag}}, or a 501 on a backend that moves nothing.
+     */
+    static native String moveEvent(
+            Transport transport,
+            String account,
+            String calendarUrl,
+            String id,
+            String etag,
+            String targetUrl);
+
+    /**
      * Removes one object from its calendar, guarded by any ETag.
      *
      * <p>Announced as {@link #updateEvent} is. Returns {@code {}}.

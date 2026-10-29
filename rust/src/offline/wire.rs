@@ -12,7 +12,7 @@ use io_pimdir::{
     object::{PimdirHash, PimdirObject},
     placement::{
         PimdirBase, PimdirFlags, PimdirHandle, PimdirLevel, PimdirLinkId, PimdirOrigin,
-        PimdirPlacement, PimdirStatus,
+        PimdirPlacement, PimdirStatus, PimdirSuperseded,
     },
     remote::{
         PimdirEnumerated, PimdirFetchedBody, PimdirRemoteItem, PimdirRemoteMeta,
@@ -237,6 +237,48 @@ impl From<&PimdirOrigin> for OriginJson {
             handle: origin.handle.as_str().into(),
         }
     }
+}
+
+/// The member a pending create may be moved from (pimdir SYNC §3), both
+/// directions: a load names it, a push carries it on the add.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SupersededJson {
+    collection: String,
+    handle: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    if_match: Option<String>,
+}
+
+impl From<SupersededJson> for PimdirSuperseded {
+    fn from(wire: SupersededJson) -> Self {
+        Self {
+            collection: wire.collection.into(),
+            handle: PimdirHandle(wire.handle),
+            if_match: wire.if_match.filter(|etag| !etag.is_empty()),
+        }
+    }
+}
+
+impl From<&PimdirSuperseded> for SupersededJson {
+    fn from(superseded: &PimdirSuperseded) -> Self {
+        Self {
+            collection: superseded.collection.as_str().into(),
+            handle: superseded.handle.as_str().into(),
+            if_match: superseded.if_match.clone(),
+        }
+    }
+}
+
+/// A loaded pending create and the member it may be moved from, on a load
+/// reply (`list_superseded_bindings`).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SupersedingJson {
+    /// The pending create's handle.
+    pub handle: String,
+    /// The member it may be moved from.
+    pub supersedes: SupersededJson,
 }
 
 /// The detail level on the JSON wire.
@@ -500,6 +542,9 @@ pub enum ChangeJson {
         flags: Option<Vec<String>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         origin: Option<OriginJson>,
+        /// The member a connector able to move may deliver it from.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        supersedes: Option<SupersededJson>,
         #[serde(skip_serializing_if = "Option::is_none")]
         object: Option<String>,
     },
@@ -538,6 +583,7 @@ impl From<&PimdirChange> for ChangeJson {
                 link_id,
                 flags,
                 origin,
+                supersedes,
                 object,
             } => Self::Add {
                 key,
@@ -545,6 +591,7 @@ impl From<&PimdirChange> for ChangeJson {
                 link_id: link_id.as_ref().map(|link| link.as_str().into()),
                 flags: flags_json(flags),
                 origin: origin.as_ref().map(OriginJson::from),
+                supersedes: supersedes.as_ref().map(SupersededJson::from),
                 object: object.as_ref().map(|hash| hash.as_str().into()),
             },
             PimdirChangeKind::Remove {
@@ -716,6 +763,11 @@ pub struct LoadedJson {
     /// and its create is still pending (`list_superseded_pending`).
     #[serde(default)]
     pub held: Vec<String>,
+    /// The loaded pending creates superseding a member of their identity
+    /// this source binds in another collection, each with that member
+    /// (`list_superseded_bindings`, SYNC §3).
+    #[serde(default)]
+    pub superseded: Vec<SupersedingJson>,
 }
 
 /// A scope `[since, until)` on the mail `Date`, an absent bound open.
