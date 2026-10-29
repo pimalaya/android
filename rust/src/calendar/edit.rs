@@ -176,6 +176,13 @@ pub fn create(draft: &EventDraft) -> Result<String, BridgeError> {
         false => format!("{zone}\r\n"),
     };
 
+    // NOTE: a capture states when it was captured (pimdir GUIDE §17),
+    // what Waiting For and the review count from.
+    let created = match kind {
+        "VTODO" => format!("CREATED:{stamp}\r\n"),
+        _ => String::new(),
+    };
+
     let object = format!(
         "BEGIN:VCALENDAR\r\n\
          VERSION:2.0\r\n\
@@ -184,6 +191,7 @@ pub fn create(draft: &EventDraft) -> Result<String, BridgeError> {
          BEGIN:{kind}\r\n\
          UID:{uid}\r\n\
          DTSTAMP:{stamp}\r\n\
+         {created}\
          {dtstart}\
          END:{kind}\r\n\
          END:VCALENDAR\r\n"
@@ -205,9 +213,52 @@ pub fn create(draft: &EventDraft) -> Result<String, BridgeError> {
 /// A syntax-tree patch, never a rebuild: a client rewriting what it does
 /// not manage (alarms, X- properties, attendees) loses other clients'
 /// data. [`series::split`] splits a series, as it writes two objects.
+///
+/// A to-do is written as pimdir GUIDE §17's table says: an edit whose
+/// result it already holds comes back as it was, stamps included, so the
+/// caller stages nothing; a categories edit naming a reserved value is
+/// refused, the state being the `gtd` field's.
 pub fn write(ical: &str, edit: &str) -> Result<String, BridgeError> {
     let edit: EventEdit = serde_json::from_str(edit).map_err(|err| err.to_string())?;
 
+    if !is_todo_object(ical)? {
+        return apply(ical, &edit);
+    }
+
+    if let Some(reserved) = edit
+        .categories
+        .iter()
+        .flat_map(|value| value.split(','))
+        .find(|value| task::state_of(value).is_some())
+    {
+        return Err(format!(
+            "`{}` is a state, not a category: set it as the task's list",
+            reserved.trim()
+        )
+        .into());
+    }
+
+    let unstamped = EventEdit {
+        stamp: None,
+        ..edit.clone()
+    };
+    if apply(ical, &unstamped)? == ical {
+        return Ok(ical.to_string());
+    }
+    apply(ical, &edit)
+}
+
+/// Whether an object's first scheduled component is a to-do.
+fn is_todo_object(ical: &str) -> Result<bool, BridgeError> {
+    let cst = cst_of(ical)?.into_static();
+    Ok(scheduled(&cst)
+        .first()
+        .is_some_and(|index| is_todo(child(&cst, *index))))
+}
+
+/// [`write`]'s patch, applied as it comes.
+fn apply(ical: &str, edit: &EventEdit) -> Result<String, BridgeError> {
+    let edit = edit.clone();
     let cst = cst_of(ical)?;
     let mut cst = cst.into_static();
 
@@ -248,26 +299,20 @@ pub fn patch(component: &mut IcalCst<'static>, edit: &EventEdit) {
         }
     }
 
-    if let Some(value) = &edit.categories {
+    if let Some(value) = &edit.categories
+        && is_todo(component)
+    {
         // NOTE: on a to-do the GTD state is a category the form does not
-        // show, so it stays: only `gtd` sets it (pimdir GUIDE §17).
-        let todo = is_todo(component);
-        let kept: Vec<String> = match todo {
-            true => categories(component)
-                .into_iter()
-                .flat_map(|(_, values)| values)
-                .filter(|value| task::state_of(value).is_some())
-                .collect(),
-            false => Vec::new(),
-        };
+        // show, so it stays where it stands: only `gtd` sets it (pimdir
+        // GUIDE §17).
+        set_own_categories(component, value);
+    } else if let Some(value) = &edit.categories {
         component.remove::<CATEGORIES>();
         let items: Vec<_> = value
             .split(',')
             .map(str::trim)
             .filter(|item| !item.is_empty())
-            .filter(|item| !todo || task::state_of(item).is_none())
             .map(str::to_string)
-            .chain(kept)
             .map(Into::into)
             .collect();
         if !items.is_empty() {
@@ -335,6 +380,9 @@ fn patch_task(component: &mut IcalCst<'static>, edit: &EventEdit) {
     }
 
     if let Some(contact) = &edit.contact {
+        // NOTE: where the first one stood (pimdir GUIDE §17), so a contact
+        // set again as it is writes the same bytes back.
+        let first = position(component, "CONTACT");
         component.remove::<CONTACT>();
         let name = contact.name.trim();
         let address = contact.address.trim();
@@ -347,11 +395,17 @@ fn patch_task(component: &mut IcalCst<'static>, edit: &EventEdit) {
                 true => address,
                 false => name,
             };
-            component.push(prop(
+            let contact = prop(
                 IcalPropKind::Contact,
                 params,
                 IcalValue::Text(IcalText(text.to_string().into())),
-            ));
+            );
+            match first {
+                Some(index) => component.items.insert(index, encoded(contact)),
+                None => {
+                    component.push(contact);
+                }
+            }
         }
     }
 
@@ -378,8 +432,9 @@ fn patch_task(component: &mut IcalCst<'static>, edit: &EventEdit) {
 /// Only the reserved values move (pimdir GUIDE §17): every other category
 /// stays in order, and a line holding none of them stays byte for byte.
 /// The state takes the place of the first reserved value it replaces, else
-/// a line of its own; a to-do already in that state is left untouched, its
-/// casing included.
+/// a line of its own after the last `CATEGORIES` line, else after the last
+/// property; a to-do already in that state is left untouched, its casing
+/// included.
 fn set_state(component: &mut IcalCst<'static>, state: Option<&'static str>) {
     let lines = categories(component);
     let mut present: Vec<&str> = lines
@@ -394,37 +449,148 @@ fn set_state(component: &mut IcalCst<'static>, state: Option<&'static str>) {
     }
 
     let mut placed = state.is_none();
+    let rewritten: Vec<(usize, Vec<String>)> = lines
+        .iter()
+        .filter(|(_, values)| values.iter().any(|value| task::state_of(value).is_some()))
+        .map(|(index, values)| {
+            let mut kept = Vec::new();
+            for value in values {
+                match task::state_of(value) {
+                    None => kept.push(value.clone()),
+                    Some(_) if !placed => {
+                        kept.extend(state.map(str::to_string));
+                        placed = true;
+                    }
+                    Some(_) => {}
+                }
+            }
+            (*index, kept)
+        })
+        .collect();
+
+    if let (false, Some(state)) = (placed, state) {
+        insert_categories(component, &lines, vec![state.to_string()]);
+    }
+    rewrite_categories(component, rewritten);
+}
+
+/// Sets the person's own categories of a to-do to the comma-separated
+/// `wanted`, its state kept where it stands (pimdir GUIDE §17).
+///
+/// The new values, trimmed, the empty ones and the repeats (folded)
+/// dropped, take the place of the first of the person's values, the
+/// others go and a line left empty goes; with none to take the place of,
+/// they are a line of its own placed as a new state is. Nothing changes
+/// when the person's values, in document order, already are the new ones.
+/// A reserved value among them is [`write`]'s to refuse.
+fn set_own_categories(component: &mut IcalCst<'static>, wanted: &str) {
+    let mut new: Vec<String> = Vec::new();
+    for value in wanted.split(',').map(str::trim) {
+        if !value.is_empty()
+            && task::state_of(value).is_none()
+            && !new.iter().any(|kept| fold(kept) == fold(value))
+        {
+            new.push(value.to_string());
+        }
+    }
+
+    let lines = categories(component);
+    let own: Vec<&String> = lines
+        .iter()
+        .flat_map(|(_, values)| values)
+        .filter(|value| task::state_of(value).is_none())
+        .collect();
+    if own.iter().copied().eq(new.iter()) {
+        return;
+    }
+
+    let mut placed = false;
+    let rewritten: Vec<(usize, Vec<String>)> = lines
+        .iter()
+        .filter(|(_, values)| values.iter().any(|value| task::state_of(value).is_none()))
+        .map(|(index, values)| {
+            let mut kept = Vec::new();
+            for value in values {
+                match task::state_of(value) {
+                    Some(_) => kept.push(value.clone()),
+                    None if !placed => {
+                        kept.extend(new.iter().cloned());
+                        placed = true;
+                    }
+                    None => {}
+                }
+            }
+            (*index, kept)
+        })
+        .collect();
+
+    if !placed && !new.is_empty() {
+        insert_categories(component, &lines, new);
+    }
+    rewrite_categories(component, rewritten);
+}
+
+/// A category as the store compares one: Unicode lowercase, trimmed.
+fn fold(value: &str) -> String {
+    value.to_lowercase().trim().to_string()
+}
+
+/// A new `CATEGORIES` line of `values` after the last of `lines`, else
+/// after the component's last property.
+///
+/// Before [`rewrite_categories`] runs: `lines` are the indices it read.
+fn insert_categories(
+    component: &mut IcalCst<'static>,
+    lines: &[(usize, Vec<String>)],
+    values: Vec<String>,
+) {
+    let line = prop(
+        IcalPropKind::Categories,
+        Vec::new(),
+        IcalValue::TextList(IcalTextList(values.into_iter().map(Into::into).collect())),
+    );
+    match lines.last() {
+        Some((index, _)) => component.items.insert(index + 1, encoded(line)),
+        None => {
+            component.push(line);
+        }
+    }
+}
+
+/// Writes each `CATEGORIES` line its new values, by index, ascending: one
+/// left empty goes, one whose values did not change keeps its bytes.
+///
+/// A line inserted by [`insert_categories`] after the last of them shifts
+/// none of these indices.
+fn rewrite_categories(component: &mut IcalCst<'static>, lines: Vec<(usize, Vec<String>)>) {
+    let held: Vec<(usize, Vec<String>)> = categories(component);
     let mut emptied = Vec::new();
     for (index, values) in lines {
-        if values.iter().all(|value| task::state_of(value).is_none()) {
-            continue;
-        }
-        let mut kept = Vec::new();
-        for value in values {
-            match task::state_of(&value) {
-                None => kept.push(value),
-                Some(_) if !placed => {
-                    kept.extend(state.map(str::to_string));
-                    placed = true;
-                }
-                Some(_) => {}
-            }
-        }
-        match kept.is_empty() {
-            true => emptied.push(index),
-            false => replace_categories(component, index, kept),
+        if values.is_empty() {
+            emptied.push(index);
+        } else if held
+            .iter()
+            .find(|(at, _)| *at == index)
+            .is_none_or(|(_, old)| *old != values)
+        {
+            replace_categories(component, index, values);
         }
     }
     for index in emptied.into_iter().rev() {
         component.items.remove(index);
     }
-    if let (false, Some(state)) = (placed, state) {
-        component.push(prop(
-            IcalPropKind::Categories,
-            Vec::new(),
-            IcalValue::TextList(IcalTextList(vec![state.into()])),
-        ));
-    }
+}
+
+/// The index of the first line of a property among a component's items.
+fn position(component: &IcalCst<'static>, name: &str) -> Option<usize> {
+    component.items.iter().position(
+        |item| matches!(item, IcalItem::Prop(line) if line.name.get().eq_ignore_ascii_case(name)),
+    )
+}
+
+/// A property as the line a component holds, its text escaped and folded.
+fn encoded(prop: IcalProp<'static>) -> IcalItem<'static> {
+    IcalItem::Prop(prop.encode(Escaper::default()))
 }
 
 /// Every `CATEGORIES` line of a component: where it sits among the items,
@@ -477,10 +643,20 @@ fn is_todo(component: &IcalCst<'static>) -> bool {
 /// RFC 5545 3.8.7.2 and 3.8.7.3: an edit is when the object was last
 /// built, and when it last changed. Both, because a server and another
 /// client read different ones.
+///
+/// A to-do as pimdir GUIDE §17 says, so both task writers stamp alike:
+/// `DTSTAMP` restated where it stands, after the last property when
+/// absent, and `LAST-MODIFIED` only where the to-do carries one.
 pub fn touch(component: &mut IcalCst<'static>, edit: &EventEdit) {
     let Some(stamp) = &edit.stamp else {
         return;
     };
+
+    if is_todo(component) {
+        restamp(component, IcalPropKind::DtStamp, stamp, true);
+        restamp(component, IcalPropKind::LastModified, stamp, false);
+        return;
+    }
 
     let utc = DateEdit {
         time: stamp.trim_end_matches(['Z', 'z']).to_string(),
@@ -489,6 +665,25 @@ pub fn touch(component: &mut IcalCst<'static>, edit: &EventEdit) {
     };
     replace_date(component, IcalPropKind::DtStamp, &utc);
     replace_date(component, IcalPropKind::LastModified, &utc);
+}
+
+/// Writes `stamp`, a UTC stamp, as the value of `kind` where its first line
+/// stands; with none, after the last property when `add`, else nowhere.
+fn restamp(component: &mut IcalCst<'static>, kind: IcalPropKind, stamp: &str, add: bool) {
+    let time = EventTime {
+        time: stamp.trim_end_matches(['Z', 'z']).to_string(),
+        kind: EventTimeKind::Utc,
+        tzid: String::new(),
+        offset: None,
+    };
+    let line = date_prop(kind, &time);
+    match position(component, &kind) {
+        Some(index) => component.items[index] = encoded(line),
+        None if add => {
+            component.push(line);
+        }
+        None => {}
+    }
 }
 
 /// Replaces a text property, removing it when the edit clears it.
@@ -501,14 +696,14 @@ fn replace_text<L: IcalPropLens>(
         return;
     };
 
-    component.remove::<L>();
-    if !value.is_empty() {
-        component.push(prop(
+    let line = (!value.is_empty()).then(|| {
+        prop(
             kind,
             Vec::new(),
             IcalValue::Text(IcalText(value.clone().into())),
-        ));
-    }
+        )
+    });
+    replace_line::<L>(component, &kind, line);
 }
 
 /// The same for an integer property, ignoring anything unreadable
@@ -522,13 +717,61 @@ fn replace_number<L: IcalPropLens>(
         return;
     };
 
-    component.remove::<L>();
-    if value.parse::<i64>().is_ok() {
-        component.push(prop(
+    let line = value.parse::<i64>().is_ok().then(|| {
+        prop(
             kind,
             Vec::new(),
             IcalValue::Integer(IcalInteger(value.clone().into())),
-        ));
+        )
+    });
+    replace_line::<L>(component, &kind, line);
+}
+
+/// Writes `line` in place of every line of the property, [`None`] dropping
+/// them all.
+///
+/// On a to-do as pimdir GUIDE §17 says: where the first line stood, and
+/// one line already holding the value left as it is, its parameters and
+/// folding included, so a to-do's edit can read as unchanged. Elsewhere
+/// after the last property, as an event's edit always wrote it.
+fn replace_line<L: IcalPropLens>(
+    component: &mut IcalCst<'static>,
+    kind: &IcalPropKind,
+    line: Option<IcalProp<'static>>,
+) {
+    let name = kind.to_string();
+    let todo = is_todo(component);
+    let held: Vec<&IcalItem<'static>> = component
+        .items
+        .iter()
+        .filter(|item| {
+            matches!(item, IcalItem::Prop(held) if held.name.get().eq_ignore_ascii_case(&name))
+        })
+        .collect();
+    if todo
+        && line.is_some()
+        && let [IcalItem::Prop(held)] = held.as_slice()
+        && held.decode(IcalVersion::V2_0).value == line.as_ref().unwrap().value
+    {
+        return;
+    }
+
+    if !todo {
+        component.remove::<L>();
+        if let Some(line) = line {
+            component.push(line);
+        }
+        return;
+    }
+
+    let first = position(component, &name);
+    component.remove::<L>();
+    match (line, first) {
+        (Some(line), Some(index)) => component.items.insert(index, encoded(line)),
+        (Some(line), None) => {
+            component.push(line);
+        }
+        (None, _) => {}
     }
 }
 

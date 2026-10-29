@@ -37,6 +37,7 @@ import org.json.JSONObject;
 import org.pimalaya.calendar.CalendarMapping.Row;
 import org.pimalaya.calendar.CalendarMapping.Write;
 import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.Derived;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.EventTimeKind;
 import org.pimalaya.client.PhoneEdit;
@@ -482,7 +483,12 @@ final class CalendarRemote implements PhoneSpoke {
         item.put("linkId", handle);
         item.put("hash", token);
         item.put("body", body);
-        item.put("sortKey", "");
+        // NOTE: as a server listing carries it (CalendarSummaries).
+        Derived derived = CalendarSummaries.of(body);
+        item.put("sortKey", derived == null ? "" : derived.sortKey());
+        if (derived != null && derived.summary() != null) {
+            item.put("summary", derived.summary());
+        }
         item.put("revision", revision);
         return item;
     }

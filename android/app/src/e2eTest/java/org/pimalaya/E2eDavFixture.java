@@ -62,7 +62,19 @@ final class E2eDavFixture implements E2eItemFixture {
 
     @Override
     public void createCollection(String name) throws Exception {
+        createCollection(name, List.of());
+    }
+
+    @Override
+    public void createCollection(String name, List<String> components) throws Exception {
         String props = "<D:set><D:prop><D:displayname>" + name + "</D:displayname>";
+        if (calendar && !components.isEmpty()) {
+            props += "<C:supported-calendar-component-set>";
+            for (String component : components) {
+                props += "<C:comp name=\"" + component + "\"/>";
+            }
+            props += "</C:supported-calendar-component-set>";
+        }
         if (calendar) {
             send(
                     "MKCALENDAR",
@@ -135,6 +147,20 @@ final class E2eDavFixture implements E2eItemFixture {
             }
         }
         return titles;
+    }
+
+    @Override
+    public java.util.Map<String, String> objects(String collection) throws Exception {
+        if (!collection.startsWith(E2eFixture.PREFIX)) {
+            throw new IllegalArgumentException("not a scratch collection: " + collection);
+        }
+        java.util.Map<String, String> objects = new java.util.LinkedHashMap<>();
+        for (String[] member : members(home + collection + "/")) {
+            if (!member[0].endsWith("/")) {
+                objects.put(segmentOf(member[0]), send("GET", absolute(member[0]), null, null));
+            }
+        }
+        return objects;
     }
 
     @Override

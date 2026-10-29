@@ -331,6 +331,7 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
                     band: round.band,
                 }),
                 unstamped: loaded.unstamped.into_iter().map(PimdirHandle).collect(),
+                held: loaded.held.into_iter().map(PimdirHandle).collect(),
             })
         }
         PimdirYield::WantsLookupObject(_) => {
@@ -437,6 +438,7 @@ fn enumerate_json<'a>(collection: &'a str, request: &PimdirEnumerate) -> YieldJs
             cursor: cursor.as_ref().map(cursor_str),
             band: *band,
         },
+        PimdirListing::Head(_) => ListingJson::Head,
     };
 
     YieldJson::Enumerate {

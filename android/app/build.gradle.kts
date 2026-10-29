@@ -150,7 +150,7 @@ tasks.register<Test>("e2eTest") {
     testClassesDirs = files(unit.map { it.testClassesDirs })
     classpath = files(unit.map { it.classpath })
     include("org/pimalaya/**/E2e*")
-    for (option in listOf("e2e.targets", "e2e.only", "e2e.patience", "e2e.log")) {
+    for (option in listOf("e2e.targets", "e2e.only", "e2e.patience", "e2e.log", "e2e.prefix")) {
         providers.gradleProperty(option).orNull?.let { systemProperty(option, it) }
     }
     systemProperty("e2e.report", layout.buildDirectory.dir("reports/e2e").get().asFile.path)

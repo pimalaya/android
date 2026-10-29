@@ -14,6 +14,14 @@ interface E2eItemFixture {
     /** Creates a scratch collection; none where it is fixed (Google's). */
     void createCollection(String name) throws Exception;
 
+    /**
+     * Creates a scratch calendar stating these components (RFC 4791 §5.2.3),
+     * where a server's default may take events alone, as Fastmail's does.
+     */
+    default void createCollection(String name, List<String> components) throws Exception {
+        createCollection(name);
+    }
+
     /** Deletes a scratch collection and its items; quiet when gone. */
     void deleteCollection(String name) throws Exception;
 
@@ -24,6 +32,14 @@ interface E2eItemFixture {
 
     /** The titles of the items a collection holds that carry {@code text}. */
     List<String> titles(String collection, String text) throws Exception;
+
+    /**
+     * Every object a scratch collection holds, by resource name, as the
+     * server serves it.
+     */
+    default java.util.Map<String, String> objects(String collection) throws Exception {
+        throw new UnsupportedOperationException("no objects read on this target");
+    }
 
     /** Deletes for good every item and collection carrying the tag. */
     void sweep(String tag) throws Exception;

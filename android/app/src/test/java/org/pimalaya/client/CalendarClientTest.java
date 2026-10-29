@@ -575,16 +575,16 @@ public class CalendarClientTest {
         String raw =
                 "{\"id\":\"work\",\"name\":\"Work\",\"url\":\"https://dav.example.org/cal/work/\","
                         + "\"description\":\"Team\",\"color\":\"#ff0000\",\"role\":\"default\","
-                        + "\"writable\":false}";
+                        + "\"writable\":false,\"vtodo\":false}";
         assertMirrors(Calendar.class, raw);
         assertEquals(
                 new Calendar(
                         "work", "Work", "https://dav.example.org/cal/work/", "Team", "#ff0000",
-                        Calendar.DEFAULT, false),
+                        Calendar.DEFAULT, false, false),
                 Calendar.from(new JSONObject(raw)));
 
         // NOTE: what the source does not say is no description or colour,
-        // no role and writable.
+        // no role, writable, and no component set (vtodo null).
         assertEquals(
                 new Calendar(
                         "bare", "bare", "https://dav.example.org/cal/bare/", null, null, "", true),

@@ -25,6 +25,8 @@ pub mod phone;
 pub mod read;
 pub mod series;
 pub mod task;
+#[cfg(test)]
+mod vectors;
 mod zone;
 
 use ical::{
@@ -92,6 +94,12 @@ pub struct Calendar {
     /// Whether the user may write into it, true where the source says
     /// nothing.
     pub writable: bool,
+    /// Whether its server takes a to-do there (RFC 4791 §5.2.3): false when
+    /// its `supported-calendar-component-set` names components but not
+    /// `VTODO`, true when it names `VTODO`, [`None`] when it states none or
+    /// the backend has no such set (Graph, Google, JMAP).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vtodo: Option<bool>,
 }
 
 /// One calendar item surfaced to the Java client, raw.

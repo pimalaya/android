@@ -354,7 +354,9 @@ pub enum WriteOpJson {
     /// Lands a page's resume cursor, and the checkpoint it carried.
     SetRoundCursor {
         collection: String,
-        cursor: String,
+        /// Absent keeps the cursor a page landed (a delta head's write).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cursor: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         checkpoint: Option<String>,
     },
@@ -438,7 +440,7 @@ impl From<&PimdirWriteOp> for WriteOpJson {
                 checkpoint,
             } => Self::SetRoundCursor {
                 collection: collection.as_str().into(),
-                cursor: cursor_str(cursor),
+                cursor: cursor.as_ref().map(cursor_str),
                 checkpoint: checkpoint.as_ref().map(checkpoint_str),
             },
             PimdirWriteOp::CloseRound {
@@ -710,6 +712,10 @@ pub struct LoadedJson {
     /// The open round's unstamped based bindings, in scope or undated.
     #[serde(default)]
     pub unstamped: Vec<String>,
+    /// The loaded tombstones whose remove is held: an add superseded them
+    /// and its create is still pending (`list_superseded_pending`).
+    #[serde(default)]
+    pub held: Vec<String>,
 }
 
 /// A scope `[since, until)` on the mail `Date`, an absent bound open.
@@ -985,8 +991,17 @@ pub enum LoadScopeJson<'a> {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum ListingJson {
-    Delta { checkpoint: String },
-    Round { cursor: Option<String>, band: bool },
+    Delta {
+        checkpoint: String,
+    },
+    Round {
+        cursor: Option<String>,
+        band: bool,
+    },
+    /// The open round's head (SYNC §5). Never asked: the bridge syncs with
+    /// no heads (`PimdirHeads::NONE`, the default), so a connector reading
+    /// one fails on a kind it does not know rather than list it as another.
+    Head,
 }
 
 /// The detail tier a `fetch` yield asks for.

@@ -250,6 +250,70 @@ public class TaskWritesTest {
         assertEquals(loaded.task.uid(), read.task.uid());
     }
 
+    /** The first value of a query on the store, null for no row. */
+    private String one(String sql) {
+        try (android.database.Cursor cursor =
+                parts.pimdir().getReadableDatabase().rawQuery(sql, null)) {
+            return cursor.moveToFirst() ? cursor.getString(0) : null;
+        }
+    }
+
+    @Test
+    public void aCaptureCarriesItsSummaryAndWhenItWasCaptured() throws Exception {
+        writes.capture(calendar, "Call the plumber", null, null);
+
+        TaskStore.Stored captured = store.load(context).get(0);
+
+        // NOTE: staged with the summary its body derives, so the store lists
+        // it as a task (task_summary), and CREATED says when (GUIDE §17).
+        assertEquals("[\"inbox\"]", one("SELECT categories FROM task_summary"));
+        assertEquals("Call the plumber", one("SELECT summary FROM task_summary"));
+        assertTrue(captured.event.ical.contains("CREATED:"));
+        assertEquals(captured.task.created().length(), 16);
+    }
+
+    @Test
+    public void anEditTheTaskAlreadyHoldsStagesNothing() throws Exception {
+        writes.capture(calendar, "Call the plumber", null, null);
+        TaskStore.Stored captured = store.load(context).get(0);
+
+        writes.edit(
+                captured,
+                TaskEdit.at("20991231T000000Z")
+                        .withList(Task.INBOX)
+                        .withText("Call the plumber", null));
+
+        // NOTE: no stamp moves either (pimdir GUIDE §17): nothing to push.
+        assertEquals(captured.event.ical, store.load(context).get(0).event.ical);
+    }
+
+    @Test
+    public void aStoreFromBeforeSummariesListsItsTasksAndGainsTheirRows() throws Exception {
+        writes.capture(calendar, "Renew the passport", null, null);
+        new CalendarStager(parts.pimdir(), parts.clients())
+                .mutateAdd(
+                        calendar.id,
+                        "meeting.ics",
+                        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//other//EN\r\n"
+                                + "BEGIN:VEVENT\r\nUID:meeting\r\nDTSTAMP:20261020T080000Z\r\n"
+                                + "DTSTART:20261030T090000Z\r\nSUMMARY:Standup\r\n"
+                                + "END:VEVENT\r\nEND:VCALENDAR\r\n",
+                        Flags.none(),
+                        null,
+                        "");
+        // NOTE: as a store an earlier build wrote, no calendar item carrying
+        // a summary row.
+        parts.pimdir().getWritableDatabase().execSQL("DELETE FROM task_summary");
+        parts.pimdir().getWritableDatabase().execSQL("DELETE FROM event_summary");
+
+        List<TaskStore.Stored> tasks = store.load(context);
+
+        assertEquals(1, tasks.size());
+        assertEquals("Renew the passport", tasks.get(0).task.summary());
+        assertEquals("Renew the passport", one("SELECT summary FROM task_summary"));
+        assertEquals("Standup", one("SELECT summary FROM event_summary"));
+    }
+
     @Test
     public void theCaptureTimeIsReadFromItsStamp() {
         Task task =

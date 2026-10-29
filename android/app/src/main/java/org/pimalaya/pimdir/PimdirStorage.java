@@ -180,7 +180,86 @@ public final class PimdirStorage {
                 placements.put(placementOf(collection, cursor));
             }
         }
+        held(db, stored, placements, reply);
         return reply;
+    }
+
+    /**
+     * Writes the loaded tombstones whose remove is held into a load reply
+     * (STORAGE §15.3, SYNC §5): an add superseded them and the item it
+     * created is still a pending create, so the engine pushes no delete of
+     * them yet. Read by the canonical {@code list_superseded_pending}, by
+     * link id, answered as the handles the placements carry.
+     */
+    private static void held(
+            SQLiteDatabase db, String collection, JSONArray placements, JSONObject reply)
+            throws JSONException {
+        Set<String> superseded = new HashSet<>();
+        PimdirSql.Bound bound =
+                PimdirSql.bind("LIST_SUPERSEDED_PENDING", Map.of("collection", collection));
+        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+            while (cursor.moveToNext()) {
+                superseded.add(cursor.getString(0));
+            }
+        }
+        if (superseded.isEmpty()) {
+            return;
+        }
+        JSONArray held = new JSONArray();
+        for (int index = 0; index < placements.length(); index++) {
+            JSONObject placement = placements.getJSONObject(index);
+            if (superseded.contains(placement.optString("linkId"))) {
+                held.put(placement.getString("handle"));
+            }
+        }
+        reply.put("held", held);
+    }
+
+    /**
+     * Records that an add superseded an item (STORAGE §15.3): the item at
+     * {@code collection} and {@code linkId}, the add's at {@code
+     * byCollection} and {@code byLinkId}, through the canonical {@code
+     * supersede_item}.
+     *
+     * <p>In the transaction staging the add and the item's tombstone
+     * ({@link #atomically}): a load then holds the tombstone's delete
+     * until the add is pushed.
+     */
+    public void supersede(
+            String collection, String linkId, String byCollection, String byLinkId) {
+        Map<String, Object> values = new HashMap<>();
+        values.put("collection", collectionOf(collection));
+        values.put("link_id", linkId);
+        values.put("by_collection", collectionOf(byCollection));
+        values.put("by_link_id", byLinkId);
+        PimdirSql.Bound bound = PimdirSql.bind("SUPERSEDE_ITEM", values);
+        store.getWritableDatabase().execSQL(bound.sql, bound.args);
+    }
+
+    /** Writes to run as one, {@link #atomically}. */
+    public interface Writes {
+        void run() throws JSONException;
+    }
+
+    /**
+     * Runs {@code writes} as one transaction under the store's writer.
+     *
+     * <p>The engine's own write batches nest in it, so several staged
+     * mutations and the store's own rows land together or not at all; the
+     * blobs a batch collected go once the outermost transaction ends.
+     */
+    public void atomically(Writes writes) throws JSONException {
+        synchronized (store.locks().store) {
+            SQLiteDatabase db = store.getWritableDatabase();
+            db.beginTransaction();
+            try {
+                writes.run();
+                db.setTransactionSuccessful();
+            } finally {
+                db.endTransaction();
+                PimdirItems.unlinkCollected(store, db, blobs);
+            }
+        }
     }
 
     /**

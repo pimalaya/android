@@ -28,9 +28,10 @@ import java.util.Set;
  * (cairn/changes/gtd-by-categories).
  *
  * <p>No store of its own: a task is a VTODO the calendar sync already keeps,
- * its state, categories and parent read off the object at load time
- * ({@link CalendarClient#readTasks}), as the contacts list reads a phone off
- * its card.
+ * found by its {@code task_summary} row ({@link EventStore#loadTasks}), its
+ * state, categories, parent, contact and capture time read off the object at
+ * load time ({@link CalendarClient#readTasks}): the row lacks the contact and
+ * {@code CREATED}, and a body is what an edit patches anyway.
  */
 public final class TaskStore {
     /** The calendar the last capture went to, in the Tasks preferences. */
@@ -59,7 +60,7 @@ public final class TaskStore {
     /**
      * Every to-do of the calendars the filter shows, open and closed.
      *
-     * <p>Off the main thread: it reads every calendar object.
+     * <p>Off the main thread: it reads every to-do's body.
      */
     public List<Stored> load(Context context) {
         MergedFilter filter = MergedFilter.of(context, PimDomain.CALENDAR);
@@ -70,15 +71,9 @@ public final class TaskStore {
 
         Map<String, EventStore.StoredEvent> byKey = new LinkedHashMap<>();
         Map<String, String> objects = new LinkedHashMap<>();
-        for (EventStore.StoredEvent event : parts.events().loadEvents()) {
+        for (EventStore.StoredEvent event : parts.events().loadTasks()) {
             EventStore.StoredCalendar calendar = byCollection.get(event.collectionId);
             if (calendar == null || !filter.accepts(calendar.accountEmail, calendar.id)) {
-                continue;
-            }
-            // NOTE: a to-do is told by its text before the bridge parses it,
-            // so an agenda of thousands of events costs one scan, not as
-            // many parses.
-            if (!event.ical.contains("BEGIN:VTODO")) {
                 continue;
             }
             String key = event.collectionId + "\n" + event.id;
@@ -114,17 +109,19 @@ public final class TaskStore {
     }
 
     /**
-     * Whether a calendar can hold tasks in this first draft.
+     * Whether a calendar can hold tasks.
      *
      * <p>CalDAV only (VTODO, RFC 4791): Graph and Google keep tasks in a
      * service of their own, JMAP calendar writes are not wired, and the phone's
-     * local calendar takes no write.
+     * local calendar takes no write. And not one whose server states it takes
+     * none ({@code x-vtodo} {@code none}, pimdir STORAGE §15.6), as a Google
+     * CalDAV calendar does.
      */
     public static boolean takesTasks(EventStore.StoredCalendar calendar) {
-        String url = calendar.url == null ? "" : calendar.url;
         return calendar.writable
-                && (url.startsWith("https://") || url.startsWith("http://"))
-                && !LocalBook.is(url);
+                && EventStore.isCaldav(calendar.url)
+                && !LocalBook.is(calendar.url)
+                && !calendar.refusesTasks;
     }
 
     /**

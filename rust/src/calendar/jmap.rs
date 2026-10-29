@@ -394,6 +394,7 @@ fn jmap_calendar(session: &JmapSession, calendar: JmapCalendar) -> Calendar {
         color: calendar.color,
         role: default_role(calendar.is_default),
         writable: writable_calendar(&calendar.my_rights),
+        vtodo: None,
     }
 }
 

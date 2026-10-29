@@ -206,7 +206,19 @@ fn into_calendar(home_set: &Url, calendar: DavCalendar) -> Calendar {
         // default, and writable.
         role: String::new(),
         writable: true,
+        vtodo: vtodo_of(&calendar.components),
     }
+}
+
+/// Whether a calendar of this `supported-calendar-component-set` takes a
+/// to-do: [`None`] for an empty set, which restricts nothing (RFC 4791
+/// §5.2.3).
+fn vtodo_of(components: &BTreeSet<String>) -> Option<bool> {
+    (!components.is_empty()).then(|| {
+        components
+            .iter()
+            .any(|component| component.eq_ignore_ascii_case("VTODO"))
+    })
 }
 
 /// An io-webdav item entry as an [`Event`], its bytes decoded lossily.
@@ -294,5 +306,29 @@ mod tests {
         );
 
         assert_eq!(created.id, "3f2a.ics");
+    }
+
+    #[test]
+    fn a_calendar_states_whether_it_takes_tasks() {
+        let home: Url = "https://caldav.example.org/dav/calendars/user/"
+            .parse()
+            .unwrap();
+        let listed = |components: &[&str]| {
+            into_calendar(
+                &home,
+                DavCalendar {
+                    id: "work".into(),
+                    components: components.iter().map(|c| c.to_string()).collect(),
+                    ..Default::default()
+                },
+            )
+            .vtodo
+        };
+
+        // NOTE: an events-only calendar refuses a VTODO PUT (Google answers
+        // 403); no set stated restricts nothing (RFC 4791 §5.2.3).
+        assert_eq!(listed(&["VEVENT"]), Some(false));
+        assert_eq!(listed(&["VEVENT", "VTODO"]), Some(true));
+        assert_eq!(listed(&[]), None);
     }
 }

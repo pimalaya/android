@@ -9,6 +9,7 @@ import org.pimalaya.calendar.Zones;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.EventDraft;
 import org.pimalaya.client.Flags;
+import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.Task;
 import org.pimalaya.client.TaskEdit;
 
@@ -43,6 +44,7 @@ public final class TaskWrites {
      */
     public String create(EventStore.StoredCalendar calendar, TaskEdit edit)
             throws JSONException {
+        refuseUnlessTasks(calendar);
         String uid = UUID.randomUUID().toString();
         String ical =
                 CalendarClient.newEvent(new EventDraft("VTODO", uid, edit.stamp(), "", "", ""));
@@ -86,26 +88,56 @@ public final class TaskWrites {
                         .withSource(messageId));
     }
 
-    /** Applies {@code edit} to a stored to-do. */
+    /**
+     * Applies {@code edit} to a stored to-do.
+     *
+     * <p>Nothing is staged when the to-do already holds what the edit writes
+     * (pimdir GUIDE §17): the bridge hands its bytes back as they were.
+     */
     public void edit(TaskStore.Stored stored, TaskEdit edit) throws JSONException {
         String written = CalendarClient.writeTask(stored.event.ical, edit);
+        if (written.equals(stored.event.ical)) {
+            return;
+        }
         stager().mutateEdit(stored.event.collectionId, stored.event.handle, written, null, "");
     }
 
     /**
      * Applies {@code edit} to a stored to-do and files it in {@code target}.
      *
-     * <p>An add there, then a removal here once the add was accepted (pimdir
-     * GUIDE §17), rather than a move: a refused create throws before the
-     * removal, so the capture is never lost. The {@code UID} stays.
+     * <p>One add there superseding the source item (pimdir STORAGE §15.3,
+     * GUIDE §17), staged in one transaction with the source's tombstone and
+     * the pair: a load holds the tombstone's delete while the add is a
+     * pending create, so a create the server refuses leaves the capture on
+     * it. The {@code UID} and the link id stay, the link id being the name
+     * the target's server is asked to file it by.
      */
     public void moveTo(TaskStore.Stored stored, EventStore.StoredCalendar target, TaskEdit edit)
             throws JSONException {
+        refuseUnlessTasks(target);
         String written = CalendarClient.writeTask(stored.event.ical, edit);
+        String linkId = stored.event.id;
         CalendarStager stager = stager();
-        stager.mutateAdd(
-                target.id, UUID.randomUUID() + ".ics", written, Flags.none(), null, "");
-        stager.mutateRemove(stored.event.collectionId, stored.event.handle);
+        stager.offline.atomically(
+                () -> {
+                    stager.mutateAdd(target.id, linkId, written, Flags.none(), null, "");
+                    // NOTE: before the remove, both items then being rows: a
+                    // source never pushed is withdrawn rather than marked,
+                    // and the pair goes with it, there being nothing to hold.
+                    stager.offline.supersede(
+                            stored.event.collectionId, stored.event.id, target.id, linkId);
+                    stager.mutateRemove(stored.event.collectionId, stored.event.handle);
+                });
+    }
+
+    /**
+     * Refuses a write of a to-do into a calendar taking none (spec/tasks.md),
+     * before anything is staged.
+     */
+    private static void refuseUnlessTasks(EventStore.StoredCalendar calendar) {
+        if (!TaskStore.takesTasks(calendar)) {
+            throw new PimalayaException("The calendar " + calendar.name + " takes no tasks");
+        }
     }
 
     /**

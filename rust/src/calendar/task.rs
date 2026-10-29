@@ -471,12 +471,70 @@ mod tests {
     fn editing_the_categories_keeps_the_state() {
         let ical = object("BEGIN:VTODO\r\nUID:3\r\nCATEGORIES:inbox,@home\r\nEND:VTODO\r\n");
 
-        let written = write(&ical, r#"{"categories":"@work, someday"}"#).unwrap();
+        let written = write(&ical, r#"{"categories":"@work, @phone"}"#).unwrap();
         let task = task(&written).unwrap().unwrap();
 
         assert_eq!(task.list, "INBOX");
         assert_eq!(task.states, ["inbox"]);
-        assert_eq!(task.categories, ["@work"]);
+        assert_eq!(task.categories, ["@work", "@phone"]);
+        // NOTE: where the person's first value stood, the state's place
+        // kept (pimdir GUIDE §17).
+        assert!(written.contains("CATEGORIES:inbox,@work,@phone\r\n"));
+    }
+
+    #[test]
+    fn a_state_among_the_categories_is_refused() {
+        let ical = object("BEGIN:VTODO\r\nUID:3\r\nCATEGORIES:inbox,@home\r\nEND:VTODO\r\n");
+
+        // NOTE: the state is the list's to set, never a category's (pimdir
+        // GUIDE §17); an event's categories are anything.
+        assert!(write(&ical, r#"{"categories":"@work, Someday"}"#).is_err());
+        let event = object("BEGIN:VEVENT\r\nUID:4\r\nDTSTART:20261027T090000\r\nEND:VEVENT\r\n");
+        assert!(write(&event, r#"{"categories":"someday"}"#).is_ok());
+    }
+
+    #[test]
+    fn an_edit_a_task_already_holds_writes_nothing() {
+        let ical = object(
+            "BEGIN:VTODO\r\nUID:3\r\nDTSTAMP:20261020T080000Z\r\nSUMMARY:Call\r\n\
+             CATEGORIES:waiting\r\nEND:VTODO\r\n",
+        );
+        let edit = r#"{"gtd":"waiting","summary":"Call","stamp":"20261028T090000Z"}"#;
+
+        assert_eq!(write(&ical, edit).unwrap(), ical);
+    }
+
+    #[test]
+    fn a_task_edit_stamps_where_the_stamps_stand() {
+        let ical = object(
+            "BEGIN:VTODO\r\nUID:3\r\nDTSTAMP:20261020T080000Z\r\nSUMMARY:Call\r\n\
+             END:VTODO\r\n",
+        );
+        let edit = r#"{"summary":"Call Ann","stamp":"20261028T090000Z"}"#;
+
+        let written = write(&ical, edit).unwrap();
+
+        // NOTE: no LAST-MODIFIED where the task carried none (pimdir GUIDE
+        // §17), DTSTAMP restated in place.
+        assert!(written.contains("UID:3\r\nDTSTAMP:20261028T090000Z\r\n"));
+        assert!(!written.contains("LAST-MODIFIED"));
+    }
+
+    #[test]
+    fn a_capture_states_when_it_was_captured() {
+        let draft = crate::calendar::edit::EventDraft {
+            component: "VTODO",
+            uid: "10",
+            stamp: "20261028T090000Z",
+            start: "",
+            tzid: "",
+            vtimezone: "",
+        };
+
+        let ical = crate::calendar::edit::create(&draft).unwrap();
+
+        assert!(ical.contains("DTSTAMP:20261028T090000Z\r\nCREATED:20261028T090000Z\r\n"));
+        assert_eq!(task(&ical).unwrap().unwrap().created, "20261028T090000Z");
     }
 
     #[test]

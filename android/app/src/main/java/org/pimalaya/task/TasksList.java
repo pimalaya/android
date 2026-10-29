@@ -26,7 +26,6 @@ import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.SectionsAdapter;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -268,7 +267,7 @@ public final class TasksList {
         }
     }
 
-    /** The open next actions, due first, then by priority. */
+    /** The open next actions in Next's order ({@link TaskOrder#NEXT}). */
     private static List<Task> nextActions(List<TaskStore.Stored> open) {
         List<TaskStore.Stored> next = new ArrayList<>();
         for (TaskStore.Stored stored : open) {
@@ -276,7 +275,7 @@ public final class TasksList {
                 next.add(stored);
             }
         }
-        next.sort(TasksList::byDueThenPriority);
+        next.sort(TaskOrder.NEXT);
         List<Task> tasks = new ArrayList<>();
         for (TaskStore.Stored stored : next) {
             tasks.add(stored.task);
@@ -292,7 +291,7 @@ public final class TasksList {
                 inbox.add(stored);
             }
         }
-        inbox.sort(Comparator.comparing(stored -> stored.task.created()));
+        inbox.sort(TaskOrder.CAPTURED);
         return inbox;
     }
 
@@ -368,9 +367,9 @@ public final class TasksList {
         ((TextView) host.findViewById(R.id.tasks_empty_text)).setText(emptyOf(shown));
     }
 
-    /** Whether a to-do passes the category filter. */
+    /** Whether a to-do passes the category filter, compared folded. */
     private boolean narrowed(TaskStore.Stored stored) {
-        return category == null || stored.task.categories().contains(category);
+        return category == null || TaskOrder.carries(stored, category);
     }
 
     private List<Row> rowsOf(List<TaskStore.Stored> open) {
@@ -382,7 +381,7 @@ public final class TasksList {
         }
         List<Row> rows = new ArrayList<>();
         if (Task.NEXT.equals(shown)) {
-            listed.sort(TasksList::byDueThenPriority);
+            listed.sort(TaskOrder.NEXT);
             String due = host.getString(R.string.task_section_due);
             String actions = host.getString(R.string.task_section_next);
             for (TaskStore.Stored stored : nested(listed)) {
@@ -390,7 +389,7 @@ public final class TasksList {
             }
             return rows;
         }
-        listed.sort(Comparator.comparing(stored -> stored.task.created()));
+        listed.sort(TaskOrder.CAPTURED);
         String section = host.getString(R.string.task_section_oldest);
         for (TaskStore.Stored stored : nested(listed)) {
             rows.add(new Row(stored, section));
@@ -462,27 +461,6 @@ public final class TasksList {
         return null;
     }
 
-    /** Due ones first, soonest first; then by priority, 1 highest. */
-    private static int byDueThenPriority(TaskStore.Stored left, TaskStore.Stored right) {
-        boolean leftDue = left.task.due() != null;
-        boolean rightDue = right.task.due() != null;
-        if (leftDue != rightDue) {
-            return leftDue ? -1 : 1;
-        }
-        if (leftDue) {
-            int byDue = Long.compare(Zones.instant(left.task.due()), Zones.instant(right.task.due()));
-            if (byDue != 0) {
-                return byDue;
-            }
-        }
-        return Integer.compare(rank(left.task.priority()), rank(right.task.priority()));
-    }
-
-    /** A priority's rank, undefined last (RFC 5545 3.8.1.9). */
-    private static int rank(int priority) {
-        return priority == 0 ? 10 : priority;
-    }
-
     /** The task a UID names, null when none is loaded. */
     TaskStore.Stored taskOf(String uid) {
         return uid == null ? null : find(all, uid);
@@ -499,24 +477,20 @@ public final class TasksList {
         return parents;
     }
 
-    /** Every category an open to-do names, in first-seen order. */
+    /**
+     * Every category an open to-do names, one per folded spelling, in
+     * first-seen order.
+     */
     Set<String> categories() {
-        Set<String> categories = new LinkedHashSet<>();
-        for (TaskStore.Stored stored : open()) {
-            categories.addAll(stored.task.categories());
-        }
-        return categories;
+        return new LinkedHashSet<>(TaskOrder.categories(open()));
     }
 
     private void renderCategories(List<TaskStore.Stored> open) {
         categoryRow.removeAllViews();
-        Set<String> categories = new LinkedHashSet<>();
-        for (TaskStore.Stored stored : open) {
-            categories.addAll(stored.task.categories());
-        }
+        java.util.Collection<String> categories = TaskOrder.categories(open);
         ((View) categoryRow.getParent())
                 .setVisibility(categories.isEmpty() ? View.GONE : View.VISIBLE);
-        if (category != null && !categories.contains(category)) {
+        if (category != null && categories.stream().noneMatch(this::picked)) {
             category = null;
         }
 
@@ -529,13 +503,18 @@ public final class TasksList {
                 });
         for (String name : categories) {
             TextView chip = chip(categoryRow, name, 0);
-            draw(chip, 0, name.equals(category));
+            draw(chip, 0, picked(name));
             chip.setOnClickListener(
                     view -> {
-                        category = name.equals(category) ? null : name;
+                        category = picked(name) ? null : name;
                         render();
                     });
         }
+    }
+
+    /** Whether {@code name} is the category picked, compared folded. */
+    private boolean picked(String name) {
+        return category != null && TaskOrder.fold(category).equals(TaskOrder.fold(name));
     }
 
     /** What the header says of the weekly review. */

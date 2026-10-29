@@ -507,6 +507,7 @@ fn graph_calendar(calendar: MsgraphCalendar) -> Option<Calendar> {
         color: calendar.hex_color.filter(|color| !color.is_empty()),
         role: default_role(calendar.is_default_calendar == Some(true)),
         writable: calendar.can_edit != Some(false),
+        vtodo: None,
     })
 }
 

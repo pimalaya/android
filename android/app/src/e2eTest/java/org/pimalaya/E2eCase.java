@@ -61,6 +61,13 @@ public abstract class E2eCase {
 
     private E2eDevice observer;
 
+    /**
+     * Whether the devices' calendar passes take the scratch calendars
+     * alone ({@link E2eDevice#scratchOnly}), for a test that must read no
+     * calendar of the account.
+     */
+    protected boolean scratchOnly;
+
     private final List<String> scratch = new ArrayList<>();
 
     protected E2eCase(String target) {
@@ -144,6 +151,7 @@ public abstract class E2eCase {
         E2eDevice.network(RuntimeEnvironment.getApplication(), E2eDevice.Network.WIFI);
         phone = new E2eDevice(RuntimeEnvironment.getApplication(), "phone");
         phone.tag = tag;
+        phone.scratchOnly = scratchOnly;
         account = target.account(phone.clients.account());
     }
 
@@ -187,12 +195,17 @@ public abstract class E2eCase {
      * <p>Answers its name.
      */
     protected String scratch() throws Exception {
+        return scratch(List.of());
+    }
+
+    /** A scratch calendar stating these components, as {@link #scratch()}. */
+    protected String scratch(List<String> components) throws Exception {
         String name = tag + "-" + (scratch.size() + 1);
         scratch.add(name);
         if (fixture != null) {
             fixture.createMailbox(name);
         } else {
-            items.createCollection(name);
+            items.createCollection(name, components);
         }
         return name;
     }
@@ -226,6 +239,7 @@ public abstract class E2eCase {
         if (observer == null) {
             observer = new E2eDevice(RuntimeEnvironment.getApplication(), "observer");
             observer.tag = tag;
+            observer.scratchOnly = scratchOnly;
             Exception failure = observer.connect(target.account(observer.clients.account()));
             if (failure != null) {
                 throw new AssertionError(

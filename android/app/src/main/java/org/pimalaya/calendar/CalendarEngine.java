@@ -8,6 +8,7 @@ import org.json.JSONObject;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Derived;
 import org.pimalaya.client.Event;
 import org.pimalaya.client.EventDelta;
 import org.pimalaya.client.EventRef;
@@ -213,11 +214,14 @@ public final class CalendarEngine extends PimdirEngine {
         item.put("linkId", event.id());
         item.put("hash", PimdirHash.of(event.ical()));
         item.put("body", event.ical());
-        // NOTE: no key and no summary. What an agenda row shows needs the
-        // recurrence expansion, which happens at render time against the
-        // window being shown, so there is nothing to write here that a
-        // listing could read.
-        item.put("sortKey", "");
+        // NOTE: the summary and key io-pimdir derives, which a reader listing
+        // items without their bodies reads (the Tasks tab, task_summary). An
+        // agenda row still expands at render time against its window.
+        Derived derived = CalendarSummaries.of(event.ical());
+        item.put("sortKey", derived == null ? "" : derived.sortKey());
+        if (derived != null && derived.summary() != null) {
+            item.put("summary", derived.summary());
+        }
         if (event.etag() != null) {
             item.put("revision", event.etag());
         }

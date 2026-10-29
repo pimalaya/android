@@ -310,18 +310,20 @@ public class EventEditTest {
                         + "\"due\":{\"time\":\"20260110T170000\"},\"completed\":{\"time\":\"\"},"
                         + "\"stamp\":\"20260201T100000Z\",\"scope\":\"all\"}",
                 edit.toJson().toString());
+        // NOTE: a to-do is written as pimdir GUIDE §17 says, from the agenda
+        // as from the Tasks tab: each line where it stood, DTSTAMP restated
+        // in place, and no LAST-MODIFIED where the to-do carried none.
         assertEquals(
                 "BEGIN:VCALENDAR\r\n"
                         + "VERSION:2.0\r\n"
                         + "PRODID:-//test//EN\r\n"
                         + "BEGIN:VTODO\r\n"
                         + "UID:t\r\n"
-                        + "DUE:20260110T170000Z\r\n"
-                        + "SUMMARY:File report\r\n"
-                        + "STATUS:IN-PROCESS\r\n"
-                        + "PERCENT-COMPLETE:50\r\n"
                         + "DTSTAMP:20260201T100000Z\r\n"
-                        + "LAST-MODIFIED:20260201T100000Z\r\n"
+                        + "DUE:20260110T170000Z\r\n"
+                        + "PERCENT-COMPLETE:50\r\n"
+                        + "STATUS:IN-PROCESS\r\n"
+                        + "SUMMARY:File report\r\n"
                         + "END:VTODO\r\n"
                         + "END:VCALENDAR",
                 CalendarClient.writeEvent(TODO, edit));

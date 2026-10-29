@@ -81,6 +81,10 @@ impl From<&PimdirSummary> for SummaryJson {
                 percent: task.percent,
                 recurring: task.recurring,
                 until: task.until.clone(),
+                priority: task.priority,
+                categories: task.categories.clone(),
+                parent: task.parent.clone(),
+                mid: task.mid.clone(),
                 addresses,
             }),
             PimdirSummary::Journal(journal) => Self::Journal(JournalJson {
@@ -145,6 +149,10 @@ impl From<SummaryJson> for PimdirSummary {
                 percent: task.percent,
                 recurring: task.recurring,
                 until: task.until,
+                priority: task.priority,
+                categories: task.categories,
+                parent: task.parent,
+                mid: task.mid,
                 organizer: organizer_of(&task.addresses),
                 attendees: role_of(&task.addresses, PimdirAddressRole::Attendee),
             }),
@@ -248,6 +256,15 @@ pub struct TaskJson {
     recurring: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     until: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    priority: Option<i64>,
+    /// Always stated: the column is a JSON array, `[]` for none.
+    #[serde(default)]
+    categories: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mid: Option<String>,
     #[serde(default)]
     addresses: Vec<AddressJson>,
 }

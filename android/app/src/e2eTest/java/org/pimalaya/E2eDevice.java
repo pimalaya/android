@@ -75,6 +75,12 @@ final class E2eDevice {
     /** The test's tag: a pass takes only its scratch collections. */
     String tag;
 
+    /**
+     * Whether a calendar pass takes the tag's scratch calendars alone, not
+     * the account's own: their roster is still listed, never one synced.
+     */
+    boolean scratchOnly;
+
     E2eDevice(Context app, String name) {
         context = new Isolated(app, name);
         pimdir = new PimdirDb(context);
@@ -222,6 +228,9 @@ final class E2eDevice {
                             }
                         }
                         String name = names.getOrDefault(collection, "");
+                        if (scratchOnly) {
+                            return candidate.equals(email) && tag != null && name.contains(tag);
+                        }
                         return candidate.equals(email)
                                 && (tag == null
                                         || !name.startsWith(E2eFixture.PREFIX)
@@ -287,6 +296,11 @@ final class E2eDevice {
             }
         }
         return found;
+    }
+
+    /** The calendar parts the Tasks tab reads and writes through. */
+    org.pimalaya.calendar.CalendarParts calendarParts() {
+        return new org.pimalaya.calendar.CalendarParts(pimdir, clients, events);
     }
 
     /** A calendar driver that only stages, as the event editor's is. */

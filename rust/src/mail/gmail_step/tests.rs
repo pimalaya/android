@@ -548,6 +548,7 @@ impl PimdirRemote for Remote<'_> {
                         cursor: cursor.map(|cursor| String::from_utf8(cursor.0).unwrap()),
                         band,
                     },
+                    PimdirListing::Head(head) => panic!("no head asked: {head:?}"),
                 };
                 let request = MailRequest {
                     listing,

@@ -883,6 +883,7 @@ fn gcal_calendar(entry: GcalCalendarListEntry) -> Option<Calendar> {
         color: entry.background_color.filter(|color| !color.is_empty()),
         role: default_role(entry.primary == Some(true)),
         writable,
+        vtodo: None,
     })
 }
 

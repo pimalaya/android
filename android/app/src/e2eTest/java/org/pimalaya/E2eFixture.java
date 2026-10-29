@@ -12,8 +12,14 @@ import java.util.List;
  * message, so nothing else on the account is touched.
  */
 interface E2eFixture extends AutoCloseable {
-    /** What every scratch mailbox name and message tag starts with. */
-    String PREFIX = "pimalaya-e2e-";
+    /**
+     * What every scratch mailbox name and message tag starts with.
+     *
+     * <p>{@code -Pe2e.prefix} names another, for a run granted only
+     * collections of its own prefix (unfog cairn/changes/gtd-hardening:
+     * {@code unfog-e2e-}), whose sweeps then touch nothing else.
+     */
+    String PREFIX = System.getProperty("e2e.prefix", "pimalaya-e2e-");
 
     /** The timestamp a tag carries after the prefix. */
     DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
