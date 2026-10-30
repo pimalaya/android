@@ -2,10 +2,13 @@
 <!-- A Tasks row, one of its list's card, on the agenda row's shape
      (item_event.xml): a tick to close it, then the task and the line
      saying where it belongs (context, project, who it waits on), and on
-     its right what is due or how long it has waited. -->
+     its right what is due or how long it has waited. It blocks its
+     descendants' focus, the tick's ImageButton taking focus whatever it
+     says, or the list would not hand the row its tap (TaskRowTest). -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:descendantFocusability="blocksDescendants"
     android:paddingStart="@dimen/card_gutter"
     android:paddingEnd="@dimen/card_gutter">
 

@@ -387,6 +387,8 @@ public class MainActivity extends Host
         }
         ((TextView) findViewById(R.id.nav_mail_badge)).setTextColor(accentContrast());
         findViewById(R.id.bar_filter).setOnClickListener(view -> openFilter());
+        findViewById(R.id.tasks_clarify).setOnClickListener(view -> tasksList.clarifyInbox());
+        findViewById(R.id.tasks_review).setOnClickListener(view -> tasksList.openReview());
 
         dock = new SyncDock(this);
         observeSync(sync::showSyncDock);
@@ -493,7 +495,7 @@ public class MainActivity extends Host
         }
         if (ACTION_CAPTURE.equals(intent.getAction())) {
             intent.setAction(Intent.ACTION_MAIN);
-            capture.open();
+            capture.capture();
             return;
         }
         if (ACTION_INBOX.equals(intent.getAction())) {
@@ -637,7 +639,7 @@ public class MainActivity extends Host
     /** Leaves the clarify flow; what was clarified stays clarified. */
     private void leaveClarify() {
         tasksList.reload();
-        showBack(Panels.TASKS);
+        showInstant(Panels.TASKS);
     }
 
     /** Enters the connection flow over the screen, closing the drawer. */
@@ -1804,7 +1806,8 @@ public class MainActivity extends Host
     }
 
     /** Swaps the screen in place, for a lateral move with no direction. */
-    private void showInstant(int panel) {
+    @Override
+    public void showInstant(int panel) {
         flipper.setInAnimation(null);
         flipper.setOutAnimation(null);
         flip(panel);
@@ -2000,8 +2003,11 @@ public class MainActivity extends Host
         Screen tasks = new Screen();
         tasks.chrome =
                 () -> {
-                    listFab(R.string.capture_title, R.drawable.ic_add);
+                    listFab(R.string.task_add, R.drawable.ic_add);
                     showDomainBar(Panels.TASKS);
+                    findViewById(R.id.tasks_review).setVisibility(View.VISIBLE);
+                    findViewById(R.id.tasks_clarify)
+                            .setVisibility(tasksList.hasInbox() ? View.VISIBLE : View.GONE);
                     tasksList.reload();
                 };
         tasks.fab = () -> capture.open();
@@ -2038,8 +2044,8 @@ public class MainActivity extends Host
                     findViewById(R.id.fab).setVisibility(View.GONE);
                     review.refresh();
                 };
-        reviewing.barBack = () -> showBack(Panels.TASKS);
-        reviewing.systemBack = () -> showBack(Panels.TASKS);
+        reviewing.barBack = () -> showInstant(Panels.TASKS);
+        reviewing.systemBack = () -> showInstant(Panels.TASKS);
         screens.put(Panels.REVIEW, reviewing);
 
         Screen composer = new Screen();
@@ -2169,6 +2175,8 @@ public class MainActivity extends Host
                         R.id.bar_back,
                         R.id.bar_menu,
                         R.id.bar_filter,
+                        R.id.tasks_clarify,
+                        R.id.tasks_review,
                         R.id.contacts_birthdays,
                         R.id.contacts_duplicates,
                         R.id.contacts_transfer,

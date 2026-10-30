@@ -25,6 +25,9 @@ public class StubHost extends Host {
     public void showBack(int panel) {}
 
     @Override
+    public void showInstant(int panel) {}
+
+    @Override
     public void openOverlay(int panel) {}
 
     @Override

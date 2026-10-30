@@ -14,6 +14,7 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Flags;
 import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.ui.ChipField;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.PillField;
@@ -112,7 +113,7 @@ public final class MessageCompose {
             host.findViewById(pair[0])
                     .setOnClickListener(
                             view -> {
-                                if (field instanceof RecipientField recipients) {
+                                if (field instanceof ChipField recipients) {
                                     recipients.focus();
                                 } else {
                                     field.requestFocus();
@@ -180,9 +181,9 @@ public final class MessageCompose {
         this.opened = prefill;
 
         ((TextView) host.findViewById(R.id.compose_from)).setText(account.email);
-        ((RecipientField) host.findViewById(R.id.compose_to)).set(prefill.to);
-        ((RecipientField) host.findViewById(R.id.compose_cc)).set(prefill.cc);
-        ((RecipientField) host.findViewById(R.id.compose_bcc)).clear();
+        ((ChipField) host.findViewById(R.id.compose_to)).set(prefill.to);
+        ((ChipField) host.findViewById(R.id.compose_cc)).set(prefill.cc);
+        ((ChipField) host.findViewById(R.id.compose_bcc)).clear();
         ((EditText) host.findViewById(R.id.compose_subject)).setText(prefill.subject);
         MarkdownField body = body();
         boolean rich = prefill.rich != null ? prefill.rich : ComposeFormat.rich(host, account.email);
@@ -438,6 +439,6 @@ public final class MessageCompose {
 
     /** One address field's recipients, comma separated. */
     private String recipients(int id) {
-        return ((RecipientField) host.findViewById(id)).value();
+        return ((ChipField) host.findViewById(id)).value();
     }
 }

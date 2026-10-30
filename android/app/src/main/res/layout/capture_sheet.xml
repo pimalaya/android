@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The capture sheet, on the sync sheet's ground (sync_sheet.xml): what
-     is on the person's mind, an optional note, the mail it was captured
-     from when there is one, and the task calendar it goes to: a dropdown
+<!-- The task sheet, on the sync sheet's ground (sync_sheet.xml): the
+     task, an optional note, its GTD state and categories, the mail it was
+     added from when there is one, and the task calendar it goes to: a dropdown
      when there are several, why it cannot go anywhere when there are none
      (CaptureSheet). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -25,7 +25,7 @@
         android:id="@+id/capture_title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/capture_title"
+        android:text="@string/task_new"
         android:textColor="?android:attr/textColorPrimary"
         android:textSize="22sp"
         android:textStyle="bold" />
@@ -62,6 +62,22 @@
         android:textColor="?android:attr/colorAccent"
         android:textSize="14sp"
         android:textStyle="bold" />
+
+    <!-- The GTD state, at most one chip on, none a next action
+         (CaptureSheet). -->
+    <LinearLayout
+        android:id="@+id/capture_states"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal" />
+
+    <org.pimalaya.ui.ChipField
+        android:id="@+id/capture_categories"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:hint="@string/task_field_categories" />
 
     <TextView
         android:id="@+id/capture_source"

@@ -1,8 +1,6 @@
 package org.pimalaya.task;
 
 import android.content.SharedPreferences;
-import android.content.res.ColorStateList;
-import android.graphics.drawable.Drawable;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -19,6 +17,7 @@ import org.pimalaya.calendar.Zones;
 import org.pimalaya.client.Task;
 import org.pimalaya.client.TaskEdit;
 import org.pimalaya.ui.CardSections;
+import org.pimalaya.ui.Chips;
 import org.pimalaya.ui.Dates;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListHeader;
@@ -26,21 +25,28 @@ import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.SectionsAdapter;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * The Tasks tab: the GTD lists over every calendar's to-dos.
+ * The Tasks tab: the open tasks of every calendar the filter shows, the GTD
+ * lists beside them (cairn/changes/tasks-for-everyone).
  *
- * <p>Inbox, Next, Waiting For and Someday, each a filter of the one load
- * ({@link TaskStore}) across accounts and calendars, the state a reserved
- * category (pimdir GUIDE §17); a category filter narrows all four. A row's
- * tick closes it; a tap opens its page ({@link TaskPage}), or clarifies it
- * from the Inbox.
+ * <p>Two chip rows (cairn/changes/task-filter-rows). The category row holds
+ * the GTD lists, at most one on, each a reserved category (pimdir GUIDE §17),
+ * then the person's own categories, any number on. The status row under it,
+ * at most one on, keeps the tasks under way, done or cancelled ({@code
+ * STATUS}), the open tasks with none on. With nothing on, the next actions,
+ * merged across accounts and calendars. A row's tick closes it, or reopens it
+ * once closed; a tap opens its page ({@link TaskPage}), or clarifies it from
+ * the Inbox.
  */
 public final class TasksList {
     /** Days after which a weekly review is due again. */
@@ -51,23 +57,36 @@ public final class TasksList {
 
     static final String REVIEWED = "reviewed_at";
 
-    /** The lists the chips switch between, in GTD's order. */
+    /**
+     * The statuses the first row filters on ({@link TaskOrder#lists}); none on
+     * is the open tasks.
+     */
+    private static final String[] STATUSES = {
+        TaskOrder.PROGRESS, TaskOrder.DONE, TaskOrder.CANCELLED,
+    };
+
+    private static final int[] STATUS_LABELS = {
+        R.string.task_list_progress, R.string.task_list_done, R.string.task_list_cancelled,
+    };
+
+    private static final int[] STATUS_ICONS = {
+        R.drawable.ic_task_progress, R.drawable.ic_task_done, R.drawable.ic_cancel,
+    };
+
+    /**
+     * The GTD lists heading the category row, in GTD's order; none on is Next
+     * among the open tasks, any state under a status.
+     */
     private static final String[] LISTS = {
-        Task.INBOX, Task.NEXT, Task.WAITING, Task.SOMEDAY,
+        Task.INBOX, Task.WAITING, Task.SOMEDAY,
     };
 
     private static final int[] LABELS = {
-        R.string.task_list_inbox,
-        R.string.task_list_next,
-        R.string.task_list_waiting,
-        R.string.task_list_someday,
+        R.string.task_list_inbox, R.string.task_list_waiting, R.string.task_list_someday,
     };
 
     private static final int[] ICONS = {
-        R.drawable.ic_task_inbox,
-        R.drawable.ic_arrow_forward,
-        R.drawable.ic_task_waiting,
-        R.drawable.ic_task_someday,
+        R.drawable.ic_task_inbox, R.drawable.ic_task_waiting, R.drawable.ic_task_someday,
     };
 
     private final Host host;
@@ -94,22 +113,30 @@ public final class TasksList {
     /** Opened on a row tap. */
     TaskPage page;
 
-    /** Opened from the Inbox's Clarify button. */
+    /** Opened from the bar's Clarify button. */
     Clarify clarify;
 
-    /** Opened from the Review chip. */
+    /** Opened from the bar's Weekly review button. */
     WeeklyReview review;
 
     private ListHeader header;
-    private final List<TextView> listChips = new ArrayList<>();
+    private List<TextView> statusChips = new ArrayList<>();
     private LinearLayout categoryRow;
-    private TextView clarifyButton;
 
-    /** The list on screen, one of {@link #LISTS}. */
+    /** The status on: one of {@link #STATUSES}, null for the open tasks. */
+    private String status;
+
+    /** The GTD list on: one of {@link #LISTS}, or Next with none on. */
     private String shown = Task.NEXT;
 
-    /** The category every list narrows to, null for every one. */
-    private String category;
+    /**
+     * The categories on, folded, every list narrowed to the tasks carrying
+     * any of them; empty for every task.
+     */
+    private final Set<String> categoriesOn = new LinkedHashSet<>();
+
+    /** The Inbox count of the last draw, for the bar's Clarify button. */
+    private int inboxCount;
 
     /** Every to-do of the last load. */
     private List<TaskStore.Stored> all = new ArrayList<>();
@@ -153,42 +180,28 @@ public final class TasksList {
         header = new ListHeader(host, list, Panels.TASKS);
         header.empty(host.findViewById(R.id.tasks_empty));
 
-        LinearLayout chips = header.chips();
-        for (int index = 0; index < LISTS.length; index++) {
-            String target = LISTS[index];
-            TextView chip = chip(chips, host.getString(LABELS[index]), ICONS[index]);
-            chip.setOnClickListener(
-                    view -> {
-                        shown = target;
-                        render();
-                        list.setSelection(0);
-                    });
-            listChips.add(chip);
-        }
-        TextView reviewChip =
-                chip(chips, host.getString(R.string.task_review), R.drawable.ic_task_review);
-        reviewChip.setOnClickListener(view -> review.open());
-
-        // NOTE: a second row under the lists, the categories, which the
-        // header's one chip row has no room for. It narrows every list, so
-        // switching lists keeps it.
+        // NOTE: the header's chip row holds the categories, the GTD lists
+        // first, drawn again on every render; the statuses take a second row
+        // under it, which narrows whatever the categories pick.
+        categoryRow = header.chips();
         HorizontalScrollView scroll = new HorizontalScrollView(host);
         scroll.setHorizontalScrollBarEnabled(false);
         scroll.setPadding(host.dp(16), host.dp(10), host.dp(16), 0);
         scroll.setClipToPadding(false);
-        categoryRow = new LinearLayout(host);
-        scroll.addView(categoryRow);
+        LinearLayout statusRow = new LinearLayout(host);
+        scroll.addView(statusRow);
         ((ViewGroup) header.view).addView(scroll);
-
-        clarifyButton = new TextView(host, null, 0, R.style.Chip);
-        clarifyButton.setBackgroundResource(R.drawable.button_pill);
-        clarifyButton.setTextColor(host.accentContrast());
-        clarifyButton.setOnClickListener(view -> clarify.open(inbox()));
-        LinearLayout.LayoutParams clarifyParams =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT, host.dp(40));
-        clarifyParams.setMargins(host.dp(16), host.dp(12), host.dp(16), 0);
-        ((ViewGroup) header.view).addView(clarifyButton, clarifyParams);
+        statusChips =
+                Chips.exclusive(
+                        host,
+                        statusRow,
+                        STATUS_LABELS,
+                        STATUS_ICONS,
+                        picked -> {
+                            status = picked < 0 ? null : STATUSES[picked];
+                            render();
+                            list.setSelection(0);
+                        });
 
         list.setAdapter(adapter);
         list.setOnItemClickListener(
@@ -197,7 +210,7 @@ public final class TasksList {
                     if (row == null) {
                         return;
                     }
-                    if (Task.INBOX.equals(shown)) {
+                    if (Task.INBOX.equals(shown) && !row.stored.task.closed()) {
                         clarify.open(List.of(row.stored));
                     } else {
                         page.open(row.stored);
@@ -210,11 +223,30 @@ public final class TasksList {
         return header;
     }
 
-    /** The list shown, as the tab opens on it, every category shown. */
+    /**
+     * The list shown, as the tab opens on it, among the open tasks, every
+     * category shown: Next is no chip on.
+     */
     public void show(String list) {
         shown = list;
-        category = null;
+        status = null;
+        categoriesOn.clear();
         reload();
+    }
+
+    /** The bar's Clarify: the Inbox, one item at a time. */
+    public void clarifyInbox() {
+        clarify.open(inbox());
+    }
+
+    /** The bar's Weekly review. */
+    public void openReview() {
+        review.open();
+    }
+
+    /** Whether the Inbox holds an open item, for the bar's Clarify button. */
+    public boolean hasInbox() {
+        return inboxCount > 0;
     }
 
     /**
@@ -313,12 +345,16 @@ public final class TasksList {
 
     /** Closes or reopens a to-do, then reloads. */
     void done(TaskStore.Stored stored, boolean done) {
+        write(stored, TaskEdit.at(TaskWrites.now()).withDone(done));
+    }
+
+    private void write(TaskStore.Stored stored, TaskEdit edit) {
         host.io.execute(
                 () -> {
                     try {
-                        writes.edit(stored, TaskEdit.at(TaskWrites.now()).withDone(done));
+                        writes.edit(stored, edit);
                     } catch (Exception error) {
-                        Log.w("pimalaya", "task done failed: " + stored.event.id, error);
+                        Log.w("pimalaya", "task edit failed: " + stored.event.id, error);
                         host.postAlive(() -> host.showError(error, R.string.task_save_failed));
                         return;
                     }
@@ -326,27 +362,34 @@ public final class TasksList {
                 });
     }
 
+    /** Whether {@code status} lists closed tasks: Done or Cancelled. */
+    private static boolean closedStatus(String status) {
+        return TaskOrder.DONE.equals(status) || TaskOrder.CANCELLED.equals(status);
+    }
+
+    /** {@code label} with its count, none when nothing or a closed status. */
+    private String counted(int label, int count, String inStatus) {
+        String text = host.getString(label);
+        // NOTE: the closed statuses only grow, so they count nothing.
+        return count > 0 && !closedStatus(inStatus) ? text + "  " + count : text;
+    }
+
     private void render() {
         List<TaskStore.Stored> open = open();
-        renderCategories(open);
-        int[] counts = new int[LISTS.length];
-        int inboxCount = 0;
+        inboxCount = 0;
+        int progress = 0;
         for (TaskStore.Stored stored : open) {
             inboxCount += stored.task.in(Task.INBOX) ? 1 : 0;
-            for (int index = 0; index < LISTS.length; index++) {
-                if (stored.task.in(LISTS[index]) && narrowed(stored)) {
-                    counts[index]++;
-                }
+            if (TaskOrder.lists(TaskOrder.PROGRESS, shown, stored.task) && narrowed(stored)) {
+                progress++;
             }
         }
-        for (int index = 0; index < LISTS.length; index++) {
-            TextView chip = listChips.get(index);
-            String label = host.getString(LABELS[index]);
-            chip.setText(counts[index] > 0 && !Task.NEXT.equals(LISTS[index])
-                    ? label + "  " + counts[index]
-                    : label);
-            draw(chip, ICONS[index], LISTS[index].equals(shown));
+        for (int index = 0; index < STATUSES.length; index++) {
+            TextView chip = statusChips.get(index);
+            chip.setText(counted(STATUS_LABELS[index], progress, STATUSES[index]));
+            Chips.draw(host, chip, STATUS_ICONS[index], STATUSES[index].equals(status));
         }
+        renderCategories();
 
         header.meta(reviewLine());
 
@@ -356,41 +399,51 @@ public final class TasksList {
         if (nextListed != null) {
             nextListed.accept(nextActions(open));
         }
-        clarifyButton.setVisibility(
-                Task.INBOX.equals(shown) && inboxCount > 0 ? View.VISIBLE : View.GONE);
-        clarifyButton.setText(host.getString(R.string.task_clarify_count, inboxCount));
+        if (host.screen == Panels.TASKS) {
+            host.findViewById(R.id.tasks_clarify)
+                    .setVisibility(inboxCount > 0 ? View.VISIBLE : View.GONE);
+        }
 
-        List<Row> rows = rowsOf(open);
+        List<Row> rows = rowsOf();
         sections.fill(rows, row -> row.section);
         adapter.notifyDataSetChanged();
         host.findViewById(R.id.tasks_empty).setVisibility(rows.isEmpty() ? View.VISIBLE : View.GONE);
-        ((TextView) host.findViewById(R.id.tasks_empty_text)).setText(emptyOf(shown));
+        ((TextView) host.findViewById(R.id.tasks_empty_text)).setText(emptyOf());
     }
 
     /** Whether a to-do passes the category filter, compared folded. */
     private boolean narrowed(TaskStore.Stored stored) {
-        return category == null || TaskOrder.carries(stored, category);
+        return TaskOrder.carriesAny(stored, categoriesOn);
     }
 
-    private List<Row> rowsOf(List<TaskStore.Stored> open) {
+    private List<Row> rowsOf() {
         List<TaskStore.Stored> listed = new ArrayList<>();
-        for (TaskStore.Stored stored : open) {
-            if (stored.task.in(shown) && narrowed(stored)) {
+        for (TaskStore.Stored stored : all) {
+            if (TaskOrder.lists(status, shown, stored.task) && narrowed(stored)) {
                 listed.add(stored);
             }
         }
         List<Row> rows = new ArrayList<>();
-        if (Task.NEXT.equals(shown)) {
+        if (status == null && Task.NEXT.equals(shown) || TaskOrder.PROGRESS.equals(status)) {
             listed.sort(TaskOrder.NEXT);
             String due = host.getString(R.string.task_section_due);
-            String actions = host.getString(R.string.task_section_next);
+            String actions = host.getString(R.string.task_section_undated);
             for (TaskStore.Stored stored : nested(listed)) {
                 rows.add(new Row(stored, sectionOf(stored, listed, due, actions)));
             }
             return rows;
         }
-        listed.sort(TaskOrder.CAPTURED);
-        String section = host.getString(R.string.task_section_oldest);
+        String section;
+        if (TaskOrder.DONE.equals(status)) {
+            listed.sort(TaskOrder.COMPLETED);
+            section = host.getString(R.string.task_section_newest);
+        } else if (TaskOrder.CANCELLED.equals(status)) {
+            listed.sort(TaskOrder.RECENT);
+            section = host.getString(R.string.task_section_newest);
+        } else {
+            listed.sort(TaskOrder.CAPTURED);
+            section = host.getString(R.string.task_section_oldest);
+        }
         for (TaskStore.Stored stored : nested(listed)) {
             rows.add(new Row(stored, section));
         }
@@ -485,44 +538,90 @@ public final class TasksList {
         return new LinkedHashSet<>(TaskOrder.categories(open()));
     }
 
-    private void renderCategories(List<TaskStore.Stored> open) {
+    /**
+     * The category row: the GTD lists, at most one on, each counting its
+     * tasks under the status on; then the person's categories the tasks of
+     * that status carry, any number on, plus any category on that they lack,
+     * so switching status never hides one narrowing the list.
+     */
+    private void renderCategories() {
         categoryRow.removeAllViews();
-        java.util.Collection<String> categories = TaskOrder.categories(open);
-        ((View) categoryRow.getParent())
-                .setVisibility(categories.isEmpty() ? View.GONE : View.VISIBLE);
-        if (category != null && categories.stream().noneMatch(this::picked)) {
-            category = null;
+
+        List<TaskStore.Stored> ofStatus = new ArrayList<>();
+        for (TaskStore.Stored stored : all) {
+            if (status == null
+                    ? !stored.task.closed()
+                    : TaskOrder.lists(status, Task.NEXT, stored.task)) {
+                ofStatus.add(stored);
+            }
         }
 
-        TextView every = chip(categoryRow, host.getString(R.string.task_context_all), 0);
-        draw(every, 0, category == null);
-        every.setOnClickListener(
-                view -> {
-                    category = null;
-                    render();
-                });
-        for (String name : categories) {
-            TextView chip = chip(categoryRow, name, 0);
-            draw(chip, 0, picked(name));
-            chip.setOnClickListener(
-                    view -> {
-                        category = picked(name) ? null : name;
-                        render();
-                    });
+        for (int index = 0; index < LISTS.length; index++) {
+            String target = LISTS[index];
+            int count = 0;
+            for (TaskStore.Stored stored : ofStatus) {
+                if (TaskOrder.lists(status, target, stored.task) && narrowed(stored)) {
+                    count++;
+                }
+            }
+            TextView chip =
+                    Chips.add(
+                            host,
+                            categoryRow,
+                            counted(LABELS[index], count, status),
+                            ICONS[index],
+                            on -> {
+                                shown = on ? target : Task.NEXT;
+                                render();
+                            });
+            Chips.draw(host, chip, ICONS[index], target.equals(shown));
+        }
+
+        // NOTE: a category no task carries any more is turned off, so
+        // nothing invisible narrows the lists.
+        Map<String, String> every = new HashMap<>();
+        for (String name : TaskOrder.categories(all)) {
+            every.put(TaskOrder.fold(name), name);
+        }
+        categoriesOn.retainAll(every.keySet());
+
+        Map<String, String> shownNames = new LinkedHashMap<>();
+        for (String name : TaskOrder.categories(ofStatus)) {
+            shownNames.put(TaskOrder.fold(name), name);
+        }
+        for (String folded : categoriesOn) {
+            shownNames.putIfAbsent(folded, every.get(folded));
+        }
+
+        for (String name : shownNames.values()) {
+            String folded = TaskOrder.fold(name);
+            TextView chip =
+                    Chips.add(
+                            host,
+                            categoryRow,
+                            name,
+                            0,
+                            on -> {
+                                if (on) {
+                                    categoriesOn.add(folded);
+                                } else {
+                                    categoriesOn.remove(folded);
+                                }
+                                render();
+                            });
+            Chips.draw(host, chip, 0, categoriesOn.contains(folded));
         }
     }
 
-    /** Whether {@code name} is the category picked, compared folded. */
-    private boolean picked(String name) {
-        return category != null && TaskOrder.fold(category).equals(TaskOrder.fold(name));
-    }
-
-    /** What the header says of the weekly review. */
+    /**
+     * What the header says of the weekly review: nothing before a first one
+     * is finished.
+     */
     private String reviewLine() {
         SharedPreferences preferences = host.getSharedPreferences(PREFERENCES, 0);
         long at = preferences.getLong(REVIEWED, 0);
         if (at == 0) {
-            return host.getString(R.string.task_review_never);
+            return "";
         }
         String day = Dates.day(host, at).toString();
         long days = (System.currentTimeMillis() - at) / 86_400_000L;
@@ -531,44 +630,24 @@ public final class TasksList {
                 : host.getString(R.string.task_review_done, day);
     }
 
-    private int emptyOf(String list) {
-        switch (list) {
+    /** What an empty list says: of its status when one is on, else its list. */
+    private int emptyOf() {
+        switch (status != null ? status : shown) {
             case Task.INBOX:
                 return R.string.tasks_empty_inbox;
             case Task.WAITING:
                 return R.string.tasks_empty_waiting;
             case Task.SOMEDAY:
                 return R.string.tasks_empty_someday;
+            case TaskOrder.PROGRESS:
+                return R.string.tasks_empty_progress;
+            case TaskOrder.DONE:
+                return R.string.tasks_empty_done;
+            case TaskOrder.CANCELLED:
+                return R.string.tasks_empty_cancelled;
             default:
                 return R.string.tasks_empty;
         }
-    }
-
-    private TextView chip(LinearLayout row, CharSequence label, int icon) {
-        TextView chip = new TextView(host, null, 0, R.style.Chip);
-        chip.setText(label);
-        LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, host.dp(34));
-        params.setMarginEnd(host.dp(8));
-        row.addView(chip, params);
-        draw(chip, icon, false);
-        return chip;
-    }
-
-    private void draw(TextView chip, int icon, boolean on) {
-        chip.setSelected(on);
-        chip.setBackgroundResource(on ? R.drawable.button_pill : R.drawable.button_tonal);
-        int color =
-                on ? host.accentContrast() : host.ui.resolveColor(android.R.attr.textColorPrimary);
-        chip.setTextColor(color);
-        if (icon == 0) {
-            chip.setCompoundDrawablesRelative(null, null, null, null);
-            return;
-        }
-        Drawable glyph = host.getDrawable(icon).mutate();
-        glyph.setBounds(0, 0, host.dp(18), host.dp(18));
-        chip.setCompoundDrawablesRelative(glyph, null, null, null);
-        chip.setCompoundDrawableTintList(ColorStateList.valueOf(color));
     }
 
     /** The second line of a row: where it belongs, by the list shown. */
@@ -596,18 +675,19 @@ public final class TasksList {
             }
             return String.join(" · ", parts);
         }
+        parts.add(stored.calendar.name);
         parts.addAll(task.categories());
         TaskStore.Stored parent = taskOf(task.parent());
         if (parent != null) {
             parts.add(parent.task.summary());
         }
-        if (parts.isEmpty()) {
-            parts.add(stored.calendar.name);
-        }
         return String.join(" · ", parts);
     }
 
-    /** What the right of a row says: when it is due, or how long it waited. */
+    /**
+     * What the right of a row says: when it is due, how long it waited, or
+     * when it was done.
+     */
     private String whenOf(TaskStore.Stored stored) {
         Task task = stored.task;
         if (Task.WAITING.equals(shown)) {
@@ -617,6 +697,11 @@ public final class TasksList {
             }
             long days = (System.currentTimeMillis() - since) / 86_400_000L;
             return host.getString(R.string.task_waiting_days, days);
+        }
+        if (TaskOrder.DONE.equals(status)) {
+            return task.completed() == null
+                    ? ""
+                    : Dates.relativeDays(host, Zones.instant(task.completed()));
         }
         if (task.due() != null) {
             return Dates.relativeDays(host, Zones.instant(task.due()));
@@ -669,15 +754,28 @@ public final class TasksList {
             if (waiting && replied(row.stored)) {
                 badge.setText(R.string.task_reply_received);
                 badge.setVisibility(View.VISIBLE);
+            } else if (!TaskOrder.PROGRESS.equals(status) && TaskOrder.underWay(task)) {
+                badge.setText(R.string.task_list_progress);
+                badge.setVisibility(View.VISIBLE);
             } else {
                 badge.setVisibility(View.GONE);
             }
 
-            // NOTE: a capture is clarified rather than ticked off.
+            // NOTE: a capture is clarified rather than ticked off; a closed
+            // task's tick reopens it.
             ImageButton done = view.findViewById(R.id.task_done);
             boolean tickable = !Task.INBOX.equals(shown);
+            boolean closed = task.closed();
             done.setVisibility(tickable ? View.VISIBLE : View.INVISIBLE);
-            done.setOnClickListener(tickable ? button -> done(row.stored, true) : null);
+            done.setOnClickListener(tickable ? button -> done(row.stored, !closed) : null);
+            done.setImageResource(
+                    !closed
+                            ? R.drawable.ic_circle
+                            : TaskOrder.DONE.equals(task.status())
+                                    ? R.drawable.ic_task_done
+                                    : R.drawable.ic_cancel);
+            done.setContentDescription(
+                    host.getString(closed ? R.string.task_reopen : R.string.task_mark_done));
             return view;
         }
     }

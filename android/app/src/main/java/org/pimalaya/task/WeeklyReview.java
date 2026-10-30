@@ -48,7 +48,7 @@ public final class WeeklyReview {
     /** Opens the checklist, the steps ticked since the last Finish kept. */
     public void open() {
         render();
-        host.show(Panels.REVIEW);
+        host.showInstant(Panels.REVIEW);
     }
 
     /** Draws the checklist again on return from a step. */
@@ -130,7 +130,7 @@ public final class WeeklyReview {
 
     private void showList(String target) {
         list.show(target);
-        host.show(Panels.TASKS);
+        host.showInstant(Panels.TASKS);
     }
 
     private void finish() {
@@ -140,6 +140,6 @@ public final class WeeklyReview {
                 .putLong(TasksList.REVIEWED, System.currentTimeMillis())
                 .apply();
         list.reload();
-        host.showBack(Panels.TASKS);
+        host.showInstant(Panels.TASKS);
     }
 }

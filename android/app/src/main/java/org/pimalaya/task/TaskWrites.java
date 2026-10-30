@@ -13,6 +13,7 @@ import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.Task;
 import org.pimalaya.client.TaskEdit;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -57,10 +58,28 @@ public final class TaskWrites {
     public String capture(
             EventStore.StoredCalendar calendar, String title, String note, String source)
             throws JSONException {
+        return add(calendar, title, note, source, Task.INBOX, List.of());
+    }
+
+    /**
+     * Adds {@code title} to {@code calendar} in {@code state}, {@link
+     * Task#NEXT} for none, carrying the person's {@code categories}.
+     */
+    public String add(
+            EventStore.StoredCalendar calendar,
+            String title,
+            String note,
+            String source,
+            String state,
+            List<String> categories)
+            throws JSONException {
         TaskEdit edit =
                 TaskEdit.at(now())
-                        .withList(Task.INBOX)
+                        .withList(state)
                         .withText(title, note == null || note.isEmpty() ? null : note);
+        if (!categories.isEmpty()) {
+            edit = edit.withCategories(String.join(",", categories));
+        }
         if (source != null && !source.isEmpty()) {
             edit = edit.withSource(source);
         }

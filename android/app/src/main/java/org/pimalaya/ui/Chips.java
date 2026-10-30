@@ -20,8 +20,21 @@ public final class Chips {
     /**
      * Adds one chip to {@code row}, telling {@code onToggle} each new state.
      */
-    public static void add(
+    public static TextView add(
             Host host, LinearLayout row, int label, int icon, Consumer<Boolean> onToggle) {
+        return add(host, row, host.getString(label), icon, onToggle);
+    }
+
+    /**
+     * Adds one chip labelled {@code label}, for a row its caller fills from
+     * data; {@code icon} 0 for none but the check while on.
+     */
+    public static TextView add(
+            Host host,
+            LinearLayout row,
+            CharSequence label,
+            int icon,
+            Consumer<Boolean> onToggle) {
         TextView chip = chip(host, row, label, icon);
         chip.setOnClickListener(
                 view -> {
@@ -29,15 +42,17 @@ public final class Chips {
                     draw(host, chip, icon, on);
                     onToggle.accept(on);
                 });
+        return chip;
     }
 
     /**
      * Adds a group of chips at most one of which is on.
      *
      * <p>Turning one on turns the others off; {@code onPick} gets the index of
-     * the one on, -1 for none.
+     * the one on, -1 for none. Returns the chips, for a caller relabelling
+     * them.
      */
-    public static void exclusive(
+    public static List<TextView> exclusive(
             Host host,
             LinearLayout row,
             int[] labels,
@@ -45,7 +60,7 @@ public final class Chips {
             IntConsumer onPick) {
         List<TextView> chips = new ArrayList<>();
         for (int index = 0; index < labels.length; index++) {
-            chips.add(chip(host, row, labels[index], icons[index]));
+            chips.add(chip(host, row, host.getString(labels[index]), icons[index]));
         }
         for (int index = 0; index < chips.size(); index++) {
             int picked = index;
@@ -59,9 +74,10 @@ public final class Chips {
                         onPick.accept(on ? picked : -1);
                     });
         }
+        return chips;
     }
 
-    private static TextView chip(Host host, LinearLayout row, int label, int icon) {
+    private static TextView chip(Host host, LinearLayout row, CharSequence label, int icon) {
         TextView chip = new TextView(host, null, 0, R.style.Chip);
         chip.setText(label);
         LinearLayout.LayoutParams params =
@@ -72,12 +88,20 @@ public final class Chips {
         return chip;
     }
 
-    private static void draw(Host host, TextView chip, int icon, boolean on) {
+    /**
+     * Draws {@code chip} on or off, as a tap would, for a caller whose own
+     * state turned it.
+     */
+    public static void draw(Host host, TextView chip, int icon, boolean on) {
         chip.setSelected(on);
         chip.setBackgroundResource(on ? R.drawable.button_pill : R.drawable.button_tonal);
         int color =
                 on ? host.accentContrast() : host.ui.resolveColor(android.R.attr.textColorPrimary);
         chip.setTextColor(color);
+        if (!on && icon == 0) {
+            chip.setCompoundDrawablesRelative(null, null, null, null);
+            return;
+        }
         Drawable glyph = host.getDrawable(on ? R.drawable.ic_check : icon).mutate();
         glyph.setBounds(0, 0, host.dp(18), host.dp(18));
         chip.setCompoundDrawablesRelative(glyph, null, null, null);

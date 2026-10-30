@@ -100,6 +100,61 @@ public class TaskWritesTest {
     }
 
     @Test
+    public void aNewTaskWithNoStateIsANextActionWithNoCategories() throws Exception {
+        writes.add(calendar, "Buy ink", "", "abc@example.org", Task.NEXT, List.of());
+
+        TaskStore.Stored added = store.load(context).get(0);
+
+        assertTrue(added.task.in(Task.NEXT));
+        assertEquals("abc@example.org", added.task.source());
+        assertFalse(added.event.ical.contains("CATEGORIES"));
+        assertTrue(added.event.ical.contains("\r\nCREATED:"));
+    }
+
+    @Test
+    public void aNewTaskCarriesItsStateAndCategories() throws Exception {
+        writes.add(calendar, "Call back", null, null, Task.WAITING, List.of("Work", "calls"));
+
+        TaskStore.Stored added = store.load(context).get(0);
+
+        assertTrue(added.task.in(Task.WAITING));
+        assertEquals(List.of("Work", "calls"), added.task.categories());
+        // NOTE: the categories a line, the state a line of its own after it,
+        // where pimdir GUIDE §17 places a new state.
+        assertTrue(added.event.ical.contains("CATEGORIES:Work,calls\r\nCATEGORIES:waiting\r\n"));
+    }
+
+    @Test
+    public void aWaitingItemTickedAndReopenedIsWaitingAgain() throws Exception {
+        writes.add(calendar, "Quote from the roofer", null, null, Task.WAITING, List.of());
+        writes.edit(store.load(context).get(0), TaskEdit.at(TaskWrites.now()).withDone(true));
+        TaskStore.Stored done = store.load(context).get(0);
+        assertTrue(TaskOrder.lists(TaskOrder.DONE, Task.NEXT, done.task));
+
+        writes.edit(done, TaskEdit.at(TaskWrites.now()).withDone(false));
+
+        TaskStore.Stored reopened = store.load(context).get(0);
+        assertTrue(TaskOrder.lists(null, Task.WAITING, reopened.task));
+        assertTrue(reopened.event.ical.contains("\r\nSTATUS:NEEDS-ACTION\r\n"));
+        assertFalse(reopened.event.ical.contains("\r\nCOMPLETED:"));
+        assertFalse(reopened.event.ical.contains("PERCENT-COMPLETE"));
+    }
+
+    @Test
+    public void aTaskUnderWayCarriesInProcess() throws Exception {
+        writes.add(calendar, "Paint the fence", null, null, Task.NEXT, List.of());
+        writes.edit(
+                store.load(context).get(0),
+                TaskEdit.at(TaskWrites.now()).withStatus(TaskOrder.PROGRESS));
+
+        TaskStore.Stored started = store.load(context).get(0);
+
+        assertTrue(TaskOrder.lists(TaskOrder.PROGRESS, Task.NEXT, started.task));
+        assertTrue(TaskOrder.lists(null, Task.NEXT, started.task));
+        assertTrue(started.event.ical.contains("\r\nSTATUS:IN-PROCESS\r\n"));
+    }
+
+    @Test
     public void clarifyingMovesItAndClosingTakesItOutOfTheLists() throws Exception {
         writes.capture(calendar, "Feedback on the filter page", null, null);
         TaskStore.Stored captured = store.load(context).get(0);

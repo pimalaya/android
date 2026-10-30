@@ -1,10 +1,11 @@
 package org.pimalaya.task;
 
 import android.app.AlertDialog;
+import android.content.res.ColorStateList;
 import android.util.Log;
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.TextView;
 
 import org.pimalaya.R;
 import org.pimalaya.calendar.CalendarParts;
@@ -17,6 +18,7 @@ import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.Sections;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -24,24 +26,41 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 
 /**
- * A task's page: its list, categories, parent task, due date, who it waits on
- * and the mail it came from, edited and saved as one write.
+ * A task's page, on the entry page's shape (EventView): its details, when it
+ * is due, its progress, how it is organised, the mail it came from and its
+ * calendar, edited and saved as one write.
  *
- * <p>The working values start as opened; a save sends only what moved, so
- * what another client set and this page does not show survives (the bridge
- * patches the object, never rebuilds it).
+ * <p>Each row opens a dialog; a field the task has not got stays hidden until
+ * its section's add button reveals it. The working values start as opened; a
+ * save sends only what moved, so what another client set and this page does
+ * not show survives (the bridge patches the object, never rebuilds it).
  */
 public final class TaskPage {
-    /** The lists a task can move to from its page, in GTD's order. */
+    /** The GTD lists a task can move to, none being a next action. */
     private static final String[] LISTS = {
-        Task.INBOX, Task.NEXT, Task.WAITING, Task.SOMEDAY,
+        Task.NEXT, Task.INBOX, Task.WAITING, Task.SOMEDAY,
     };
 
     private static final int[] LIST_LABELS = {
+        R.string.task_none,
         R.string.task_list_inbox,
-        R.string.task_list_next,
         R.string.task_list_waiting,
         R.string.task_list_someday,
+    };
+
+    /**
+     * The statuses offered (RFC 5545 3.8.1.11), none stated reading as the
+     * first.
+     */
+    private static final String[] STATUSES = {
+        "NEEDS-ACTION", TaskOrder.PROGRESS, TaskOrder.DONE, TaskOrder.CANCELLED,
+    };
+
+    private static final int[] STATUS_LABELS = {
+        R.string.task_status_todo,
+        R.string.task_list_progress,
+        R.string.task_list_done,
+        R.string.task_list_cancelled,
     };
 
     /** The priorities offered: none, high, medium, low (RFC 5545 3.8.1.9). */
@@ -53,6 +72,15 @@ public final class TaskPage {
         R.string.task_priority_medium,
         R.string.task_priority_low,
     };
+
+    /** The fields a section's add button reveals, by key. */
+    private static final String NOTES = "notes";
+
+    private static final String PRIORITY = "priority";
+    private static final String DUE = "due";
+    private static final String CATEGORIES = "categories";
+    private static final String PARENT = "parent";
+    private static final String CONTACT = "contact";
 
     private final Host host;
     private final TasksList list;
@@ -69,6 +97,7 @@ public final class TaskPage {
 
     private String summary;
     private String description;
+    private String status;
     private String listed;
     private List<String> categories;
     private String parent;
@@ -76,6 +105,9 @@ public final class TaskPage {
     private String priority;
     private String contactName;
     private String contactAddress;
+
+    /** The empty fields an add button revealed since the page opened. */
+    private final Set<String> revealed = new HashSet<>();
 
     /** The page over {@code list}'s load; {@code openMail} opens a source. */
     public TaskPage(
@@ -111,6 +143,7 @@ public final class TaskPage {
         Task task = stored.task;
         summary = task.summary();
         description = task.description();
+        status = statusOf(task);
         listed = task.list();
         categories = new ArrayList<>(task.categories());
         parent = task.parent() == null ? "" : task.parent();
@@ -118,97 +151,52 @@ public final class TaskPage {
         priority = task.priority() == 0 ? "" : String.valueOf(task.priority());
         contactName = task.contactName();
         contactAddress = task.contactAddress();
+        revealed.clear();
         render();
         host.show(Panels.TASK);
     }
 
+    /** A task's status as the page offers it, none read as not started. */
+    private static String statusOf(Task task) {
+        for (String offered : STATUSES) {
+            if (offered.equals(task.status())) {
+                return offered;
+            }
+        }
+        return STATUSES[0];
+    }
+
+    /** Whether a field shows: it holds a value, or an add button revealed it. */
+    private boolean shows(String field) {
+        if (revealed.contains(field)) {
+            return true;
+        }
+        switch (field) {
+            case NOTES:
+                return !description.isEmpty();
+            case PRIORITY:
+                return !priority.isEmpty();
+            case DUE:
+                return !due.isEmpty();
+            case CATEGORIES:
+                return !categories.isEmpty();
+            case PARENT:
+                return !parent.isEmpty();
+            case CONTACT:
+                return Task.WAITING.equals(listed)
+                        || !contactName.isEmpty()
+                        || !contactAddress.isEmpty();
+            default:
+                return false;
+        }
+    }
+
     private void render() {
         sections.clear();
-        LinearLayout container = host.findViewById(R.id.task_page);
-
-        LinearLayout lists = new LinearLayout(host);
-        lists.setPadding(host.dp(16), host.dp(8), host.dp(16), 0);
-        android.widget.HorizontalScrollView scroll = new android.widget.HorizontalScrollView(host);
-        scroll.setHorizontalScrollBarEnabled(false);
-        scroll.addView(lists);
-        container.addView(scroll);
-        for (int index = 0; index < LISTS.length; index++) {
-            String target = LISTS[index];
-            TextView chip = new TextView(host, null, 0, R.style.Chip);
-            chip.setText(LIST_LABELS[index]);
-            boolean on = target.equals(listed);
-            chip.setBackgroundResource(on ? R.drawable.button_pill : R.drawable.button_tonal);
-            chip.setTextColor(
-                    on
-                            ? host.accentContrast()
-                            : host.ui.resolveColor(android.R.attr.textColorPrimary));
-            chip.setOnClickListener(
-                    view -> {
-                        listed = target;
-                        render();
-                    });
-            LinearLayout.LayoutParams params =
-                    new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.WRAP_CONTENT, host.dp(34));
-            params.setMarginEnd(host.dp(8));
-            lists.addView(chip, params);
-        }
-
-        List<View> organise = new ArrayList<>();
-        organise.add(
-                sections.row(
-                        host.getString(R.string.task_field_categories),
-                        categories.isEmpty()
-                                ? host.getString(R.string.task_none)
-                                : String.join(", ", categories),
-                        null,
-                        this::pickCategories));
-        TaskStore.Stored above = list.taskOf(parent);
-        organise.add(
-                sections.row(
-                        host.getString(R.string.task_field_parent),
-                        above == null
-                                ? host.getString(R.string.task_none)
-                                : above.task.summary(),
-                        null,
-                        this::pickParent));
-        organise.add(
-                sections.row(
-                        host.getString(R.string.task_field_due),
-                        due.isEmpty()
-                                ? host.getString(R.string.task_add_date)
-                                : org.pimalaya.ui.Dates.date(host, dayStamp(due)),
-                        null,
-                        () -> TaskDialogs.date(host, due, picked -> {
-                            due = picked;
-                            render();
-                        })));
-        sections.section(R.string.task_section_organise, R.drawable.ic_folder_open, organise, null, false);
-
-        if (Task.WAITING.equals(listed)) {
-            String who = contactName.isEmpty() ? contactAddress : contactName;
-            List<View> waiting = new ArrayList<>();
-            waiting.add(
-                    sections.row(
-                            host.getString(R.string.task_field_waiting_on),
-                            who.isEmpty() ? host.getString(R.string.task_none) : who,
-                            null,
-                            () -> TaskDialogs.text(
-                                    host,
-                                    R.string.task_field_waiting_on,
-                                    who,
-                                    false,
-                                    value -> {
-                                        if (value.contains("@") && !value.contains(" ")) {
-                                            contactAddress = value;
-                                            contactName = "";
-                                        } else {
-                                            contactName = value;
-                                        }
-                                        render();
-                                    })));
-            sections.section(R.string.task_section_waiting, R.drawable.ic_task_waiting, waiting, null, false);
-        }
+        details();
+        when();
+        progress();
+        organise();
 
         if (opened.task.source() != null) {
             List<View> source = new ArrayList<>();
@@ -218,14 +206,23 @@ public final class TaskPage {
                             opened.task.source(),
                             null,
                             this::openSource));
-            sections.section(R.string.task_section_from, R.drawable.ic_section_mail, source, null, false);
+            sections.section(
+                    R.string.task_section_from, R.drawable.ic_section_mail, source, null, false);
         }
 
-        List<View> details = new ArrayList<>();
-        details.add(
+        List<View> where = new ArrayList<>();
+        where.add(sections.row(opened.calendar.name, opened.calendar.accountEmail, null, null));
+        sections.section(
+                R.string.task_section_calendar, R.drawable.ic_domain_calendar, where, null, false);
+    }
+
+    /** The title, then the notes and the priority once set or revealed. */
+    private void details() {
+        List<View> rows = new ArrayList<>();
+        rows.add(
                 sections.row(
                         host.getString(R.string.event_field_summary),
-                        summary,
+                        summary.isEmpty() ? host.getString(R.string.event_unset) : summary,
                         null,
                         () -> TaskDialogs.text(
                                 host, R.string.event_field_summary, summary, false, value -> {
@@ -233,46 +230,258 @@ public final class TaskPage {
                                     render();
                                     host.updateBarTitle(title());
                                 })));
-        details.add(
-                sections.row(
-                        host.getString(R.string.task_field_notes),
-                        description.isEmpty() ? host.getString(R.string.task_none) : description,
-                        null,
-                        () -> TaskDialogs.text(
-                                host, R.string.task_field_notes, description, true, value -> {
-                                    description = value;
-                                    render();
-                                })));
-        details.add(
-                sections.row(
-                        host.getString(R.string.event_field_priority),
-                        host.getString(PRIORITY_LABELS[priorityIndex()]),
-                        null,
-                        this::pickPriority));
-        sections.section(R.string.event_section_details, R.drawable.ic_section_notes, details, null, false);
+        if (shows(NOTES)) {
+            rows.add(
+                    sections.row(
+                            host.getString(R.string.task_field_notes),
+                            unsetOr(description),
+                            null,
+                            this::editNotes));
+        }
+        if (shows(PRIORITY)) {
+            rows.add(
+                    sections.row(
+                            host.getString(R.string.event_field_priority),
+                            host.getString(PRIORITY_LABELS[priorityIndex()]),
+                            null,
+                            this::pickPriority));
+        }
+        sections.section(
+                R.string.event_section_details,
+                R.drawable.ic_section_notes,
+                rows,
+                addIcon(NOTES, PRIORITY),
+                true);
+    }
 
-        List<View> where = new ArrayList<>();
-        where.add(
-                sections.row(
-                        opened.calendar.name,
-                        opened.calendar.accountEmail,
-                        null,
-                        null));
-        sections.section(R.string.task_section_calendar, R.drawable.ic_domain_calendar, where, null, false);
+    /** The due date once set or revealed. */
+    private void when() {
+        List<View> rows = new ArrayList<>();
+        if (shows(DUE)) {
+            rows.add(
+                    sections.row(
+                            host.getString(R.string.task_field_due),
+                            due.isEmpty()
+                                    ? host.getString(R.string.event_unset)
+                                    : org.pimalaya.ui.Dates.date(host, dayStamp(due)),
+                            null,
+                            this::pickDue));
+        }
+        sections.section(
+                R.string.event_section_when,
+                R.drawable.ic_domain_calendar,
+                rows,
+                addIcon(DUE),
+                true);
+    }
 
-        List<View> actions = new ArrayList<>();
-        boolean closed = opened.task.closed();
-        actions.add(
+    /** The status, then who a Waiting For item waits on. */
+    private void progress() {
+        List<View> rows = new ArrayList<>();
+        rows.add(
                 sections.row(
-                        host.getString(closed ? R.string.task_reopen : R.string.task_mark_done),
+                        host.getString(R.string.task_field_status),
+                        host.getString(STATUS_LABELS[indexOf(STATUSES, status)]),
                         null,
+                        this::pickStatus));
+        if (shows(CONTACT)) {
+            String who = contactName.isEmpty() ? contactAddress : contactName;
+            rows.add(
+                    sections.row(
+                            host.getString(R.string.task_field_waiting_on),
+                            unsetOr(who),
+                            null,
+                            () -> editContact(who)));
+        }
+        sections.section(
+                R.string.event_section_progress, R.drawable.ic_check, rows, addIcon(CONTACT), true);
+    }
+
+    /** The GTD list, then the categories and the task it sits under. */
+    private void organise() {
+        List<View> rows = new ArrayList<>();
+        rows.add(
+                sections.row(
+                        host.getString(R.string.task_field_list),
+                        host.getString(LIST_LABELS[indexOf(LISTS, listed)]),
                         null,
-                        () -> {
-                            list.done(opened, !closed);
-                            host.showBack(back);
-                        }));
-        actions.add(sections.row(host.getString(R.string.task_drop), null, null, this::drop));
-        sections.section(0, 0, actions, null, false);
+                        this::pickList));
+        if (shows(CATEGORIES)) {
+            rows.add(
+                    sections.row(
+                            host.getString(R.string.task_field_categories),
+                            categories.isEmpty()
+                                    ? host.getString(R.string.event_unset)
+                                    : String.join(", ", categories),
+                            null,
+                            this::pickCategories));
+        }
+        if (shows(PARENT)) {
+            TaskStore.Stored above = list.taskOf(parent);
+            rows.add(
+                    sections.row(
+                            host.getString(R.string.task_field_parent),
+                            above == null
+                                    ? host.getString(R.string.event_unset)
+                                    : above.task.summary(),
+                            null,
+                            this::pickParent));
+        }
+        sections.section(
+                R.string.task_section_organise,
+                R.drawable.ic_folder_open,
+                rows,
+                addIcon(CATEGORIES, PARENT),
+                true);
+    }
+
+    /** {@code value}, or the unset placeholder when empty. */
+    private String unsetOr(String value) {
+        return value.isEmpty() ? host.getString(R.string.event_unset) : value;
+    }
+
+    private static int indexOf(String[] values, String value) {
+        for (int index = 0; index < values.length; index++) {
+            if (values[index].equals(value)) {
+                return index;
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * A section header's add action: the fields of {@code fields} not shown
+     * yet, the one picked revealed and opened.
+     */
+    private View addIcon(String... fields) {
+        ImageView icon = new ImageView(host);
+        icon.setImageResource(R.drawable.ic_add_entry);
+        icon.setImageTintList(ColorStateList.valueOf(sections.accentColor));
+        icon.setContentDescription(host.getString(R.string.contact_add_field));
+        icon.setBackgroundResource(
+                host.ui.resolveAttr(android.R.attr.selectableItemBackgroundBorderless));
+        icon.setPadding(host.dp(6), host.dp(6), host.dp(6), host.dp(6));
+        icon.setOnClickListener(view -> addField(fields));
+        return icon;
+    }
+
+    private void addField(String... fields) {
+        List<String> offerable = new ArrayList<>();
+        for (String field : fields) {
+            if (!shows(field)) {
+                offerable.add(field);
+            }
+        }
+        if (offerable.isEmpty()) {
+            host.toast(host.getString(R.string.event_nothing_to_add));
+            return;
+        }
+        String[] labels = new String[offerable.size()];
+        for (int index = 0; index < labels.length; index++) {
+            labels[index] = host.getString(labelOf(offerable.get(index)));
+        }
+        new AlertDialog.Builder(host)
+                .setTitle(R.string.contact_add_field)
+                .setItems(
+                        labels,
+                        (dialog, which) -> {
+                            String field = offerable.get(which);
+                            revealed.add(field);
+                            render();
+                            edit(field);
+                        })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private static int labelOf(String field) {
+        switch (field) {
+            case NOTES:
+                return R.string.task_field_notes;
+            case PRIORITY:
+                return R.string.event_field_priority;
+            case DUE:
+                return R.string.task_field_due;
+            case CATEGORIES:
+                return R.string.task_field_categories;
+            case PARENT:
+                return R.string.task_field_parent;
+            default:
+                return R.string.task_field_waiting_on;
+        }
+    }
+
+    /** Opens a field's dialog, as its row does. */
+    private void edit(String field) {
+        switch (field) {
+            case NOTES:
+                editNotes();
+                break;
+            case PRIORITY:
+                pickPriority();
+                break;
+            case DUE:
+                pickDue();
+                break;
+            case CATEGORIES:
+                pickCategories();
+                break;
+            case PARENT:
+                pickParent();
+                break;
+            default:
+                editContact(contactName.isEmpty() ? contactAddress : contactName);
+        }
+    }
+
+    private void editNotes() {
+        TaskDialogs.text(host, R.string.task_field_notes, description, true, value -> {
+            description = value;
+            render();
+        });
+    }
+
+    private void pickDue() {
+        TaskDialogs.date(host, due, picked -> {
+            due = picked;
+            render();
+        });
+    }
+
+    private void editContact(String who) {
+        TaskDialogs.text(host, R.string.task_field_waiting_on, who, false, value -> {
+            if (value.contains("@") && !value.contains(" ")) {
+                contactAddress = value;
+                contactName = "";
+            } else {
+                contactName = value;
+            }
+            render();
+        });
+    }
+
+    private void pickStatus() {
+        CharSequence[] labels = new CharSequence[STATUS_LABELS.length];
+        for (int index = 0; index < labels.length; index++) {
+            labels[index] = host.getString(STATUS_LABELS[index]);
+        }
+        TaskDialogs.pick(
+                host, R.string.task_field_status, labels, indexOf(STATUSES, status), picked -> {
+                    status = STATUSES[picked];
+                    render();
+                });
+    }
+
+    private void pickList() {
+        CharSequence[] labels = new CharSequence[LIST_LABELS.length];
+        for (int index = 0; index < labels.length; index++) {
+            labels[index] = host.getString(LIST_LABELS[index]);
+        }
+        TaskDialogs.pick(
+                host, R.string.task_field_list, labels, indexOf(LISTS, listed), picked -> {
+                    listed = LISTS[picked];
+                    render();
+                });
     }
 
     private int priorityIndex() {
@@ -365,14 +574,20 @@ public final class TaskPage {
                 });
     }
 
-    private void drop() {
-        new AlertDialog.Builder(host)
-                .setMessage(R.string.task_drop_confirm)
-                .setPositiveButton(
-                        R.string.task_drop,
-                        (dialog, which) -> write(TaskEdit.at(TaskWrites.now()).withCancelled()))
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+    /**
+     * {@code edit} moving the task to {@code status}: done with its {@code
+     * COMPLETED} time, dropped, or open again, a closed task's {@code
+     * COMPLETED} and {@code PERCENT-COMPLETE} cleared (TaskEdit.withDone).
+     */
+    private static TaskEdit withStatus(TaskEdit edit, String status, boolean closed) {
+        switch (status) {
+            case TaskOrder.DONE:
+                return edit.withDone(true);
+            case TaskOrder.CANCELLED:
+                return edit.withCancelled();
+            default:
+                return closed ? edit.withDone(false).withStatus(status) : edit.withStatus(status);
+        }
     }
 
     /** Saves what moved since the page opened. */
@@ -381,6 +596,9 @@ public final class TaskPage {
         TaskEdit edit = TaskEdit.at(TaskWrites.now());
         if (!summary.equals(task.summary()) || !description.equals(task.description())) {
             edit = edit.withText(summary, description);
+        }
+        if (!status.equals(statusOf(task))) {
+            edit = withStatus(edit, status, task.closed());
         }
         if (!listed.equals(task.list())) {
             edit = edit.withList(listed);

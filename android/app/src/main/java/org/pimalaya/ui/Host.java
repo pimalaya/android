@@ -55,6 +55,9 @@ public abstract class Host extends Activity {
     /** Navigates back: the panels slide in from the left. */
     public abstract void showBack(int panel);
 
+    /** Swaps the screen in place, no slide. */
+    public abstract void showInstant(int panel);
+
     /** Raises a whole-frame overlay over the current screen. */
     public abstract void openOverlay(int panel);
 

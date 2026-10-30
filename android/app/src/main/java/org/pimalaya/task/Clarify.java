@@ -82,7 +82,7 @@ public final class Clarify {
                             () -> {
                                 targets = read;
                                 begin();
-                                host.show(Panels.CLARIFY);
+                                host.showInstant(Panels.CLARIFY);
                             });
                 });
     }
@@ -459,8 +459,8 @@ public final class Clarify {
 
     private void next() {
         if (queue.isEmpty()) {
-            list.show(Task.INBOX);
-            host.showBack(Panels.TASKS);
+            list.reload();
+            host.showInstant(Panels.TASKS);
             return;
         }
         begin();

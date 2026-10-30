@@ -87,9 +87,11 @@ public final class ListHeader {
         ((TextView) view.findViewById(R.id.header_title)).setText(title);
     }
 
-    /** Sets the supporting line under the title. */
+    /** Sets the supporting line under the title, gone when empty. */
     public void meta(String meta) {
-        ((TextView) view.findViewById(R.id.header_meta)).setText(meta);
+        TextView line = view.findViewById(R.id.header_meta);
+        line.setText(meta);
+        line.setVisibility(meta.isEmpty() ? View.GONE : View.VISIBLE);
     }
 
     /**

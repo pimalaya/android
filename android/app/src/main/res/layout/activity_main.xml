@@ -130,6 +130,28 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
+        <!-- Tasks: clarify the Inbox, shown while it holds an item. -->
+        <ImageButton
+            android:id="@+id/tasks_clarify"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:background="@drawable/ripple_circle"
+            android:contentDescription="@string/task_clarify"
+            android:src="@drawable/ic_task_clarify"
+            android:tint="?android:attr/textColorPrimary"
+            android:visibility="gone" />
+
+        <!-- Tasks: the weekly review. -->
+        <ImageButton
+            android:id="@+id/tasks_review"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:background="@drawable/ripple_circle"
+            android:contentDescription="@string/task_review"
+            android:src="@drawable/ic_task_review"
+            android:tint="?android:attr/textColorPrimary"
+            android:visibility="gone" />
+
         <!-- Every list screen's two-axis filter, last so it sits at the
              same spot whatever the domain. Tinted with the accent while
              it hides anything, so a narrowed list never looks like an

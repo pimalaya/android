@@ -1,6 +1,7 @@
 package org.pimalaya.task;
 
 import org.pimalaya.calendar.Zones;
+import org.pimalaya.client.Task;
 
 import java.util.Collection;
 import java.util.Comparator;
@@ -8,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * How the lists order their tasks and how the category filter compares, as
@@ -33,6 +35,50 @@ final class TaskOrder {
     static final Comparator<TaskStore.Stored> CAPTURED =
             Comparator.comparingLong(stored -> TaskStore.capturedAt(stored.task));
 
+    /** Cancelled's order: the last captured first. */
+    static final Comparator<TaskStore.Stored> RECENT = CAPTURED.reversed();
+
+    /** Done's order: the last {@code COMPLETED} first, one stating none after. */
+    static final Comparator<TaskStore.Stored> COMPLETED =
+            Comparator.comparingLong(
+                    (TaskStore.Stored stored) ->
+                            stored.task.completed() == null
+                                    ? Long.MAX_VALUE
+                                    : -Zones.instant(stored.task.completed()));
+
+    /** The view of the tasks under way, a {@code STATUS} (RFC 5545 3.8.1.11). */
+    static final String PROGRESS = "IN-PROCESS";
+
+    /** The view of the done tasks. */
+    static final String DONE = "COMPLETED";
+
+    /** The view of the dropped tasks. */
+    static final String CANCELLED = "CANCELLED";
+
+    /** Whether an open task is under way: {@code STATUS:IN-PROCESS}. */
+    static boolean underWay(Task task) {
+        return !task.closed() && PROGRESS.equals(task.status());
+    }
+
+    /**
+     * Whether the two filter rows list {@code task}: {@code status} one of
+     * {@link #PROGRESS}, {@link #DONE} and {@link #CANCELLED}, null for the
+     * open tasks; {@code list} a GTD list. With no status, the open tasks of
+     * that list, {@link Task#NEXT} the ones carrying no state; under a status,
+     * its tasks in that list, {@link Task#NEXT} then meaning any state, since
+     * a closed or started task keeps the state it had.
+     */
+    static boolean lists(String status, String list, Task task) {
+        if (status == null) {
+            return !task.closed() && task.in(list);
+        }
+        boolean inList = Task.NEXT.equals(list) || task.in(list);
+        if (PROGRESS.equals(status)) {
+            return underWay(task) && inList;
+        }
+        return status.equals(task.status()) && inList;
+    }
+
     /** Due ones first, soonest first. */
     private static int byDue(TaskStore.Stored left, TaskStore.Stored right) {
         boolean leftDue = left.task.due() != null;
@@ -55,11 +101,36 @@ final class TaskOrder {
         return category.toLowerCase(Locale.ROOT).trim();
     }
 
+    /**
+     * Whether {@code category} is one of the three reserved values, the
+     * state rather than a person's category (pimdir GUIDE §17).
+     */
+    static boolean reserved(String category) {
+        String folded = fold(category);
+        return folded.equals("inbox") || folded.equals("waiting") || folded.equals("someday");
+    }
+
     /** Whether a task carries {@code category}, compared folded. */
     static boolean carries(TaskStore.Stored stored, String category) {
         String wanted = fold(category);
         for (String held : stored.task.categories()) {
             if (fold(held).equals(wanted)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a task passes the category filter: it carries any of {@code
+     * folded}, categories already folded; every task when none is on.
+     */
+    static boolean carriesAny(TaskStore.Stored stored, Set<String> folded) {
+        if (folded.isEmpty()) {
+            return true;
+        }
+        for (String held : stored.task.categories()) {
+            if (folded.contains(fold(held))) {
                 return true;
             }
         }

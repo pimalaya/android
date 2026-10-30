@@ -1,4 +1,4 @@
-package org.pimalaya.mail;
+package org.pimalaya.ui;
 
 import android.content.Context;
 import android.graphics.drawable.Drawable;
@@ -18,13 +18,14 @@ import java.util.List;
 import org.pimalaya.R;
 
 /**
- * A composer address field: one removable chip per recipient, then the input.
+ * A field of removable chips, then the input: the composer's recipients, one
+ * chip per address, and the task sheet's categories ({@link #tags}).
  *
  * <p>A typed separator (comma, semicolon, space), the keyboard's action and
  * focus loss all make a chip, so a pasted list splits by itself. Backspace on
  * an empty input takes the last chip back for correction.
  */
-public final class RecipientField extends ViewGroup {
+public final class ChipField extends ViewGroup {
     private static final String ANDROID = "http://schemas.android.com/apk/res/android";
 
     /** The narrowest the input gets before it wraps to a line of its own. */
@@ -35,8 +36,14 @@ public final class RecipientField extends ViewGroup {
     private final EditText input;
     private final List<String> addresses = new ArrayList<>();
 
+    /** What ends an entry as it is typed; spaces too for an address. */
+    private String separators = "[,; ]";
+
+    /** How a chip's remove action is described, its entry the argument. */
+    private int removeLabel = R.string.compose_remove_recipient;
+
     /** Inflated from a layout. */
-    public RecipientField(Context context, AttributeSet attrs) {
+    public ChipField(Context context, AttributeSet attrs) {
         super(context, attrs);
 
         input = new EditText(context);
@@ -62,7 +69,7 @@ public final class RecipientField extends ViewGroup {
                     @Override
                     public void afterTextChanged(Editable text) {
                         String typed = text.toString();
-                        if (typed.matches(".*[,; ].*")) {
+                        if (typed.matches(".*" + separators + ".*")) {
                             commit(typed);
                         }
                     }
@@ -95,6 +102,30 @@ public final class RecipientField extends ViewGroup {
         setOnClickListener(view -> focus());
     }
 
+    /**
+     * Turns the field into one of tags: a comma or a semicolon ends an entry,
+     * spaces staying inside it, typed as words rather than an address, each
+     * chip's remove action described by {@code removeLabel}.
+     */
+    public void tags(int removeLabel) {
+        separators = "[,;]";
+        this.removeLabel = removeLabel;
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_AUTO_CORRECT);
+    }
+
+    /** The entries, the one still typed included, trimmed. */
+    public List<String> entries() {
+        List<String> all = new ArrayList<>();
+        for (String entry : addresses) {
+            all.add(entry.trim());
+        }
+        String pending = input.getText().toString().trim();
+        if (!pending.isEmpty()) {
+            all.add(pending);
+        }
+        return all;
+    }
+
     /** Puts the caret in the input. */
     public void focus() {
         input.requestFocus();
@@ -103,7 +134,7 @@ public final class RecipientField extends ViewGroup {
     /**
      * The recipients comma separated, as the bridge reads them, input included.
      */
-    String value() {
+    public String value() {
         List<String> all = new ArrayList<>(addresses);
         String pending = input.getText().toString().trim();
         if (!pending.isEmpty()) {
@@ -113,23 +144,23 @@ public final class RecipientField extends ViewGroup {
     }
 
     /** Empties the field. */
-    void clear() {
+    public void clear() {
         addresses.clear();
         removeViews(0, getChildCount() - 1);
         input.setText("");
     }
 
     /** Replaces the field's recipients with the comma separated addresses. */
-    void set(String addresses) {
+    public void set(String addresses) {
         clear();
         commit(addresses);
     }
 
     /** Turns every address in the text into a chip, leaving the input empty. */
     private void commit(String text) {
-        for (String address : text.split("[,; ]+")) {
-            if (!address.isEmpty()) {
-                addChip(address);
+        for (String address : text.split(separators + "+")) {
+            if (!address.isBlank()) {
+                addChip(address.trim());
             }
         }
         if (input.length() > 0) {
@@ -151,7 +182,7 @@ public final class RecipientField extends ViewGroup {
         close.setBounds(0, 0, dp(16), dp(16));
         chip.setCompoundDrawablesRelative(null, null, close, null);
         chip.setContentDescription(
-                getContext().getString(R.string.compose_remove_recipient, address));
+                getContext().getString(removeLabel, address));
         chip.setOnClickListener(
                 view -> {
                     addresses.remove(indexOfChild(view));

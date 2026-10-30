@@ -3,7 +3,7 @@
      from, who it goes to and what it is about, then the text under it.
      Sending is the bar's (bar_send).
 
-     Each address field holds one chip per recipient (RecipientField),
+     Each address field holds one chip per recipient (ChipField),
      since a comma is not something anybody should have to know to
      write to two people. The copy rows open only when they are asked
      for, so the ordinary message is three rows and a body.
@@ -76,7 +76,7 @@
                         android:id="@+id/compose_to_label"
                         android:text="@string/compose_to" />
 
-                    <org.pimalaya.mail.RecipientField
+                    <org.pimalaya.ui.ChipField
                         android:id="@+id/compose_to"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
@@ -110,7 +110,7 @@
                         android:id="@+id/compose_cc_label"
                         android:text="@string/compose_cc" />
 
-                    <org.pimalaya.mail.RecipientField
+                    <org.pimalaya.ui.ChipField
                         android:id="@+id/compose_cc"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
@@ -132,7 +132,7 @@
                         android:id="@+id/compose_bcc_label"
                         android:text="@string/compose_bcc" />
 
-                    <org.pimalaya.mail.RecipientField
+                    <org.pimalaya.ui.ChipField
                         android:id="@+id/compose_bcc"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"

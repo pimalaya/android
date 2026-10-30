@@ -1,6 +1,7 @@
 package org.pimalaya.task;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -28,6 +29,15 @@ public class TaskOrderTest {
                 new Task(
                         uid, uid, "", "", Task.NEXT, List.of(), List.of(categories), null,
                         priority, null, when, null, "", "", null, created));
+    }
+
+    private static Task status(String status, String state, String completed) {
+        EventTime done =
+                completed == null ? null : new EventTime(completed, EventTimeKind.UTC, "", null);
+        return new Task(
+                "t", "t", "", status, state == null ? Task.NEXT : state.toUpperCase(java.util.Locale.ROOT),
+                state == null ? List.of() : List.of(state), List.of(), null, 0, null, null, done,
+                "", "", null, "");
     }
 
     private static List<String> uids(List<TaskStore.Stored> tasks) {
@@ -92,5 +102,70 @@ public class TaskOrderTest {
         assertTrue(TaskOrder.carries(tasks.get(1), "Work"));
         assertTrue(TaskOrder.carries(tasks.get(2), "été"));
         assertEquals(List.of("Work", "ÉTÉ", "home"), new ArrayList<>(TaskOrder.categories(tasks)));
+    }
+
+    @Test
+    public void categoriesOnKeepATaskCarryingAnyOfThem() {
+        TaskStore.Stored home = task("home", null, 0, "", "@Home");
+        TaskStore.Stored phone = task("phone", null, 0, "", "Garden", "@phone");
+        TaskStore.Stored garden = task("garden", null, 0, "", "Garden");
+        java.util.Set<String> on = java.util.Set.of("@home", "@phone");
+
+        assertTrue(TaskOrder.carriesAny(home, on));
+        assertTrue(TaskOrder.carriesAny(phone, on));
+        assertFalse(TaskOrder.carriesAny(garden, on));
+        // NOTE: nothing on is every task.
+        assertTrue(TaskOrder.carriesAny(garden, java.util.Set.of()));
+    }
+
+    @Test
+    public void aStatusAndAListCombine() {
+        Task waitingStarted = status("IN-PROCESS", "waiting", null);
+        Task waitingDone = status("COMPLETED", "waiting", "20261030T090000");
+        Task dropped = status("CANCELLED", null, null);
+        Task plain = status("", null, null);
+
+        // NOTE: with no status, the open tasks of the list, Next carrying no
+        // state; a closed task is in none.
+        assertTrue(TaskOrder.lists(null, Task.WAITING, waitingStarted));
+        assertFalse(TaskOrder.lists(null, Task.NEXT, waitingStarted));
+        assertTrue(TaskOrder.lists(null, Task.NEXT, plain));
+        assertFalse(TaskOrder.lists(null, Task.WAITING, waitingDone));
+        assertFalse(TaskOrder.lists(null, Task.NEXT, dropped));
+        // NOTE: under a status, no list is any state, a list narrows it.
+        assertTrue(TaskOrder.lists(TaskOrder.PROGRESS, Task.NEXT, waitingStarted));
+        assertTrue(TaskOrder.lists(TaskOrder.PROGRESS, Task.WAITING, waitingStarted));
+        assertFalse(TaskOrder.lists(TaskOrder.PROGRESS, Task.SOMEDAY, waitingStarted));
+        assertFalse(TaskOrder.lists(TaskOrder.PROGRESS, Task.NEXT, plain));
+        assertTrue(TaskOrder.lists(TaskOrder.DONE, Task.NEXT, waitingDone));
+        assertTrue(TaskOrder.lists(TaskOrder.DONE, Task.WAITING, waitingDone));
+        assertFalse(TaskOrder.lists(TaskOrder.DONE, Task.INBOX, waitingDone));
+        assertFalse(TaskOrder.lists(TaskOrder.CANCELLED, Task.NEXT, waitingDone));
+        assertTrue(TaskOrder.lists(TaskOrder.CANCELLED, Task.NEXT, dropped));
+    }
+
+    @Test
+    public void doneIsTheLastCompletedFirst() {
+        List<TaskStore.Stored> done =
+                new ArrayList<>(
+                        List.of(
+                                new TaskStore.Stored(null, null, status("COMPLETED", null, null)),
+                                new TaskStore.Stored(
+                                        null, null, status("COMPLETED", null, "20261029T090000")),
+                                new TaskStore.Stored(
+                                        null, null, status("COMPLETED", null, "20261030T090000"))));
+
+        done.sort(TaskOrder.COMPLETED);
+
+        assertEquals("20261030T090000", done.get(0).task.completed().time());
+        assertEquals("20261029T090000", done.get(1).task.completed().time());
+        assertEquals(null, done.get(2).task.completed());
+    }
+
+    @Test
+    public void theStatesAreReservedFolded() {
+        assertTrue(TaskOrder.reserved(" Waiting "));
+        assertTrue(TaskOrder.reserved("INBOX"));
+        assertFalse(TaskOrder.reserved("someday-maybe"));
     }
 }

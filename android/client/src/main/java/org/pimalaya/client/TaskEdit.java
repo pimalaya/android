@@ -135,6 +135,16 @@ public record TaskEdit(
                 stamp);
     }
 
+    /**
+     * This edit setting an open to-do's {@code STATUS}: {@code IN-PROCESS}
+     * under way, {@code NEEDS-ACTION} not started (RFC 5545 3.8.1.11).
+     */
+    public TaskEdit withStatus(String status) {
+        return new TaskEdit(
+                summary, description, status, categories, priority, due, completed,
+                percentComplete, list, parent, contactName, contactAddress, source, stamp);
+    }
+
     /** This edit dropping the to-do, kept but out of every list. */
     public TaskEdit withCancelled() {
         return new TaskEdit(

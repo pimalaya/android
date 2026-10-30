@@ -16,28 +16,44 @@ import android.widget.TextView;
 import org.pimalaya.R;
 import org.pimalaya.calendar.CalendarParts;
 import org.pimalaya.calendar.EventStore;
+import org.pimalaya.client.Task;
+import org.pimalaya.ui.ChipField;
+import org.pimalaya.ui.Chips;
 import org.pimalaya.ui.Host;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The capture sheet: a line saved to the Inbox at once, offline included, as
- * a to-do carrying {@code CATEGORIES:inbox}.
+ * The task sheet: a task saved at once, offline included, as a dateless to-do
+ * (cairn/changes/tasks-for-everyone).
  *
- * <p>One sheet for every way in: the Tasks button, the home-screen widget and
- * launcher shortcut, the share sheet, and a mail's Add to tasks, which links
- * the message by {@code mid:} and leaves it where it is. Its target is a
- * dropdown of the task calendars, each named with its account, the one the
- * last capture went to preselected; hidden when there is one, and the sheet
- * says why when there is none.
+ * <p>One sheet for every way in: the Tasks add button, the share sheet and a
+ * mail's Add to tasks, which links the message by {@code mid:} and leaves it
+ * where it is, open it with no state; the home-screen widget and launcher
+ * shortcut, both a capture, with Inbox on. Its state chips, Inbox, Waiting and
+ * Someday, keep at most one on, none being a next action; its categories are
+ * the person's own tags. Its target is a dropdown of the task calendars, each
+ * named with its account, the one the last task went to preselected; hidden
+ * when there is one, and the sheet says why when there is none.
  */
 public final class CaptureSheet {
+    /** The states the chips set, in GTD's order. */
+    private static final String[] STATES = {Task.INBOX, Task.WAITING, Task.SOMEDAY};
+
+    private static final int[] STATE_LABELS = {
+        R.string.task_list_inbox, R.string.task_list_waiting, R.string.task_list_someday,
+    };
+
+    private static final int[] STATE_ICONS = {
+        R.drawable.ic_task_inbox, R.drawable.ic_task_waiting, R.drawable.ic_task_someday,
+    };
+
     private final Host host;
     private final TaskStore store;
     private final TaskWrites writes;
 
-    /** Runs after a capture lands, to reload what shows tasks. */
+    /** Runs after a task lands, to reload what shows tasks. */
     private final Runnable captured;
 
     /** The sheet over the calendar store. */
@@ -48,21 +64,30 @@ public final class CaptureSheet {
         this.captured = captured;
     }
 
-    /** Opens empty. */
+    /** Opens empty, no state on: the add button's new task. */
     public void open() {
         open("", null, null);
     }
 
+    /** Opens empty with Inbox on: the widget's and the shortcut's capture. */
+    public void capture() {
+        open("", null, null, Task.INBOX);
+    }
+
     /**
-     * Opens with {@code text} prefilled, linked to the mail {@code source}
-     * names (a bare {@code Message-ID}, null for none), described by {@code
-     * sourceLabel}.
+     * Opens with {@code text} prefilled, no state on, linked to the mail
+     * {@code source} names (a bare {@code Message-ID}, null for none),
+     * described by {@code sourceLabel}.
      */
     public void open(String text, String source, String sourceLabel) {
+        open(text, source, sourceLabel, Task.NEXT);
+    }
+
+    private void open(String text, String source, String sourceLabel, String state) {
         host.io.execute(
                 () -> {
                     List<EventStore.StoredCalendar> targets = store.targets(host);
-                    host.postAlive(() -> show(text, source, sourceLabel, targets));
+                    host.postAlive(() -> show(text, source, sourceLabel, state, targets));
                 });
     }
 
@@ -70,8 +95,10 @@ public final class CaptureSheet {
             String text,
             String source,
             String sourceLabel,
+            String state,
             List<EventStore.StoredCalendar> targets) {
         EventStore.StoredCalendar[] target = {targets.isEmpty() ? null : targets.get(0)};
+        String[] picked = {state};
 
         Dialog dialog = new Dialog(host, R.style.SyncSheet);
         dialog.setContentView(R.layout.capture_sheet);
@@ -99,6 +126,19 @@ public final class CaptureSheet {
                     addNote.setVisibility(View.GONE);
                     note.requestFocus();
                 });
+
+        List<TextView> states =
+                Chips.exclusive(
+                        host,
+                        dialog.findViewById(R.id.capture_states),
+                        STATE_LABELS,
+                        STATE_ICONS,
+                        index -> picked[0] = index < 0 ? Task.NEXT : STATES[index]);
+        for (int index = 0; index < STATES.length; index++) {
+            Chips.draw(host, states.get(index), STATE_ICONS[index], STATES[index].equals(state));
+        }
+        ChipField categories = dialog.findViewById(R.id.capture_categories);
+        categories.tags(R.string.task_remove_category);
 
         Spinner where = dialog.findViewById(R.id.capture_target);
         if (targets.size() > 1) {
@@ -142,27 +182,45 @@ public final class CaptureSheet {
                         input.setError(host.getString(R.string.capture_empty));
                         return;
                     }
+                    List<String> tags = categories.entries();
+                    for (String tag : tags) {
+                        if (TaskOrder.reserved(tag)) {
+                            host.toast(host.getString(R.string.task_category_reserved, tag));
+                            return;
+                        }
+                    }
                     dialog.dismiss();
-                    save(target[0], title, note.getText().toString().trim(), source);
+                    String body = note.getText().toString().trim();
+                    save(target[0], title, body, source, picked[0], tags);
                 });
         dialog.show();
         input.requestFocus();
     }
 
-    private void save(EventStore.StoredCalendar target, String title, String note, String source) {
+    private void save(
+            EventStore.StoredCalendar target,
+            String title,
+            String note,
+            String source,
+            String state,
+            List<String> categories) {
         TaskStore.captureTo(host, target.id);
         host.io.execute(
                 () -> {
                     try {
-                        writes.capture(target, title, note, source);
+                        writes.add(target, title, note, source, state, categories);
                     } catch (Exception error) {
-                        Log.w("pimalaya", "capture failed", error);
+                        Log.w("pimalaya", "task add failed", error);
                         host.postAlive(() -> host.showError(error, R.string.task_save_failed));
                         return;
                     }
                     host.postAlive(
                             () -> {
-                                host.toast(host.getString(R.string.capture_saved));
+                                host.toast(
+                                        host.getString(
+                                                Task.INBOX.equals(state)
+                                                        ? R.string.capture_saved
+                                                        : R.string.task_added));
                                 captured.run();
                             });
                 });
