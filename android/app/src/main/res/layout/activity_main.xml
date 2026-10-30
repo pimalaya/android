@@ -152,6 +152,37 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
+        <!-- Calendar: the agenda's two modes, the list and the week, the
+             one on drawn on the nav indicator by CalendarList. -->
+        <LinearLayout
+            android:id="@+id/calendar_modes"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="@dimen/app_bar_toggle_margin"
+            android:background="@drawable/button_tonal"
+            android:orientation="horizontal"
+            android:padding="@dimen/app_bar_toggle_padding"
+            android:visibility="gone">
+
+            <ImageButton
+                android:id="@+id/calendar_mode_list"
+                android:layout_width="@dimen/app_bar_toggle_width"
+                android:layout_height="@dimen/app_bar_toggle_height"
+                android:background="@drawable/nav_indicator"
+                android:contentDescription="@string/calendar_mode_list"
+                android:src="@drawable/ic_view_agenda" />
+
+            <ImageButton
+                android:id="@+id/calendar_mode_week"
+                android:layout_width="@dimen/app_bar_toggle_width"
+                android:layout_height="@dimen/app_bar_toggle_height"
+                android:layout_marginStart="@dimen/app_bar_toggle_padding"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/calendar_mode_week"
+                android:src="@drawable/ic_calendar_view_week" />
+
+        </LinearLayout>
+
         <!-- Every list screen's two-axis filter, last so it sits at the
              same spot whatever the domain. Tinted with the accent while
              it hides anything, so a narrowed list never looks like an

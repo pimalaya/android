@@ -1953,6 +1953,7 @@ public class MainActivity extends Host
                 () -> {
                     listFab(R.string.event_new, R.drawable.ic_add);
                     showDomainBar(Panels.CALENDAR);
+                    findViewById(R.id.calendar_modes).setVisibility(View.VISIBLE);
                     // NOTE: the agenda's window starts at today, so it is
                     // rebuilt on arrival rather than cached across days.
                     calendarList.reload();
@@ -2152,6 +2153,7 @@ public class MainActivity extends Host
                         R.id.bar_filter,
                         R.id.tasks_clarify,
                         R.id.tasks_review,
+                        R.id.calendar_modes,
                         R.id.contacts_birthdays,
                         R.id.contacts_duplicates,
                         R.id.contacts_transfer,

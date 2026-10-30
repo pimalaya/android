@@ -99,6 +99,24 @@ public final class CalendarList {
 
     private static final int[] HAS_LABELS = {R.string.filter_location};
 
+    /** The list's side of now, the first being the default: the list alone offers it. */
+    private static final String TIMEFRAME = "timeframe";
+
+    private static final String[] TIMEFRAME_KEYS = {"upcoming", "past"};
+
+    private static final int[] TIMEFRAME_LABELS = {R.string.filter_upcoming, R.string.filter_past};
+
+    /** How many days the list reaches from today, in its timeframe's direction. */
+    static final int LIST_DAYS = 92;
+
+    /** Where the mode is kept, the list being the default. */
+    private static final String MODE_PREFERENCES = "calendar-mode";
+
+    private static final String MODE_LIST = "list";
+
+    /** Whether the agenda lists from now rather than showing the week card. */
+    private boolean listing = true;
+
     /** What a past row is drawn at, as a done task. */
     private static final float PAST_ALPHA = 0.5f;
 
@@ -178,8 +196,11 @@ public final class CalendarList {
                     query = settled;
                     render();
                 });
-        filter = new ListFilter(host, "calendar", CALENDARS, WHEN, TIME, HAS);
+        filter = new ListFilter(host, "calendar", CALENDARS, WHEN, TIME, HAS, TIMEFRAME);
         panel = new FilterPanel(host, header, this::render);
+        listing = host.getSharedPreferences(MODE_PREFERENCES, 0).getBoolean(MODE_LIST, true);
+        host.findViewById(R.id.calendar_mode_list).setOnClickListener(view -> setListing(true));
+        host.findViewById(R.id.calendar_mode_week).setOnClickListener(view -> setListing(false));
         list.setAdapter(adapter);
         list.setOnItemClickListener(
                 (parent, view, position, id) -> {
@@ -221,15 +242,26 @@ public final class CalendarList {
         // render keeps the week by instant.
         // A range set in When replaces the week: from its first day, eight
         // days on when it states no last, and back when it states no first.
+        // The list reads its days with the same day of slack either side.
         String first = bound("from:");
         String last = bound("to:");
-        String from =
-                first != null
-                        ? plusDays(first, -1)
-                        : last != null
-                                ? plusDays(last, -8)
-                                : plusDays(shownWeek(today()), -1);
-        String until = last != null ? plusDays(last, 2) : plusDays(from, 9);
+        String from;
+        String until;
+        if (listing) {
+            String[] days = listDays(today(), showsPast(), first, last);
+            from = plusDays(days[0], -1);
+            // NOTE: an empty span still reads a window, which render
+            // then keeps nothing of.
+            until = plusDays(days[1].compareTo(days[0]) < 0 ? days[0] : days[1], 2);
+        } else {
+            from =
+                    first != null
+                            ? plusDays(first, -1)
+                            : last != null
+                                    ? plusDays(last, -8)
+                                    : plusDays(shownWeek(today()), -1);
+            until = last != null ? plusDays(last, 2) : plusDays(from, 9);
+        }
         MergedFilter filter = MergedFilter.of(host, PimDomain.CALENDAR);
         int asked = ++generation;
 
@@ -351,11 +383,90 @@ public final class CalendarList {
         panel.begin();
         panel.collections(
                 "calendars", R.string.filter_calendars, offered, edited.set(CALENDARS), changed);
+        if (listing) {
+            // NOTE: a reload rather than a render, the window turning
+            // round with the timeframe.
+            panel.choice(
+                    "timeframe",
+                    R.string.filter_timeframe,
+                    TIMEFRAME_KEYS,
+                    TIMEFRAME_LABELS,
+                    edited.set(TIMEFRAME),
+                    () -> {
+                        filter.save();
+                        reload();
+                    });
+        }
         drawWhen();
         panel.checks(
                 "time", R.string.filter_time, TIME_KEYS, TIME_LABELS, edited.set(TIME), changed);
         panel.checks("has", R.string.filter_has, HAS_KEYS, HAS_LABELS, edited.set(HAS), changed);
-        panel.end(filter.applied().active());
+        // NOTE: the week does not follow the timeframe, so a Past kept from
+        // the list does not accent the button there.
+        panel.end(
+                !edited.set(CALENDARS).isEmpty()
+                        || !edited.set(WHEN).isEmpty()
+                        || !edited.set(TIME).isEmpty()
+                        || !edited.set(HAS).isEmpty()
+                        || showsPast());
+    }
+
+    /** Whether the list shows what is over, the week never doing so. */
+    private boolean showsPast() {
+        return listing && filter.applied().set(TIMEFRAME).contains("past");
+    }
+
+    /**
+     * The first and last civil days the list shows, both kept.
+     *
+     * <p>Upcoming runs from today, or a later From, to {@link #LIST_DAYS} on,
+     * or To instead, which narrows or widens it; Past runs back from today, or
+     * an earlier To, to {@link #LIST_DAYS} back, or From instead. A To before
+     * an Upcoming list's first day, or a From after a Past one's last, ends it
+     * before it starts: it lists nothing.
+     */
+    static String[] listDays(String today, boolean past, String first, String last) {
+        if (past) {
+            return new String[] {
+                first != null ? first : plusDays(today, -LIST_DAYS),
+                last != null && last.compareTo(today) < 0 ? last : today
+            };
+        }
+        return new String[] {
+            first != null && first.compareTo(today) > 0 ? first : today,
+            last != null ? last : plusDays(today, LIST_DAYS)
+        };
+    }
+
+    /** Switches between the list and the week, the week opening on this one. */
+    private void setListing(boolean on) {
+        if (on == listing) {
+            return;
+        }
+        listing = on;
+        host.getSharedPreferences(MODE_PREFERENCES, 0).edit().putBoolean(MODE_LIST, on).apply();
+        weekOffset = 0;
+        selectedDay = null;
+        reload();
+        ListView list = host.findViewById(R.id.calendar_list);
+        list.setSelection(0);
+    }
+
+    /** The bar's two modes, the one on drawn on the nav indicator. */
+    private void drawModes() {
+        int[] buttons = {R.id.calendar_mode_list, R.id.calendar_mode_week};
+        for (int index = 0; index < buttons.length; index++) {
+            boolean on = (index == 0) == listing;
+            ImageView button = host.findViewById(buttons[index]);
+            button.setBackgroundResource(on ? R.drawable.nav_indicator : R.drawable.ripple_circle);
+            button.setImageTintList(
+                    ColorStateList.valueOf(
+                            host.ui.resolveColor(
+                                    on
+                                            ? android.R.attr.textColorPrimary
+                                            : android.R.attr.textColorSecondary)));
+            button.setSelected(on);
+        }
     }
 
     /** When: a first day and a last, each a date or none, each a pill. */
@@ -378,8 +489,13 @@ public final class CalendarList {
                 set.isEmpty() ? any : String.join(", ", set),
                 !set.isEmpty(),
                 list -> {
-                    panel.action(list, from, () -> pickBound("from:", first));
-                    panel.action(list, to, () -> pickBound("to:", last));
+                    panel.action(
+                            list,
+                            from,
+                            R.drawable.ic_calendar_today,
+                            () -> pickBound("from:", first));
+                    panel.action(
+                            list, to, R.drawable.ic_calendar_today, () -> pickBound("to:", last));
                 });
         if (first != null) {
             panel.pill(from, () -> setBound("from:", null));
@@ -443,15 +559,21 @@ public final class CalendarList {
         return Dates.date(host, stampOf(day));
     }
 
-    /** Lays out the picked day, else the seven days of the shown week. */
+    /**
+     * Lays out the list on its side of now, else the picked day or the seven
+     * days of the shown week.
+     */
     private void render() {
         String today = today();
+        drawModes();
         drawFilters();
         ListFilter.State held = filter.applied();
         String first = shownWeek(today);
         String from = bound("from:");
         String to = bound("to:");
         boolean ranged = from != null || to != null;
+        boolean pastSide = showsPast();
+        String[] listed = listDays(today, pastSide, from, to);
         long now = System.currentTimeMillis();
         List<Row> upcoming = new ArrayList<>();
         List<Row> over = new ArrayList<>();
@@ -472,35 +594,63 @@ public final class CalendarList {
                 continue;
             }
             String day = dayOf(row);
+            if (listing) {
+                // NOTE: now parts the two sides, so a meeting running is
+                // still upcoming and one over this morning is past.
+                if (ended == pastSide
+                        && day.compareTo(listed[0]) >= 0
+                        && day.compareTo(listed[1]) <= 0) {
+                    (ended ? over : upcoming).add(row);
+                }
+                continue;
+            }
             // NOTE: a range set in When lists its days whatever the week.
-            boolean listed =
+            boolean kept =
                     ranged
                             ? (from == null || day.compareTo(from) >= 0)
                                     && (to == null || day.compareTo(to) <= 0)
                             : kept(day, selectedDay, first);
-            if (listed) {
+            if (kept) {
                 (ended ? over : upcoming).add(row);
             }
         }
 
         // NOTE: what is over goes under the rest, the last first, as done
-        // tasks go under open ones.
+        // tasks go under open ones; the list's past side is only that, so
+        // nothing there is dimmed.
         over.sort((left, right) -> Long.compare(right.start, left.start));
         past.clear();
-        past.addAll(over);
+        if (!listing) {
+            past.addAll(over);
+        }
         List<Row> shown = new ArrayList<>(upcoming);
         shown.addAll(over);
+        // NOTE: the list heads each month other than today's with its name
+        // in full, the week card naming the week's own.
+        String month = today.substring(0, 6);
         sections.fill(
                 shown,
                 row ->
                         past.contains(row)
                                 ? host.getString(R.string.calendar_past_day, dayLabel(dayOf(row)))
-                                : dayLabel(dayOf(row)));
+                                : dayLabel(dayOf(row)),
+                row -> {
+                    String of = dayOf(row).substring(0, 6);
+                    return listing && !of.equals(month) ? of : null;
+                },
+                key -> monthOf(stampOf(key + "01")));
         adapter.notifyDataSetChanged();
         header.meta(
                 host.getResources()
-                        .getQuantityString(R.plurals.calendar_meta, shown.size(), shown.size()));
-        week(today);
+                        .getQuantityString(
+                                pastSide ? R.plurals.calendar_meta_past : R.plurals.calendar_meta,
+                                shown.size(),
+                                shown.size()));
+        if (listing) {
+            header.noWeek();
+        } else {
+            week(today);
+        }
         host.findViewById(R.id.calendar_empty)
                 .setVisibility(shown.isEmpty() ? View.VISIBLE : View.GONE);
     }
@@ -540,7 +690,8 @@ public final class CalendarList {
     }
 
     /**
-     * A day card's heading: today, tomorrow, else the weekday and date.
+     * A day card's heading: today, tomorrow, yesterday, else the weekday and
+     * date, the year with it when it is not this one.
      *
      * <p>An agenda is read by the calendar, not by distance.
      */
@@ -552,12 +703,16 @@ public final class CalendarList {
         if (day.equals(plusDays(today, 1))) {
             return host.getString(R.string.date_tomorrow);
         }
+        if (day.equals(plusDays(today, -1))) {
+            return host.getString(R.string.date_yesterday);
+        }
+        boolean thisYear = day.substring(0, 4).equals(today.substring(0, 4));
         return DateUtils.formatDateTime(
                 host,
                 stampOf(day),
                 DateUtils.FORMAT_SHOW_WEEKDAY
                         | DateUtils.FORMAT_SHOW_DATE
-                        | DateUtils.FORMAT_NO_YEAR);
+                        | (thisYear ? DateUtils.FORMAT_NO_YEAR : DateUtils.FORMAT_SHOW_YEAR));
     }
 
     /**

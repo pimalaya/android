@@ -182,6 +182,11 @@ public final class ListHeader {
         return view.findViewById(R.id.header_days);
     }
 
+    /** Hides the week's card, for a list that shows no week. */
+    public void noWeek() {
+        view.findViewById(R.id.header_week).setVisibility(View.GONE);
+    }
+
     private void onScrolled(int first) {
         View top = list.getChildAt(0);
         int offset = top == null ? 0 : top.getTop();

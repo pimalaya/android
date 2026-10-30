@@ -1,5 +1,6 @@
 package org.pimalaya.calendar;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -103,5 +104,51 @@ public class CalendarListTest {
         assertTrue(CalendarList.kept("20261009", "20261009", week));
         assertFalse(CalendarList.kept("20261007", "20261009", week));
         assertFalse(CalendarList.kept("20261010", "20261009", week));
+    }
+
+    @Test
+    public void theListReachesThreeMonthsFromTodayOnItsSide() {
+        // NOTE: today being Friday 30 October 2026; 92 days on is 30
+        // January 2027, 92 back 30 July, across the months' lengths.
+        String today = "20261030";
+        assertArrayEquals(
+                new String[] {"20261030", "20270130"},
+                CalendarList.listDays(today, false, null, null));
+        assertArrayEquals(
+                new String[] {"20260730", "20261030"},
+                CalendarList.listDays(today, true, null, null));
+    }
+
+    @Test
+    public void whensDaysNarrowAndWidenTheList() {
+        String today = "20261030";
+        // NOTE: a To six months on reaches past the window, a To next
+        // week stops short of it, and From replaces today when later.
+        assertArrayEquals(
+                new String[] {"20261030", "20270430"},
+                CalendarList.listDays(today, false, null, "20270430"));
+        assertArrayEquals(
+                new String[] {"20261030", "20261106"},
+                CalendarList.listDays(today, false, null, "20261106"));
+        assertArrayEquals(
+                new String[] {"20261102", "20270130"},
+                CalendarList.listDays(today, false, "20261102", null));
+        // NOTE: Past mirrors it: From reaches back past the window, and a
+        // To later than today is today, nothing ahead being past.
+        assertArrayEquals(
+                new String[] {"20260101", "20261030"},
+                CalendarList.listDays(today, true, "20260101", "20261231"));
+    }
+
+    @Test
+    public void theOtherSideOfNowListsNothing() {
+        String today = "20261030";
+        // NOTE: an Upcoming list told to stop last week, or an earlier From
+        // than today, still starts today: it ends before it starts.
+        String[] upcoming = CalendarList.listDays(today, false, "20261001", "20261020");
+        assertEquals("20261030", upcoming[0]);
+        assertTrue(upcoming[1].compareTo(upcoming[0]) < 0);
+        String[] past = CalendarList.listDays(today, true, "20261105", null);
+        assertTrue(past[1].compareTo(past[0]) < 0);
     }
 }

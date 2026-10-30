@@ -73,6 +73,10 @@
         <item quantity="one">%1$d entrée à venir</item>
         <item quantity="other">%1$d entrées à venir</item>
     </plurals>
+    <plurals name="calendar_meta_past">
+        <item quantity="one">%1$d entrée passée</item>
+        <item quantity="other">%1$d entrées passées</item>
+    </plurals>
     <string name="mail_search">Rechercher dans les e-mails</string>
     <string name="date_unknown">Sans date</string>
     <string name="mail_more_load">Charger plus</string>
@@ -130,6 +134,11 @@
     <string name="filter_read">Lus</string>
     <string name="calendar_search">Rechercher des événements</string>
     <string name="calendar_past_day">Passé · %1$s</string>
+    <string name="calendar_mode_list">Liste</string>
+    <string name="calendar_mode_week">Semaine</string>
+    <string name="filter_timeframe">Période</string>
+    <string name="filter_upcoming">À venir</string>
+    <string name="filter_past">Passés</string>
     <string name="filter_kind">Nature</string>
     <string name="filter_when">Quand</string>
     <string name="filter_time">Horaire</string>

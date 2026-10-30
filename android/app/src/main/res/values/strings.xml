@@ -262,6 +262,11 @@
     <string name="filter_read">Read</string>
     <string name="calendar_search">Search events</string>
     <string name="calendar_past_day">Past · %1$s</string>
+    <string name="calendar_mode_list">List</string>
+    <string name="calendar_mode_week">Week</string>
+    <string name="filter_timeframe">Timeframe</string>
+    <string name="filter_upcoming">Upcoming</string>
+    <string name="filter_past">Past</string>
     <string name="filter_kind">Kind</string>
     <string name="filter_when">When</string>
     <string name="filter_time">Time</string>
@@ -340,6 +345,10 @@
     <plurals name="calendar_meta">
         <item quantity="one">%1$d upcoming entry</item>
         <item quantity="other">%1$d upcoming entries</item>
+    </plurals>
+    <plurals name="calendar_meta_past">
+        <item quantity="one">%1$d past entry</item>
+        <item quantity="other">%1$d past entries</item>
     </plurals>
     <string name="mail_search">Search mail</string>
     <string name="date_unknown">Undated</string>

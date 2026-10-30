@@ -438,6 +438,19 @@ public final class FilterPanel {
         into.addView(action);
     }
 
+    /**
+     * An accented action as {@link #action}, {@code glyph} leading it in the
+     * column the choices' glyphs stand in.
+     */
+    public void action(LinearLayout into, CharSequence label, int glyph, Runnable run) {
+        LinearLayout row = choice(glyph, true, 0);
+        TextView action = text(label, 14, android.R.attr.colorAccent);
+        action.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        row.addView(action, weighted());
+        row.setOnClickListener(view -> run.run());
+        into.addView(row);
+    }
+
     /** A pill standing for one criterion on, shown while folded. */
     public void pill(CharSequence label, Runnable remove) {
         Chips.removable(host, pills, label, remove);

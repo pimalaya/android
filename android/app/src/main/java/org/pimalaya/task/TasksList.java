@@ -1003,7 +1003,7 @@ public final class TasksList {
                                 });
                     }
                     if (on) {
-                        filters.action(list, day, this::pickDueDay);
+                        filters.action(list, day, R.drawable.ic_calendar_today, this::pickDueDay);
                     }
                 });
         if (on) {

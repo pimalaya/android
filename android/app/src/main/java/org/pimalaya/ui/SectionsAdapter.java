@@ -34,12 +34,16 @@ public abstract class SectionsAdapter<T> extends BaseAdapter {
 
     @Override
     public int getViewTypeCount() {
-        return 2;
+        return 3;
     }
 
+    /** A row, a header, or a header opening a group, each recycled apart. */
     @Override
     public int getItemViewType(int position) {
-        return sections.isHeader(position) ? 1 : 0;
+        if (!sections.isHeader(position)) {
+            return 0;
+        }
+        return sections.opensGroup(position) ? 2 : 1;
     }
 
     @Override
