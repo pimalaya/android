@@ -1,18 +1,14 @@
 package org.pimalaya.contact;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.res.ColorStateList;
 import android.text.InputType;
-import android.util.TypedValue;
-import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -32,6 +28,7 @@ import org.pimalaya.client.FormAddress;
 import org.pimalaya.client.FormGender;
 import org.pimalaya.client.FormView;
 import org.pimalaya.client.TypeKind;
+import org.pimalaya.ui.FieldChooser;
 import org.pimalaya.ui.Sections;
 import org.pimalaya.ui.Ui;
 
@@ -139,6 +136,24 @@ public final class ContactForm {
 
     /** The per-property edit dialogs the tappable rows open. */
     private final ContactFieldDialogs dialogs;
+
+    /** Where the contact is, as the form's first section shows it. */
+    public static final class Where {
+        final String name;
+        final String account;
+
+        /** What a tap on the row does, null when it does nothing. */
+        final Runnable tap;
+
+        public Where(String name, String account, Runnable tap) {
+            this.name = name;
+            this.account = account;
+            this.tap = tap;
+        }
+    }
+
+    /** The open contact's book, its editor's; null shows no such section. */
+    public java.util.function.Supplier<Where> where = () -> null;
 
     /** An empty form drawing into the activity. */
     public ContactForm(Activity activity) {
@@ -418,68 +433,11 @@ public final class ContactForm {
      * already on the page.
      */
     private void showChooser(List<Field> fields) {
-        if (fields.isEmpty()) {
-            Toast.makeText(activity, R.string.add_field_none, Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (fields.size() == 1) {
-            fields.get(0).open.run();
-            return;
-        }
-
-        // NOTE: locale-aware sort by localized label, so a field is found
-        // by name rather than by the catalog's layout order.
-        java.text.Collator collator = java.text.Collator.getInstance();
-        fields.sort((left, right) -> collator.compare(getS(left.label), getS(right.label)));
-
-        LinearLayout list = new LinearLayout(activity);
-        list.setOrientation(LinearLayout.VERTICAL);
-        // NOTE: bottom padding mirrors the framework title's top padding
-        // so the dialog is symmetric and the last row clears the corner.
-        list.setPadding(0, ui.dp(8), 0, ui.dp(18));
-        ScrollView scroller = new ScrollView(activity);
-        scroller.addView(list);
-
-        AlertDialog dialog =
-                new AlertDialog.Builder(activity)
-                        .setTitle(R.string.contact_add_field)
-                        .setView(scroller)
-                        .create();
-
+        List<FieldChooser.Choice> choices = new ArrayList<>();
         for (Field field : fields) {
-            list.addView(chooserRow(field, dialog));
+            choices.add(new FieldChooser.Choice(field.icon, field.label, field.open));
         }
-        dialog.show();
-    }
-
-    /** One chooser row; picking it closes the chooser and opens the dialog. */
-    private View chooserRow(Field field, AlertDialog dialog) {
-        ImageView iconView = new ImageView(activity);
-        iconView.setImageResource(field.icon);
-        iconView.setImageTintList(
-                ColorStateList.valueOf(ui.resolveColor(android.R.attr.textColorSecondary)));
-
-        TextView labelView = new TextView(activity);
-        labelView.setText(field.label);
-        labelView.setTextColor(ui.resolveColor(android.R.attr.textColorPrimary));
-        labelView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        LinearLayout.LayoutParams labelParams =
-                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        labelParams.setMarginStart(ui.dp(12));
-
-        LinearLayout row = new LinearLayout(activity);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(ui.dp(24), ui.dp(14), ui.dp(24), ui.dp(14));
-        row.setBackgroundResource(resolveAttr(android.R.attr.selectableItemBackground));
-        row.addView(iconView, new LinearLayout.LayoutParams(ui.dp(22), ui.dp(22)));
-        row.addView(labelView, labelParams);
-        row.setOnClickListener(
-                view -> {
-                    dialog.dismiss();
-                    field.open.run();
-                });
-        return row;
+        FieldChooser.show(activity, ui, choices);
     }
 
     /** Rebuilds the whole page from the working model. */
@@ -487,6 +445,17 @@ public final class ContactForm {
         view = ContactClient.formView(model.build());
         container.removeAllViews();
         pending.clear();
+
+        // NOTE: the book first, as an entry's calendar and a task's are.
+        Where here = where.get();
+        if (here != null) {
+            sections.section(
+                    R.string.contact_section_book,
+                    R.drawable.ic_addressbooks,
+                    List.of(sections.row(here.name, here.account, null, here.tap)),
+                    null,
+                    false);
+        }
 
         // NOTE: identity holds the solo fields (display name, name parts,
         // dates, gender); every multi-valued list is its own section below.

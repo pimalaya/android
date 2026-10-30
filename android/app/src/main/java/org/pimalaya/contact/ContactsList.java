@@ -5,7 +5,9 @@ import android.widget.CheckBox;
 import android.widget.ListView;
 import android.widget.TextView;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
@@ -17,8 +19,9 @@ import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.CardSections;
-import org.pimalaya.ui.Chips;
+import org.pimalaya.ui.FilterPanel;
 import org.pimalaya.ui.Host;
+import org.pimalaya.ui.ListFilter;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.SectionsAdapter;
@@ -55,6 +58,45 @@ public final class ContactsList {
     private final Adapter adapter = new Adapter();
     private ListHeader header;
 
+    /** The panel's sections: which books show, and All or Default. */
+    private static final String BOOKS = "books";
+
+    private static final String SHOW = "show";
+
+    private static final String[] SHOWS = {"all", "default"};
+
+    private static final int[] SHOW_LABELS = {R.string.filter_all, R.string.chip_default};
+
+    private static final String HAS = "has";
+
+    private static final String KINDS = "kinds";
+
+    private static final String CATEGORIES = "categories";
+
+    /** The vCard properties Has offers (RFC 6350), a contact passing with any on. */
+    private static final String[] HAS_KEYS = {"EMAIL", "TEL", "ADR", "BDAY", "ORG", "PHOTO"};
+
+    private static final int[] HAS_LABELS = {
+        R.string.filter_email,
+        R.string.filter_phone,
+        R.string.filter_address,
+        R.string.filter_birthday,
+        R.string.filter_organisation,
+        R.string.filter_photo,
+    };
+
+    /** The {@code KIND} values Kind offers (RFC 6350 6.1.4). */
+    private static final String[] KIND_KEYS = {"individual", "group", "org"};
+
+    private static final int[] KIND_LABELS = {
+        R.string.filter_individuals, R.string.filter_groups, R.string.filter_organisations,
+    };
+
+    /** What the list keeps of the books synced, drafted by the panel. */
+    private ListFilter filter;
+
+    private FilterPanel panel;
+
     /** Multi-select state, keyed by merged group. */
     private boolean selectionMode;
 
@@ -62,11 +104,6 @@ public final class ContactsList {
 
     /** Lower-cased raw-vCard filter; empty shows all. */
     private String searchQuery = "";
-
-    /**
-     * Whether the Default chip narrows to the shown accounts' default books.
-     */
-    private boolean defaultOnly;
 
     /** The contacts screen; {@code pull} runs the pull-to-refresh sync. */
     public ContactsList(Host host, ContactParts parts, ContactEditor editor, Runnable pull) {
@@ -113,15 +150,8 @@ public final class ContactsList {
                     searchQuery = query;
                     render();
                 });
-        Chips.add(
-                host,
-                header.chips(),
-                R.string.chip_default,
-                R.drawable.ic_star,
-                on -> {
-                    defaultOnly = on;
-                    render();
-                });
+        filter = new ListFilter(host, "contacts", BOOKS, SHOW, HAS, KINDS, CATEGORIES);
+        panel = new FilterPanel(host, header, this::render, filter);
         list.setAdapter(adapter);
 
         list.setOnItemClickListener(
@@ -219,6 +249,83 @@ public final class ContactsList {
     }
 
     /**
+     * Whether a card passes Has, Kind and Categories: any property on, any
+     * kind on, any category on (compared lowercased), each none on passing.
+     */
+    private static boolean described(ListFilter.State kept, String vcard) {
+        Set<String> has = kept.set(HAS);
+        if (!has.isEmpty()) {
+            boolean any = false;
+            for (String property : has) {
+                any |= CardFacts.has(vcard, property);
+            }
+            if (!any) {
+                return false;
+            }
+        }
+        Set<String> kinds = kept.set(KINDS);
+        if (!kinds.isEmpty() && !kinds.contains(CardFacts.kind(vcard))) {
+            return false;
+        }
+        Set<String> categories = kept.set(CATEGORIES);
+        if (categories.isEmpty()) {
+            return true;
+        }
+        for (String category : CardFacts.categories(vcard)) {
+            if (categories.contains(category.toLowerCase(java.util.Locale.ROOT))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The filter panel: the books synced under their accounts, any hidden
+     * from this list alone, then All or Default.
+     */
+    private void drawFilters(MergedFilter synced) {
+        Map<String, Map<String, String>> books = new LinkedHashMap<>();
+        for (BookEntry entry : parts.cards().loadAllAddressbooks()) {
+            if (entry.subscribed && synced.accepts(entry.accountEmail, entry.book.url())) {
+                String account =
+                        LocalBook.is(entry.accountEmail)
+                                ? host.getString(R.string.local_book)
+                                : entry.accountEmail;
+                books.computeIfAbsent(account, key -> new LinkedHashMap<>())
+                        .put(entry.book.url(), entry.book.name());
+            }
+        }
+        ListFilter.State edited = filter.edited();
+        Runnable changed =
+                () -> {
+                    filter.save();
+                    render();
+                };
+        panel.begin();
+        panel.collections("books", R.string.filter_books, books, edited.set(BOOKS), changed);
+        panel.choice("show", R.string.filter_show, SHOWS, SHOW_LABELS, edited.set(SHOW), changed);
+        panel.checks("has", R.string.filter_has, HAS_KEYS, HAS_LABELS, edited.set(HAS), changed);
+        panel.checks(
+                "kinds", R.string.filter_kind, KIND_KEYS, KIND_LABELS, edited.set(KINDS), changed);
+        Map<String, String> names = new LinkedHashMap<>();
+        for (Group group : groupedContacts) {
+            for (Entry entry : group.replicas) {
+                for (String category : CardFacts.categories(entry.card.vcard())) {
+                    names.putIfAbsent(category.toLowerCase(java.util.Locale.ROOT), category);
+                }
+            }
+        }
+        panel.checks(
+                "categories",
+                R.string.filter_categories,
+                names.keySet().toArray(new String[0]),
+                names.values().toArray(new String[0]),
+                edited.set(CATEGORIES),
+                changed);
+        panel.end(filter.applied().active());
+    }
+
+    /**
      * Filters the grouped rows by the search query and refreshes the list.
      *
      * <p>A group matches when any replica does; conflicts float to the top.
@@ -227,9 +334,11 @@ public final class ContactsList {
         updateSelectionUi();
 
         sortedContacts = new ArrayList<>();
-        MergedFilter filter = MergedFilter.of(host, PimDomain.CONTACTS);
+        MergedFilter synced = MergedFilter.of(host, PimDomain.CONTACTS);
+        drawFilters(synced);
+        ListFilter.State kept = filter.applied();
         Set<String> defaults =
-                defaultOnly
+                kept.set(SHOW).contains("default")
                         ? DefaultCollection.shown(
                                 host,
                                 PimdirSummary.CONTACT,
@@ -242,7 +351,9 @@ public final class ContactsList {
             // the row when that account held all of them.
             boolean matches = false;
             for (Entry entry : group.replicas) {
-                if (!filter.accepts(entry.accountEmail, entry.book.url())
+                if (!synced.accepts(entry.accountEmail, entry.book.url())
+                        || kept.set(BOOKS).contains(entry.book.url())
+                        || !described(kept, entry.card.vcard())
                         || defaults != null && !defaults.contains(entry.book.url())) {
                     continue;
                 }
@@ -518,8 +629,6 @@ public final class ContactsList {
         }
         host.findViewById(R.id.bar_menu).setVisibility(navigating ? View.VISIBLE : View.GONE);
         showActions(navigating);
-        host.findViewById(R.id.bar_filter)
-                .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
         host.findViewById(R.id.selection_close)
                 .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         // NOTE: merging needs at least two physical cards.

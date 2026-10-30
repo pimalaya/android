@@ -493,6 +493,20 @@ final class Native {
     static native String applyEvent(String ical, String edit);
 
     /**
+     * Every alarm of a calendar object's master component, whatever its
+     * action. Returns an array of {@code {index, action, minutes,
+     * minutesBeforeEnd, absolute, description, summary, attendees, repeat,
+     * everyMinutes}}.
+     */
+    static native String readAlarms(String ical);
+
+    /**
+     * Patches an edit of the alarms, {@code {alarms, stamp}}, onto a calendar
+     * object. Returns {@code {ical}}, the object patched.
+     */
+    static native String applyAlarms(String ical, String edit);
+
+    /**
      * Pushes an edited object back to its calendar, guarded by any ETag.
      *
      * <p>The account's address makes Google and JMAP announce a meeting it

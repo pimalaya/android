@@ -326,4 +326,33 @@ public class CalendarClient {
         return EventIcal.from(Replies.object(Native.applyEvent(ical, edit.toJson().toString())))
                 .ical();
     }
+
+    /** Every alarm of an object's master component, whatever its action. */
+    public static List<EventAlarm> readAlarms(String ical) {
+        JSONArray array = Replies.array(Native.readAlarms(ical));
+        List<EventAlarm> alarms = new ArrayList<>(array.length());
+        for (int index = 0; index < array.length(); index++) {
+            alarms.add(EventAlarm.from(array.optJSONObject(index)));
+        }
+        return alarms;
+    }
+
+    /**
+     * The object with its alarms set to {@code alarms}, {@code stamp} now as a
+     * UTC stamp: a kept alarm byte for byte, one left out removed.
+     */
+    public static String applyAlarms(String ical, List<EventAlarm> alarms, String stamp) {
+        try {
+            JSONArray list = new JSONArray();
+            for (EventAlarm alarm : alarms) {
+                list.put(alarm.toJson());
+            }
+            JSONObject edit = new JSONObject().put("alarms", list).put("stamp", stamp);
+            // NOTE: the object byte for byte, so not trimmed.
+            return EventIcal.from(Replies.object(Native.applyAlarms(ical, edit.toString())))
+                    .ical();
+        } catch (JSONException error) {
+            throw new PimalayaException("Unwritable alarm edit: " + error.getMessage());
+        }
+    }
 }

@@ -2,6 +2,7 @@ package org.pimalaya.calendar;
 
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
+import android.content.DialogInterface;
 import android.app.TimePickerDialog;
 import android.content.res.ColorStateList;
 import android.text.InputType;
@@ -10,11 +11,15 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 
 import org.pimalaya.R;
@@ -33,16 +38,17 @@ import org.pimalaya.client.EventSide;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.EventTimeKind;
 import org.pimalaya.client.Occurrence;
+import org.pimalaya.client.EventAlarm;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.ui.Dates;
+import org.pimalaya.ui.FieldChooser;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Linked;
 import org.pimalaya.ui.Panels;
-import org.pimalaya.ui.Picker;
 import org.pimalaya.ui.Sections;
 
 import java.time.LocalDateTime;
@@ -85,14 +91,16 @@ public final class EventView {
         final EventEdit.Field text;
         final int section;
         final int label;
+        final int icon;
         final Kind kind;
         final String[] components;
 
-        Field(String key, int section, int label, Kind kind, String... components) {
+        Field(String key, int section, int label, int icon, Kind kind, String... components) {
             this.key = key;
             this.text = textOf(key);
             this.section = section;
             this.label = label;
+            this.icon = icon;
             this.kind = kind;
             this.components = components;
         }
@@ -129,44 +137,32 @@ public final class EventView {
     private static final String[] DATES = {"start", "end", "due", "completed"};
 
     /**
-     * Every property the page can edit, in section order.
+     * Every property the page can edit, in section order: When's, every one
+     * shown, then Details', the title shown and the rest once set or added.
      *
      * <p>The placing date and all-day switch are not here: they are what a
      * component is, so they always show.
      */
     private static final Field[] CATALOG = {
-        new Field("end", R.string.event_section_when, R.string.event_field_end, Kind.DATE, EVENT),
-        new Field("due", R.string.event_section_when, R.string.event_field_due, Kind.DATE, TODO),
         new Field(
-                "completed",
-                R.string.event_section_progress,
-                R.string.event_field_completed,
+                "end",
+                R.string.event_section_when,
+                R.string.event_field_end,
+                R.drawable.ic_field_schedule,
                 Kind.DATE,
-                TODO),
+                EVENT),
         new Field(
-                "percentComplete",
-                R.string.event_section_progress,
-                R.string.event_field_progress,
-                Kind.NUMBER,
-                TODO),
-        new Field(
-                "priority",
-                R.string.event_section_progress,
-                R.string.event_field_priority,
-                Kind.NUMBER,
-                EVENT,
-                TODO),
-        new Field(
-                "location",
-                R.string.event_section_where,
-                R.string.event_field_location,
-                Kind.TEXT,
-                EVENT,
+                "due",
+                R.string.event_section_when,
+                R.string.event_field_due,
+                R.drawable.ic_field_schedule,
+                Kind.DATE,
                 TODO),
         new Field(
                 "summary",
                 R.string.event_section_details,
                 R.string.event_field_summary,
+                R.drawable.ic_title,
                 Kind.TEXT,
                 EVENT,
                 TODO,
@@ -175,23 +171,56 @@ public final class EventView {
                 "description",
                 R.string.event_section_details,
                 R.string.event_field_description,
+                R.drawable.ic_section_notes,
                 Kind.LONG_TEXT,
                 EVENT,
                 TODO,
                 JOURNAL),
         new Field(
-                "categories",
+                "location",
                 R.string.event_section_details,
-                R.string.event_field_categories,
+                R.string.event_field_location,
+                R.drawable.ic_section_location_on,
                 Kind.TEXT,
                 EVENT,
-                TODO,
-                JOURNAL),
+                TODO),
         new Field(
                 "status",
                 R.string.event_section_details,
                 R.string.event_field_status,
+                R.drawable.ic_task_progress,
                 Kind.STATUS,
+                EVENT,
+                TODO,
+                JOURNAL),
+        new Field(
+                "priority",
+                R.string.event_section_details,
+                R.string.event_field_priority,
+                R.drawable.ic_flag,
+                Kind.NUMBER,
+                EVENT,
+                TODO),
+        new Field(
+                "percentComplete",
+                R.string.event_section_details,
+                R.string.event_field_progress,
+                R.drawable.ic_field_percent,
+                Kind.NUMBER,
+                TODO),
+        new Field(
+                "completed",
+                R.string.event_section_details,
+                R.string.event_field_completed,
+                R.drawable.ic_task_done,
+                Kind.DATE,
+                TODO),
+        new Field(
+                "categories",
+                R.string.event_section_details,
+                R.string.event_field_categories,
+                R.drawable.ic_section_label,
+                Kind.TEXT,
                 EVENT,
                 TODO,
                 JOURNAL),
@@ -199,6 +228,7 @@ public final class EventView {
                 "url",
                 R.string.event_section_details,
                 R.string.event_field_url,
+                R.drawable.ic_link,
                 Kind.TEXT,
                 EVENT,
                 TODO,
@@ -234,6 +264,18 @@ public final class EventView {
      */
     private boolean creating;
 
+    /** The calendars a new entry may go to, the form switching among them. */
+    private List<EventStore.StoredCalendar> targets = List.of();
+
+    /**
+     * The entry's alarms, whatever their action (rs/calendar/alarm.rs); null
+     * where the page does not edit them.
+     */
+    private List<EventAlarm> alarms;
+
+    /** The alarms as opened, to tell whether a save changes them. */
+    private List<EventAlarm> openedAlarms;
+
     /** The working values, keyed as the bridge's edit object keys them. */
     private final Map<EventEdit.Field, String> model = new EnumMap<>(EventEdit.Field.class);
 
@@ -255,6 +297,15 @@ public final class EventView {
 
     /** Fields the user added this session, so their empty row stays. */
     private final Set<String> revealed = new HashSet<>();
+
+    /** The dates the all-day switch converts. */
+    private static final String[] FLIPPED = {"start", "end", "due"};
+
+    /** The dates before the all-day switch last flipped them. */
+    private final Map<String, EventTime> beforeFlip = new HashMap<>();
+
+    /** The dates that flip left, to tell whether they moved since. */
+    private final Map<String, EventTime> afterFlip = new HashMap<>();
 
     /** The conflict the page settles, null outside conflict mode. */
     private EventStore.StoredConflict conflict;
@@ -286,13 +337,15 @@ public final class EventView {
     }
 
     /**
-     * Opens the page on a new entry, in the given calendar.
+     * Opens the page on a new entry in {@code calendar}, which the form may
+     * switch among {@code targets}.
      *
      * <p>Built up front, so the page has one shape. At the next whole hour, in
      * the device's zone named with its definition (RFC 5545 3.2.19): a floating
      * start would follow each reader.
      */
-    public void compose(EventStore.StoredCalendar calendar) {
+    private void compose(
+            EventStore.StoredCalendar calendar, List<EventStore.StoredCalendar> targets) {
         String uid = UUID.randomUUID().toString();
         ZoneId zone = ZoneId.systemDefault();
         LocalDateTime start =
@@ -317,6 +370,7 @@ public final class EventView {
 
         String id = uid + ".ics";
         leaveConflict();
+        this.targets = targets;
         open(
                 null,
                 new EventStore.StoredEvent(
@@ -326,10 +380,10 @@ public final class EventView {
     }
 
     /**
-     * Starts an entry in the default calendar of the account in view.
+     * Starts an entry in the default calendar of the account in view, else
+     * the first writable one; the form switches it when there are several.
      *
-     * <p>Asks only when there is none, as a new contact picks its book; a
-     * read-only calendar is never offered.
+     * <p>A read-only calendar is never offered.
      */
     public void composeNew() {
         Map<String, EventStore.StoredCalendar> byId = new HashMap<>();
@@ -353,15 +407,21 @@ public final class EventView {
                         PimdirSummary.CALENDAR,
                         collections,
                         MergedFilter.of(host, PimDomain.CALENDAR)::accepts);
-        Picker.choose(
-                host,
-                R.string.event_target_title,
-                R.string.event_no_calendar,
-                choice.direct,
-                choice.offered,
-                choice.preselected,
-                collection -> host.ui.twoLine(collection.name, collection.accountEmail),
-                calendar -> compose(byId.get(calendar.id)));
+        List<EventStore.StoredCalendar> targets = new ArrayList<>();
+        if (choice.direct != null) {
+            targets.add(byId.get(choice.direct.id));
+        } else {
+            for (PimdirCollections.Stored collection : choice.offered) {
+                targets.add(byId.get(collection.id));
+            }
+        }
+        targets.removeIf(Objects::isNull);
+        if (targets.isEmpty()) {
+            host.toast(host.getString(R.string.event_no_calendar));
+            return;
+        }
+        int preselected = choice.direct == null ? Math.max(0, choice.preselected) : 0;
+        compose(targets.get(Math.min(preselected, targets.size() - 1)), targets);
     }
 
     /** Opens the page on an agenda row, in conflict mode if conflicted. */
@@ -497,12 +557,17 @@ public final class EventView {
         this.event = event;
         this.calendar = calendar;
         this.creating = creating;
+        if (!creating) {
+            targets = List.of();
+        }
         this.detail = detailOf(event);
 
         model.clear();
         allDay = false;
         times.clear();
         revealed.clear();
+        beforeFlip.clear();
+        afterFlip.clear();
         if (detail != null) {
             put(EventEdit.Field.SUMMARY, detail.summary());
             put(EventEdit.Field.DESCRIPTION, detail.description());
@@ -528,9 +593,41 @@ public final class EventView {
         opened.putAll(model);
         openedTimes.clear();
         openedTimes.putAll(times);
+        alarms = alarmsOf(event);
+        openedAlarms = alarms == null ? null : List.copyOf(alarms);
 
         render();
         host.show(Panels.EVENT_VIEW);
+    }
+
+    /**
+     * Every alarm of an entry the page edits them on, whatever its action
+     * (rs/calendar/alarm.rs); null on anything else.
+     *
+     * <p>A CalDAV event alone, outside conflict mode: the phone's calendar
+     * provider rings the display and audio ones the mirror projects, another
+     * client the rest, and Microsoft's and Google's reminders are not mapped
+     * (cairn/changes/event-alarm-details).
+     */
+    private List<EventAlarm> alarmsOf(EventStore.StoredEvent event) {
+        if (detail == null
+                || merge != null
+                || !EVENT.equals(component())
+                || !EventStore.isCaldav(calendar.url)
+                || LocalBook.is(calendar.url)) {
+            return null;
+        }
+        try {
+            return new ArrayList<>(CalendarClient.readAlarms(event.ical));
+        } catch (Exception error) {
+            Log.w("pimalaya", "event alarms unreadable: " + event.id, error);
+            return null;
+        }
+    }
+
+    /** Whether the page changed the alarms. */
+    private boolean alarmsChanged() {
+        return alarms != null && !alarms.equals(openedAlarms);
     }
 
     /**
@@ -568,6 +665,11 @@ public final class EventView {
         return detail != null;
     }
 
+    /** Whether the page is on an entry the server has never seen. */
+    public boolean creating() {
+        return creating;
+    }
+
     /** Whether the page may write back: read, on a writable calendar. */
     public boolean editable() {
         return readable() && writes();
@@ -585,6 +687,7 @@ public final class EventView {
 
     private void render() {
         sections.clear();
+        calendarSection();
 
         if (detail == null) {
             List<View> rows = new ArrayList<>();
@@ -600,11 +703,9 @@ public final class EventView {
 
         conflicts();
         when();
-        section(R.string.event_section_progress, R.drawable.ic_check);
-        section(R.string.event_section_where, R.drawable.ic_section_location_on);
         section(R.string.event_section_details, R.drawable.ic_section_notes);
+        alarmSection();
         people();
-        origin();
         if (!creating) {
             linked.section(sections, EventStore.endpointOf(event), this::render);
         }
@@ -617,7 +718,7 @@ public final class EventView {
 
     /** Gates the save: in conflict mode, until every conflict is reviewed. */
     public void gate() {
-        host.gateSave(settled(), R.drawable.ic_save, R.string.event_save);
+        host.gateSave(settled(), R.drawable.ic_check, R.string.event_save);
     }
 
     /** Whether nothing awaits review. */
@@ -711,7 +812,7 @@ public final class EventView {
                 R.string.event_section_when,
                 CalendarList.glyphOf(component()),
                 rows,
-                addIcon(R.string.event_section_when),
+                null,
                 true);
     }
 
@@ -734,6 +835,10 @@ public final class EventView {
 
     /** Whether a field's row shows: set, added this session, or conflicted. */
     private boolean shown(Field field) {
+        // NOTE: When's rows and the title always show; the rest once set.
+        if (field.section == R.string.event_section_when || "summary".equals(field.key)) {
+            return true;
+        }
         boolean set =
                 field.kind == Kind.DATE
                         ? times.get(field.key) != null
@@ -772,25 +877,667 @@ public final class EventView {
         return attendee.name().isEmpty() ? standing : standing + " · " + attendee.address();
     }
 
-    /** Which calendar of which account holds it, and what it is. */
-    private void origin() {
-        List<View> rows = new ArrayList<>();
-        rows.add(sections.value(calendar.name, R.string.event_field_calendar));
-        rows.add(sections.value(calendar.accountEmail, R.string.event_field_account));
-        rows.add(
-                sections.value(
-                        host.getString(CalendarList.componentName(component())),
-                        R.string.event_field_kind));
-        if (!writes()) {
-            rows.add(sections.row(host.getString(R.string.event_read_only), null, null, null));
-        }
-
+    /**
+     * The first card: the entry's calendar and account, a dropdown naming
+     * each calendar with its account while a new entry may go to several.
+     */
+    private void calendarSection() {
+        // NOTE: a row as the task page's, a tap picking another calendar
+        // while the entry is new and has a choice.
+        boolean choice = creating && targets.size() > 1;
         sections.section(
-                R.string.event_section_calendar,
+                R.string.event_field_calendar,
                 R.drawable.ic_domain_calendar,
-                rows,
+                List.of(
+                        sections.row(
+                                calendar.name,
+                                calendar.accountEmail,
+                                null,
+                                choice ? this::pickCalendar : null)),
                 null,
                 false);
+    }
+
+    /** Asks which calendar a new entry goes to. */
+    private void pickCalendar() {
+        CharSequence[] labels = new CharSequence[targets.size()];
+        for (int index = 0; index < targets.size(); index++) {
+            EventStore.StoredCalendar target = targets.get(index);
+            labels[index] =
+                    host.getString(R.string.capture_target_item, target.name, target.accountEmail);
+        }
+        new android.app.AlertDialog.Builder(host)
+                .setTitle(R.string.event_field_calendar)
+                .setSingleChoiceItems(
+                        labels,
+                        Math.max(0, targets.indexOf(calendar)),
+                        (dialog, which) -> {
+                            dialog.dismiss();
+                            if (targets.get(which) != calendar) {
+                                switchCalendar(targets.get(which));
+                            }
+                        })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * Switches a new entry to another of its calendars, what the form holds
+     * kept; the alarms follow whether that calendar takes them.
+     */
+    private void switchCalendar(EventStore.StoredCalendar picked) {
+        calendar = picked;
+        event = new EventStore.StoredEvent(picked.id, event.id, event.handle, event.ical, "");
+        if (alarmsOf(event) == null) {
+            alarms = null;
+            openedAlarms = null;
+        } else if (alarms == null) {
+            alarms = alarmsOf(event);
+            openedAlarms = List.copyOf(alarms);
+        }
+        render();
+    }
+
+    /**
+     * The actions a new alarm takes (RFC 5545 3.8.6.1): a notification and a
+     * sound the phone rings, an email another client sends.
+     */
+    private static final String[] ACTIONS = {
+        EventAlarm.DISPLAY, EventAlarm.AUDIO, EventAlarm.EMAIL,
+    };
+
+    private static final int[] ACTION_LABELS = {
+        R.string.event_alarm_type_display,
+        R.string.event_alarm_type_audio,
+        R.string.event_alarm_type_email,
+    };
+
+    /**
+     * The alarms, each a row saying its type and when it rings over its
+     * message, recipients and repeats, and an add button; none where the
+     * page does not edit them ({@link #alarmsOf}).
+     */
+    private void alarmSection() {
+        if (alarms == null) {
+            return;
+        }
+        List<View> rows = new ArrayList<>();
+        for (int index = 0; index < alarms.size(); index++) {
+            int at = index;
+            EventAlarm alarm = alarms.get(index);
+            rows.add(
+                    sections.row(
+                            host.getString(
+                                    R.string.capture_target_item,
+                                    actionLabel(alarm.action()),
+                                    alarmLabel(alarm)),
+                            alarmDetail(alarm),
+                            null,
+                            () -> alarmForm(at)));
+        }
+        sections.section(
+                R.string.event_section_alarms,
+                R.drawable.ic_section_alarm,
+                rows,
+                addButton(() -> alarmForm(-1)),
+                true);
+    }
+
+    /**
+     * How a trigger is placed, as the form's dropdown offers it: before or
+     * after the start, before or after the end, or at a moment.
+     */
+    private static final int[] PLACES = {
+        R.string.event_alarm_before_start,
+        R.string.event_alarm_after_start,
+        R.string.event_alarm_before_end,
+        R.string.event_alarm_after_end,
+        R.string.event_alarm_at_moment,
+    };
+
+    /** The units an offset or an interval is counted in, in minutes. */
+    private static final long[] UNITS = {1, 60, 1440, 10080};
+
+    private static final int[] UNIT_LABELS = {
+        R.string.event_alarm_unit_minutes,
+        R.string.event_alarm_unit_hours,
+        R.string.event_alarm_unit_days,
+        R.string.event_alarm_unit_weeks,
+    };
+
+    /** A duration in each unit, as the form shows it. */
+    private static final int[] DURATIONS = {
+        R.plurals.event_alarm_duration_minutes,
+        R.plurals.event_alarm_duration_hours,
+        R.plurals.event_alarm_duration_days,
+        R.plurals.event_alarm_duration_weeks,
+    };
+
+    /**
+     * One alarm's form, every field in one dialog as the other fields'
+     * dialogs: its type; when it rings, an offset in a unit before or after
+     * the start or the end, or a moment (RFC 5545 3.8.6.3); how many more
+     * times it rings and how far apart; its message and, for an email, its
+     * subject and recipients. {@code index} the alarm edited, which adds a
+     * Remove button, -1 for a new one.
+     *
+     * <p>A new alarm rings 15 minutes before the start, its message the
+     * entry's title, an email one addressed to the account under that title.
+     */
+    private void alarmForm(int index) {
+        String title = value(EventEdit.Field.SUMMARY);
+        EventAlarm alarm =
+                index < 0
+                        ? EventAlarm.before(EventAlarm.DISPLAY, 15, title, "", List.of())
+                        : alarms.get(index);
+
+        List<String> actions = new ArrayList<>(List.of(ACTIONS));
+        if (!actions.contains(alarm.action())) {
+            actions.add(alarm.action());
+        }
+        List<String> actionLabels = new ArrayList<>();
+        for (String action : actions) {
+            actionLabels.add(actionLabel(action));
+        }
+
+        LinearLayout form = new LinearLayout(host);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(host.dp(24), host.dp(8), host.dp(24), 0);
+        Spinner type = formSpinner(form, R.string.event_alarm_type, actionLabels);
+        type.setSelection(actions.indexOf(alarm.action()));
+
+        // NOTE: the trigger as the form edits it: where it is placed, and
+        // an offset in the largest unit dividing it, or a moment.
+        int place;
+        long offset;
+        if (alarm.minutes() != null) {
+            place = alarm.minutes() >= 0 ? 0 : 1;
+            offset = Math.abs(alarm.minutes());
+        } else if (alarm.minutesBeforeEnd() != null) {
+            place = alarm.minutesBeforeEnd() >= 0 ? 2 : 3;
+            offset = Math.abs(alarm.minutesBeforeEnd());
+        } else {
+            place = 4;
+            offset = 15;
+        }
+        long[] moment = {
+            alarm.absolute() != null
+                    ? Zones.instant(
+                            new EventTime(
+                                    alarm.absolute().replace("Z", "").replace("z", ""),
+                                    EventTimeKind.UTC,
+                                    "",
+                                    null))
+                    : startInstant() - 15 * 60_000L
+        };
+
+        // NOTE: one label and one input per value. When is an offset picked
+        // as an amount and a unit, or a moment picked as a day and a time,
+        // following the trigger.
+        Spinner where =
+                formSpinner(form, R.string.event_alarm_trigger, List.of(labels(PLACES)));
+        where.setSelection(place);
+        long[] offsetMinutes = {offset};
+        EditText when = formPicked(form, R.string.event_alarm_when);
+        Runnable placed =
+                () ->
+                        when.setText(
+                                where.getSelectedItemPosition() == 4
+                                        ? momentLabel(moment[0])
+                                        : duration(offsetMinutes[0]));
+        placed.run();
+        where.setOnItemSelectedListener(selected(placed));
+        when.setOnClickListener(
+                view -> {
+                    if (where.getSelectedItemPosition() == 4) {
+                        pickMoment(moment, placed);
+                    } else {
+                        pickDuration(R.string.event_alarm_when, offsetMinutes, placed);
+                    }
+                });
+
+        EditText repeat =
+                formText(form, R.string.event_alarm_repeat, String.valueOf(alarm.repeat()), false);
+        repeat.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        long[] interval = {alarm.everyMinutes() == null ? 5 : alarm.everyMinutes()};
+        TextView everyLabel = formLabel(form, R.string.event_alarm_every);
+        EditText every = formPicked(form, 0);
+        Runnable intervalShown =
+                () -> {
+                    every.setText(duration(interval[0]));
+                    int shown = numberOf(repeat) > 0 ? View.VISIBLE : View.GONE;
+                    everyLabel.setVisibility(shown);
+                    every.setVisibility(shown);
+                };
+        intervalShown.run();
+        every.setOnClickListener(
+                view -> pickDuration(R.string.event_alarm_every, interval, intervalShown));
+        repeat.addTextChangedListener(
+                new android.text.TextWatcher() {
+                    @Override
+                    public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+
+                    @Override
+                    public void onTextChanged(CharSequence s, int a, int b, int c) {}
+
+                    @Override
+                    public void afterTextChanged(android.text.Editable s) {
+                        intervalShown.run();
+                    }
+                });
+
+        EditText message =
+                formText(form, R.string.event_alarm_message, alarm.description(), true);
+        TextView subjectLabel = formLabel(form, R.string.event_alarm_subject);
+        EditText subject = formText(form, 0, alarm.summary(), false);
+        TextView recipientsLabel = formLabel(form, R.string.event_alarm_recipients);
+        EditText recipients =
+                formText(
+                        form,
+                        0,
+                        String.join(
+                                ", ",
+                                alarm.attendees().isEmpty()
+                                        ? List.of(calendar.accountEmail)
+                                        : alarm.attendees()),
+                        false);
+        recipients.setInputType(
+                android.text.InputType.TYPE_CLASS_TEXT
+                        | android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+
+        // NOTE: an email alarm's own fields show with it alone.
+        Runnable emailFields =
+                () -> {
+                    int shown =
+                            EventAlarm.EMAIL.equals(actions.get(type.getSelectedItemPosition()))
+                                    ? View.VISIBLE
+                                    : View.GONE;
+                    View[] fields = {subjectLabel, subject, recipientsLabel, recipients};
+                    for (View view : fields) {
+                        view.setVisibility(shown);
+                    }
+                };
+        emailFields.run();
+        type.setOnItemSelectedListener(selected(emailFields));
+
+        ScrollView scroll = new ScrollView(host);
+        scroll.addView(form);
+        AlertDialog.Builder dialog =
+                new AlertDialog.Builder(host)
+                        .setTitle(index < 0 ? R.string.event_alarm_add : R.string.event_alarm)
+                        .setView(scroll)
+                        .setPositiveButton(
+                                android.R.string.ok,
+                                (shown, which) -> {
+                                    String action = actions.get(type.getSelectedItemPosition());
+                                    boolean email = EventAlarm.EMAIL.equals(action);
+                                    int placing = where.getSelectedItemPosition();
+                                    long minutes = offsetMinutes[0];
+                                    long signed = placing == 1 || placing == 3 ? -minutes : minutes;
+                                    long times = numberOf(repeat);
+                                    long apart = interval[0];
+                                    // NOTE: REPEAT and DURATION go together
+                                    // (RFC 5545 3.6.6), so a repeat with no
+                                    // interval is none.
+                                    boolean repeats = times > 0 && apart > 0;
+                                    List<String> to = addresses(recipients.getText().toString());
+                                    String subjectText = subject.getText().toString().trim();
+                                    EventAlarm written =
+                                            new EventAlarm(
+                                                    alarm.index(),
+                                                    action,
+                                                    placing < 2 ? signed : null,
+                                                    placing == 2 || placing == 3 ? signed : null,
+                                                    placing == 4 ? Zones.utc(moment[0]) : null,
+                                                    message.getText().toString().trim(),
+                                                    !email
+                                                            ? ""
+                                                            : subjectText.isEmpty()
+                                                                    ? title
+                                                                    : subjectText,
+                                                    !email
+                                                            ? List.of()
+                                                            : to.isEmpty()
+                                                                    ? List.of(calendar.accountEmail)
+                                                                    : to,
+                                                    repeats ? times : 0,
+                                                    repeats ? apart : null);
+                                    if (index < 0) {
+                                        alarms.add(written);
+                                    } else {
+                                        alarms.set(index, written);
+                                    }
+                                    render();
+                                })
+                        .setNegativeButton(android.R.string.cancel, null);
+        if (index >= 0) {
+            dialog.setNeutralButton(
+                    R.string.event_alarm_remove,
+                    (shown, which) -> {
+                        alarms.remove(index);
+                        render();
+                    });
+        }
+        dialog.show();
+    }
+
+    /** The entry's start as an instant, now when it has none. */
+    private long startInstant() {
+        EventTime start = times.get("start");
+        return start == null ? System.currentTimeMillis() : Zones.instant(start);
+    }
+
+    /** The largest unit {@code minutes} is a whole number of, minutes for 0. */
+    private static int unitOf(long minutes) {
+        for (int unit = UNITS.length - 1; unit > 0; unit--) {
+            if (minutes != 0 && minutes % UNITS[unit] == 0) {
+                return unit;
+            }
+        }
+        return 0;
+    }
+
+    /** A number field's value, 0 when empty. */
+    private static long numberOf(EditText field) {
+        try {
+            return Math.max(0, Long.parseLong(field.getText().toString().trim()));
+        } catch (NumberFormatException error) {
+            return 0;
+        }
+    }
+
+    private String[] labels(int[] ids) {
+        String[] labels = new String[ids.length];
+        for (int index = 0; index < ids.length; index++) {
+            labels[index] = host.getString(ids[index]);
+        }
+        return labels;
+    }
+
+    /** A moment as the form shows it, in the reader's zone. */
+    private String momentLabel(long instant) {
+        String stamp = Zones.utc(instant).replace("Z", "");
+        return moment(new EventTime(stamp, EventTimeKind.UTC, "", null));
+    }
+
+    /** Picks a moment's day then its time, then runs {@code then}. */
+    private void pickMoment(long[] moment, Runnable then) {
+        Calendar picked = Calendar.getInstance();
+        picked.setTimeInMillis(moment[0]);
+        new DatePickerDialog(
+                        host,
+                        (view, year, month, day) -> {
+                            picked.set(year, month, day);
+                            new TimePickerDialog(
+                                            host,
+                                            (clock, hour, minute) -> {
+                                                picked.set(Calendar.HOUR_OF_DAY, hour);
+                                                picked.set(Calendar.MINUTE, minute);
+                                                picked.set(Calendar.SECOND, 0);
+                                                picked.set(Calendar.MILLISECOND, 0);
+                                                moment[0] = picked.getTimeInMillis();
+                                                then.run();
+                                            },
+                                            picked.get(Calendar.HOUR_OF_DAY),
+                                            picked.get(Calendar.MINUTE),
+                                            android.text.format.DateFormat.is24HourFormat(host))
+                                    .show();
+                        },
+                        picked.get(Calendar.YEAR),
+                        picked.get(Calendar.MONTH),
+                        picked.get(Calendar.DAY_OF_MONTH))
+                .show();
+    }
+
+    /** A spinner listener running {@code then} on every pick. */
+    private static AdapterView.OnItemSelectedListener selected(Runnable then) {
+        return new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                then.run();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        };
+    }
+
+    /**
+     * A field in a dialog form whose value a picker sets: shown as text, a
+     * tap opening the picker the caller wires; labelled unless 0.
+     */
+    private EditText formPicked(LinearLayout form, int label) {
+        EditText field = formText(form, label, "", false);
+        field.setFocusable(false);
+        field.setCursorVisible(false);
+        field.setKeyListener(null);
+        return field;
+    }
+
+    /** A duration as the form shows it, in the largest whole unit. */
+    private String duration(long minutes) {
+        int unit = unitOf(minutes);
+        int amount = (int) (minutes / UNITS[unit]);
+        return host.getResources().getQuantityString(DURATIONS[unit], amount, amount);
+    }
+
+    /**
+     * Picks a duration as an amount and a unit, into {@code minutes}, then
+     * runs {@code then}.
+     */
+    private void pickDuration(int title, long[] minutes, Runnable then) {
+        int unit = unitOf(minutes[0]);
+        android.widget.NumberPicker amount = new android.widget.NumberPicker(host);
+        amount.setMinValue(0);
+        amount.setMaxValue(999);
+        amount.setValue((int) Math.min(999, minutes[0] / UNITS[unit]));
+        android.widget.NumberPicker units = new android.widget.NumberPicker(host);
+        units.setMinValue(0);
+        units.setMaxValue(UNITS.length - 1);
+        units.setDisplayedValues(labels(UNIT_LABELS));
+        units.setValue(unit);
+        LinearLayout pickers = new LinearLayout(host);
+        pickers.setGravity(android.view.Gravity.CENTER);
+        pickers.setPadding(0, host.dp(8), 0, 0);
+        pickers.addView(amount);
+        pickers.addView(units);
+        new AlertDialog.Builder(host)
+                .setTitle(title)
+                .setView(pickers)
+                .setPositiveButton(
+                        android.R.string.ok,
+                        (shown, which) -> {
+                            minutes[0] = amount.getValue() * UNITS[units.getValue()];
+                            then.run();
+                        })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /** A field's label in a dialog form, as the task sheet's. */
+    private TextView formLabel(LinearLayout form, int label) {
+        TextView view = new TextView(host);
+        view.setText(label);
+        view.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
+        view.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        view.setPadding(0, host.dp(12), 0, 0);
+        form.addView(view);
+        return view;
+    }
+
+    /** A labelled dropdown in a dialog form, full width. */
+    private Spinner formSpinner(LinearLayout form, int label, List<String> items) {
+        formLabel(form, label);
+        ArrayAdapter<String> adapter =
+                new ArrayAdapter<>(host, android.R.layout.simple_spinner_item, items);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        Spinner spinner = new Spinner(host);
+        spinner.setAdapter(adapter);
+        form.addView(
+                spinner,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
+        return spinner;
+    }
+
+    /** A text field in a dialog form, full width, labelled unless 0. */
+    private EditText formText(LinearLayout form, int label, String value, boolean multiline) {
+        if (label != 0) {
+            formLabel(form, label);
+        }
+        EditText input = new EditText(host);
+        input.setText(value);
+        input.setInputType(
+                android.text.InputType.TYPE_CLASS_TEXT
+                        | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                        | (multiline ? android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE : 0));
+        form.addView(
+                input,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
+        return input;
+    }
+
+    /** The addresses a comma or space separated text names. */
+    private static List<String> addresses(String text) {
+        List<String> addresses = new ArrayList<>();
+        for (String address : text.split("[,;\\s]+")) {
+            if (!address.isBlank()) {
+                addresses.add(address.trim());
+            }
+        }
+        return addresses;
+    }
+
+    /** What an alarm's action is called, an unknown one as written. */
+    private String actionLabel(String action) {
+        int index = indexOf(ACTIONS, action);
+        return index < 0 ? action : host.getString(ACTION_LABELS[index]);
+    }
+
+    private static int indexOf(String[] values, String value) {
+        for (int index = 0; index < values.length; index++) {
+            if (values[index].equals(value)) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * An alarm's second line: its message, an email's recipients, and how it
+     * repeats; null when it has none of them.
+     */
+    private CharSequence alarmDetail(EventAlarm alarm) {
+        List<String> parts = new ArrayList<>();
+        if (EventAlarm.EMAIL.equals(alarm.action()) && !alarm.attendees().isEmpty()) {
+            parts.add(
+                    host.getString(
+                            R.string.event_alarm_to, String.join(", ", alarm.attendees())));
+        }
+        if (!alarm.description().isEmpty()) {
+            parts.add(alarm.description());
+        }
+        if (alarm.repeat() > 0 && alarm.everyMinutes() != null) {
+            int times = (int) alarm.repeat();
+            parts.add(
+                    host.getResources()
+                            .getQuantityString(
+                                    R.plurals.event_alarm_repeats,
+                                    times,
+                                    times,
+                                    alarm.everyMinutes().intValue()));
+        }
+        return parts.isEmpty() ? null : String.join(" · ", parts);
+    }
+
+    /**
+     * When an alarm rings: against the start, against the end, or the moment
+     * it was written at.
+     */
+    private String alarmLabel(EventAlarm alarm) {
+        if (alarm.minutes() != null) {
+            return beforeStart(alarm.minutes());
+        }
+        if (alarm.minutesBeforeEnd() != null) {
+            return alarm.minutesBeforeEnd() == 0
+                    ? host.getString(R.string.event_alarm_at_end)
+                    : host.getString(
+                            R.string.event_alarm_from_end, offset(alarm.minutesBeforeEnd()));
+        }
+        if (alarm.absolute() != null) {
+            String stamp = alarm.absolute().replace("Z", "").replace("z", "");
+            return host.getString(
+                    R.string.event_alarm_at,
+                    moment(new EventTime(stamp, EventTimeKind.UTC, "", null)));
+        }
+        return host.getString(R.string.event_unset);
+    }
+
+    /**
+     * {@code minutes} before the start: a day and a time on an all-day entry,
+     * else an offset.
+     */
+    private String beforeStart(long minutes) {
+        if (allDay()) {
+            // NOTE: minutes after the start day's midnight, split into the
+            // day and the time of day it rings at.
+            long after = -minutes;
+            long day = Math.floorDiv(after, 1440);
+            long clock = after - day * 1440;
+            String time =
+                    android.text.format.DateFormat.getTimeFormat(host)
+                            .format(
+                                    new java.util.Date(
+                                            java.time.LocalDate.now()
+                                                            .atStartOfDay(ZoneId.systemDefault())
+                                                            .toInstant()
+                                                            .toEpochMilli()
+                                                    + clock * 60_000L));
+            if (day == 0) {
+                return host.getString(R.string.event_alarm_day_of, time);
+            }
+            int days = (int) Math.abs(day);
+            return host.getResources()
+                    .getQuantityString(
+                            day < 0
+                                    ? R.plurals.event_alarm_days_before_at
+                                    : R.plurals.event_alarm_days_after_at,
+                            days,
+                            days,
+                            time);
+        }
+        if (minutes == 0) {
+            return host.getString(R.string.event_alarm_at_start);
+        }
+        return offset(minutes);
+    }
+
+    /** An offset, before when positive, in the largest whole unit. */
+    private String offset(long minutes) {
+        android.content.res.Resources resources = host.getResources();
+        boolean before = minutes > 0;
+        long size = Math.abs(minutes);
+        if (size % 1440 == 0) {
+            int days = (int) (size / 1440);
+            return resources.getQuantityString(
+                    before ? R.plurals.event_alarm_days_before : R.plurals.event_alarm_days_after,
+                    days,
+                    days);
+        }
+        if (size % 60 == 0) {
+            int hours = (int) (size / 60);
+            return resources.getQuantityString(
+                    before ? R.plurals.event_alarm_hours_before : R.plurals.event_alarm_hours_after,
+                    hours,
+                    hours);
+        }
+        return resources.getQuantityString(
+                before ? R.plurals.event_alarm_minutes_before : R.plurals.event_alarm_minutes_after,
+                (int) size,
+                (int) size);
     }
 
     /** What a to-do's or a journal entry's placing date is called. */
@@ -805,6 +1552,11 @@ public final class EventView {
 
     /** A section header's add action, filtered to that section. */
     private View addIcon(int section) {
+        return addButton(() -> addField(section));
+    }
+
+    /** A section header's add button, running {@code onAdd}. */
+    private View addButton(Runnable onAdd) {
         ImageView icon = new ImageView(host);
         icon.setImageResource(R.drawable.ic_add_entry);
         icon.setImageTintList(ColorStateList.valueOf(sections.accentColor));
@@ -812,47 +1564,28 @@ public final class EventView {
         icon.setBackgroundResource(
                 host.ui.resolveAttr(android.R.attr.selectableItemBackgroundBorderless));
         icon.setPadding(host.dp(6), host.dp(6), host.dp(6), host.dp(6));
-        icon.setOnClickListener(view -> addField(section));
+        icon.setOnClickListener(view -> onAdd.run());
         return icon;
-    }
-
-    /** The bar's add: every property this component does not have yet. */
-    public void addField() {
-        addField(0);
     }
 
     /** The same, filtered to one section when a header asked. */
     private void addField(int section) {
-        List<Field> offerable = new ArrayList<>();
+        List<FieldChooser.Choice> choices = new ArrayList<>();
         for (Field field : CATALOG) {
             boolean mine = section == 0 || field.section == section;
             if (mine && field.of(component()) && !shown(field)) {
-                offerable.add(field);
+                choices.add(
+                        new FieldChooser.Choice(
+                                field.icon,
+                                field.label,
+                                () -> {
+                                    revealed.add(field.key);
+                                    render();
+                                    edit(field);
+                                }));
             }
         }
-
-        if (offerable.isEmpty()) {
-            host.toast(host.getString(R.string.event_nothing_to_add));
-            return;
-        }
-
-        String[] labels = new String[offerable.size()];
-        for (int index = 0; index < offerable.size(); index++) {
-            labels[index] = host.getString(offerable.get(index).label);
-        }
-
-        new AlertDialog.Builder(host)
-                .setTitle(R.string.contact_add_field)
-                .setItems(
-                        labels,
-                        (dialog, which) -> {
-                            Field field = offerable.get(which);
-                            revealed.add(field.key);
-                            render();
-                            edit(field);
-                        })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        FieldChooser.show(host, host.ui, choices);
     }
 
     private View row(Field field) {
@@ -1014,7 +1747,8 @@ public final class EventView {
             moment.setTimeInMillis(Zones.instant(current));
         }
 
-        new DatePickerDialog(
+        DatePickerDialog picker =
+                new DatePickerDialog(
                         host,
                         (view, year, month, day) -> {
                             moment.set(Calendar.YEAR, year);
@@ -1032,8 +1766,25 @@ public final class EventView {
                         },
                         moment.get(Calendar.YEAR),
                         moment.get(Calendar.MONTH),
-                        moment.get(Calendar.DAY_OF_MONTH))
-                .show();
+                        moment.get(Calendar.DAY_OF_MONTH));
+        if (current != null && clearable(key)) {
+            picker.setButton(
+                    DialogInterface.BUTTON_NEUTRAL,
+                    host.getString(R.string.clear),
+                    (dialog, which) -> {
+                        times.put(key, null);
+                        render();
+                    });
+        }
+        picker.show();
+    }
+
+    /**
+     * Whether a date may be cleared: every one but an event's start, which
+     * RFC 5545 3.6.1 requires.
+     */
+    private boolean clearable(String key) {
+        return !("start".equals(key) && EVENT.equals(component()));
     }
 
     private void editTime(String key, Calendar moment) {
@@ -1089,7 +1840,26 @@ public final class EventView {
         boolean allDay = !allDay();
         this.allDay = allDay;
 
-        for (String key : new String[] {"start", "end", "due"}) {
+        // NOTE: flipped back with the dates untouched since, the dates as
+        // they stood before come back, times of day included, rather than
+        // the midnights a day converts to.
+        Map<String, EventTime> standing = new HashMap<>();
+        for (String key : FLIPPED) {
+            standing.put(key, times.get(key));
+        }
+        if (!beforeFlip.isEmpty() && standing.equals(afterFlip)) {
+            times.putAll(beforeFlip);
+            afterFlip.clear();
+            afterFlip.putAll(beforeFlip);
+            beforeFlip.clear();
+            beforeFlip.putAll(standing);
+            render();
+            return;
+        }
+        beforeFlip.clear();
+        beforeFlip.putAll(standing);
+
+        for (String key : FLIPPED) {
             EventTime current = times.get(key);
             if (current != null) {
                 times.put(key, at(Zones.instant(current), key, allDay));
@@ -1102,13 +1872,23 @@ public final class EventView {
             LocalDateTime next = Zones.civil(start.time()).plusDays(1);
             times.put("end", new EventTime(Zones.stamp(next, true), EventTimeKind.DATE, "", null));
         }
+        afterFlip.clear();
+        for (String key : FLIPPED) {
+            afterFlip.put(key, times.get(key));
+        }
         render();
     }
 
     private void dialog(int title, View content, Runnable onOk) {
         LinearLayout frame = new LinearLayout(host);
         frame.setPadding(host.dp(24), host.dp(8), host.dp(24), 0);
-        frame.addView(content);
+        // NOTE: the field takes the dialog's width; a horizontal layout's
+        // child would only wrap its text.
+        frame.addView(
+                content,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
 
         new AlertDialog.Builder(host)
                 .setTitle(title)
@@ -1490,7 +2270,12 @@ public final class EventView {
         }
         // NOTE: a resolution with nothing edited beside it is one of the
         // whole object, so there is no occurrence to ask about.
-        if (creating || !series() || merge != null && !changed()) {
+        // NOTE: alarms are the whole entry's, so a save changing them alone
+        // has no occurrence to ask about either.
+        if (creating
+                || !series()
+                || merge != null && !changed()
+                || !changed() && alarmsChanged()) {
             save(EventScope.ALL);
             return;
         }
@@ -1540,6 +2325,7 @@ public final class EventView {
         boolean rewritten = changed;
         EventStore.StoredConflict settling = conflict;
         Map<Integer, EventSide> chosen = new HashMap<>(picks);
+        List<EventAlarm> alarmed = alarmsChanged() ? List.copyOf(alarms) : null;
 
         host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
         host.io.execute(
@@ -1557,7 +2343,8 @@ public final class EventView {
                                                 isNew,
                                                 rewritten,
                                                 settling,
-                                                chosen));
+                                                chosen,
+                                                alarmed));
                     } catch (Exception error) {
                         Log.w("pimalaya", "event save failed: " + target.id, error);
                         failure = error;

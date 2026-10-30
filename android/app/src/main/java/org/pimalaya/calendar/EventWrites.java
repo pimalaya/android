@@ -1,6 +1,7 @@
 package org.pimalaya.calendar;
 
 import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.EventAlarm;
 import org.pimalaya.client.EventEdit;
 import org.pimalaya.client.EventScope;
 import org.pimalaya.client.EventSide;
@@ -8,6 +9,7 @@ import org.pimalaya.client.EventSides;
 import org.pimalaya.client.EventSplit;
 import org.pimalaya.client.Flags;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -28,7 +30,8 @@ final class EventWrites {
      *
      * <p>The scope, the scoped edit, the new series' UID, the entry and its
      * calendar, whether it creates, whether anything beyond the stamp was
-     * edited, and the conflict it settles with the sides picked.
+     * edited, the conflict it settles with the sides picked, and the alarms it
+     * sets, null when it leaves them.
      */
     record Save(
             EventScope scope,
@@ -39,7 +42,8 @@ final class EventWrites {
             boolean isNew,
             boolean rewritten,
             EventStore.StoredConflict settling,
-            Map<Integer, EventSide> picks) {}
+            Map<Integer, EventSide> picks,
+            List<EventAlarm> alarms) {}
 
     /**
      * Stages a save: the series or lone entry, one occurrence, or a split.
@@ -81,17 +85,18 @@ final class EventWrites {
                 engine.mutateAdd(
                         collection.id,
                         uid + ".ics",
-                        split.series(),
+                        withAlarms(split.series(), save.alarms()),
                         Flags.none(),
                         null,
                         "");
             }
-            engine.mutateEdit(into, handle, split.master(), null, "");
+            engine.mutateEdit(into, handle, withAlarms(split.master(), save.alarms()), null, "");
         } else {
             String written =
                     settling != null && !rewritten
                             ? source
                             : CalendarClient.writeEvent(source, edited);
+            written = withAlarms(written, save.alarms());
             if (isNew) {
                 engine.mutateAdd(
                         collection.id,
@@ -104,6 +109,20 @@ final class EventWrites {
                 engine.mutateEdit(into, handle, written, null, "");
             }
         }
+    }
+
+    /**
+     * {@code ical} with its master's alarms set to {@code alarms}, untouched
+     * when null.
+     *
+     * <p>Alarm by alarm (rs/calendar/alarm.rs): one kept stays byte for byte,
+     * one changed has only what moved rewritten, one left out goes.
+     */
+    private static String withAlarms(String ical, List<EventAlarm> alarms) {
+        if (alarms == null) {
+            return ical;
+        }
+        return CalendarClient.applyAlarms(ical, alarms, Zones.utc(System.currentTimeMillis()));
     }
 
     /**

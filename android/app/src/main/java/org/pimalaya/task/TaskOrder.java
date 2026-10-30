@@ -3,6 +3,9 @@ package org.pimalaya.task;
 import org.pimalaya.calendar.Zones;
 import org.pimalaya.client.Task;
 
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -54,6 +57,24 @@ final class TaskOrder {
 
     /** The view of the dropped tasks. */
     static final String CANCELLED = "CANCELLED";
+
+    /** The state of an open task not under way, with or without a STATUS. */
+    static final String TODO = "NEEDS-ACTION";
+
+    /**
+     * A task's state, as the list's Status filter tells them: {@link #DONE},
+     * {@link #CANCELLED}, {@link #PROGRESS}, else {@link #TODO}, a task
+     * stating no {@code STATUS} included.
+     */
+    static String stateOf(Task task) {
+        if (DONE.equals(task.status())) {
+            return DONE;
+        }
+        if (CANCELLED.equals(task.status())) {
+            return CANCELLED;
+        }
+        return underWay(task) ? PROGRESS : TODO;
+    }
 
     /** Whether an open task is under way: {@code STATUS:IN-PROCESS}. */
     static boolean underWay(Task task) {
@@ -119,6 +140,46 @@ final class TaskOrder {
             }
         }
         return false;
+    }
+
+    /** The due filter off: every task, dated or not. */
+    static final String DUE_ANY = "any";
+
+    /** Due strictly before the day. */
+    static final String DUE_BEFORE = "before";
+
+    /** Due on the day. */
+    static final String DUE_ON = "on";
+
+    /** Due strictly after the day. */
+    static final String DUE_AFTER = "after";
+
+    /**
+     * Whether a task passes the due filter: its {@code DUE}'s day on the
+     * reader's calendar against {@code day} as {@code mode} says; a task
+     * stating no {@code DUE} passes {@link #DUE_ANY} alone.
+     */
+    static boolean dueMatches(Task task, String mode, LocalDate day) {
+        if (DUE_ANY.equals(mode)) {
+            return true;
+        }
+        if (task.due() == null) {
+            return false;
+        }
+        LocalDate due =
+                Instant.ofEpochMilli(Zones.instant(task.due()))
+                        .atZone(ZoneId.systemDefault())
+                        .toLocalDate();
+        switch (mode) {
+            case DUE_BEFORE:
+                return due.isBefore(day);
+            case DUE_ON:
+                return due.isEqual(day);
+            case DUE_AFTER:
+                return due.isAfter(day);
+            default:
+                return true;
+        }
     }
 
     /**

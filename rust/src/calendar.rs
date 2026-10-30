@@ -13,6 +13,7 @@
 //! ([`EventTime`]) for Java to resolve with the platform's tzdata; this
 //! side resolves only the zones an object defines itself ([`zone`]).
 
+pub mod alarm;
 mod caldav;
 pub mod conflict;
 pub mod edit;

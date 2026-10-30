@@ -1,15 +1,20 @@
 package org.pimalaya.task;
 
+import android.content.res.ColorStateList;
+import android.graphics.Typeface;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import org.pimalaya.R;
 import org.pimalaya.client.Task;
+import org.pimalaya.ui.Dates;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
-import org.pimalaya.ui.Sections;
 
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -17,10 +22,10 @@ import java.util.Set;
 /**
  * The weekly review: GTD's checklist, each step a count over the last load.
  *
- * <p>Nothing guessed: the Inbox left, the calendar, the open next actions,
- * Waiting For by age with the replies received, Someday. A step opens what
- * it counts and is ticked; Finish keeps the day on the device, which the
- * Tasks header then counts from.
+ * <p>Nothing guessed: the Inbox left, the calendar, the active tasks, Waiting
+ * For by age with the replies received, Someday. A step opens what it counts
+ * and is ticked; Finish, held at the bottom, keeps the day on the device,
+ * which the Tasks bar's review button then counts from.
  */
 public final class WeeklyReview {
     private enum Step {
@@ -34,7 +39,7 @@ public final class WeeklyReview {
     private final Host host;
     private final TasksList list;
     private final Runnable openCalendar;
-    private final Sections sections;
+    private final LinearLayout steps;
     private final Set<Step> ticked = new HashSet<>();
 
     /** The review over {@code list}'s load; {@code openCalendar} shows the agenda. */
@@ -42,7 +47,10 @@ public final class WeeklyReview {
         this.host = host;
         this.list = list;
         this.openCalendar = openCalendar;
-        this.sections = new Sections(host, (LinearLayout) host.findViewById(R.id.review_page));
+        this.steps = host.findViewById(R.id.review_steps);
+        TextView finish = host.findViewById(R.id.review_finish);
+        finish.setTextColor(host.accentContrast());
+        finish.setOnClickListener(view -> finish());
     }
 
     /** Opens the checklist, the steps ticked since the last Finish kept. */
@@ -57,7 +65,7 @@ public final class WeeklyReview {
     }
 
     private void render() {
-        sections.clear();
+        steps.removeAllViews();
         List<TaskStore.Stored> open = list.open();
         int inbox = 0;
         int next = 0;
@@ -84,8 +92,7 @@ public final class WeeklyReview {
         }
 
         int left = inbox;
-        List<View> steps = new ArrayList<>();
-        steps.add(step(Step.INBOX, R.string.review_inbox,
+        step(Step.INBOX, R.string.review_inbox,
                 inbox == 0
                         ? host.getString(R.string.review_inbox_empty)
                         : host.getString(R.string.review_inbox_left, inbox),
@@ -93,39 +100,124 @@ public final class WeeklyReview {
                     if (left > 0) {
                         list.clarify.open(list.inbox());
                     }
-                }));
-        steps.add(step(Step.CALENDAR, R.string.review_calendar,
-                host.getString(R.string.review_calendar_line), openCalendar));
-        steps.add(step(Step.NEXT, R.string.review_next,
+                });
+        step(Step.CALENDAR, R.string.review_calendar,
+                host.getString(R.string.review_calendar_line), openCalendar);
+        step(Step.NEXT, R.string.review_next,
                 host.getString(R.string.review_next_line, next),
-                () -> showList(Task.NEXT)));
-        steps.add(step(Step.WAITING, R.string.review_waiting,
+                () -> showList(Task.NEXT));
+        step(Step.WAITING, R.string.review_waiting,
                 host.getString(R.string.review_waiting_line, waiting, replied, late),
-                () -> showList(Task.WAITING)));
-        steps.add(step(Step.SOMEDAY, R.string.review_someday,
+                () -> showList(Task.WAITING));
+        step(Step.SOMEDAY, R.string.review_someday,
                 host.getString(R.string.review_someday_line, someday),
-                () -> showList(Task.SOMEDAY)));
-        sections.section(R.string.task_review, R.drawable.ic_task_review, steps, null, false);
+                () -> showList(Task.SOMEDAY));
 
-        List<View> finish = new ArrayList<>();
-        finish.add(sections.row(host.getString(R.string.review_finish), null, null, this::finish));
-        sections.section(0, 0, finish, null, false);
+        long at =
+                host.getSharedPreferences(TasksList.PREFERENCES, 0)
+                        .getLong(TasksList.REVIEWED, 0);
+        int total = Step.values().length;
+        ((TextView) host.findViewById(R.id.review_meta))
+                .setText(
+                        at == 0
+                                ? host.getString(R.string.review_meta, ticked.size(), total)
+                                : host.getString(
+                                        R.string.review_meta_last,
+                                        Dates.dayMonth(at),
+                                        ticked.size(),
+                                        total));
     }
 
-    private View step(Step step, int title, String line, Runnable open) {
-        android.widget.ImageView tick = new android.widget.ImageView(host);
-        tick.setImageResource(ticked.contains(step) ? R.drawable.ic_check_box : R.drawable.ic_check_box_blank);
-        tick.setImageTintList(
-                android.content.res.ColorStateList.valueOf(
-                        host.ui.resolveColor(
-                                ticked.contains(step)
-                                        ? android.R.attr.colorAccent
-                                        : android.R.attr.textColorSecondary)));
-        return sections.row(host.getString(title), line, tick, () -> {
-            ticked.add(step);
-            render();
-            open.run();
-        });
+    /**
+     * One step: its number in a ring, or a check on an accent disc once done,
+     * its title and its count, and a chevron while it is left to do.
+     */
+    private void step(Step step, int title, String line, Runnable open) {
+        boolean done = ticked.contains(step);
+        int size = host.dp(26);
+
+        View mark;
+        if (done) {
+            ImageView check = new ImageView(host);
+            check.setImageResource(R.drawable.ic_check);
+            check.setImageTintList(ColorStateList.valueOf(host.accentContrast()));
+            check.setBackgroundResource(R.drawable.review_step_done);
+            check.setPadding(host.dp(5), host.dp(5), host.dp(5), host.dp(5));
+            mark = check;
+        } else {
+            TextView number = new TextView(host);
+            number.setText(String.valueOf(step.ordinal() + 1));
+            number.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            number.setTypeface(null, Typeface.BOLD);
+            number.setTextColor(host.resolveColor(android.R.attr.textColorSecondary));
+            number.setGravity(Gravity.CENTER);
+            number.setBackgroundResource(R.drawable.review_step);
+            mark = number;
+        }
+        LinearLayout.LayoutParams markParams = new LinearLayout.LayoutParams(size, size);
+        markParams.topMargin = host.dp(14);
+
+        TextView name = new TextView(host);
+        name.setText(title);
+        name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        name.setTextColor(
+                host.resolveColor(
+                        done
+                                ? android.R.attr.textColorSecondary
+                                : android.R.attr.textColorPrimary));
+        TextView count = new TextView(host);
+        count.setText(line);
+        count.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        count.setTextColor(host.resolveColor(android.R.attr.textColorSecondary));
+        LinearLayout text = new LinearLayout(host);
+        text.setOrientation(LinearLayout.VERTICAL);
+        text.addView(name);
+        text.addView(count);
+
+        LinearLayout content = new LinearLayout(host);
+        content.setOrientation(LinearLayout.HORIZONTAL);
+        content.setGravity(Gravity.CENTER_VERTICAL);
+        content.setPadding(0, host.dp(12), host.dp(16), host.dp(12));
+        content.addView(
+                text,
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        if (!done) {
+            ImageView chevron = new ImageView(host);
+            chevron.setImageResource(R.drawable.ic_chevron_right);
+            chevron.setImageTintList(
+                    ColorStateList.valueOf(host.resolveColor(android.R.attr.textColorSecondary)));
+            content.addView(chevron, new LinearLayout.LayoutParams(host.dp(20), host.dp(20)));
+        }
+
+        // NOTE: the hairline sits over the text alone, past the mark, as
+        // between the rows of every grouped list.
+        LinearLayout body = new LinearLayout(host);
+        body.setOrientation(LinearLayout.VERTICAL);
+        if (steps.getChildCount() > 0) {
+            View divider = new View(host);
+            divider.setBackgroundColor(host.getColor(R.color.divider_light));
+            body.addView(
+                    divider,
+                    new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        }
+        body.addView(content);
+
+        LinearLayout row = new LinearLayout(host);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(host.dp(14), 0, 0, 0);
+        row.setBackgroundResource(host.ui.resolveAttr(android.R.attr.selectableItemBackground));
+        row.addView(mark, markParams);
+        LinearLayout.LayoutParams bodyParams =
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        bodyParams.setMarginStart(host.dp(12));
+        row.addView(body, bodyParams);
+        row.setOnClickListener(
+                view -> {
+                    ticked.add(step);
+                    render();
+                    open.run();
+                });
+        steps.addView(row);
     }
 
     private void showList(String target) {

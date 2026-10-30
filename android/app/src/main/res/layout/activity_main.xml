@@ -723,15 +723,21 @@
 
     </LinearLayout>
 
+    <!-- The Tasks selection's actions, in the bottom navigation's place
+         while a selection runs (TasksList builds the six). -->
+    <LinearLayout
+        android:id="@+id/tasks_actions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/surface"
+        android:orientation="horizontal"
+        android:visibility="gone" />
+
     </LinearLayout>
 
     <!-- The auth sheet: a whole-frame overlay with its own bar, fading
          in over the content (the drawer is closed while it runs). -->
     <include layout="@layout/panel_auth" />
-
-    <!-- A list's filter page: the same overlay treatment, over the list it
-         filters (the drawer is closed while it is up). -->
-    <include layout="@layout/panel_filter" />
 
     <!-- The screens' primary action, fixed above everything: add on
          the lists, save on the editor, continue through the auth flow
@@ -1129,6 +1135,11 @@
          DrawerLayout, so the drawer's account rows raise it over the
          open drawer and closing it reveals that drawer again. -->
     <include layout="@layout/panel_account" />
+
+    <!-- What an account syncs, per domain: the same overlay treatment,
+         raised from the account's settings and closing back onto them,
+         so it sits above them. -->
+    <include layout="@layout/panel_filter" />
 
     <!-- Deleted items: the same treatment, raised from the drawer's row
          and closing back onto the drawer. -->

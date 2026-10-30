@@ -56,8 +56,66 @@ public final class ContactEditor {
         this.host = host;
         this.parts = parts;
         this.form = form;
+        form.where = this::where;
         this.reloadList = reloadList;
         this.writer = new ContactWriter(host, parts, this, reloadList);
+    }
+
+    /**
+     * The form's Address book section: where the contact is; a tap picks
+     * another book for a new one, or places a stored one (manageBooks), never
+     * while a conflict is resolved.
+     */
+    private ContactForm.Where where() {
+        if (edit == null || edit.book == null) {
+            return null;
+        }
+        boolean local = LocalBook.is(edit.accountEmail);
+        Runnable tap = null;
+        if (edit.card == null) {
+            tap = targets().size() > 1 ? this::pickNewBook : null;
+        } else if (!edit.resolvingConflict && !targets().isEmpty()) {
+            tap = this::manageBooks;
+        }
+        return new ContactForm.Where(
+                local ? host.getString(R.string.local_book) : edit.book.name(),
+                local ? null : edit.accountEmail,
+                tap);
+    }
+
+    /** The books a contact may go to: subscribed, the local one aside. */
+    private List<BookEntry> targets() {
+        List<BookEntry> books = new ArrayList<>();
+        for (BookEntry entry : parts.cards().loadSubscribedAddressbooks()) {
+            if (!LocalBook.is(entry.accountEmail)) {
+                books.add(entry);
+            }
+        }
+        return books;
+    }
+
+    /** Asks which book a new contact goes to. */
+    private void pickNewBook() {
+        List<BookEntry> books = targets();
+        int checked = 0;
+        for (int index = 0; index < books.size(); index++) {
+            if (books.get(index).book.url().equals(edit.book.url())) {
+                checked = index;
+            }
+        }
+        new AlertDialog.Builder(host)
+                .setTitle(R.string.save_target_title)
+                .setSingleChoiceItems(
+                        bookLabels(books),
+                        checked,
+                        (dialog, which) -> {
+                            dialog.dismiss();
+                            edit.book = books.get(which).book;
+                            edit.accountEmail = books.get(which).accountEmail;
+                            form.refresh();
+                        })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     /** The current session, replaced on every open and on leaving. */

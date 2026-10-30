@@ -1,6 +1,6 @@
 //! # Writer vectors
 //!
-//! pimdir's GTD writer vectors (vectors/gtd/writers.json, GUIDE §17), run
+//! pimdir's GTD writer vectors (conventions/gtd/writers.json), run
 //! against the app's task writers: each case an input VTODO, an edit and
 //! the bytes it writes, so the app and unfog edit a task alike.
 //!
@@ -34,7 +34,7 @@ enum Outcome {
 fn directory() -> PathBuf {
     match std::env::var_os("PIMALAYA_PIMDIR_VECTORS") {
         Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../pimdir/vectors/gtd"),
+        None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../pimdir/conventions/gtd"),
     }
 }
 

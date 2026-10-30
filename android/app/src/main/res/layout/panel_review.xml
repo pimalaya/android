@@ -1,21 +1,74 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The weekly review checklist (WeeklyReview), on the entry page's
-     settings-style sections. -->
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- The weekly review checklist (WeeklyReview): a large title over what
+     is done, one card of numbered steps, and Finish held at the bottom. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:orientation="vertical">
 
     <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
         <LinearLayout
-            android:id="@+id/review_page"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingBottom="96dp" />
+            android:paddingTop="8dp"
+            android:paddingBottom="16dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="20dp"
+                android:layout_marginEnd="20dp"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/task_review"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="@dimen/large_title"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/review_meta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="20dp"
+                android:layout_marginTop="2dp"
+                android:layout_marginEnd="20dp"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="14sp" />
+
+            <LinearLayout
+                android:id="@+id/review_steps"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/card_gutter"
+                android:layout_marginTop="16dp"
+                android:layout_marginEnd="@dimen/card_gutter"
+                android:background="@drawable/card_group"
+                android:orientation="vertical" />
+
+        </LinearLayout>
 
     </ScrollView>
 
-</FrameLayout>
+    <LinearLayout
+        android:id="@+id/review_actions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="16dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="16dp">
+
+        <Button
+            android:id="@+id/review_finish"
+            style="@style/PrimaryButton"
+            android:text="@string/review_finish" />
+
+    </LinearLayout>
+
+</LinearLayout>

@@ -69,6 +69,12 @@ public final class FilterPage {
     /** The list screen the page was raised over, restored on the way out. */
     private int cameFrom = Panels.MAIL;
 
+    /** The one account the page lists, from its settings; null for every one. */
+    private String onlyAccount;
+
+    /** Run once the page closes, for the settings it was raised over. */
+    private Runnable closed;
+
     /** The filter page; {@code filterChanged} runs once a filter changed. */
     public FilterPage(Host host, Filters filters, Runnable filterChanged) {
         this.host = host;
@@ -93,6 +99,8 @@ public final class FilterPage {
     public void open(PimDomain domain) {
         this.domain = domain;
         this.files = false;
+        this.onlyAccount = null;
+        this.closed = null;
         this.cameFrom = host.screen;
         ((TextView) host.findViewById(R.id.filter_title))
                 .setText(host.getString(R.string.filter_title_of, host.getString(domain.label)));
@@ -100,6 +108,25 @@ public final class FilterPage {
         render();
         host.openOverlay(Panels.FILTER);
     }
+
+    /**
+     * Opens the page on what {@code email} syncs of {@code domain}, from the
+     * account's settings (cairn/changes/one-filter-panel): its collections
+     * alone, Apply syncing what it newly takes; {@code closed} runs once the
+     * page is gone.
+     */
+    public void openSync(PimDomain domain, String email, Runnable closed) {
+        this.domain = domain;
+        this.files = false;
+        this.onlyAccount = email;
+        this.closed = closed;
+        this.cameFrom = host.screen;
+        ((TextView) host.findViewById(R.id.filter_title)).setText(domain.syncLabel());
+        draft = MergedFilter.of(host, domain).draft();
+        render();
+        host.openOverlay(Panels.FILTER);
+    }
+
 
     /** Opens the page over the Files tab. */
     public void openFiles() {
@@ -125,17 +152,26 @@ public final class FilterPage {
         MergedFilter kept = files ? MergedFilter.files(host) : MergedFilter.of(host, domain);
         PimDomain applied = files ? null : domain;
         MergedFilter ticks = draft;
+        Runnable after = closed;
         leave();
         filters.apply(applied, kept, ticks, filterChanged);
+        if (after != null) {
+            after.run();
+        }
     }
 
-    /** Closes the page onto the list it was opened over. */
+    /** Closes the page onto the screen it was opened over. */
     public void leave() {
+        Runnable after = closed;
+        closed = null;
         domain = null;
         draft = null;
         host.closeOverlay(Panels.FILTER);
         host.screen = cameFrom;
         host.applyChrome(cameFrom);
+        if (after != null) {
+            after.run();
+        }
     }
 
     /** A default chosen: the page and the lists behind it follow. */
@@ -153,6 +189,9 @@ public final class FilterPage {
         String kind = domain == PimDomain.CALENDAR ? PimdirSummary.CALENDAR : PimdirSummary.CONTACT;
 
         for (Account account : files ? filters.filesRoster() : filters.roster(domain)) {
+            if (onlyAccount != null && !onlyAccount.equals(account.email)) {
+                continue;
+            }
             List<String> ids = account.ids();
             MergedFilter.Tick tick = filter.tick(account.email, ids);
             content.addView(

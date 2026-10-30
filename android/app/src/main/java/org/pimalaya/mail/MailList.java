@@ -36,9 +36,11 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SyncScope;
 import org.pimalaya.client.Flags;
 import org.pimalaya.ui.Avatar;
-import org.pimalaya.ui.Chips;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.ui.FilterPanel;
 import org.pimalaya.ui.Dates;
 import org.pimalaya.ui.Host;
+import org.pimalaya.ui.ListFilter;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
 
@@ -164,11 +166,37 @@ public final class MailList {
 
     private String query = "";
 
-    /** The role chip on, pimdir's mail role it narrows to, null for none. */
+    /** The role Show picked, pimdir's mail role it narrows to, null for all. */
     private String role;
 
     private boolean unreadOnly;
+    private boolean readOnly;
     private boolean attachmentsOnly;
+
+    /** The panel's sections: the mailboxes shown, the role, the flags. */
+    private static final String MAILBOXES = "mailboxes";
+
+    private static final String SHOW = "show";
+
+    private static final String ONLY = "only";
+
+    /**
+     * The flags offered: the ones the store's mail statements bind (seen, an
+     * attachment); starred and answered wait for statements binding them.
+     */
+    private static final String[] ONLY_KEYS = {"unread", "read", "attachments"};
+
+    private static final int[] ONLY_LABELS = {
+        R.string.mail_chip_unread, R.string.filter_read, R.string.mail_chip_attachments,
+    };
+
+    /** What the list keeps of the mailboxes synced, drafted by the panel. */
+    private ListFilter filter;
+
+    private FilterPanel panel;
+
+    /** The mailboxes the panel offers, by account then id, as last read. */
+    private Map<String, Map<String, String>> offered = new LinkedHashMap<>();
 
     /** The messages selected one by one, keyed by their store id. */
     private final Map<String, MailStore.StoredMessage> selected = new LinkedHashMap<>();
@@ -203,34 +231,36 @@ public final class MailList {
                     query = settled;
                     reload();
                 });
-        LinearLayout chips = header.chips();
-        Chips.exclusive(
-                host,
-                chips,
-                ROLE_LABELS,
-                ROLE_ICONS,
-                picked -> {
-                    role = picked < 0 ? null : ROLES[picked];
-                    reload();
-                });
-        Chips.add(
-                host,
-                chips,
-                R.string.mail_chip_unread,
-                R.drawable.ic_visibility_off,
-                on -> {
-                    unreadOnly = on;
-                    reload();
-                });
-        Chips.add(
-                host,
-                chips,
-                R.string.mail_chip_attachments,
-                R.drawable.ic_attach_file,
-                on -> {
-                    attachmentsOnly = on;
-                    reload();
-                });
+        filter = new ListFilter(host, "mail", MAILBOXES, SHOW, ONLY);
+        // NOTE: the store answers the filters, so Apply reloads; a tick in
+        // the draft only redraws the panel.
+        panel =
+                new FilterPanel(
+                        host,
+                        header,
+                        this::drawFilters,
+                        new FilterPanel.Draft() {
+                            @Override
+                            public void open() {
+                                filter.open();
+                            }
+
+                            @Override
+                            public void apply() {
+                                filter.apply();
+                                reload();
+                            }
+
+                            @Override
+                            public void cancel() {
+                                filter.cancel();
+                            }
+
+                            @Override
+                            public void reset() {
+                                filter.reset();
+                            }
+                        });
 
         list.setAdapter(adapter);
         list.setOnItemClickListener(
@@ -299,10 +329,18 @@ public final class MailList {
         int asked = ++generation;
         ListView list = host.findViewById(R.id.mail_list);
         int around = Math.max(0, header.rowAt(list.getFirstVisiblePosition()));
+        ListFilter.State kept = this.filter.applied();
+        Set<String> roleOn = kept.set(SHOW);
+        role = roleOn.isEmpty() ? null : roleOn.iterator().next();
+        unreadOnly = kept.set(ONLY).contains("unread");
+        readOnly = kept.set(ONLY).contains("read");
+        attachmentsOnly = kept.set(ONLY).contains("attachments");
+        Set<String> hidden = new HashSet<>(kept.set(MAILBOXES));
+        drawFilters();
         MergedFilter filter = MergedFilter.of(host, PimDomain.MAIL);
         String narrowing = role;
         String words = query;
-        boolean unread = unreadOnly;
+        Integer seen = unreadOnly == readOnly ? null : Integer.valueOf(unreadOnly ? 0 : 1);
         boolean attachments = attachmentsOnly;
         String outboxLabel = store.outbox().outboxName();
         String undated = host.getString(R.string.date_unknown);
@@ -310,10 +348,15 @@ public final class MailList {
         reads.execute(
                 () -> {
                     Map<String, String> roles = store.roles();
-                    BiPredicate<String, String> shown =
+                    BiPredicate<String, String> synced =
                             narrowed(filter, narrowing, roles)::collection;
-                    MailStore.Query wanted = store.query(shown, unread, attachments, words);
+                    // NOTE: a mailbox hidden from this list alone still syncs.
+                    BiPredicate<String, String> shown =
+                            (email, collection) ->
+                                    !hidden.contains(collection) && synced.test(email, collection);
+                    MailStore.Query wanted = store.query(shown, seen, attachments, words);
                     List<MailStore.Edge> edges = store.edges();
+                    Map<String, Map<String, String>> found = offeredOf(filter, edges);
 
                     Map<String, String> windows = new HashMap<>();
                     Map<String, String> mailboxWindows = new HashMap<>();
@@ -339,7 +382,7 @@ public final class MailList {
                     List<MailStore.StoredMessage> outbox = new ArrayList<>();
                     for (MailStore.StoredMessage message : store.outbox().outgoing()) {
                         if (shown.test(message.accountEmail, message.collection)
-                                && !unread
+                                && seen == null
                                 && !attachments
                                 && matches(message, words)) {
                             outbox.add(message);
@@ -377,6 +420,8 @@ public final class MailList {
                                 }
                                 currentQuery = listed;
                                 layout = next;
+                                offered = found;
+                                drawFilters();
                                 pages.clear();
                                 loading.clear();
                                 pages.putAll(read);
@@ -384,6 +429,62 @@ public final class MailList {
                                 render();
                             });
                 });
+    }
+
+    /**
+     * The mailboxes the panel offers: those of the accounts listed that the
+     * account's settings sync, by account then id, each under its name.
+     *
+     * <p>On {@link #reads}.
+     */
+    private Map<String, Map<String, String>> offeredOf(
+            MergedFilter synced, List<MailStore.Edge> edges) {
+        List<String> emails = new ArrayList<>();
+        for (MailStore.Edge edge : edges) {
+            if (!emails.contains(edge.accountEmail)) {
+                emails.add(edge.accountEmail);
+            }
+        }
+        Map<String, Map<String, String>> found = new LinkedHashMap<>();
+        for (PimdirCollections.Stored mailbox : store.loadMailboxes(emails)) {
+            if (synced.accepts(mailbox.accountEmail, mailbox.id)) {
+                found.computeIfAbsent(mailbox.accountEmail, key -> new LinkedHashMap<>())
+                        .put(mailbox.id, store.mailboxLabel(mailbox));
+            }
+        }
+        return found;
+    }
+
+    /**
+     * The filter panel: the mailboxes synced, then the role, then the flags. A
+     * tick in the draft redraws the panel; a pill removed reloads the list.
+     */
+    private void drawFilters() {
+        ListFilter.State edited = filter.edited();
+        Runnable changed =
+                () -> {
+                    if (edited != filter.applied()) {
+                        drawFilters();
+                        return;
+                    }
+                    filter.save();
+                    reload();
+                };
+        String[] shows = new String[ROLES.length + 1];
+        int[] showLabels = new int[ROLES.length + 1];
+        shows[0] = "all";
+        showLabels[0] = R.string.filter_all;
+        for (int index = 0; index < ROLES.length; index++) {
+            shows[index + 1] = ROLES[index];
+            showLabels[index + 1] = ROLE_LABELS[index];
+        }
+        panel.begin();
+        panel.collections(
+                "mailboxes", R.string.filter_mailboxes, offered, edited.set(MAILBOXES), changed);
+        panel.choice("show", R.string.filter_role, shows, showLabels, edited.set(SHOW), changed);
+        panel.checks(
+                "only", R.string.filter_flags, ONLY_KEYS, ONLY_LABELS, edited.set(ONLY), changed);
+        panel.end(filter.applied().active());
     }
 
     /**
@@ -1275,7 +1376,6 @@ public final class MailList {
             host.showDomainTitle(Panels.MAIL);
         }
         host.findViewById(R.id.bar_menu).setVisibility(selecting ? View.GONE : View.VISIBLE);
-        host.findViewById(R.id.bar_filter).setVisibility(selecting ? View.GONE : View.VISIBLE);
         host.findViewById(R.id.selection_close)
                 .setVisibility(selecting ? View.VISIBLE : View.GONE);
         host.findViewById(R.id.selection_all_slot)

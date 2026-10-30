@@ -50,6 +50,21 @@ public enum PimDomain {
         this.jmapCapability = jmapCapability;
     }
 
+    /**
+     * What an account's settings call the collections of this domain it
+     * syncs (cairn/changes/one-filter-panel).
+     */
+    public int syncLabel() {
+        switch (this) {
+            case MAIL:
+                return R.string.sync_mailboxes;
+            case CALENDAR:
+                return R.string.sync_calendars;
+            default:
+                return R.string.sync_books;
+        }
+    }
+
     /** The domain a stored id names, contacts when it names none. */
     public static PimDomain byId(String id) {
         for (PimDomain domain : values()) {

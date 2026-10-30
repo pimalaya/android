@@ -6,6 +6,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.AbsListView;
 import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -115,7 +116,7 @@ public final class ListHeader {
 
     /** Shows the search field, each settled query trimmed and lower-cased. */
     public void search(int hint, Consumer<String> onQuery) {
-        view.findViewById(R.id.header_search).setVisibility(View.VISIBLE);
+        view.findViewById(R.id.header_search_box).setVisibility(View.VISIBLE);
         EditText input = view.findViewById(R.id.header_search_input);
         View clear = view.findViewById(R.id.header_search_clear);
         input.setHint(hint);
@@ -144,6 +145,23 @@ public final class ListHeader {
     /** Empties the search field (its watcher settles the query). */
     public void clearSearch() {
         ((EditText) view.findViewById(R.id.header_search_input)).setText("");
+    }
+
+    /** The filter button ending the search field, shown. */
+    ImageButton filterButton() {
+        ImageButton button = view.findViewById(R.id.header_search_filter);
+        button.setVisibility(View.VISIBLE);
+        return button;
+    }
+
+    /** The filter panel under the search field, its visibility the caller's. */
+    LinearLayout filterPanel() {
+        return view.findViewById(R.id.header_filter);
+    }
+
+    /** The chip row's scroll, its visibility the caller's. */
+    View chipsRow() {
+        return view.findViewById(R.id.header_chips_scroll);
     }
 
     /** The chip row, shown, for the caller to fill. */

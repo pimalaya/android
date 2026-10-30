@@ -652,6 +652,18 @@ public final class MailStore {
             boolean unreadOnly,
             boolean attachmentsOnly,
             String words) {
+        return query(accepts, unreadOnly ? Integer.valueOf(0) : null, attachmentsOnly, words);
+    }
+
+    /**
+     * The query a list asks for, {@code seen} 0 for unread mail alone, 1 for
+     * read mail alone, null for both.
+     */
+    public Query query(
+            BiPredicate<String, String> accepts,
+            Integer seen,
+            boolean attachmentsOnly,
+            String words) {
         List<String> ids = new ArrayList<>();
         for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
             if (accepts.test(stored.accountEmail, stored.id)) {
@@ -673,7 +685,7 @@ public final class MailStore {
         String trimmed = words == null ? "" : words.trim();
         return new Query(
                 ids,
-                unreadOnly ? 0 : null,
+                seen,
                 attachmentsOnly ? 1 : null,
                 trimmed.isEmpty() ? null : PimdirDb.likePattern(trimmed),
                 hidden);

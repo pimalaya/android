@@ -9,10 +9,12 @@ import android.widget.LinearLayout;
 
 import org.pimalaya.R;
 import org.pimalaya.calendar.CalendarParts;
+import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.DateEdit;
 import org.pimalaya.client.EventTimeKind;
 import org.pimalaya.client.Task;
 import org.pimalaya.client.TaskEdit;
+import org.pimalaya.ui.FieldChooser;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.Sections;
@@ -28,7 +30,8 @@ import java.util.function.BiConsumer;
 /**
  * A task's page, on the entry page's shape (EventView): its details, when it
  * is due, its progress, how it is organised, the mail it came from and its
- * calendar, edited and saved as one write.
+ * calendar, edited and saved as one write. A new task opens the same page
+ * empty, its calendar picked among those taking tasks, saved as one create.
  *
  * <p>Each row opens a dialog; a field the task has not got stays hidden until
  * its section's add button reveals it. The working values start as opened; a
@@ -90,7 +93,13 @@ public final class TaskPage {
     /** Opens a mail by its collection and link id. */
     private final BiConsumer<String, String> openMail;
 
+    /** The task on the page, null while a new one is written. */
     private TaskStore.Stored opened;
+
+    /** Where a new task goes, and where it may go instead. */
+    private EventStore.StoredCalendar target;
+
+    private List<EventStore.StoredCalendar> targets = List.of();
 
     /** The panel the page goes back to: the Tasks tab, or the agenda. */
     private int back = Panels.TASKS;
@@ -124,11 +133,47 @@ public final class TaskPage {
         return back;
     }
 
-    /** What the bar calls the page: the task's title. */
+    /** What the bar calls the page: the task's title, New task while unnamed. */
     public String title() {
-        return summary == null || summary.isEmpty()
-                ? host.getString(R.string.event_untitled)
-                : summary;
+        if (summary == null || summary.isEmpty()) {
+            return host.getString(opened == null ? R.string.task_new : R.string.event_untitled);
+        }
+        return summary;
+    }
+
+    /**
+     * Opens the page on a new task, going back to {@code from}: empty, in the
+     * calendar the last one went to.
+     */
+    public void openNew(int from) {
+        host.io.execute(
+                () -> {
+                    List<EventStore.StoredCalendar> found = list.store().targets(host);
+                    host.postAlive(
+                            () -> {
+                                if (found.isEmpty()) {
+                                    host.toast(host.getString(R.string.capture_no_calendar));
+                                    return;
+                                }
+                                opened = null;
+                                targets = found;
+                                target = found.get(0);
+                                back = from;
+                                summary = "";
+                                description = "";
+                                status = STATUSES[0];
+                                listed = Task.NEXT;
+                                categories = new ArrayList<>();
+                                parent = "";
+                                due = "";
+                                priority = "";
+                                contactName = "";
+                                contactAddress = "";
+                                revealed.clear();
+                                render();
+                                host.show(Panels.TASK);
+                            });
+                });
     }
 
     /** Opens the page on a task, from the Tasks tab. */
@@ -139,6 +184,8 @@ public final class TaskPage {
     /** Opens the page on a task, going back to {@code from}. */
     public void open(TaskStore.Stored stored, int from) {
         opened = stored;
+        target = stored.calendar;
+        targets = List.of();
         back = from;
         Task task = stored.task;
         summary = task.summary();
@@ -191,14 +238,18 @@ public final class TaskPage {
         }
     }
 
+    /**
+     * The page as the entry page lays it: the calendar first, then how the
+     * task is organised, its details, its progress, the mail it came from.
+     */
     private void render() {
         sections.clear();
-        details();
-        when();
-        progress();
+        calendar();
         organise();
+        details();
+        progress();
 
-        if (opened.task.source() != null) {
+        if (opened != null && opened.task.source() != null) {
             List<View> source = new ArrayList<>();
             source.add(
                     sections.row(
@@ -209,14 +260,27 @@ public final class TaskPage {
             sections.section(
                     R.string.task_section_from, R.drawable.ic_section_mail, source, null, false);
         }
+    }
 
+    /** Its calendar; a new task picks it here. */
+    private void calendar() {
         List<View> where = new ArrayList<>();
-        where.add(sections.row(opened.calendar.name, opened.calendar.accountEmail, null, null));
+        // NOTE: a new task picks its calendar here, a stored one moves from
+        // the Tasks list's selection.
+        where.add(
+                sections.row(
+                        target.name,
+                        target.accountEmail,
+                        null,
+                        opened == null && targets.size() > 1 ? this::pickTarget : null));
         sections.section(
                 R.string.task_section_calendar, R.drawable.ic_domain_calendar, where, null, false);
     }
 
-    /** The title, then the notes and the priority once set or revealed. */
+    /**
+     * The title, then the notes, the priority and the due date once set or
+     * revealed.
+     */
     private void details() {
         List<View> rows = new ArrayList<>();
         rows.add(
@@ -246,17 +310,6 @@ public final class TaskPage {
                             null,
                             this::pickPriority));
         }
-        sections.section(
-                R.string.event_section_details,
-                R.drawable.ic_section_notes,
-                rows,
-                addIcon(NOTES, PRIORITY),
-                true);
-    }
-
-    /** The due date once set or revealed. */
-    private void when() {
-        List<View> rows = new ArrayList<>();
         if (shows(DUE)) {
             rows.add(
                     sections.row(
@@ -268,14 +321,14 @@ public final class TaskPage {
                             this::pickDue));
         }
         sections.section(
-                R.string.event_section_when,
-                R.drawable.ic_domain_calendar,
+                R.string.event_section_details,
+                R.drawable.ic_section_notes,
                 rows,
-                addIcon(DUE),
+                addIcon(NOTES, PRIORITY, DUE),
                 true);
     }
 
-    /** The status, then who a Waiting For item waits on. */
+    /** The status: to do, in progress, done or cancelled ({@code STATUS}). */
     private void progress() {
         List<View> rows = new ArrayList<>();
         rows.add(
@@ -284,6 +337,22 @@ public final class TaskPage {
                         host.getString(STATUS_LABELS[indexOf(STATUSES, status)]),
                         null,
                         this::pickStatus));
+        sections.section(R.string.event_section_progress, R.drawable.ic_check, rows, null, true);
+    }
+
+    /**
+     * The GTD list and who a waiting task waits on ({@code CONTACT}, pimdir
+     * GTD.md: a link deciding nothing, kept by the Waiting state rather than
+     * the status), then the categories and the task it sits under.
+     */
+    private void organise() {
+        List<View> rows = new ArrayList<>();
+        rows.add(
+                sections.row(
+                        host.getString(R.string.task_field_list),
+                        host.getString(LIST_LABELS[indexOf(LISTS, listed)]),
+                        null,
+                        this::pickList));
         if (shows(CONTACT)) {
             String who = contactName.isEmpty() ? contactAddress : contactName;
             rows.add(
@@ -293,20 +362,7 @@ public final class TaskPage {
                             null,
                             () -> editContact(who)));
         }
-        sections.section(
-                R.string.event_section_progress, R.drawable.ic_check, rows, addIcon(CONTACT), true);
-    }
-
-    /** The GTD list, then the categories and the task it sits under. */
-    private void organise() {
-        List<View> rows = new ArrayList<>();
-        rows.add(
-                sections.row(
-                        host.getString(R.string.task_field_list),
-                        host.getString(LIST_LABELS[indexOf(LISTS, listed)]),
-                        null,
-                        this::pickList));
-        if (shows(CATEGORIES)) {
+        // NOTE: always in sight, the categories being how a task is found.
             rows.add(
                     sections.row(
                             host.getString(R.string.task_field_categories),
@@ -315,7 +371,6 @@ public final class TaskPage {
                                     : String.join(", ", categories),
                             null,
                             this::pickCategories));
-        }
         if (shows(PARENT)) {
             TaskStore.Stored above = list.taskOf(parent);
             rows.add(
@@ -331,7 +386,7 @@ public final class TaskPage {
                 R.string.task_section_organise,
                 R.drawable.ic_folder_open,
                 rows,
-                addIcon(CATEGORIES, PARENT),
+                addIcon(CONTACT, PARENT),
                 true);
     }
 
@@ -366,32 +421,38 @@ public final class TaskPage {
     }
 
     private void addField(String... fields) {
-        List<String> offerable = new ArrayList<>();
+        List<FieldChooser.Choice> choices = new ArrayList<>();
         for (String field : fields) {
             if (!shows(field)) {
-                offerable.add(field);
+                choices.add(
+                        new FieldChooser.Choice(
+                                iconOf(field),
+                                labelOf(field),
+                                () -> {
+                                    revealed.add(field);
+                                    render();
+                                    edit(field);
+                                }));
             }
         }
-        if (offerable.isEmpty()) {
-            host.toast(host.getString(R.string.event_nothing_to_add));
-            return;
+        FieldChooser.show(host, host.ui, choices);
+    }
+
+    private static int iconOf(String field) {
+        switch (field) {
+            case NOTES:
+                return R.drawable.ic_section_notes;
+            case PRIORITY:
+                return R.drawable.ic_flag;
+            case DUE:
+                return R.drawable.ic_field_schedule;
+            case CATEGORIES:
+                return R.drawable.ic_section_label;
+            case PARENT:
+                return R.drawable.ic_field_parent;
+            default:
+                return R.drawable.ic_section_person;
         }
-        String[] labels = new String[offerable.size()];
-        for (int index = 0; index < labels.length; index++) {
-            labels[index] = host.getString(labelOf(offerable.get(index)));
-        }
-        new AlertDialog.Builder(host)
-                .setTitle(R.string.contact_add_field)
-                .setItems(
-                        labels,
-                        (dialog, which) -> {
-                            String field = offerable.get(which);
-                            revealed.add(field);
-                            render();
-                            edit(field);
-                        })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
     }
 
     private static int labelOf(String field) {
@@ -542,7 +603,7 @@ public final class TaskPage {
     }
 
     private void pickParent() {
-        List<TaskStore.Stored> parents = list.parentsFor(opened);
+        List<TaskStore.Stored> parents = opened == null ? list.open() : list.parentsFor(opened);
         CharSequence[] labels = new CharSequence[parents.size() + 1];
         labels[0] = host.getString(R.string.task_none);
         int checked = 0;
@@ -579,7 +640,7 @@ public final class TaskPage {
      * COMPLETED} time, dropped, or open again, a closed task's {@code
      * COMPLETED} and {@code PERCENT-COMPLETE} cleared (TaskEdit.withDone).
      */
-    private static TaskEdit withStatus(TaskEdit edit, String status, boolean closed) {
+    static TaskEdit withStatus(TaskEdit edit, String status, boolean closed) {
         switch (status) {
             case TaskOrder.DONE:
                 return edit.withDone(true);
@@ -590,8 +651,72 @@ public final class TaskPage {
         }
     }
 
-    /** Saves what moved since the page opened. */
+    /** Picks the calendar a new task goes to, among those taking tasks. */
+    private void pickTarget() {
+        CharSequence[] labels = new CharSequence[targets.size()];
+        int checked = 0;
+        for (int index = 0; index < targets.size(); index++) {
+            EventStore.StoredCalendar calendar = targets.get(index);
+            labels[index] =
+                    host.getString(
+                            R.string.capture_target_item, calendar.name, calendar.accountEmail);
+            if (calendar.id.equals(target.id)) {
+                checked = index;
+            }
+        }
+        TaskDialogs.pick(host, R.string.task_section_calendar, labels, checked, picked -> {
+            target = targets.get(picked);
+            render();
+        });
+    }
+
+    /**
+     * A new task as the page holds it: every field set written, a title first
+     * asked for when there is none.
+     */
+    private void create() {
+        if (summary.trim().isEmpty()) {
+            TaskDialogs.text(host, R.string.event_field_summary, summary, false, value -> {
+                summary = value;
+                render();
+                host.updateBarTitle(title());
+            });
+            return;
+        }
+        TaskEdit edit =
+                TaskEdit.at(TaskWrites.now())
+                        .withList(listed)
+                        .withText(summary, description.isEmpty() ? null : description);
+        if (!status.equals(STATUSES[0])) {
+            edit = withStatus(edit, status, false);
+        }
+        if (!categories.isEmpty()) {
+            edit = edit.withCategories(String.join(",", categories));
+        }
+        if (!parent.isEmpty()) {
+            edit = edit.withParent(parent);
+        }
+        if (!due.isEmpty()) {
+            edit = edit.withDue(new DateEdit(due, EventTimeKind.DATE, ""));
+        }
+        if (!priority.isEmpty()) {
+            edit = edit.withPriority(priority);
+        }
+        if (!contactName.isEmpty() || !contactAddress.isEmpty()) {
+            edit = edit.withContact(contactName, contactAddress);
+        }
+        EventStore.StoredCalendar into = target;
+        TaskStore.captureTo(host, into.id);
+        TaskEdit created = edit;
+        run(() -> writes.create(into, created), into.id);
+    }
+
+    /** Saves what moved since the page opened, or files a new task. */
     public void save() {
+        if (opened == null) {
+            create();
+            return;
+        }
         Task task = opened.task;
         TaskEdit edit = TaskEdit.at(TaskWrites.now());
         if (!summary.equals(task.summary()) || !description.equals(task.description())) {
@@ -625,15 +750,24 @@ public final class TaskPage {
     }
 
     private void write(TaskEdit edit) {
-        TaskStore.Stored target = opened;
+        TaskStore.Stored stored = opened;
+        run(() -> writes.edit(stored, edit), stored.event.id);
+    }
+
+    /** A write the page waits on: off the main thread, then back on success. */
+    private interface Write {
+        void run() throws Exception;
+    }
+
+    private void run(Write write, String what) {
         host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
         host.io.execute(
                 () -> {
                     Exception failure = null;
                     try {
-                        writes.edit(target, edit);
+                        write.run();
                     } catch (Exception error) {
-                        Log.w("pimalaya", "task save failed: " + target.event.id, error);
+                        Log.w("pimalaya", "task save failed: " + what, error);
                         failure = error;
                     }
                     Exception outcome = failure;

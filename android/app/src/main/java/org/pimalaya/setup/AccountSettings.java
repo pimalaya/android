@@ -98,6 +98,9 @@ public final class AccountSettings {
     private boolean calendarsElsewhere;
 
     /** Builds the page; {@link #bind} wires it once laid out. */
+    /** Opens what an account syncs of a domain, from its row; the activity's. */
+    public java.util.function.BiConsumer<PimDomain, String> chooseSync;
+
     public AccountSettings(
             Host host,
             SyncPasses.Parts parts,
@@ -342,6 +345,7 @@ public final class AccountSettings {
                             () -> promptSubmission(none ? null : current)));
         }
 
+        rows.add(syncRow(sections, PimDomain.MAIL, account.email, true));
         sections.section(PimDomain.MAIL.label, R.drawable.ic_section_mail, rows, null, false);
     }
 
@@ -385,6 +389,11 @@ public final class AccountSettings {
     }
 
     /** Re-renders after background work, unless the page moved on. */
+    /** Draws the page again when it is open on {@code email}. */
+    public void refresh(String email) {
+        renderIfOpen(email);
+    }
+
     private void renderIfOpen(String email) {
         if (email.equals(settingsEmail)) {
             render();
@@ -517,7 +526,35 @@ public final class AccountSettings {
             }
             rows.add(item);
         }
+        // NOTE: no count: the contacts filter keys a book by its address,
+        // not by the collection the store lists.
+        rows.add(syncRow(sections, PimDomain.CONTACTS, email, false));
         sections.section(R.string.account_books, R.drawable.ic_addressbooks, rows, null, false);
+    }
+
+    /**
+     * The row opening what {@code email} syncs of {@code domain}, counting
+     * the collections it takes when {@code counted}.
+     */
+    private View syncRow(Sections sections, PimDomain domain, String email, boolean counted) {
+        String count = null;
+        if (counted) {
+            MergedFilter filter = MergedFilter.of(host, domain);
+            int all = 0;
+            int taken = 0;
+            for (PimdirCollections.Stored collection : sync.passes().collectionsOf(domain)) {
+                if (collection.accountEmail.equals(email)) {
+                    all++;
+                    taken += filter.ticked(email, collection.id) ? 1 : 0;
+                }
+            }
+            count = host.getString(R.string.filter_count_of, taken, all);
+        }
+        return sections.row(
+                host.getString(domain.syncLabel()),
+                count,
+                chevron(),
+                () -> chooseSync.accept(domain, email));
     }
 
     /** One of a book's two options, a checkbox indented under it. */
@@ -605,8 +642,8 @@ public final class AccountSettings {
                             calendar.name,
                             host.getString(
                                     filter.ticked(email, calendar.id)
-                                            ? R.string.calendar_filter_shown
-                                            : R.string.calendar_filter_hidden),
+                                            ? R.string.calendar_synced
+                                            : R.string.calendar_not_synced),
                             null,
                             null));
             View phone =
@@ -618,6 +655,7 @@ public final class AccountSettings {
             item.addView(phone);
             rows.add(item);
         }
+        rows.add(syncRow(sections, PimDomain.CALENDAR, email, true));
         sections.section(R.string.calendar_title, R.drawable.ic_domain_calendar, rows, null, false);
     }
 

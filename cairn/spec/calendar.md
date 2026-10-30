@@ -44,7 +44,7 @@ The entry page SHALL draw the rows describing the occurrence that was tapped onl
 - THEN it draws without the countdown and without naming an occurrence
 
 ### Requirement: A calendar entry can be created
-The app SHALL create a calendar entry from the entry page in the store alone: a fresh object carrying the `UID`, `DTSTAMP` and `DTSTART` RFC 5545 section 3.6.1 requires and nothing else, staged as a pending create. The next sync SHALL PUT it to a resource named after its `UID`, guarded by `If-None-Match: *`. A create the server refuses as such, with 403, 409, 412 or 422, SHALL stay staged for the sync that follows and the pass SHALL go on with the calendar's other changes, so one refused item never fails the calendar's pass; a 401, a throttle (a 403 naming a rate limit or a quota) and every other failure SHALL fail the pass as before. A refusal SHALL cross the bridge with its status whichever refusal io-webdav reads it as, a duplicate `UID` (`no-uid-conflict`, `unique-scheduling-object-resource`) included.
+The app SHALL create a calendar entry from the entry page in the store alone: a fresh object carrying the `UID`, `DTSTAMP` and `DTSTART` RFC 5545 section 3.6.1 requires and nothing else, staged as a pending create, in the calendar the page's dropdown names: the account's default, else the first writable one, the dropdown in a card of its own on top of the page while creating and shown only when several calendars take writes. The next sync SHALL PUT it to a resource named after its `UID`, guarded by `If-None-Match: *`. A create the server refuses as such, with 403, 409, 412 or 422, SHALL stay staged for the sync that follows and the pass SHALL go on with the calendar's other changes, so one refused item never fails the calendar's pass; a 401, a throttle (a 403 naming a rate limit or a quota) and every other failure SHALL fail the pass as before. A refusal SHALL cross the bridge with its status whichever refusal io-webdav reads it as, a duplicate `UID` (`no-uid-conflict`, `unique-scheduling-object-resource`) included.
 
 #### Scenario: A new entry
 - GIVEN a writable calendar
@@ -70,7 +70,8 @@ The app SHALL create a calendar entry from the entry page in the store alone: a 
 #### Scenario: Several calendars
 - GIVEN more than one writable calendar
 - WHEN a new entry is started
-- THEN the calendar it lands in is asked for, and taken silently when there is only one
+- THEN the page opens at once in the default calendar, a dropdown in a card on top naming each calendar with its account
+- AND with only one writable calendar there is no dropdown
 
 ### Requirement: A calendar entry can be edited
 The app SHALL stage an edit against the ETag the entry was read at, and the agenda SHALL show it at once. The next sync SHALL PUT it guarded by that ETag, so the write is conditioned on the state the edit was made against rather than on whatever arrived since.
@@ -221,3 +222,63 @@ A dated to-do tapped in the agenda SHALL open on the task page, which goes back 
 - GIVEN a to-do due on Friday
 - WHEN its row is tapped in Friday's agenda
 - THEN the task page opens, and back returns to the agenda
+
+### Requirement: An entry's alarms are the phone's to ring
+The page of a CalDAV event SHALL show every alarm of its master component, whatever its action, each saying its type (a display alarm as a notification, an audio one as a sound, an email one as an email, another action as written), when it rings (off the start, off the end, or at a moment), its message, an email's recipients and how it repeats. A row SHALL open one form holding its type, when it rings (an amount of minutes, hours, days or weeks before or after the start or the end, or a date and time, written as a UTC date-time as RFC 5545 3.8.6.3 requires), how many more times it rings and how far apart, its message, and an email's subject and recipients, with a Remove button; a new alarm SHALL open the same form, its message the entry's title, an email one addressed to the account under that title. The app SHALL NOT ring an alarm itself: the phone's calendar provider rings the display and audio alarms the mirror projects, and another client acts on the rest. A save SHALL write the alarms one by one: an alarm kept SHALL stay byte for byte, a changed one SHALL have only what moved rewritten, a dropped one SHALL go, and a new one SHALL carry what RFC 5545 3.6.6 asks of its action (a description; an email one a subject and its recipients too). A repeat with no interval SHALL be none, `REPEAT` and `DURATION` going together. Alarms SHALL be the whole entry's: a save changing them alone SHALL ask no scope. A Microsoft or Google entry, a to-do, a journal entry and an entry in conflict SHALL show no alarm section.
+
+#### Scenario: An alarm set on a new entry
+- GIVEN a new event in a CalDAV calendar
+- WHEN a notification 15 minutes before is added and the page saved
+- THEN the entry carries a `VALARM` with `ACTION:DISPLAY` and `TRIGGER:-PT15M`
+
+#### Scenario: Another alarm kept as it was
+- GIVEN an event carrying a display alarm 10 minutes before and an email alarm an hour before
+- WHEN the display alarm is removed and the page saved
+- THEN the email alarm is still there, byte for byte
+
+#### Scenario: An email alarm
+- GIVEN an event with no alarm
+- WHEN an email alarm a day before is added
+- THEN the entry carries a `VALARM` with `ACTION:EMAIL`, `TRIGGER:-P1D`, the title as `DESCRIPTION` and `SUMMARY`, and the account's address as `ATTENDEE`
+
+### Requirement: The add-field chooser names each field with its icon
+The add-field chooser of the contact, entry and task pages SHALL be one chooser, listing the fields the item has not got, each with its icon and label, sorted by label; with none it SHALL say so and with one it SHALL open it at once.
+
+#### Scenario: Adding a location
+- GIVEN an event with no location
+- WHEN the Where section's add button is tapped
+- THEN the location's dialog opens at once, the one field left to add there
+
+### Requirement: The all-day switch gives back what it took
+Flipping an entry to all-day and back, its dates untouched in between, SHALL give back the dates and times it had; dates edited while all-day SHALL be converted as before.
+
+#### Scenario: On and off
+- GIVEN a new event from 14:00 to 15:30
+- WHEN all-day is switched on, then off
+- THEN it runs from 14:00 to 15:30 again
+
+### Requirement: A new entry is left by going back
+The page of an entry not saved yet SHALL offer no delete: going back SHALL leave it unsaved.
+
+#### Scenario: A new entry
+- GIVEN the agenda's add button
+- WHEN the page opens
+- THEN its bar carries no delete
+
+### Requirement: The entry page lays out four sections
+The entry page SHALL show, in this order, Calendar (the dropdown while a new entry may go to several calendars, else the entry's calendar and account), When, Details and Alarms (where the page edits alarms), then the people, conflicts and links an entry has; the bar SHALL carry no add button. When SHALL show all-day, the start and the end (an event) or the due date (a to-do) always, with no add button; Details SHALL show the title always and every other field once set or added from its header's add button. A date picker SHALL offer to clear its date, every date but an event's start, which RFC 5545 3.6.1 requires.
+
+#### Scenario: A new event
+- GIVEN the agenda's add button
+- WHEN the page opens
+- THEN it shows Calendar, When with its start and end, Details with its title, and Alarms
+
+#### Scenario: Clearing an end
+- GIVEN an event with an end
+- WHEN its end's date picker is cleared and the page saved
+- THEN the entry carries no `DTEND`
+
+#### Scenario: An event's start
+- GIVEN an event
+- WHEN its start's date picker opens
+- THEN it offers no Clear

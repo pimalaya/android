@@ -253,6 +253,23 @@ public final class TaskStore {
                 .apply();
     }
 
+    /**
+     * The calendars the Tasks filter offers, in the store's order: every one
+     * the calendar filter shows but those stating they take no to-do.
+     *
+     * <p>Off the main thread, as {@link #load}.
+     */
+    public List<EventStore.StoredCalendar> calendars(Context context) {
+        MergedFilter filter = MergedFilter.of(context, PimDomain.CALENDAR);
+        List<EventStore.StoredCalendar> shown = new ArrayList<>();
+        for (EventStore.StoredCalendar calendar : parts.events().loadCalendars()) {
+            if (!calendar.refusesTasks && filter.accepts(calendar.accountEmail, calendar.id)) {
+                shown.add(calendar);
+            }
+        }
+        return shown;
+    }
+
     /** The calendars a capture can go to, in the store's order. */
     public List<EventStore.StoredCalendar> targets() {
         return targetsOf(parts.events());

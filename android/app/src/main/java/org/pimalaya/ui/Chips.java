@@ -77,6 +77,26 @@ public final class Chips {
         return chips;
     }
 
+    /**
+     * Adds a pill standing for a filter on, a cross at its end: a tap runs
+     * {@code remove}.
+     */
+    public static TextView removable(
+            Host host, LinearLayout row, CharSequence label, Runnable remove) {
+        TextView chip = chip(host, row, label, 0);
+        int color = host.ui.resolveColor(android.R.attr.textColorPrimary);
+        Drawable cross = host.getDrawable(R.drawable.ic_close).mutate();
+        cross.setBounds(0, 0, host.dp(18), host.dp(18));
+        chip.setCompoundDrawablesRelative(null, null, cross, null);
+        chip.setCompoundDrawableTintList(
+                ColorStateList.valueOf(host.ui.resolveColor(android.R.attr.textColorSecondary)));
+        chip.setPaddingRelative(host.dp(14), 0, host.dp(10), 0);
+        chip.setTextColor(color);
+        chip.setContentDescription(host.getString(R.string.filter_remove, label));
+        chip.setOnClickListener(view -> remove.run());
+        return chip;
+    }
+
     private static TextView chip(Host host, LinearLayout row, CharSequence label, int icon) {
         TextView chip = new TextView(host, null, 0, R.style.Chip);
         chip.setText(label);

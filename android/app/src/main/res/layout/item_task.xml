@@ -28,7 +28,7 @@
             android:background="?android:attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/task_mark_done"
             android:focusable="false"
-            android:src="@drawable/ic_circle"
+            android:src="@drawable/ic_check_box_blank"
             android:tint="?android:attr/textColorSecondary" />
 
         <LinearLayout

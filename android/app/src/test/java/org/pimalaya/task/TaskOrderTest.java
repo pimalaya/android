@@ -11,6 +11,7 @@ import org.pimalaya.client.EventTimeKind;
 import org.pimalaya.client.Task;
 import org.robolectric.RobolectricTestRunner;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -167,5 +168,26 @@ public class TaskOrderTest {
         assertTrue(TaskOrder.reserved(" Waiting "));
         assertTrue(TaskOrder.reserved("INBOX"));
         assertFalse(TaskOrder.reserved("someday-maybe"));
+    }
+
+    @Test
+    public void dueComparesTheDayAndAnUndatedTaskPassesAnyAlone() {
+        Task due =
+                new Task(
+                        "d", "d", "", "", Task.NEXT, List.of(), List.of(), null, 0, null,
+                        new EventTime("20261105", EventTimeKind.DATE, "", null), null, "", "",
+                        null, "");
+        Task undated = task("u", null, 0, "").task;
+        LocalDate day = LocalDate.of(2026, 11, 5);
+
+        assertTrue(TaskOrder.dueMatches(due, TaskOrder.DUE_ON, day));
+        assertFalse(TaskOrder.dueMatches(due, TaskOrder.DUE_BEFORE, day));
+        assertTrue(TaskOrder.dueMatches(due, TaskOrder.DUE_BEFORE, day.plusDays(1)));
+        assertFalse(TaskOrder.dueMatches(due, TaskOrder.DUE_AFTER, day));
+        assertTrue(TaskOrder.dueMatches(due, TaskOrder.DUE_AFTER, day.minusDays(1)));
+        assertTrue(TaskOrder.dueMatches(undated, TaskOrder.DUE_ANY, day));
+        assertFalse(TaskOrder.dueMatches(undated, TaskOrder.DUE_BEFORE, day));
+        assertFalse(TaskOrder.dueMatches(undated, TaskOrder.DUE_ON, day));
+        assertFalse(TaskOrder.dueMatches(undated, TaskOrder.DUE_AFTER, day));
     }
 }

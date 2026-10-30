@@ -119,6 +119,55 @@
     <string name="filter_download_message">Tous les messages de %1$s sont listés et téléchargés en Wi-Fi, au-delà de la période synchronisée du compte.</string>
     <string name="filter_reset">Réinitialiser</string>
     <string name="filter_apply">Appliquer</string>
+    <string name="filter_categories">Catégories</string>
+    <string name="filter_status">Statut</string>
+    <string name="filter_show">Afficher</string>
+    <string name="filter_books">Carnets</string>
+    <string name="contact_section_book">Carnet</string>
+    <string name="filter_mailboxes">Boîtes</string>
+    <string name="filter_folders">Dossiers</string>
+    <string name="filter_role">Rôle</string>
+    <string name="filter_flags">Indicateurs</string>
+    <string name="filter_read">Lus</string>
+    <string name="calendar_search">Rechercher des événements</string>
+    <string name="calendar_past_day">Passé · %1$s</string>
+    <string name="filter_kind">Nature</string>
+    <string name="filter_kind_events">Événements</string>
+    <string name="filter_kind_journals">Entrées de journal</string>
+    <string name="filter_when">Quand</string>
+    <string name="filter_upcoming">À venir</string>
+    <string name="filter_past">Passés</string>
+    <string name="filter_time">Horaire</string>
+    <string name="filter_all_day">Toute la journée</string>
+    <string name="filter_timed">À une heure</string>
+    <string name="filter_has">Avec</string>
+    <string name="filter_location">Un lieu</string>
+    <string name="filter_email">Une adresse mail</string>
+    <string name="filter_phone">Un téléphone</string>
+    <string name="filter_address">Une adresse postale</string>
+    <string name="filter_birthday">Un anniversaire</string>
+    <string name="filter_organisation">Une organisation</string>
+    <string name="filter_photo">Une photo</string>
+    <string name="filter_individuals">Personnes</string>
+    <string name="filter_groups">Groupes</string>
+    <string name="filter_organisations">Organisations</string>
+    <string name="filter_types">Type</string>
+    <string name="filter_calendars">Agendas</string>
+    <string name="filter_all">Tout</string>
+    <string name="filter_any_time">Peu importe</string>
+    <string name="filter_due_before">Avant le</string>
+    <string name="filter_due_on">Le</string>
+    <string name="filter_due_after">Après le</string>
+    <string name="filter_due_before_pill">Échéance avant le %1$s</string>
+    <string name="filter_due_on_pill">Échéance le %1$s</string>
+    <string name="filter_due_after_pill">Échéance après le %1$s</string>
+    <string name="filter_show_all">Tout afficher (%1$d)</string>
+    <string name="filter_count_of">%1$d sur %2$d</string>
+    <string name="filter_remove">Retirer %1$s</string>
+    <plurals name="filter_categories_count">
+        <item quantity="one">%1$d catégorie</item>
+        <item quantity="other">%1$d catégories</item>
+    </plurals>
 
     <!-- Deleted items -->
     <string name="deleted_title">Éléments supprimés</string>
@@ -425,6 +474,7 @@
     <string name="no_account">Aucun compte trouvé</string>
 
     <string name="back">Retour</string>
+    <string name="close">Fermer</string>
     <string name="delete_selected">Supprimer les contacts sélectionnés</string>
     <string name="cancel_selection">Annuler la sélection</string>
     <string name="select_all">Tout sélectionner</string>
@@ -596,7 +646,6 @@
     <string name="event_delete_failed">Impossible de supprimer l\'entrée</string>
     <string name="event_no_calendar">Aucun calendrier où la placer</string>
     <string name="event_read_only">Ce calendrier n\'accepte aucune modification depuis l\'application</string>
-    <string name="event_target_title">Ajouter au calendrier</string>
     <string name="event_section_conflicts">Conflits</string>
     <string name="event_conflict_occurrence">Occurrence</string>
     <string name="event_conflict_entry">Entrée entière</string>
@@ -631,8 +680,11 @@
     <string name="account_books">Carnets d\'adresses</string>
     <string name="book_remote_sync">Synchroniser avec le serveur</string>
     <string name="book_off">Désactivé : ni synchronisé, ni affiché</string>
-    <string name="calendar_filter_shown">Affiché dans la liste</string>
-    <string name="calendar_filter_hidden">Masqué par le filtre</string>
+    <string name="calendar_synced">Synchronisé</string>
+    <string name="calendar_not_synced">Non synchronisé</string>
+    <string name="sync_mailboxes">Boîtes synchronisées</string>
+    <string name="sync_calendars">Agendas synchronisés</string>
+    <string name="sync_books">Carnets synchronisés</string>
     <string name="account_servers">Serveurs</string>
     <string name="server_token">Jeton</string>
     <string name="delete_account">Retirer ce compte</string>
@@ -737,13 +789,92 @@
     <string name="event_percent_hint">0 à 100</string>
     <string name="event_priority_hint">1 (la plus haute) à 9</string>
     <string name="event_section_when">Quand</string>
-    <string name="event_section_where">Où</string>
     <string name="event_section_details">Détails</string>
     <string name="event_section_people">Personnes</string>
     <string name="event_section_progress">Avancement</string>
-    <string name="event_section_calendar">Agenda</string>
+    <string name="event_section_alarms">Alarmes</string>
+    <string name="event_alarm_add">Ajouter une alarme</string>
+    <string name="event_alarm">Alarme</string>
+    <string name="event_alarm_remove">Retirer</string>
+    <string name="event_alarm_at_start">Au début</string>
+    <string name="event_alarm_at">À %1$s</string>
+    <string name="event_alarm_day_of">Le jour même à %1$s</string>
+    <string name="event_alarm_at_end">À la fin</string>
+    <string name="event_alarm_from_end">%1$s la fin</string>
+    <string name="event_alarm_to">À %1$s</string>
+    <string name="event_alarm_type">Type</string>
+    <string name="event_alarm_message">Message</string>
+    <string name="event_alarm_subject">Objet</string>
+    <string name="event_alarm_recipients">Destinataires</string>
+    <string name="event_alarm_type_display">Notification</string>
+    <string name="event_alarm_type_audio">Son</string>
+    <string name="event_alarm_type_email">E-mail</string>
+    <string name="event_alarm_before_start">Avant le début</string>
+    <string name="event_alarm_after_start">Après le début</string>
+    <string name="event_alarm_before_end">Avant la fin</string>
+    <string name="event_alarm_after_end">Après la fin</string>
+    <string name="event_alarm_at_moment">À une date et une heure</string>
+    <string name="event_alarm_unit_minutes">minutes</string>
+    <string name="event_alarm_unit_hours">heures</string>
+    <string name="event_alarm_unit_days">jours</string>
+    <string name="event_alarm_unit_weeks">semaines</string>
+    <string name="event_alarm_trigger">Déclencheur</string>
+    <string name="event_alarm_when">Quand</string>
+    <string name="event_alarm_repeat">Sonne encore (fois)</string>
+    <string name="event_alarm_every">Toutes les</string>
+    <plurals name="event_alarm_duration_minutes">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
+    <plurals name="event_alarm_duration_hours">
+        <item quantity="one">%d heure</item>
+        <item quantity="other">%d heures</item>
+    </plurals>
+    <plurals name="event_alarm_duration_days">
+        <item quantity="one">%d jour</item>
+        <item quantity="other">%d jours</item>
+    </plurals>
+    <plurals name="event_alarm_duration_weeks">
+        <item quantity="one">%d semaine</item>
+        <item quantity="other">%d semaines</item>
+    </plurals>
+    <plurals name="event_alarm_repeats">
+        <item quantity="one">puis %1$d fois de plus toutes les %2$d min</item>
+        <item quantity="other">puis %1$d fois de plus toutes les %2$d min</item>
+    </plurals>
+    <plurals name="event_alarm_minutes_before">
+        <item quantity="one">%d minute avant</item>
+        <item quantity="other">%d minutes avant</item>
+    </plurals>
+    <plurals name="event_alarm_minutes_after">
+        <item quantity="one">%d minute après</item>
+        <item quantity="other">%d minutes après</item>
+    </plurals>
+    <plurals name="event_alarm_hours_before">
+        <item quantity="one">%d heure avant</item>
+        <item quantity="other">%d heures avant</item>
+    </plurals>
+    <plurals name="event_alarm_hours_after">
+        <item quantity="one">%d heure après</item>
+        <item quantity="other">%d heures après</item>
+    </plurals>
+    <plurals name="event_alarm_days_before">
+        <item quantity="one">%d jour avant</item>
+        <item quantity="other">%d jours avant</item>
+    </plurals>
+    <plurals name="event_alarm_days_after">
+        <item quantity="one">%d jour après</item>
+        <item quantity="other">%d jours après</item>
+    </plurals>
+    <plurals name="event_alarm_days_before_at">
+        <item quantity="one">%1$d jour avant à %2$s</item>
+        <item quantity="other">%1$d jours avant à %2$s</item>
+    </plurals>
+    <plurals name="event_alarm_days_after_at">
+        <item quantity="one">%1$d jour après à %2$s</item>
+        <item quantity="other">%1$d jours après à %2$s</item>
+    </plurals>
     <string name="event_field_summary">Titre</string>
-    <string name="event_field_kind">Type</string>
     <string name="event_field_all_day">Toute la journée</string>
     <string name="event_field_start">Début</string>
     <string name="event_field_end">Fin</string>
@@ -763,7 +894,6 @@
     <string name="event_field_completed">Terminé</string>
     <string name="event_field_progress">Réalisé</string>
     <string name="event_field_priority">Priorité</string>
-    <string name="event_field_account">Compte</string>
     <string name="event_field_calendar">Agenda</string>
     <string name="event_scope_save">Enregistrer quelles occurrences ?</string>
     <string name="event_scope_delete">Supprimer quelles occurrences ?</string>
@@ -774,6 +904,11 @@
     <!-- Tâches, à la GTD (cairn/changes/gtd). -->
     <string name="domain_tasks">Tâches</string>
     <string name="tasks_title">Tâches</string>
+    <string name="tasks_search">Rechercher des tâches</string>
+    <plurals name="tasks_meta">
+        <item quantity="one">%1$d tâche</item>
+        <item quantity="other">%1$d tâches</item>
+    </plurals>
     <string name="tasks_empty">Rien à faire ici</string>
     <string name="tasks_empty_inbox">Boîte vide : tout est clarifié</string>
     <string name="tasks_empty_waiting">Personne ne vous doit rien</string>
@@ -789,8 +924,6 @@
     <string name="task_list_done">Faites</string>
     <string name="task_list_cancelled">Annulées</string>
     <string name="task_review">Revue hebdomadaire</string>
-    <string name="task_review_due">Revue hebdomadaire à faire · dernière %1$s</string>
-    <string name="task_review_done">Revue hebdomadaire faite %1$s</string>
     <string name="task_category_new">Nouvelle catégorie</string>
     <string name="task_clarify">Clarifier la boîte</string>
     <string name="task_clarify_title">Clarifier %1$d sur %2$d</string>
@@ -829,7 +962,18 @@
     <string name="task_priority_low">Basse</string>
     <string name="capture_title">Capturer</string>
     <string name="task_new">Nouvelle tâche</string>
-    <string name="task_add">Ajouter une tâche</string>
+    <string name="task_batch_category">Catégorie</string>
+    <string name="task_batch_move">Déplacer</string>
+    <string name="task_batch_copy">Copier</string>
+    <string name="task_batch_delete">Supprimer</string>
+    <plurals name="task_batch_category_title">
+        <item quantity="one">Catégorie de %1$d tâche</item>
+        <item quantity="other">Catégorie de %1$d tâches</item>
+    </plurals>
+    <plurals name="task_batch_delete_confirm">
+        <item quantity="one">Supprimer %1$d tâche ? Elle reste dans les éléments supprimés jusqu\'à une purge.</item>
+        <item quantity="other">Supprimer %1$d tâches ? Elles restent dans les éléments supprimés jusqu\'à une purge.</item>
+    </plurals>
     <string name="task_added">Tâche ajoutée</string>
     <string name="task_remove_category">Retirer %1$s</string>
     <string name="task_category_reserved">%1$s se règle avec les puces Boîte, En attente et Un jour</string>
@@ -880,13 +1024,15 @@
     <string name="review_inbox_left">%1$d à clarifier</string>
     <string name="review_calendar">Regarder l\'agenda</string>
     <string name="review_calendar_line">La semaine passée et les deux suivantes</string>
-    <string name="review_next">Prochaines actions</string>
+    <string name="review_next">Tâches actives</string>
     <string name="review_next_line">%1$d ouvertes : toujours les bonnes ?</string>
     <string name="review_waiting">En attente</string>
     <string name="review_waiting_line">%1$d en attente · %2$d répondues · %3$d depuis plus de deux semaines</string>
     <string name="review_someday">Un jour, peut-être</string>
     <string name="review_someday_line">%1$d idées, une à lancer ?</string>
     <string name="review_finish">Terminer la revue</string>
+    <string name="review_meta">%1$d étapes sur %2$d faites</string>
+    <string name="review_meta_last">Dernière le %1$s · %2$d étapes sur %3$d faites</string>
     <string name="widget_description">Capturer une tâche d\'un geste</string>
     <string name="widget_inbox">Boîte %1$d</string>
     <string name="widget_next_description">Vos prochaines actions, les échéances d\'abord</string>

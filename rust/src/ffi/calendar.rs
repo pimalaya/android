@@ -19,7 +19,7 @@ use serde_json::{from_str, to_string};
 
 use crate::{
     calendar::{
-        Calendars, EventCreate, EventDelete, EventMove, EventUpdate,
+        Calendars, EventCreate, EventDelete, EventMove, EventUpdate, alarm,
         conflict::{merge, resolve},
         edit::{EventDraft, create, write},
         expand::expand,
@@ -357,6 +357,57 @@ pub extern "system" fn Java_org_pimalaya_client_Native_applyEvent<'local>(
         let edit = read_string(env, &edit);
 
         let json = match phone::apply(&ical, &edit) {
+            Ok(written) => to_string(&IcalReply {
+                ical: Some(written),
+            })
+            .unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.readAlarms`: every alarm of an object's master component.
+///
+/// Whatever its action, for the entry page. Pure. Returns the alarms, an
+/// array.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_readAlarms<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    ical: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let ical = read_string(env, &ical);
+
+        let json = match alarm::alarms(&ical) {
+            Ok(alarms) => to_string(&alarms).unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.applyAlarms`: patches an edit of the alarms onto the object.
+///
+/// A kept alarm byte for byte, a changed one only where it moved. Pure.
+/// Returns `{ical}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_applyAlarms<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    ical: JString<'local>,
+    edit: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let ical = read_string(env, &ical);
+        let edit = read_string(env, &edit);
+
+        let json = match alarm::apply(&ical, &edit) {
             Ok(written) => to_string(&IcalReply {
                 ical: Some(written),
             })

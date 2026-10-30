@@ -15,19 +15,22 @@ import android.widget.TextView;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import org.pimalaya.R;
+import org.pimalaya.account.AccountActivation;
 import org.pimalaya.account.LocalBook;
-import org.pimalaya.account.MergedFilter;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.CardSections;
-import org.pimalaya.ui.Chips;
+import org.pimalaya.ui.FilterPanel;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Linked;
+import org.pimalaya.ui.ListFilter;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.SectionsAdapter;
@@ -45,11 +48,6 @@ public final class FilesList {
 
     /** The request code of the import document picker ({@link #imported}). */
     public static final int REQUEST_IMPORT = 5;
-
-    /** The kind chips: folders, attachments. */
-    private static final int FOLDERS = 0;
-
-    private static final int ATTACHMENTS = 1;
 
     /** The media type chips: images, PDFs, documents. */
     static final int IMAGES = 0;
@@ -80,11 +78,32 @@ public final class FilesList {
 
     private ListHeader header;
 
-    /** The kind chip on, -1 for none. */
-    private int kind = -1;
+    /** The panel's sections: the folders shown, the kind, the media types. */
+    private static final String FOLDERS_SHOWN = "folders";
 
-    /** The media type chip on, -1 for none. */
-    private int type = -1;
+    private static final String SHOW = "show";
+
+    private static final String TYPES = "types";
+
+    private static final String[] SHOWS = {"all", "folders", "attachments"};
+
+    private static final int[] SHOW_LABELS = {
+        R.string.filter_all, R.string.chip_folders, R.string.chip_attachments,
+    };
+
+    private static final String[] TYPE_KEYS = {"images", "pdfs", "documents"};
+
+    private static final int[] TYPE_LABELS = {
+        R.string.chip_images, R.string.chip_pdfs, R.string.chip_documents,
+    };
+
+    /** What the list keeps, drafted by the panel. */
+    private ListFilter filter;
+
+    private FilterPanel panel;
+
+    /** The folders the panel offers, by account then id, as last read. */
+    private Map<String, Map<String, String>> offered = new LinkedHashMap<>();
 
     /** The search, lowercased, empty for none. */
     private String query = "";
@@ -155,27 +174,8 @@ public final class FilesList {
                     query = words;
                     render();
                 });
-        Chips.exclusive(
-                host,
-                header.chips(),
-                new int[] {R.string.chip_folders, R.string.chip_attachments},
-                new int[] {R.drawable.ic_folder_open, R.drawable.ic_attach_file},
-                picked -> {
-                    kind = picked;
-                    render();
-                });
-        Chips.exclusive(
-                host,
-                header.chips(),
-                new int[] {R.string.chip_images, R.string.chip_pdfs, R.string.chip_documents},
-                new int[] {
-                    R.drawable.ic_visibility, R.drawable.ic_component_journal,
-                    R.drawable.ic_section_notes
-                },
-                picked -> {
-                    type = picked;
-                    render();
-                });
+        filter = new ListFilter(host, "files", FOLDERS_SHOWN, SHOW, TYPES);
+        panel = new FilterPanel(host, header, this::render, filter);
         list.setAdapter(adapter);
         list.setOnItemClickListener(
                 (parent, view, position, id) -> {
@@ -204,33 +204,55 @@ public final class FilesList {
         return header;
     }
 
-    /** Reads the shown collections' files off the store, then renders them. */
+    /**
+     * Reads every folder's and every account's attachments' files off the
+     * store, then renders what the panel lets through.
+     */
     public void reload() {
-        MergedFilter filter = MergedFilter.files(host);
         host.io.execute(
                 () -> {
                     List<Row> read = new ArrayList<>();
+                    Map<String, Map<String, String>> found = new LinkedHashMap<>();
+                    String device = host.getString(R.string.files_on_device);
                     for (PimdirCollections.Stored folder : files.folders()) {
-                        if (filter.accepts(folder.accountEmail, folder.id)) {
-                            read.addAll(rowsOf(folder, folder.name));
-                        }
+                        found.computeIfAbsent(device, key -> new LinkedHashMap<>())
+                                .put(folder.id, folder.name);
+                        read.addAll(rowsOf(folder, folder.name));
                     }
                     for (PimdirCollections.Stored held : files.attachmentCollections()) {
-                        if (filter.accepts(held.accountEmail, held.id)) {
-                            read.addAll(
-                                    rowsOf(
-                                            held,
-                                            host.getString(
-                                                    R.string.files_attachments_of,
-                                                    held.accountEmail)));
+                        if (!AccountActivation.enabled(host, held.accountEmail)) {
+                            continue;
                         }
+                        String label =
+                                host.getString(R.string.files_attachments_of, held.accountEmail);
+                        found.computeIfAbsent(held.accountEmail, key -> new LinkedHashMap<>())
+                                .put(held.id, label);
+                        read.addAll(rowsOf(held, label));
                     }
                     host.postAlive(
                             () -> {
                                 rows = read;
+                                offered = found;
                                 render();
                             });
                 });
+    }
+
+    /** The filter panel: the folders, then the kind, then the media types. */
+    private void drawFilters() {
+        ListFilter.State edited = filter.edited();
+        Runnable changed =
+                () -> {
+                    filter.save();
+                    render();
+                };
+        panel.begin();
+        panel.collections(
+                "folders", R.string.filter_folders, offered, edited.set(FOLDERS_SHOWN), changed);
+        panel.choice("show", R.string.filter_show, SHOWS, SHOW_LABELS, edited.set(SHOW), changed);
+        panel.checks(
+                "types", R.string.filter_types, TYPE_KEYS, TYPE_LABELS, edited.set(TYPES), changed);
+        panel.end(filter.applied().active());
     }
 
     /** One collection's rows, an empty folder standing as its placeholder. */
@@ -251,8 +273,12 @@ public final class FilesList {
         return rows;
     }
 
-    /** Lays out what the chips and the search let through. */
+    /** Lays out what the panel and the search let through. */
     private void render() {
+        drawFilters();
+        ListFilter.State kept = filter.applied();
+        Set<String> show = kept.set(SHOW);
+        Set<String> types = kept.set(TYPES);
         List<Row> shown = new ArrayList<>();
         int files = 0;
         folderHeaders.clear();
@@ -260,16 +286,20 @@ public final class FilesList {
             if (!row.attachment()) {
                 folderHeaders.put(row.section, row.collection);
             }
-            if (kind == FOLDERS && row.attachment() || kind == ATTACHMENTS && !row.attachment()) {
+            if (kept.set(FOLDERS_SHOWN).contains(row.collection.id)) {
+                continue;
+            }
+            if (show.contains("folders") && row.attachment()
+                    || show.contains("attachments") && !row.attachment()) {
                 continue;
             }
             if (row.file == null) {
-                if (type == -1 && query.isEmpty()) {
+                if (types.isEmpty() && query.isEmpty()) {
                     shown.add(row);
                 }
                 continue;
             }
-            if (type != -1 && !matches(type, row.file.mediaType)) {
+            if (!types.isEmpty() && !matchesAny(types, row.file.mediaType)) {
                 continue;
             }
             if (!query.isEmpty() && !searched(row, query)) {
@@ -283,6 +313,16 @@ public final class FilesList {
         header.meta(host.getResources().getQuantityString(R.plurals.files_meta, files, files));
         host.findViewById(R.id.files_empty)
                 .setVisibility(shown.isEmpty() ? View.VISIBLE : View.GONE);
+    }
+
+    /** Whether a media type falls under any of the types on, by key. */
+    private static boolean matchesAny(Set<String> types, String mediaType) {
+        for (int index = 0; index < TYPE_KEYS.length; index++) {
+            if (types.contains(TYPE_KEYS[index]) && matches(index, mediaType)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Whether a media type falls under one of the type chips. */

@@ -1,6 +1,7 @@
 package org.pimalaya.calendar;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
@@ -16,6 +17,7 @@ import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.DateEdit;
+import org.pimalaya.client.EventAlarm;
 import org.pimalaya.client.EventEdit;
 import org.pimalaya.client.EventScope;
 import org.pimalaya.client.EventSides;
@@ -194,7 +196,7 @@ public class EventWritesTest {
         writes.save(
                 new EventWrites.Save(
                         EventScope.FOLLOWING, edited, "s-2", target, calendar, false, true, null,
-                        Map.of()));
+                        Map.of(), null));
 
         assertEquals(
                 List.of(
@@ -222,10 +224,67 @@ public class EventWritesTest {
         writes.save(
                 new EventWrites.Save(
                         EventScope.ALL, edited, "", target, calendar, true, true, null,
-                        Map.of()));
+                        Map.of(), null));
 
         assertEquals(List.of("add " + calendar.id + " " + id), client.staged);
         assertTrue(stored(id).ical.contains("SUMMARY:Lunch\r\n"));
+    }
+
+    @Test
+    public void aNewEntryCarriesTheAlarmsSet() throws Exception {
+        String id = "a.ics";
+        EventStore.StoredEvent target =
+                new EventStore.StoredEvent(
+                        calendar.id,
+                        id,
+                        PimdirStorage.rowHandle(null, id),
+                        entry("Dentist", "20260101T000000Z"),
+                        "");
+        EventEdit edited =
+                EventEdit.of(Map.of(), Map.of(), null, STAMP)
+                        .scoped(EventScope.ALL, null, null, null);
+
+        writes.save(
+                new EventWrites.Save(
+                        EventScope.ALL, edited, "", target, calendar, true, true, null,
+                        Map.of(),
+                        List.of(
+                                EventAlarm.before(
+                                        EventAlarm.DISPLAY, 15, "Dentist", "", List.of()))));
+
+        String ical = stored(id).ical;
+        assertTrue(ical.contains("BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\n"));
+    }
+
+    @Test
+    public void removingAnAlarmKeepsTheOthersByteForByte() throws Exception {
+        String id = "b.ics";
+        String withAlarms =
+                entry("Review", "20260101T000000Z")
+                        .replace(
+                                "END:VEVENT",
+                                "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT10M\r\nEND:VALARM\r\n"
+                                        + "BEGIN:VALARM\r\nACTION:EMAIL\r\nTRIGGER:-PT1H\r\n"
+                                        + "END:VALARM\r\nEND:VEVENT");
+        EventStore.StoredEvent target =
+                new EventStore.StoredEvent(
+                        calendar.id, id, PimdirStorage.rowHandle(null, id), withAlarms, "");
+        EventEdit edited =
+                EventEdit.of(Map.of(), Map.of(), null, STAMP)
+                        .scoped(EventScope.ALL, null, null, null);
+
+        // NOTE: the page holds every alarm; dropping the display one keeps
+        // the email one as it was.
+        List<EventAlarm> kept = List.of(CalendarClient.readAlarms(withAlarms).get(1));
+
+        writes.save(
+                new EventWrites.Save(
+                        EventScope.ALL, edited, "", target, calendar, true, true, null,
+                        Map.of(), kept));
+
+        String ical = stored(id).ical;
+        assertFalse(ical.contains("TRIGGER:-PT10M"));
+        assertTrue(ical.contains("ACTION:EMAIL\r\nTRIGGER:-PT1H\r\n"));
     }
 
     @Test
@@ -245,7 +304,7 @@ public class EventWritesTest {
         writes.save(
                 new EventWrites.Save(
                         EventScope.ALL, edited, "", stored("e.ics"), calendar, false, false,
-                        settling, Map.of()));
+                        settling, Map.of(), null));
 
         assertEquals(List.of("edit " + settling.collection + " raw-7"), client.staged);
         assertEquals(resolved, client.bodies.get(0));
