@@ -46,6 +46,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed the calendar showing No event for a moment on opening, before its entries were read.
 - Fixed the connection flow finding no mail server for an address whose domain publishes only its MX records, such as one hosted at Migadu: the provider those records name is asked for its autoconfig, following the alias of its autoconfig host when that host holds no certificate for it, as Thunderbird does. The autoconfig request no longer asks for the address with its domain written twice.
 - Fixed the Contacts app listing a second, empty account for an address whose calendars show on the phone: a contact saved into it never synced and was lost when the account was set up again. Calendar accounts are now of their own type, which contacts apps do not list, and those made by an earlier version move over on the next start. A phone account is no longer removed while it holds a contact created or edited in a contacts app and not yet synced, and deleting an account brings such contacts in first, removing nothing when it cannot.
 - Fixed the background download starting again every few seconds, the strip saying so each time, for a message deleted from the server after the sync listed it: a message gone is now given up until its mailbox is listed again, a body that failed every attempt is no longer asked for again until then or the next start, and only Wi-Fi coming back starts the download, not every change Wi-Fi reports while it stays up.

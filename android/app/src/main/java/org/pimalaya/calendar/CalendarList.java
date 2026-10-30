@@ -264,26 +264,51 @@ public final class CalendarList {
         }
         MergedFilter filter = MergedFilter.of(host, PimDomain.CALENDAR);
         int asked = ++generation;
+        long requested = System.nanoTime();
 
         reads.execute(
                 () -> {
+                    long started = System.nanoTime();
                     Map<String, Map<String, String>> found = new LinkedHashMap<>();
                     List<Row> read = rowsOf(from, until, filter, found);
+                    long readAt = System.nanoTime();
                     host.postAlive(
                             () -> {
                                 if (asked != generation) {
                                     return;
                                 }
+                                long posted = System.nanoTime();
+                                loaded = true;
                                 rows.clear();
                                 rows.addAll(read);
                                 offered = found;
                                 render();
+                                long drawn = System.nanoTime();
+                                Log.d(
+                                        "pimalaya",
+                                        "agenda drawn "
+                                                + millis(requested, drawn)
+                                                + " ms after asked: queued "
+                                                + millis(requested, started)
+                                                + " ms, read "
+                                                + millis(started, readAt)
+                                                + " ms, posted "
+                                                + millis(readAt, posted)
+                                                + " ms, rendered "
+                                                + millis(posted, drawn)
+                                                + " ms");
                             });
                 });
     }
 
     /** Counts the reloads asked, so only the last one's rows land. */
     private int generation;
+
+    /**
+     * Whether a reload has landed, before which no row means nothing read
+     * yet rather than an empty calendar.
+     */
+    private boolean loaded;
 
     /** Where the agenda's rows are read, one reload after another. */
     private final ExecutorService reads = Executors.newSingleThreadExecutor();
@@ -319,12 +344,20 @@ public final class CalendarList {
             String until,
             MergedFilter filter,
             Map<String, Map<String, String>> found) {
+        long started = System.nanoTime();
         if (!from.equals(expandedFrom)) {
             expanded.clear();
             expandedFrom = from;
         }
         Map<String, EventStore.StoredCalendar> byCollection = new HashMap<>();
-        for (EventStore.StoredCalendar calendar : store.loadCalendars()) {
+        List<EventStore.StoredCalendar> calendars = store.loadCalendars();
+        long calendarsRead = System.nanoTime();
+        List<EventStore.StoredEvent> events = store.loadEvents();
+        long eventsRead = System.nanoTime();
+        long expanding = 0;
+        int fresh = 0;
+        int cached = 0;
+        for (EventStore.StoredCalendar calendar : calendars) {
             byCollection.put(calendar.id, calendar);
             if (filter.accepts(calendar.accountEmail, calendar.id)) {
                 found.computeIfAbsent(calendar.accountEmail, key -> new LinkedHashMap<>())
@@ -334,7 +367,7 @@ public final class CalendarList {
 
         List<Row> read = new ArrayList<>();
         Map<String, Expanded> kept = new HashMap<>();
-        for (EventStore.StoredEvent event : store.loadEvents()) {
+        for (EventStore.StoredEvent event : events) {
             EventStore.StoredCalendar calendar = byCollection.get(event.collectionId);
             if (calendar == null) {
                 continue;
@@ -345,6 +378,7 @@ public final class CalendarList {
             String key = event.collectionId + "\n" + event.id;
             Expanded known = expanded.get(key);
             if (known == null || !known.ical.equals(event.ical)) {
+                long asked = System.nanoTime();
                 try {
                     known =
                             new Expanded(
@@ -355,7 +389,12 @@ public final class CalendarList {
                     // agenda, so it is dropped with a log and the rest render.
                     Log.w("pimalaya", "event expand failed: " + event.id, error);
                     continue;
+                } finally {
+                    expanding += System.nanoTime() - asked;
                 }
+                fresh++;
+            } else {
+                cached++;
             }
             kept.put(key, known);
             for (Occurrence occurrence : known.occurrences) {
@@ -366,7 +405,36 @@ public final class CalendarList {
         expanded.putAll(kept);
 
         read.sort((left, right) -> Long.compare(left.start, right.start));
+        long done = System.nanoTime();
+        Log.d(
+                "pimalaya",
+                "agenda read "
+                        + from
+                        + ".."
+                        + until
+                        + ": "
+                        + events.size()
+                        + " entries ("
+                        + fresh
+                        + " expanded, "
+                        + cached
+                        + " cached), "
+                        + read.size()
+                        + " rows; calendars "
+                        + millis(started, calendarsRead)
+                        + " ms, entries "
+                        + millis(calendarsRead, eventsRead)
+                        + " ms, expanding "
+                        + expanding / 1_000_000
+                        + " ms, the rest "
+                        + (millis(eventsRead, done) - expanding / 1_000_000)
+                        + " ms");
         return read;
+    }
+
+    /** The whole milliseconds between two {@link System#nanoTime} reads. */
+    private static long millis(long from, long to) {
+        return (to - from) / 1_000_000;
     }
 
     /**
@@ -651,8 +719,10 @@ public final class CalendarList {
         } else {
             week(today);
         }
+        // NOTE: a render before the first load (the search or the panel
+        // redrawing) is no empty calendar, so the empty state waits.
         host.findViewById(R.id.calendar_empty)
-                .setVisibility(shown.isEmpty() ? View.VISIBLE : View.GONE);
+                .setVisibility(loaded && shown.isEmpty() ? View.VISIBLE : View.GONE);
     }
 
     /** The instant a row ends, its start when it states no end. */

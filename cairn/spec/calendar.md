@@ -229,6 +229,22 @@ The agenda SHALL read and expand its entries on a thread of its own and draw the
 - WHEN the app returns to the foreground
 - THEN the screen stays responsive while the agenda rebuilds, and only entries a sync changed are expanded again
 
+### Requirement: The agenda says it is empty only once read
+The agenda SHALL show its empty state only once its first reload has landed, a render before it drawing no row and no empty state.
+
+#### Scenario: Opening the tab
+- GIVEN a calendar holding entries this week
+- WHEN the tab opens and its entries are still being read
+- THEN no empty state shows before the rows
+
+### Requirement: The agenda's build is timed
+Each agenda reload SHALL log its window, how many entries it read, how many it expanded and how many it took from the kept expansions, the rows it made, the time spent reading the calendars, reading the entries, expanding and on the rest, then how long after it was asked it was drawn, split into its wait, its read, its handover to the main thread and its render.
+
+#### Scenario: A cold open
+- GIVEN the app just started
+- WHEN the calendar tab opens
+- THEN the log names every entry as expanded, none kept, and the milliseconds of each part
+
 ### Requirement: Calendar accounts stay out of contacts apps
 The Android accounts holding the phone's calendars SHALL be of a type of their own, bound to the calendar adapter alone, so no contacts app lists them. Calendar accounts of the books' type left by an earlier build SHALL be migrated: their calendars' phone pass first, then the account removed and recreated under the calendar type.
 
