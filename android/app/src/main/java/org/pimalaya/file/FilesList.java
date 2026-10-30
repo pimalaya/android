@@ -249,9 +249,9 @@ public final class FilesList {
         panel.begin();
         panel.collections(
                 "folders", R.string.filter_folders, offered, edited.set(FOLDERS_SHOWN), changed);
-        panel.choice("show", R.string.filter_show, SHOWS, SHOW_LABELS, edited.set(SHOW), changed);
+        panel.choice("show", R.string.filter_types, SHOWS, SHOW_LABELS, edited.set(SHOW), changed);
         panel.checks(
-                "types", R.string.filter_types, TYPE_KEYS, TYPE_LABELS, edited.set(TYPES), changed);
+                "types", R.string.filter_mime, TYPE_KEYS, TYPE_LABELS, edited.set(TYPES), changed);
         panel.end(filter.applied().active());
     }
 

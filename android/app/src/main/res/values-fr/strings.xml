@@ -120,7 +120,7 @@
     <string name="filter_apply">Appliquer</string>
     <string name="filter_categories">Catégories</string>
     <string name="filter_status">Statut</string>
-    <string name="filter_show">Afficher</string>
+    <string name="filter_mime">MIME</string>
     <string name="filter_books">Carnets</string>
     <string name="contact_section_book">Carnet</string>
     <string name="filter_mailboxes">Boîtes</string>
@@ -159,7 +159,6 @@
     <string name="filter_due_before_pill">Échéance avant le %1$s</string>
     <string name="filter_due_on_pill">Échéance le %1$s</string>
     <string name="filter_due_after_pill">Échéance après le %1$s</string>
-    <string name="filter_show_all">Tout afficher (%1$d)</string>
     <string name="filter_count_of">%1$d sur %2$d</string>
     <string name="filter_remove">Retirer %1$s</string>
     <plurals name="filter_categories_count">

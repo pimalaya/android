@@ -252,7 +252,7 @@
     <string name="filter_apply">Apply</string>
     <string name="filter_categories">Categories</string>
     <string name="filter_status">Status</string>
-    <string name="filter_show">Show</string>
+    <string name="filter_mime">MIME</string>
     <string name="filter_books">Address books</string>
     <string name="contact_section_book">Address book</string>
     <string name="filter_mailboxes">Mailboxes</string>
@@ -291,7 +291,6 @@
     <string name="filter_due_before_pill">Due before %1$s</string>
     <string name="filter_due_on_pill">Due %1$s</string>
     <string name="filter_due_after_pill">Due after %1$s</string>
-    <string name="filter_show_all">Show all %1$d</string>
     <string name="filter_count_of">%1$d of %2$d</string>
     <string name="filter_remove">Remove %1$s</string>
     <plurals name="filter_categories_count">

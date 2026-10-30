@@ -77,6 +77,12 @@ public final class FilterPanel {
         pillsRow = header.chipsRow();
         button.setOnClickListener(
                 view -> {
+                    // NOTE: the search field gives up its focus, and the
+                    // keyboard goes with it, the panel taking the screen.
+                    ((View) button.getParent())
+                            .findViewById(R.id.header_search_input)
+                            .clearFocus();
+                    host.hideKeyboard();
                     if (unfolded) {
                         fold();
                     } else {

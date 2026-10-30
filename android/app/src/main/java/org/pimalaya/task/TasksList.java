@@ -857,13 +857,14 @@ public final class TasksList {
     }
 
     /**
-     * Draws the filter panel, Calendars, Status, Categories and Due, and the
+     * Draws the filter panel, Calendars, Categories, Status and Due, and the
      * pills standing for what is off its default.
      */
     private void drawFilters() {
         Filter f = applied;
         filters.begin();
         drawCalendars();
+        drawCategories();
         String[] states = new String[STATES.length];
         String[] counts = new String[STATES.length];
         for (int index = 0; index < STATES.length; index++) {
@@ -888,7 +889,6 @@ public final class TasksList {
                 counts,
                 f.statesOn,
                 this::changed);
-        drawCategories();
         drawDue();
         filters.end(applied.active());
     }
