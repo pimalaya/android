@@ -18,9 +18,6 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
-import org.pimalaya.pimdir.DefaultCollection;
-import org.pimalaya.pimdir.PimdirCollections;
-import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.CardSections;
 import org.pimalaya.ui.FilterPanel;
@@ -81,29 +78,18 @@ public final class CalendarList {
     /** How many weeks from this one the week card shows, negative before it. */
     private int weekOffset;
 
-    /** Whether the Default chip narrows to the accounts' default calendars. */
-    /** The panel's sections: the calendars shown, and All or Default. */
-    private static final String CALENDARS = "calendars";
+    /**
+     * The panel's sections: the calendars and the times of day ticked, none
+     * meaning any; the dates from and to (as {@code from:YYYYMMDD} and
+     * {@code to:YYYYMMDD}); what a row must have.
+     */
+    private static final String CALENDARS = "calendars_on";
 
-    private static final String SHOW = "show";
+    private static final String WHEN = "when_dates";
 
-    private static final String KINDS = "kinds";
-
-    private static final String WHEN = "when";
-
-    private static final String TIME = "time";
+    private static final String TIME = "time_on";
 
     private static final String HAS = "has";
-
-    private static final String[] KIND_KEYS = {"VEVENT", "VTODO", "VJOURNAL"};
-
-    private static final int[] KIND_LABELS = {
-        R.string.filter_kind_events, R.string.tasks_title, R.string.filter_kind_journals,
-    };
-
-    private static final String[] WHEN_KEYS = {"upcoming", "past"};
-
-    private static final int[] WHEN_LABELS = {R.string.filter_upcoming, R.string.filter_past};
 
     private static final String[] TIME_KEYS = {"allday", "timed"};
 
@@ -119,20 +105,13 @@ public final class CalendarList {
     /** The rows of the last render that are over, drawn dimmed. */
     private final Set<Row> past = new java.util.HashSet<>();
 
-    private static final String[] SHOWS = {"all", "default"};
-
-    private static final int[] SHOW_LABELS = {R.string.filter_all, R.string.chip_default};
-
-    /** What the agenda keeps of the calendars synced, drafted by the panel. */
+    /** What the agenda keeps of the calendars synced. */
     private ListFilter filter;
 
     private FilterPanel panel;
 
     /** The calendars the panel offers, by account then id, as last read. */
     private Map<String, Map<String, String>> offered = new LinkedHashMap<>();
-
-    /** Every calendar's default, as last read, for Show: Default. */
-    private Set<String> defaults = Set.of();
 
     /** The settled search over the titles, lower-cased. */
     private String query = "";
@@ -199,8 +178,8 @@ public final class CalendarList {
                     query = settled;
                     render();
                 });
-        filter = new ListFilter(host, "calendar", CALENDARS, SHOW, KINDS, WHEN, TIME, HAS);
-        panel = new FilterPanel(host, header, this::render, filter);
+        filter = new ListFilter(host, "calendar", CALENDARS, WHEN, TIME, HAS);
+        panel = new FilterPanel(host, header, this::render);
         list.setAdapter(adapter);
         list.setOnItemClickListener(
                 (parent, view, position, id) -> {
@@ -240,14 +219,18 @@ public final class CalendarList {
         // side: the bridge compares the window with each start as written,
         // a start in another zone can fall a day off the reader's, and
         // render keeps the week by instant.
-        String from = plusDays(shownWeek(today()), -1);
-        String until = plusDays(from, 9);
+        // A range set in When replaces the week: from its first day, eight
+        // days on when it states no last, and back when it states no first.
+        String first = bound("from:");
+        String last = bound("to:");
+        String from =
+                first != null
+                        ? plusDays(first, -1)
+                        : last != null
+                                ? plusDays(last, -8)
+                                : plusDays(shownWeek(today()), -1);
+        String until = last != null ? plusDays(last, 2) : plusDays(from, 9);
         MergedFilter filter = MergedFilter.of(host, PimDomain.CALENDAR);
-        Set<String> defaultIds =
-                DefaultCollection.shown(
-                        host,
-                        PimdirSummary.CALENDAR,
-                        new PimdirCollections(parts.pimdir(), host).list(PimdirSummary.CALENDAR));
         int asked = ++generation;
 
         reads.execute(
@@ -262,7 +245,6 @@ public final class CalendarList {
                                 rows.clear();
                                 rows.addAll(read);
                                 offered = found;
-                                defaults = defaultIds;
                                 render();
                             });
                 });
@@ -355,9 +337,12 @@ public final class CalendarList {
         return read;
     }
 
-    /** The filter panel: the calendars synced, then All or Default. */
+    /**
+     * The filter panel: the calendars synced, the dates from and to, the
+     * times of day, what a row must have.
+     */
     private void drawFilters() {
-        ListFilter.State edited = filter.edited();
+        ListFilter.State edited = filter.applied();
         Runnable changed =
                 () -> {
                     filter.save();
@@ -366,15 +351,96 @@ public final class CalendarList {
         panel.begin();
         panel.collections(
                 "calendars", R.string.filter_calendars, offered, edited.set(CALENDARS), changed);
-        panel.choice("show", R.string.filter_show, SHOWS, SHOW_LABELS, edited.set(SHOW), changed);
-        panel.checks(
-                "kinds", R.string.filter_kind, KIND_KEYS, KIND_LABELS, edited.set(KINDS), changed);
-        panel.checks(
-                "when", R.string.filter_when, WHEN_KEYS, WHEN_LABELS, edited.set(WHEN), changed);
+        drawWhen();
         panel.checks(
                 "time", R.string.filter_time, TIME_KEYS, TIME_LABELS, edited.set(TIME), changed);
         panel.checks("has", R.string.filter_has, HAS_KEYS, HAS_LABELS, edited.set(HAS), changed);
         panel.end(filter.applied().active());
+    }
+
+    /** When: a first day and a last, each a date or none, each a pill. */
+    private void drawWhen() {
+        String first = bound("from:");
+        String last = bound("to:");
+        String any = host.getString(R.string.filter_any_time);
+        String from = host.getString(R.string.filter_from, first == null ? any : dateOf(first));
+        String to = host.getString(R.string.filter_to, last == null ? any : dateOf(last));
+        List<String> set = new ArrayList<>();
+        if (first != null) {
+            set.add(from);
+        }
+        if (last != null) {
+            set.add(to);
+        }
+        panel.section(
+                "when",
+                R.string.filter_when,
+                set.isEmpty() ? any : String.join(", ", set),
+                !set.isEmpty(),
+                list -> {
+                    panel.action(list, from, () -> pickBound("from:", first));
+                    panel.action(list, to, () -> pickBound("to:", last));
+                });
+        if (first != null) {
+            panel.pill(from, () -> setBound("from:", null));
+        }
+        if (last != null) {
+            panel.pill(to, () -> setBound("to:", null));
+        }
+    }
+
+    /** The day When holds under {@code prefix}, null for none. */
+    private String bound(String prefix) {
+        for (String held : filter.applied().set(WHEN)) {
+            if (held.startsWith(prefix)) {
+                return held.substring(prefix.length());
+            }
+        }
+        return null;
+    }
+
+    /** Sets the day When holds under {@code prefix}, null to clear it, then reloads. */
+    private void setBound(String prefix, String day) {
+        filter.applied().set(WHEN).removeIf(held -> held.startsWith(prefix));
+        if (day != null) {
+            filter.applied().set(WHEN).add(prefix + day);
+        }
+        filter.save();
+        reload();
+    }
+
+    /** Asks for a day, Clear leaving the bound unset. */
+    private void pickBound(String prefix, String day) {
+        java.time.LocalDate shown =
+                day == null
+                        ? java.time.LocalDate.now()
+                        : java.time.LocalDate.parse(
+                                day, java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
+        android.app.DatePickerDialog dialog =
+                new android.app.DatePickerDialog(
+                        host,
+                        (picker, year, month, date) ->
+                                setBound(
+                                        prefix,
+                                        String.format(
+                                                java.util.Locale.US,
+                                                "%04d%02d%02d",
+                                                year,
+                                                month + 1,
+                                                date)),
+                        shown.getYear(),
+                        shown.getMonthValue() - 1,
+                        shown.getDayOfMonth());
+        dialog.setButton(
+                android.app.DatePickerDialog.BUTTON_NEUTRAL,
+                host.getString(R.string.clear),
+                (picker, which) -> setBound(prefix, null));
+        dialog.show();
+    }
+
+    /** A civil day as the device spells a date. */
+    private String dateOf(String day) {
+        return Dates.date(host, stampOf(day));
     }
 
     /** Lays out the picked day, else the seven days of the shown week. */
@@ -382,28 +448,37 @@ public final class CalendarList {
         String today = today();
         drawFilters();
         ListFilter.State held = filter.applied();
-        boolean defaultOnly = held.set(SHOW).contains("default");
         String first = shownWeek(today);
+        String from = bound("from:");
+        String to = bound("to:");
+        boolean ranged = from != null || to != null;
         long now = System.currentTimeMillis();
         List<Row> upcoming = new ArrayList<>();
         List<Row> over = new ArrayList<>();
         for (Row row : rows) {
             Occurrence occurrence = row.occurrence;
             boolean ended = endOf(row) <= now;
-            if (held.set(CALENDARS).contains(row.calendar.id)
-                    || defaultOnly && !defaults.contains(row.calendar.id)
+            Set<String> calendars = held.set(CALENDARS);
+            Set<String> times = held.set(TIME);
+            if (!calendars.isEmpty() && !calendars.contains(row.calendar.id)
                     || !query.isEmpty()
                             && !occurrence
                                     .summary()
                                     .toLowerCase(java.util.Locale.ROOT)
                                     .contains(query)
-                    || !passes(held.set(KINDS), occurrence.component())
-                    || !passes(held.set(WHEN), ended ? "past" : "upcoming")
-                    || !passes(held.set(TIME), occurrence.allDay() ? "allday" : "timed")
+                    || !times.isEmpty()
+                            && !times.contains(occurrence.allDay() ? "allday" : "timed")
                     || held.set(HAS).contains("location") && occurrence.location().isEmpty()) {
                 continue;
             }
-            if (kept(dayOf(row), selectedDay, first)) {
+            String day = dayOf(row);
+            // NOTE: a range set in When lists its days whatever the week.
+            boolean listed =
+                    ranged
+                            ? (from == null || day.compareTo(from) >= 0)
+                                    && (to == null || day.compareTo(to) <= 0)
+                            : kept(day, selectedDay, first);
+            if (listed) {
                 (ended ? over : upcoming).add(row);
             }
         }
@@ -428,11 +503,6 @@ public final class CalendarList {
         week(today);
         host.findViewById(R.id.calendar_empty)
                 .setVisibility(shown.isEmpty() ? View.VISIBLE : View.GONE);
-    }
-
-    /** Whether {@code key} passes a section of choices: any on, or none. */
-    private static boolean passes(Set<String> on, String key) {
-        return on.isEmpty() || on.contains(key);
     }
 
     /** The instant a row ends, its start when it states no end. */

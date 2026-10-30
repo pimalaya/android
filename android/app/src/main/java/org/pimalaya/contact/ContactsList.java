@@ -14,9 +14,6 @@ import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
-import org.pimalaya.pimdir.DefaultCollection;
-import org.pimalaya.pimdir.PimdirCollections;
-import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.CardSections;
 import org.pimalaya.ui.FilterPanel;
@@ -58,20 +55,20 @@ public final class ContactsList {
     private final Adapter adapter = new Adapter();
     private ListHeader header;
 
-    /** The panel's sections: which books show, and All or Default. */
-    private static final String BOOKS = "books";
-
-    private static final String SHOW = "show";
-
-    private static final String[] SHOWS = {"all", "default"};
-
-    private static final int[] SHOW_LABELS = {R.string.filter_all, R.string.chip_default};
+    /**
+     * The panel's sections: the books, the kinds, the categories and the
+     * properties ticked, none ticked meaning any.
+     */
+    private static final String BOOKS = "books_on";
 
     private static final String HAS = "has";
 
-    private static final String KINDS = "kinds";
+    private static final String KINDS = "kinds_on";
 
-    private static final String CATEGORIES = "categories";
+    private static final String CATEGORIES = "categories_on";
+
+    /** A card carrying no category, None under Categories. */
+    private static final String NO_CATEGORY = " none";
 
     /** The vCard properties Has offers (RFC 6350), a contact passing with any on. */
     private static final String[] HAS_KEYS = {"EMAIL", "TEL", "ADR", "BDAY", "ORG", "PHOTO"};
@@ -150,8 +147,8 @@ public final class ContactsList {
                     searchQuery = query;
                     render();
                 });
-        filter = new ListFilter(host, "contacts", BOOKS, SHOW, HAS, KINDS, CATEGORIES);
-        panel = new FilterPanel(host, header, this::render, filter);
+        filter = new ListFilter(host, "contacts", BOOKS, KINDS, CATEGORIES, HAS);
+        panel = new FilterPanel(host, header, this::render);
         list.setAdapter(adapter);
 
         list.setOnItemClickListener(
@@ -249,8 +246,9 @@ public final class ContactsList {
     }
 
     /**
-     * Whether a card passes Has, Kind and Categories: any property on, any
-     * kind on, any category on (compared lowercased), each none on passing.
+     * Whether a card passes Kind, Categories and Has: its kind ticked, any of
+     * its categories (lowercased, or None) ticked, any property ticked, each
+     * passing with none ticked.
      */
     private static boolean described(ListFilter.State kept, String vcard) {
         Set<String> has = kept.set(HAS);
@@ -267,12 +265,16 @@ public final class ContactsList {
         if (!kinds.isEmpty() && !kinds.contains(CardFacts.kind(vcard))) {
             return false;
         }
-        Set<String> categories = kept.set(CATEGORIES);
-        if (categories.isEmpty()) {
+        Set<String> on = kept.set(CATEGORIES);
+        if (on.isEmpty()) {
             return true;
         }
-        for (String category : CardFacts.categories(vcard)) {
-            if (categories.contains(category.toLowerCase(java.util.Locale.ROOT))) {
+        List<String> categories = CardFacts.categories(vcard);
+        if (categories.isEmpty()) {
+            return on.contains(NO_CATEGORY);
+        }
+        for (String category : categories) {
+            if (on.contains(category.toLowerCase(java.util.Locale.ROOT))) {
                 return true;
             }
         }
@@ -281,7 +283,7 @@ public final class ContactsList {
 
     /**
      * The filter panel: the books synced under their accounts, any hidden
-     * from this list alone, then All or Default.
+     * from this list alone, then the kinds, the categories, what it has.
      */
     private void drawFilters(MergedFilter synced) {
         Map<String, Map<String, String>> books = new LinkedHashMap<>();
@@ -295,7 +297,7 @@ public final class ContactsList {
                         .put(entry.book.url(), entry.book.name());
             }
         }
-        ListFilter.State edited = filter.edited();
+        ListFilter.State edited = filter.applied();
         Runnable changed =
                 () -> {
                     filter.save();
@@ -303,11 +305,11 @@ public final class ContactsList {
                 };
         panel.begin();
         panel.collections("books", R.string.filter_books, books, edited.set(BOOKS), changed);
-        panel.choice("show", R.string.filter_show, SHOWS, SHOW_LABELS, edited.set(SHOW), changed);
-        panel.checks("has", R.string.filter_has, HAS_KEYS, HAS_LABELS, edited.set(HAS), changed);
         panel.checks(
                 "kinds", R.string.filter_kind, KIND_KEYS, KIND_LABELS, edited.set(KINDS), changed);
+        // NOTE: None first, for the cards carrying no category.
         Map<String, String> names = new LinkedHashMap<>();
+        names.put(NO_CATEGORY, host.getString(R.string.filter_none));
         for (Group group : groupedContacts) {
             for (Entry entry : group.replicas) {
                 for (String category : CardFacts.categories(entry.card.vcard())) {
@@ -320,8 +322,10 @@ public final class ContactsList {
                 R.string.filter_categories,
                 names.keySet().toArray(new String[0]),
                 names.values().toArray(new String[0]),
+                null,
                 edited.set(CATEGORIES),
                 changed);
+        panel.checks("has", R.string.filter_has, HAS_KEYS, HAS_LABELS, edited.set(HAS), changed);
         panel.end(filter.applied().active());
     }
 
@@ -337,24 +341,14 @@ public final class ContactsList {
         MergedFilter synced = MergedFilter.of(host, PimDomain.CONTACTS);
         drawFilters(synced);
         ListFilter.State kept = filter.applied();
-        Set<String> defaults =
-                kept.set(SHOW).contains("default")
-                        ? DefaultCollection.shown(
-                                host,
-                                PimdirSummary.CONTACT,
-                                parts.cards()
-                                        .subscribedBooks(
-                                                new PimdirCollections(parts.pimdir(), host)))
-                        : null;
         for (Group group : groupedContacts) {
             // NOTE: hiding an account thins a row's replicas, and only empties
             // the row when that account held all of them.
             boolean matches = false;
             for (Entry entry : group.replicas) {
                 if (!synced.accepts(entry.accountEmail, entry.book.url())
-                        || kept.set(BOOKS).contains(entry.book.url())
-                        || !described(kept, entry.card.vcard())
-                        || defaults != null && !defaults.contains(entry.book.url())) {
+                        || !kept.set(BOOKS).isEmpty() && !kept.set(BOOKS).contains(entry.book.url())
+                        || !described(kept, entry.card.vcard())) {
                     continue;
                 }
                 if (searchQuery.isEmpty()

@@ -263,16 +263,15 @@
     <string name="calendar_search">Search events</string>
     <string name="calendar_past_day">Past · %1$s</string>
     <string name="filter_kind">Kind</string>
-    <string name="filter_kind_events">Events</string>
-    <string name="filter_kind_journals">Journal entries</string>
     <string name="filter_when">When</string>
-    <string name="filter_upcoming">Upcoming</string>
-    <string name="filter_past">Past</string>
     <string name="filter_time">Time</string>
     <string name="filter_all_day">All day</string>
     <string name="filter_timed">At a time</string>
     <string name="filter_has">Has</string>
     <string name="filter_location">A location</string>
+    <string name="filter_from">From %1$s</string>
+    <string name="filter_to">To %1$s</string>
+    <string name="filter_none">None</string>
     <string name="filter_email">An email</string>
     <string name="filter_phone">A phone</string>
     <string name="filter_address">An address</string>
@@ -284,7 +283,7 @@
     <string name="filter_organisations">Organisations</string>
     <string name="filter_types">Type</string>
     <string name="filter_calendars">Calendars</string>
-    <string name="filter_all">All</string>
+    <string name="filter_any">Any</string>
     <string name="filter_any_time">Any time</string>
     <string name="filter_due_before">Before</string>
     <string name="filter_due_on">On</string>
@@ -378,7 +377,6 @@
     <string name="mail_chip_junk">Junk</string>
     <string name="mail_chip_archive">Archive</string>
     <string name="mail_chip_attachments">Attachments</string>
-    <string name="chip_default">Default</string>
     <string name="message_reply">Reply</string>
     <string name="message_forward">Forward</string>
     <string name="compose_quote_intro">On %1$s, %2$s wrote:</string>

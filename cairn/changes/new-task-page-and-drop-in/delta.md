@@ -26,10 +26,10 @@ A page opened from a list SHALL drop in as an account's settings do; leaving a p
 ## MODIFIED Requirements
 
 ### Requirement: A capture is on the phone at once
-As it stands, but the Tasks tab's add button SHALL open the task page (A new task is written on the task page), not the sheet; the share sheet, a mail's Add to tasks, the capture widget and the launcher shortcut SHALL still open the sheet.
+As it stands, but the Tasks tab's add button SHALL open the task page (A new task is written on the task page), not the sheet, and the capture widget and the launcher shortcut SHALL open it with Inbox set; the share sheet and a mail's Add to tasks SHALL still open the sheet.
 
 ### Requirement: A task opens on its page
-As it stands, but the page SHALL read, in order: its calendar; Organise, always shown with its Categories row (the GTD list, who a waiting task waits on, the categories, the task it sits under); Details (the title, the notes, the priority, the due date); Progress (the status); the mail it came from. There SHALL be no When section.
+As it stands, but the page SHALL read, in order: its calendar; Organise, always shown (Categories, one row holding the GTD list as one choice among Inbox, Waiting and Someday and the categories as any number; who a waiting task waits on; the task it sits under); Details (the title, the notes, the priority, the due date); Progress (the status); the mail it came from. There SHALL be no When section.
 
 ### Requirement: The entry page reads Calendar first
 As it stands (spec/calendar.md, from event-calendar-dropdown), but Calendar SHALL be one row naming the calendar and its account, a tap opening a picker while a new entry may go to several calendars, in place of the dropdown, as the task page's. The scenario reading "a dropdown in a card on top" SHALL read "a row on top, a tap offering each calendar with its account", and with one writable calendar the row SHALL take no tap.

@@ -187,9 +187,12 @@ public final class ListHeader {
         int offset = top == null ? 0 : top.getTop();
 
         // NOTE: gone once the title's baseline has passed under the bar,
-        // which is when the bar's copy stops repeating it.
+        // which is when the bar's copy stops repeating it. A list scrolls
+        // once before its first layout, the title then measuring nothing,
+        // which is no scroll: read as one, the bar's title blinked in.
         View title = view.findViewById(R.id.header_title);
-        boolean gone = first > 0 || view.getTop() + title.getBottom() <= 0;
+        boolean gone =
+                first > 0 || title.getHeight() > 0 && view.getTop() + title.getBottom() <= 0;
         if (gone != scrolled) {
             scrolled = gone;
             if (host.screen == panel) {

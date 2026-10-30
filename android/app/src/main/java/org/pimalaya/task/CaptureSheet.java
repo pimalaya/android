@@ -64,16 +64,6 @@ public final class CaptureSheet {
         this.captured = captured;
     }
 
-    /** Opens empty, no state on: the add button's new task. */
-    public void open() {
-        open("", null, null);
-    }
-
-    /** Opens empty with Inbox on: the widget's and the shortcut's capture. */
-    public void capture() {
-        open("", null, null, Task.INBOX);
-    }
-
     /**
      * Opens with {@code text} prefilled, no state on, linked to the mail
      * {@code source} names (a bare {@code Message-ID}, null for none),

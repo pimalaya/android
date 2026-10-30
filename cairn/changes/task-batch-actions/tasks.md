@@ -15,6 +15,7 @@ change: task-batch-actions
 - [x] Delete: confirmation with the count, `TaskWrites.remove` per task
 - [x] Tests (`TaskBatchTest`): the category merge per task (ticked, blank, partial), the state a list change leaves, parents copied before children, what a copy keeps
 - [ ] Not tested: the new UID of a copy (`TaskWrites.create` mints it) and the refused write reported once, the others kept (checked on the device)
+- [x] A selected row's card takes the accent over its tone (22%), beside its checked box
 - [ ] Device check (the user)
 - [ ] Spec delta folded (tasks.md), log, CHANGELOG
 - [x] Build: `:app:assembleDebug`, `:app:testDebugUnitTest` (796, `TaskBatchTest`)

@@ -174,7 +174,7 @@ public final class MailList {
     private boolean attachmentsOnly;
 
     /** The panel's sections: the mailboxes shown, the role, the flags. */
-    private static final String MAILBOXES = "mailboxes";
+    private static final String MAILBOXES = "mailboxes_on";
 
     private static final String SHOW = "show";
 
@@ -232,35 +232,9 @@ public final class MailList {
                     reload();
                 });
         filter = new ListFilter(host, "mail", MAILBOXES, SHOW, ONLY);
-        // NOTE: the store answers the filters, so Apply reloads; a tick in
-        // the draft only redraws the panel.
-        panel =
-                new FilterPanel(
-                        host,
-                        header,
-                        this::drawFilters,
-                        new FilterPanel.Draft() {
-                            @Override
-                            public void open() {
-                                filter.open();
-                            }
-
-                            @Override
-                            public void apply() {
-                                filter.apply();
-                                reload();
-                            }
-
-                            @Override
-                            public void cancel() {
-                                filter.cancel();
-                            }
-
-                            @Override
-                            public void reset() {
-                                filter.reset();
-                            }
-                        });
+        // NOTE: the store answers the filters, so a change reloads; the
+        // panel's own redraw only draws it.
+        panel = new FilterPanel(host, header, this::drawFilters);
 
         list.setAdapter(adapter);
         list.setOnItemClickListener(
@@ -335,7 +309,7 @@ public final class MailList {
         unreadOnly = kept.set(ONLY).contains("unread");
         readOnly = kept.set(ONLY).contains("read");
         attachmentsOnly = kept.set(ONLY).contains("attachments");
-        Set<String> hidden = new HashSet<>(kept.set(MAILBOXES));
+        Set<String> ticked = new HashSet<>(kept.set(MAILBOXES));
         drawFilters();
         MergedFilter filter = MergedFilter.of(host, PimDomain.MAIL);
         String narrowing = role;
@@ -350,10 +324,12 @@ public final class MailList {
                     Map<String, String> roles = store.roles();
                     BiPredicate<String, String> synced =
                             narrowed(filter, narrowing, roles)::collection;
-                    // NOTE: a mailbox hidden from this list alone still syncs.
+                    // NOTE: the mailboxes ticked, any when none is; one left out
+                    // of this list alone still syncs.
                     BiPredicate<String, String> shown =
                             (email, collection) ->
-                                    !hidden.contains(collection) && synced.test(email, collection);
+                                    (ticked.isEmpty() || ticked.contains(collection))
+                                            && synced.test(email, collection);
                     MailStore.Query wanted = store.query(shown, seen, attachments, words);
                     List<MailStore.Edge> edges = store.edges();
                     Map<String, Map<String, String>> found = offeredOf(filter, edges);
@@ -456,24 +432,20 @@ public final class MailList {
     }
 
     /**
-     * The filter panel: the mailboxes synced, then the role, then the flags. A
-     * tick in the draft redraws the panel; a pill removed reloads the list.
+     * The filter panel: the mailboxes synced, then the role, then the flags,
+     * each change reloading the list.
      */
     private void drawFilters() {
-        ListFilter.State edited = filter.edited();
+        ListFilter.State edited = filter.applied();
         Runnable changed =
                 () -> {
-                    if (edited != filter.applied()) {
-                        drawFilters();
-                        return;
-                    }
                     filter.save();
                     reload();
                 };
         String[] shows = new String[ROLES.length + 1];
         int[] showLabels = new int[ROLES.length + 1];
         shows[0] = "all";
-        showLabels[0] = R.string.filter_all;
+        showLabels[0] = R.string.filter_any;
         for (int index = 0; index < ROLES.length; index++) {
             shows[index + 1] = ROLES[index];
             showLabels[index + 1] = ROLE_LABELS[index];

@@ -3,9 +3,13 @@ package org.pimalaya.task;
 import android.app.AlertDialog;
 import android.content.res.ColorStateList;
 import android.util.Log;
+import android.util.TypedValue;
 import android.view.View;
+import android.widget.CheckBox;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.ScrollView;
 
 import org.pimalaya.R;
 import org.pimalaya.calendar.CalendarParts;
@@ -146,6 +150,14 @@ public final class TaskPage {
      * calendar the last one went to.
      */
     public void openNew(int from) {
+        openNew(from, Task.NEXT);
+    }
+
+    /**
+     * Opens the page on a new task in {@code state}, Inbox for a capture
+     * (the widget, the launcher shortcut), {@link Task#NEXT} for none.
+     */
+    public void openNew(int from, String state) {
         host.io.execute(
                 () -> {
                     List<EventStore.StoredCalendar> found = list.store().targets(host);
@@ -162,7 +174,7 @@ public final class TaskPage {
                                 summary = "";
                                 description = "";
                                 status = STATUSES[0];
-                                listed = Task.NEXT;
+                                listed = state;
                                 categories = new ArrayList<>();
                                 parent = "";
                                 due = "";
@@ -347,12 +359,21 @@ public final class TaskPage {
      */
     private void organise() {
         List<View> rows = new ArrayList<>();
+        // NOTE: always in sight, the state and the categories being how a
+        // task is found; one row, the state first.
+        List<String> named = new ArrayList<>();
+        if (!Task.NEXT.equals(listed)) {
+            named.add(host.getString(LIST_LABELS[indexOf(LISTS, listed)]));
+        }
+        named.addAll(categories);
         rows.add(
                 sections.row(
-                        host.getString(R.string.task_field_list),
-                        host.getString(LIST_LABELS[indexOf(LISTS, listed)]),
+                        host.getString(R.string.task_field_categories),
+                        named.isEmpty()
+                                ? host.getString(R.string.event_unset)
+                                : String.join(", ", named),
                         null,
-                        this::pickList));
+                        this::pickCategories));
         if (shows(CONTACT)) {
             String who = contactName.isEmpty() ? contactAddress : contactName;
             rows.add(
@@ -362,15 +383,6 @@ public final class TaskPage {
                             null,
                             () -> editContact(who)));
         }
-        // NOTE: always in sight, the categories being how a task is found.
-            rows.add(
-                    sections.row(
-                            host.getString(R.string.task_field_categories),
-                            categories.isEmpty()
-                                    ? host.getString(R.string.event_unset)
-                                    : String.join(", ", categories),
-                            null,
-                            this::pickCategories));
         if (shows(PARENT)) {
             TaskStore.Stored above = list.taskOf(parent);
             rows.add(
@@ -533,18 +545,6 @@ public final class TaskPage {
                 });
     }
 
-    private void pickList() {
-        CharSequence[] labels = new CharSequence[LIST_LABELS.length];
-        for (int index = 0; index < labels.length; index++) {
-            labels[index] = host.getString(LIST_LABELS[index]);
-        }
-        TaskDialogs.pick(
-                host, R.string.task_field_list, labels, indexOf(LISTS, listed), picked -> {
-                    listed = LISTS[picked];
-                    render();
-                });
-    }
-
     private int priorityIndex() {
         for (int index = 0; index < PRIORITIES.length; index++) {
             if (PRIORITIES[index].equals(priority)) {
@@ -566,21 +566,69 @@ public final class TaskPage {
         });
     }
 
+    /**
+     * Categories: Inbox, Waiting and Someday as radio buttons, one at most, a
+     * tap on the one on clearing it; then the person's own as checkboxes.
+     */
     private void pickCategories() {
+        String[] state = {listed};
         Set<String> known = new LinkedHashSet<>(list.categories());
         known.addAll(categories);
         List<String> names = new ArrayList<>(known);
-        CharSequence[] labels = names.toArray(new CharSequence[0]);
         boolean[] checked = new boolean[names.size()];
         for (int index = 0; index < names.size(); index++) {
             checked[index] = categories.contains(names.get(index));
         }
+
+        LinearLayout content = new LinearLayout(host);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(host.dp(20), host.dp(8), host.dp(20), 0);
+        List<RadioButton> radios = new ArrayList<>();
+        for (int index = 1; index < LISTS.length; index++) {
+            String key = LISTS[index];
+            RadioButton radio = new RadioButton(host);
+            radio.setText(LIST_LABELS[index]);
+            radio.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            radio.setMinHeight(host.dp(48));
+            radio.setChecked(key.equals(state[0]));
+            radio.setOnClickListener(
+                    view -> {
+                        state[0] = key.equals(state[0]) ? Task.NEXT : key;
+                        for (int each = 0; each < radios.size(); each++) {
+                            radios.get(each).setChecked(LISTS[each + 1].equals(state[0]));
+                        }
+                    });
+            radios.add(radio);
+            content.addView(radio);
+        }
+        if (!names.isEmpty()) {
+            View line = new View(host);
+            line.setBackgroundColor(host.getColor(R.color.divider_light));
+            LinearLayout.LayoutParams params =
+                    new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1);
+            params.setMargins(0, host.dp(6), 0, host.dp(6));
+            content.addView(line, params);
+        }
+        for (int index = 0; index < names.size(); index++) {
+            int at = index;
+            CheckBox box = new CheckBox(host);
+            box.setText(names.get(index));
+            box.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            box.setMinHeight(host.dp(48));
+            box.setChecked(checked[index]);
+            box.setOnCheckedChangeListener((view, on) -> checked[at] = on);
+            content.addView(box);
+        }
+        ScrollView scroll = new ScrollView(host);
+        scroll.addView(content);
+
         new AlertDialog.Builder(host)
                 .setTitle(R.string.task_field_categories)
-                .setMultiChoiceItems(labels, checked, (dialog, which, on) -> checked[which] = on)
+                .setView(scroll)
                 .setPositiveButton(
                         android.R.string.ok,
                         (dialog, which) -> {
+                            listed = state[0];
                             categories.clear();
                             for (int index = 0; index < names.size(); index++) {
                                 if (checked[index]) {
@@ -593,6 +641,7 @@ public final class TaskPage {
                         R.string.task_category_new,
                         (dialog, which) ->
                                 TaskDialogs.text(host, R.string.task_category_new, "", false, value -> {
+                                    listed = state[0];
                                     if (!value.isEmpty() && !categories.contains(value)) {
                                         categories.add(value);
                                     }
@@ -657,9 +706,7 @@ public final class TaskPage {
         int checked = 0;
         for (int index = 0; index < targets.size(); index++) {
             EventStore.StoredCalendar calendar = targets.get(index);
-            labels[index] =
-                    host.getString(
-                            R.string.capture_target_item, calendar.name, calendar.accountEmail);
+            labels[index] = host.ui.twoLine(calendar.name, calendar.accountEmail);
             if (calendar.id.equals(target.id)) {
                 checked = index;
             }

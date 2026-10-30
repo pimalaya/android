@@ -903,8 +903,7 @@ public final class EventView {
         CharSequence[] labels = new CharSequence[targets.size()];
         for (int index = 0; index < targets.size(); index++) {
             EventStore.StoredCalendar target = targets.get(index);
-            labels[index] =
-                    host.getString(R.string.capture_target_item, target.name, target.accountEmail);
+            labels[index] = host.ui.twoLine(target.name, target.accountEmail);
         }
         new android.app.AlertDialog.Builder(host)
                 .setTitle(R.string.event_field_calendar)

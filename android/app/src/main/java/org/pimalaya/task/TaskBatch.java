@@ -344,10 +344,7 @@ final class TaskBatch {
                                 for (int index = 0; index < targets.size(); index++) {
                                     EventStore.StoredCalendar calendar = targets.get(index);
                                     labels[index] =
-                                            host.getString(
-                                                    R.string.capture_target_item,
-                                                    calendar.name,
-                                                    calendar.accountEmail);
+                                            host.ui.twoLine(calendar.name, calendar.accountEmail);
                                 }
                                 TaskDialogs.pick(
                                         host,

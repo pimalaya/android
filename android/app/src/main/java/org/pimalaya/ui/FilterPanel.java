@@ -11,7 +11,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.AnimationUtils;
-import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -31,11 +30,11 @@ import org.pimalaya.R;
  * one-filter-panel).
  *
  * <p>The field's filter button unfolds the panel under the field, the two one
- * surface, and folds it back as Cancel does: one row per section naming its
- * value, a tap opening that section's checklist under it and closing any
- * other. Ticks edit a {@link Draft}; Apply keeps it and Cancel drops it, both
- * folding the panel. Folded, the criteria on stand as pills under the field,
- * a tap on one removing it at once. The list draws the panel on each render,
+ * surface, and folds it back: one row per section naming its value, a tap
+ * opening that section's checklist under it and closing any other. A tick
+ * applies at once. The criteria off their defaults stand as pills under the
+ * field, open or folded, a tap on one restoring its default: panel and pills
+ * show the one state. The list draws the panel on each render,
  * between {@link #begin} and {@link #end}.
  */
 public final class FilterPanel {
@@ -46,24 +45,6 @@ public final class FilterPanel {
         OFF,
     }
 
-    /**
-     * The list's filters as the panel edits them: a draft taken on opening,
-     * kept by Apply, dropped by Cancel.
-     */
-    public interface Draft {
-        /** The panel opens: the draft starts as the filters applied. */
-        void open();
-
-        /** Apply: the draft becomes the filters, the list follows. */
-        void apply();
-
-        /** Cancel: the draft is dropped. */
-        void cancel();
-
-        /** Reset: the draft goes back to the defaults, applied by Apply. */
-        void reset();
-    }
-
     private final Host host;
     private final ImageButton button;
     private final LinearLayout panel;
@@ -72,8 +53,6 @@ public final class FilterPanel {
 
     /** The list's render, run on every change the panel makes itself. */
     private final Runnable redraw;
-
-    private final Draft draft;
 
     private boolean unfolded;
 
@@ -88,24 +67,18 @@ public final class FilterPanel {
 
     private final Map<String, ImageView> chevrons = new HashMap<>();
 
-    /**
-     * The panel of {@code header}'s list, {@code redraw} its render, {@code
-     * draft} the filters it edits.
-     */
-    public FilterPanel(Host host, ListHeader header, Runnable redraw, Draft draft) {
+    /** The panel of {@code header}'s list, {@code redraw} its render. */
+    public FilterPanel(Host host, ListHeader header, Runnable redraw) {
         this.host = host;
         this.redraw = redraw;
-        this.draft = draft;
         button = header.filterButton();
         panel = header.filterPanel();
         pills = header.chips();
         pillsRow = header.chipsRow();
-        // NOTE: the button stays while the panel is open, and closes it then
-        // as Cancel does.
         button.setOnClickListener(
                 view -> {
                     if (unfolded) {
-                        fold(draft::cancel);
+                        fold();
                     } else {
                         unfold();
                     }
@@ -234,22 +207,29 @@ public final class FilterPanel {
         }
     }
 
-    /** A section of any number of choices, none on narrowing nothing. */
+    /**
+     * A section of any number of choices, none ticked meaning any; its value
+     * names the ones ticked, each standing as a pill.
+     */
     public void checks(
             String key, int name, String[] keys, int[] labels, Set<String> on, Runnable changed) {
         String[] texts = new String[labels.length];
         for (int index = 0; index < labels.length; index++) {
             texts[index] = host.getString(labels[index]);
         }
-        checks(key, name, keys, texts, on, changed);
+        checks(key, name, keys, texts, null, on, changed);
     }
 
-    /** A section of choices as {@link #checks}, labelled by text. */
+    /**
+     * A section of choices as {@link #checks}, labelled by text, {@code
+     * counts} trailing the rows, or null.
+     */
     public void checks(
             String key,
             int name,
             String[] keys,
             String[] labels,
+            String[] counts,
             Set<String> on,
             Runnable changed) {
         List<String> onLabels = new ArrayList<>();
@@ -262,17 +242,17 @@ public final class FilterPanel {
                 key,
                 name,
                 onLabels.isEmpty()
-                        ? host.getString(R.string.filter_all)
+                        ? host.getString(R.string.filter_any)
                         : String.join(", ", onLabels),
                 !onLabels.isEmpty(),
                 list -> {
                     for (int index = 0; index < keys.length; index++) {
                         String choice = keys[index];
-                        boolean ticked = on.contains(choice);
                         check(
                                 list,
                                 labels[index],
-                                ticked ? Box.ON : Box.OFF,
+                                counts == null ? null : counts[index],
+                                on.contains(choice) ? Box.ON : Box.OFF,
                                 false,
                                 0,
                                 () -> {
@@ -298,18 +278,16 @@ public final class FilterPanel {
 
     /**
      * A section of collections under their accounts ({@code byAccount}: an
-     * account, then each collection's id and name), {@code hidden} holding
-     * the ones unticked; an account's box ticks or clears them all. Its value
-     * and its one pill name what shows: all, the one collection, the one
-     * account whole, else how many of how many.
+     * account, then each collection's id and name), {@code on} holding the
+     * ones ticked, none meaning any; an account's box ticks or clears them
+     * all. Its value names the ones ticked, each standing as a pill.
      */
     public void collections(
             String key,
             int name,
             Map<String, Map<String, String>> byAccount,
-            Set<String> hidden,
+            Set<String> on,
             Runnable changed) {
-        List<String> shown = new ArrayList<>();
         Map<String, String> names = new LinkedHashMap<>();
         for (Map<String, String> collections : byAccount.values()) {
             names.putAll(collections);
@@ -317,37 +295,30 @@ public final class FilterPanel {
         if (names.isEmpty()) {
             return;
         }
-        for (String id : names.keySet()) {
-            if (!hidden.contains(id)) {
-                shown.add(id);
-            }
-        }
-        String value = host.getString(R.string.filter_all);
-        if (!hidden.isEmpty()) {
-            value = host.getString(R.string.filter_count_of, shown.size(), names.size());
-            if (shown.size() == 1) {
-                value = names.get(shown.get(0));
-            }
-            for (Map.Entry<String, Map<String, String>> account : byAccount.entrySet()) {
-                Set<String> ids = account.getValue().keySet();
-                if (!shown.isEmpty() && ids.containsAll(shown) && shown.containsAll(ids)) {
-                    value = account.getKey();
-                }
+        List<String> onNames = new ArrayList<>();
+        for (Map.Entry<String, String> collection : names.entrySet()) {
+            if (on.contains(collection.getKey())) {
+                onNames.add(collection.getValue());
             }
         }
         section(
                 key,
                 name,
-                value,
-                !hidden.isEmpty(),
+                onNames.isEmpty()
+                        ? host.getString(R.string.filter_any)
+                        : String.join(", ", onNames),
+                !onNames.isEmpty(),
                 list -> {
                     for (Map.Entry<String, Map<String, String>> account : byAccount.entrySet()) {
                         Set<String> ids = account.getValue().keySet();
-                        int off = 0;
+                        int ticked = 0;
                         for (String id : ids) {
-                            off += hidden.contains(id) ? 1 : 0;
+                            ticked += on.contains(id) ? 1 : 0;
                         }
-                        Box box = off == 0 ? Box.ON : off == ids.size() ? Box.OFF : Box.PARTIAL;
+                        Box box =
+                                ticked == 0
+                                        ? Box.OFF
+                                        : ticked == ids.size() ? Box.ON : Box.PARTIAL;
                         check(
                                 list,
                                 account.getKey(),
@@ -355,39 +326,41 @@ public final class FilterPanel {
                                 true,
                                 0,
                                 () -> {
-                                    if (box == Box.OFF) {
-                                        hidden.removeAll(ids);
+                                    if (box == Box.ON) {
+                                        on.removeAll(ids);
                                     } else {
-                                        hidden.addAll(ids);
+                                        on.addAll(ids);
                                     }
                                     changed.run();
                                 });
                         for (Map.Entry<String, String> collection :
                                 account.getValue().entrySet()) {
                             String id = collection.getKey();
-                            boolean unticked = hidden.contains(id);
                             check(
                                     list,
                                     collection.getValue(),
-                                    unticked ? Box.OFF : Box.ON,
+                                    on.contains(id) ? Box.ON : Box.OFF,
                                     false,
                                     host.dp(24),
                                     () -> {
-                                        if (!hidden.remove(id)) {
-                                            hidden.add(id);
+                                        if (!on.remove(id)) {
+                                            on.add(id);
                                         }
                                         changed.run();
                                     });
                         }
                     }
                 });
-        if (!hidden.isEmpty()) {
-            pill(
-                    value,
-                    () -> {
-                        hidden.clear();
-                        changed.run();
-                    });
+        for (Map.Entry<String, String> collection : names.entrySet()) {
+            String id = collection.getKey();
+            if (on.contains(id)) {
+                pill(
+                        collection.getValue(),
+                        () -> {
+                            on.remove(id);
+                            changed.run();
+                        });
+            }
         }
     }
 
@@ -465,46 +438,12 @@ public final class FilterPanel {
     }
 
     /**
-     * Ends a draw: the panel shown while unfolded, closed by Reset, Cancel
-     * and Apply; the pills and the button while folded, the button accented
-     * while {@code active}, the filters applied being off their defaults.
+     * Ends a draw: the panel shown while unfolded, the pills whenever any
+     * criterion is off its default, the button accented while {@code active}.
      */
     public void end(boolean active) {
-        panel.addView(divider());
-        LinearLayout actions = new LinearLayout(host);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        actions.setGravity(Gravity.CENTER_VERTICAL);
-        actions.setPadding(host.dp(8), host.dp(8), host.dp(12), host.dp(10));
-        actions.addView(
-                textButton(
-                        R.string.filter_reset,
-                        () -> {
-                            draft.reset();
-                            redraw.run();
-                        }));
-        actions.addView(new View(host), new LinearLayout.LayoutParams(0, 0, 1f));
-        actions.addView(textButton(android.R.string.cancel, () -> fold(draft::cancel)));
-        // NOTE: built from PrimaryButton alone, the theme's button style
-        // under it in a layout is missing: its centring and minimum sizes
-        // are set here.
-        Button apply = new Button(host, null, 0, R.style.PrimaryButton);
-        apply.setText(R.string.filter_apply);
-        apply.setTextColor(host.accentContrast());
-        apply.setGravity(Gravity.CENTER);
-        apply.setMinHeight(0);
-        apply.setMinimumHeight(0);
-        apply.setMinWidth(0);
-        apply.setMinimumWidth(0);
-        apply.setPadding(host.dp(20), 0, host.dp(20), 0);
-        apply.setOnClickListener(view -> fold(draft::apply));
-        LinearLayout.LayoutParams applyParams =
-                new LinearLayout.LayoutParams(wrap(), host.dp(40));
-        applyParams.setMarginStart(host.dp(4));
-        actions.addView(apply, applyParams);
-        panel.addView(actions);
-
         panel.setVisibility(unfolded ? View.VISIBLE : View.GONE);
-        pillsRow.setVisibility(!unfolded && pills.getChildCount() > 0 ? View.VISIBLE : View.GONE);
+        pillsRow.setVisibility(pills.getChildCount() > 0 ? View.VISIBLE : View.GONE);
         button.setImageTintList(
                 ColorStateList.valueOf(
                         host.resolveColor(
@@ -513,24 +452,21 @@ public final class FilterPanel {
                                         : android.R.attr.textColorPrimary)));
     }
 
-    /** Opens the panel on a draft of the filters, its height growing. */
+    /** Opens the panel, its height growing. */
     private void unfold() {
         if (folding != null) {
             return;
         }
-        draft.open();
         unfolded = true;
         redraw.run();
         folding = slide(panel, 0, heightOf(panel), () -> folding = null);
     }
 
-    /** Runs {@code close} (Apply or Cancel), then folds the panel away. */
-    private void fold(Runnable close) {
+    /** Folds the panel away, its height shrinking. */
+    private void fold() {
         if (folding != null) {
             return;
         }
-        close.run();
-        redraw.run();
         folding =
                 slide(
                         panel,
@@ -583,16 +519,6 @@ public final class FilterPanel {
                 });
         slide.start();
         return slide;
-    }
-
-    /** A borderless button of the panel's foot, in the accent. */
-    private Button textButton(int label, Runnable run) {
-        Button button = new Button(host, null, android.R.attr.borderlessButtonStyle);
-        button.setText(label);
-        button.setAllCaps(false);
-        button.setTextColor(host.resolveColor(android.R.attr.colorAccent));
-        button.setOnClickListener(view -> run.run());
-        return button;
     }
 
     /** A row of an open section: its glyph, accented while on. */

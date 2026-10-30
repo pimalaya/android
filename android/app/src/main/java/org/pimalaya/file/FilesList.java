@@ -79,7 +79,7 @@ public final class FilesList {
     private ListHeader header;
 
     /** The panel's sections: the folders shown, the kind, the media types. */
-    private static final String FOLDERS_SHOWN = "folders";
+    private static final String FOLDERS_SHOWN = "folders_on";
 
     private static final String SHOW = "show";
 
@@ -88,7 +88,7 @@ public final class FilesList {
     private static final String[] SHOWS = {"all", "folders", "attachments"};
 
     private static final int[] SHOW_LABELS = {
-        R.string.filter_all, R.string.chip_folders, R.string.chip_attachments,
+        R.string.filter_any, R.string.chip_folders, R.string.chip_attachments,
     };
 
     private static final String[] TYPE_KEYS = {"images", "pdfs", "documents"};
@@ -175,7 +175,7 @@ public final class FilesList {
                     render();
                 });
         filter = new ListFilter(host, "files", FOLDERS_SHOWN, SHOW, TYPES);
-        panel = new FilterPanel(host, header, this::render, filter);
+        panel = new FilterPanel(host, header, this::render);
         list.setAdapter(adapter);
         list.setOnItemClickListener(
                 (parent, view, position, id) -> {
@@ -240,7 +240,7 @@ public final class FilesList {
 
     /** The filter panel: the folders, then the kind, then the media types. */
     private void drawFilters() {
-        ListFilter.State edited = filter.edited();
+        ListFilter.State edited = filter.applied();
         Runnable changed =
                 () -> {
                     filter.save();
@@ -286,7 +286,8 @@ public final class FilesList {
             if (!row.attachment()) {
                 folderHeaders.put(row.section, row.collection);
             }
-            if (kept.set(FOLDERS_SHOWN).contains(row.collection.id)) {
+            Set<String> folders = kept.set(FOLDERS_SHOWN);
+            if (!folders.isEmpty() && !folders.contains(row.collection.id)) {
                 continue;
             }
             if (show.contains("folders") && row.attachment()

@@ -502,7 +502,10 @@ public class MainActivity extends Host
         }
         if (ACTION_CAPTURE.equals(intent.getAction())) {
             intent.setAction(Intent.ACTION_MAIN);
-            capture.capture();
+            // NOTE: a capture is a new task in the Inbox, on the page every
+            // task is written on, the Tasks list under it.
+            showInstant(Panels.TASKS);
+            taskPage.openNew(Panels.TASKS, org.pimalaya.client.Task.INBOX);
             return;
         }
         if (ACTION_INBOX.equals(intent.getAction())) {

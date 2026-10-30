@@ -107,7 +107,6 @@
     <string name="mail_chip_junk">Indésirables</string>
     <string name="mail_chip_archive">Archives</string>
     <string name="mail_chip_attachments">Pièces jointes</string>
-    <string name="chip_default">Par défaut</string>
     <string name="filter_title_of">Filtrer : %1$s</string>
     <string name="filter_close">Fermer le filtre</string>
     <string name="filter_default">Par défaut</string>
@@ -132,16 +131,15 @@
     <string name="calendar_search">Rechercher des événements</string>
     <string name="calendar_past_day">Passé · %1$s</string>
     <string name="filter_kind">Nature</string>
-    <string name="filter_kind_events">Événements</string>
-    <string name="filter_kind_journals">Entrées de journal</string>
     <string name="filter_when">Quand</string>
-    <string name="filter_upcoming">À venir</string>
-    <string name="filter_past">Passés</string>
     <string name="filter_time">Horaire</string>
     <string name="filter_all_day">Toute la journée</string>
     <string name="filter_timed">À une heure</string>
     <string name="filter_has">Avec</string>
     <string name="filter_location">Un lieu</string>
+    <string name="filter_from">Du %1$s</string>
+    <string name="filter_to">Au %1$s</string>
+    <string name="filter_none">Aucune</string>
     <string name="filter_email">Une adresse mail</string>
     <string name="filter_phone">Un téléphone</string>
     <string name="filter_address">Une adresse postale</string>
@@ -153,7 +151,7 @@
     <string name="filter_organisations">Organisations</string>
     <string name="filter_types">Type</string>
     <string name="filter_calendars">Agendas</string>
-    <string name="filter_all">Tout</string>
+    <string name="filter_any">Indifférent</string>
     <string name="filter_any_time">Peu importe</string>
     <string name="filter_due_before">Avant le</string>
     <string name="filter_due_on">Le</string>

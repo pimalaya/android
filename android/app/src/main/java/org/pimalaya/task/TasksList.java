@@ -63,13 +63,15 @@ public final class TasksList {
     static final String REVIEWED = "reviewed_at";
 
     /** Where the filters are kept across restarts, in {@link #PREFERENCES}. */
-    private static final String FILTER_LISTS = "filter_lists";
+    private static final String FILTER_STATES_ON = "filter_states_on";
 
-    private static final String FILTER_STATES = "filter_states";
-    private static final String FILTER_CATEGORIES = "filter_categories";
+    private static final String FILTER_CATEGORIES_ON = "filter_categories_on";
+
+    /** Under Categories, None: a task in no GTD list and carrying no category. */
+    private static final String NO_CATEGORY = " none";
     private static final String FILTER_DUE = "filter_due";
     private static final String FILTER_DAY = "filter_day";
-    private static final String FILTER_HIDDEN = "filter_hidden";
+    private static final String FILTER_CALENDARS_ON = "filter_calendars_on";
 
     /** The GTD lists Categories offers, reserved categories (GUIDE §17). */
     private static final String[] LISTS = {
@@ -105,9 +107,6 @@ public final class TasksList {
         R.string.filter_due_on,
         R.string.filter_due_after,
     };
-
-    /** The own categories Categories shows before "Show all". */
-    private static final int CATEGORIES_SHOWN = 6;
 
     private final Host host;
     private final TaskStore store;
@@ -149,18 +148,18 @@ public final class TasksList {
     private FilterPanel filters;
 
     /**
-     * What the filters keep: the ones applied to the rows, or a draft the
-     * panel edits until Apply.
+     * What the filters keep, the rows and the panel alike: the choices
+     * ticked, none meaning any.
      */
     private static final class Filter {
-        /** The GTD lists on, of {@link #LISTS}. */
-        final Set<String> lists = new LinkedHashSet<>();
+        /** The states ticked, of {@link #STATES}. */
+        final Set<String> statesOn = new LinkedHashSet<>();
 
-        /** The states on, of {@link #STATES}. */
-        final Set<String> states = new LinkedHashSet<>();
-
-        /** The own categories on, folded. */
-        final Set<String> categories = new LinkedHashSet<>();
+        /**
+         * The categories ticked: GTD lists ({@link #LISTS}), the person's
+         * own (folded) and {@link #NO_CATEGORY}.
+         */
+        final Set<String> categoriesOn = new LinkedHashSet<>();
 
         /** How Due compares, one of {@link #DUES}. */
         String dueMode = TaskOrder.DUE_ANY;
@@ -168,50 +167,31 @@ public final class TasksList {
         /** The day Due compares against. */
         LocalDate dueDay = LocalDate.now();
 
-        /** The calendars hidden from the view, by collection id. */
-        final Set<String> hidden = new HashSet<>();
-
-        Filter copy() {
-            Filter copy = new Filter();
-            copy.lists.addAll(lists);
-            copy.states.addAll(states);
-            copy.categories.addAll(categories);
-            copy.dueMode = dueMode;
-            copy.dueDay = dueDay;
-            copy.hidden.addAll(hidden);
-            return copy;
-        }
+        /** The calendars ticked, by collection id. */
+        final Set<String> calendarsOn = new HashSet<>();
 
         /** Every criterion back to its default, none narrowing. */
         void clear() {
-            lists.clear();
-            states.clear();
-            categories.clear();
+            statesOn.clear();
+            categoriesOn.clear();
             dueMode = TaskOrder.DUE_ANY;
-            hidden.clear();
+            calendarsOn.clear();
         }
 
         /** Whether any criterion narrows. */
         boolean active() {
-            return !lists.isEmpty()
-                    || !states.isEmpty()
-                    || !categories.isEmpty()
+            return !statesOn.isEmpty()
+                    || !categoriesOn.isEmpty()
                     || !TaskOrder.DUE_ANY.equals(dueMode)
-                    || !hidden.isEmpty();
+                    || !calendarsOn.isEmpty();
         }
     }
 
     /** The filters the rows follow, kept across restarts. */
     private final Filter applied = new Filter();
 
-    /** The filters the open panel edits, null while it is folded. */
-    private Filter draft;
-
     /** The settled search, lower-cased. */
     private String query = "";
-
-    /** Whether Categories lists every category, past {@link #CATEGORIES_SHOWN}. */
-    private boolean allCategories;
 
     /** The Inbox count of the last draw, for the bar's Clarify button. */
     private int inboxCount;
@@ -266,7 +246,7 @@ public final class TasksList {
                     query = settled;
                     render();
                 });
-        filters = new FilterPanel(host, header, this::render, new Drafted());
+        filters = new FilterPanel(host, header, this::render);
         restore();
 
         list.setAdapter(adapter);
@@ -340,6 +320,23 @@ public final class TasksList {
                 item,
                 new LinearLayout.LayoutParams(
                         0, host.getResources().getDimensionPixelSize(R.dimen.nav_height), 1f));
+    }
+
+    /** The tone of a selected row's card: the accent over the surface. */
+    private int selectedTone() {
+        int surface = host.getColor(R.color.surface);
+        int accent = host.resolveColor(android.R.attr.colorAccent);
+        float share = 0.22f;
+        return android.graphics.Color.rgb(
+                Math.round(
+                        android.graphics.Color.red(surface) * (1 - share)
+                                + android.graphics.Color.red(accent) * share),
+                Math.round(
+                        android.graphics.Color.green(surface) * (1 - share)
+                                + android.graphics.Color.green(accent) * share),
+                Math.round(
+                        android.graphics.Color.blue(surface) * (1 - share)
+                                + android.graphics.Color.blue(accent) * share));
     }
 
     /** Whether a selection is under way. */
@@ -433,49 +430,53 @@ public final class TasksList {
      * off; {@link Task#NEXT} for every open task.
      */
     public void show(String list) {
-        applied.lists.clear();
+        applied.statesOn.clear();
+        applied.statesOn.add(TaskOrder.TODO);
+        applied.statesOn.add(TaskOrder.PROGRESS);
+        applied.categoriesOn.clear();
         if (!Task.NEXT.equals(list)) {
-            applied.lists.add(list);
+            applied.categoriesOn.add(list);
         }
-        applied.states.clear();
-        applied.states.add(TaskOrder.TODO);
-        applied.states.add(TaskOrder.PROGRESS);
-        applied.categories.clear();
         applied.dueMode = TaskOrder.DUE_ANY;
-        applied.hidden.clear();
+        applied.calendarsOn.clear();
         save();
         reload();
     }
 
-    /** The one GTD list on, null for none or several. */
+    /**
+     * The one GTD list ticked when nothing else is in Categories, null
+     * otherwise: the Inbox, Waiting and Someday views.
+     */
     private String only() {
-        return applied.lists.size() == 1 ? applied.lists.iterator().next() : null;
+        if (applied.categoriesOn.size() != 1) {
+            return null;
+        }
+        String on = applied.categoriesOn.iterator().next();
+        return java.util.Arrays.asList(LISTS).contains(on) ? on : null;
     }
 
     /** Reads the filters kept by {@link #save}. */
     private void restore() {
         SharedPreferences kept = host.getSharedPreferences(PREFERENCES, 0);
-        applied.lists.addAll(kept.getStringSet(FILTER_LISTS, Set.of()));
-        applied.states.addAll(kept.getStringSet(FILTER_STATES, Set.of()));
-        applied.categories.addAll(kept.getStringSet(FILTER_CATEGORIES, Set.of()));
+        applied.statesOn.addAll(kept.getStringSet(FILTER_STATES_ON, Set.of()));
+        applied.categoriesOn.addAll(kept.getStringSet(FILTER_CATEGORIES_ON, Set.of()));
         applied.dueMode = kept.getString(FILTER_DUE, TaskOrder.DUE_ANY);
         long day = kept.getLong(FILTER_DAY, Long.MIN_VALUE);
         if (day != Long.MIN_VALUE) {
             applied.dueDay = LocalDate.ofEpochDay(day);
         }
-        applied.hidden.addAll(kept.getStringSet(FILTER_HIDDEN, Set.of()));
+        applied.calendarsOn.addAll(kept.getStringSet(FILTER_CALENDARS_ON, Set.of()));
     }
 
     /** Keeps the filters across restarts. */
     private void save() {
         host.getSharedPreferences(PREFERENCES, 0)
                 .edit()
-                .putStringSet(FILTER_LISTS, new HashSet<>(applied.lists))
-                .putStringSet(FILTER_STATES, new HashSet<>(applied.states))
-                .putStringSet(FILTER_CATEGORIES, new HashSet<>(applied.categories))
+                .putStringSet(FILTER_STATES_ON, new HashSet<>(applied.statesOn))
+                .putStringSet(FILTER_CATEGORIES_ON, new HashSet<>(applied.categoriesOn))
                 .putString(FILTER_DUE, applied.dueMode)
                 .putLong(FILTER_DAY, applied.dueDay.toEpochDay())
-                .putStringSet(FILTER_HIDDEN, new HashSet<>(applied.hidden))
+                .putStringSet(FILTER_CALENDARS_ON, new HashSet<>(applied.calendarsOn))
                 .apply();
     }
 
@@ -665,24 +666,25 @@ public final class TasksList {
     }
 
     /**
-     * Whether a to-do passes Categories: in any GTD list on or carrying any
-     * category on, compared folded; every to-do with none on.
+     * Whether a to-do passes Categories: any of its GTD lists and own
+     * categories (folded) ticked, {@link #NO_CATEGORY} standing for none,
+     * every to-do with none ticked.
      */
     private boolean inLists(Filter f, TaskStore.Stored stored) {
-        if (f.lists.isEmpty() && f.categories.isEmpty()) {
+        if (f.categoriesOn.isEmpty()) {
             return true;
         }
-        for (String list : f.lists) {
-            if (stored.task.in(list)) {
+        for (String item : itemsOf(stored)) {
+            if (f.categoriesOn.contains(item)) {
                 return true;
             }
         }
-        return !f.categories.isEmpty() && TaskOrder.carriesAny(stored, f.categories);
+        return false;
     }
 
-    /** Whether a to-do passes Status: its state on, or none on. */
+    /** Whether a to-do passes Status: its state ticked, or none is. */
     private boolean inStates(Filter f, TaskStore.Stored stored) {
-        return f.states.isEmpty() || f.states.contains(TaskOrder.stateOf(stored.task));
+        return f.statesOn.isEmpty() || f.statesOn.contains(TaskOrder.stateOf(stored.task));
     }
 
     /**
@@ -691,7 +693,9 @@ public final class TasksList {
      */
     private boolean narrowed(Filter f, TaskStore.Stored stored) {
         return TaskOrder.dueMatches(stored.task, f.dueMode, f.dueDay)
-                && (stored.calendar == null || !f.hidden.contains(stored.calendar.id))
+                && (stored.calendar == null
+                        || f.calendarsOn.isEmpty()
+                        || f.calendarsOn.contains(stored.calendar.id))
                 && searched(stored);
     }
 
@@ -854,261 +858,107 @@ public final class TasksList {
 
     /**
      * Draws the filter panel, Calendars, Status, Categories and Due, and the
-     * pills standing for what is on.
+     * pills standing for what is off its default.
      */
     private void drawFilters() {
-        Filter f = edited();
+        Filter f = applied;
         filters.begin();
         drawCalendars();
-        drawChoices(
+        String[] states = new String[STATES.length];
+        String[] counts = new String[STATES.length];
+        for (int index = 0; index < STATES.length; index++) {
+            String key = STATES[index];
+            states[index] = host.getString(STATE_LABELS[index]);
+            // NOTE: the closed states only grow, so they count nothing.
+            counts[index] =
+                    TaskOrder.TODO.equals(key) || TaskOrder.PROGRESS.equals(key)
+                            ? String.valueOf(
+                                    countWhere(
+                                            f,
+                                            stored ->
+                                                    key.equals(TaskOrder.stateOf(stored.task))
+                                                            && inLists(f, stored)))
+                            : null;
+        }
+        filters.checks(
                 "states",
                 R.string.filter_status,
                 STATES,
-                STATE_LABELS,
-                f.states,
-                // NOTE: the closed states only grow, so they count nothing.
-                key -> TaskOrder.TODO.equals(key) || TaskOrder.PROGRESS.equals(key),
-                key ->
-                        countWhere(
-                                f,
-                                stored ->
-                                        key.equals(TaskOrder.stateOf(stored.task))
-                                                && inLists(f, stored)));
+                states,
+                counts,
+                f.statesOn,
+                this::changed);
         drawCategories();
         drawDue();
         filters.end(applied.active());
     }
 
-    /** The filters the panel shows: its draft while open, else the applied. */
-    private Filter edited() {
-        return draft != null ? draft : applied;
-    }
-
-    /** The panel's draft, taken on opening, kept by Apply. */
-    private final class Drafted implements FilterPanel.Draft {
-        @Override
-        public void open() {
-            draft = applied.copy();
-        }
-
-        @Override
-        public void apply() {
-            Filter kept = draft;
-            draft = null;
-            applied.clear();
-            applied.lists.addAll(kept.lists);
-            applied.states.addAll(kept.states);
-            applied.categories.addAll(kept.categories);
-            applied.dueMode = kept.dueMode;
-            applied.dueDay = kept.dueDay;
-            applied.hidden.addAll(kept.hidden);
-            save();
-        }
-
-        @Override
-        public void cancel() {
-            draft = null;
-        }
-
-        @Override
-        public void reset() {
-            draft.clear();
-        }
-    }
-
     /**
-     * Categories: Inbox, Waiting and Someday, then every category a task
-     * carries, the ones on first, any number on; each but the Inbox counting
-     * its tasks under the other filters (the bar's Clarify says the Inbox
-     * holds items).
+     * Categories: Inbox, Waiting and Someday, every category a task carries,
+     * then No category, all ticked by default; each but the Inbox counts its
+     * tasks under the other filters (the bar's Clarify says the Inbox holds
+     * items).
      */
     private void drawCategories() {
-        Filter f = edited();
-        Map<String, String> every = new LinkedHashMap<>();
-        for (String name : TaskOrder.categories(all)) {
-            every.putIfAbsent(TaskOrder.fold(name), name);
+        Filter f = applied;
+        // NOTE: None first, for the tasks in no list and of no category.
+        Map<String, String> names = new LinkedHashMap<>();
+        names.put(NO_CATEGORY, host.getString(R.string.filter_none));
+        for (int index = 0; index < LISTS.length; index++) {
+            names.put(LISTS[index], host.getString(LIST_LABELS[index]));
         }
-        // NOTE: a category no task carries any more is turned off, so
+        for (String name : TaskOrder.categories(all)) {
+            names.putIfAbsent(TaskOrder.fold(name), name);
+        }
+        // NOTE: a category no task carries any more is unticked, so
         // nothing invisible narrows the lists; not before the first load,
         // which would drop the kept ones.
         if (loaded) {
-            f.categories.retainAll(every.keySet());
+            f.categoriesOn.retainAll(names.keySet());
         }
-
-        List<String> onLabels = new ArrayList<>();
-        for (int index = 0; index < LISTS.length; index++) {
-            if (f.lists.contains(LISTS[index])) {
-                onLabels.add(host.getString(LIST_LABELS[index]));
-            }
+        String[] keys = names.keySet().toArray(new String[0]);
+        String[] counts = new String[keys.length];
+        for (int index = 0; index < keys.length; index++) {
+            String key = keys[index];
+            Set<String> alone = Set.of(key);
+            counts[index] =
+                    Task.INBOX.equals(key)
+                            ? null
+                            : String.valueOf(
+                                    countWhere(
+                                            f,
+                                            stored ->
+                                                    inStates(f, stored)
+                                                            && itemsOf(stored).contains(key)));
         }
-        List<String> own = new ArrayList<>(f.categories);
-        for (String folded : f.categories) {
-            onLabels.add(every.getOrDefault(folded, folded));
-        }
-        for (String folded : every.keySet()) {
-            if (!f.categories.contains(folded)) {
-                own.add(folded);
-            }
-        }
-        String value =
-                onLabels.isEmpty()
-                        ? host.getString(R.string.filter_all)
-                        : onLabels.size() <= 2
-                                ? String.join(", ", onLabels)
-                                : host.getResources()
-                                        .getQuantityString(
-                                                R.plurals.filter_categories_count,
-                                                onLabels.size(),
-                                                onLabels.size());
-
-        filters.section(
+        filters.checks(
                 "categories",
                 R.string.filter_categories,
-                value,
-                !onLabels.isEmpty(),
-                list -> {
-                    for (int index = 0; index < LISTS.length; index++) {
-                        String key = LISTS[index];
-                        boolean ticked = f.lists.contains(key);
-                        filters.check(
-                                list,
-                                host.getString(LIST_LABELS[index]),
-                                Task.INBOX.equals(key)
-                                        ? null
-                                        : String.valueOf(
-                                                countWhere(
-                                                        f,
-                                                        stored ->
-                                                                stored.task.in(key)
-                                                                        && inStates(f, stored))),
-                                ticked ? FilterPanel.Box.ON : FilterPanel.Box.OFF,
-                                false,
-                                0,
-                                () -> {
-                                    if (ticked) {
-                                        f.lists.remove(key);
-                                    } else {
-                                        f.lists.add(key);
-                                    }
-                                    changed();
-                                });
-                    }
-                    int count =
-                            allCategories ? own.size() : Math.min(CATEGORIES_SHOWN, own.size());
-                    for (String folded : own.subList(0, count)) {
-                        boolean ticked = f.categories.contains(folded);
-                        Set<String> alone = Set.of(folded);
-                        filters.check(
-                                list,
-                                every.getOrDefault(folded, folded),
-                                String.valueOf(
-                                        countWhere(
-                                                f,
-                                                stored ->
-                                                        TaskOrder.carriesAny(stored, alone)
-                                                                && inStates(f, stored))),
-                                ticked ? FilterPanel.Box.ON : FilterPanel.Box.OFF,
-                                false,
-                                0,
-                                () -> {
-                                    if (ticked) {
-                                        f.categories.remove(folded);
-                                    } else {
-                                        f.categories.add(folded);
-                                    }
-                                    changed();
-                                });
-                    }
-                    if (count < own.size()) {
-                        filters.action(
-                                list,
-                                host.getString(R.string.filter_show_all, own.size()),
-                                () -> {
-                                    allCategories = true;
-                                    render();
-                                });
-                    }
-                });
-
-        for (int index = 0; index < LISTS.length; index++) {
-            String key = LISTS[index];
-            if (f.lists.contains(key)) {
-                filters.pill(
-                        host.getString(LIST_LABELS[index]),
-                        () -> {
-                            f.lists.remove(key);
-                            changed();
-                        });
-            }
-        }
-        for (String folded : new ArrayList<>(f.categories)) {
-            filters.pill(
-                    every.getOrDefault(folded, folded),
-                    () -> {
-                        f.categories.remove(folded);
-                        changed();
-                    });
-        }
+                keys,
+                names.values().toArray(new String[0]),
+                counts,
+                f.categoriesOn,
+                this::changed);
     }
 
     /**
-     * A section of checkboxes over {@code keys}, the ones on in {@code on},
-     * none on narrowing nothing; the ones {@code counted} say how many tasks
-     * they would list.
+     * What a task falls under in Categories: its GTD lists, its own
+     * categories folded, else {@link #NO_CATEGORY}.
      */
-    private void drawChoices(
-            String section,
-            int name,
-            String[] keys,
-            int[] labels,
-            Set<String> on,
-            java.util.function.Predicate<String> counted,
-            java.util.function.ToIntFunction<String> count) {
-        List<String> onLabels = new ArrayList<>();
-        for (int index = 0; index < keys.length; index++) {
-            if (on.contains(keys[index])) {
-                onLabels.add(host.getString(labels[index]));
+    private static List<String> itemsOf(TaskStore.Stored stored) {
+        List<String> items = new ArrayList<>();
+        for (String list : LISTS) {
+            if (stored.task.in(list)) {
+                items.add(list);
             }
         }
-        filters.section(
-                section,
-                name,
-                onLabels.isEmpty()
-                        ? host.getString(R.string.filter_all)
-                        : String.join(", ", onLabels),
-                !onLabels.isEmpty(),
-                list -> {
-                    for (int index = 0; index < keys.length; index++) {
-                        String key = keys[index];
-                        boolean ticked = on.contains(key);
-                        filters.check(
-                                list,
-                                host.getString(labels[index]),
-                                counted.test(key) ? String.valueOf(count.applyAsInt(key)) : null,
-                                ticked ? FilterPanel.Box.ON : FilterPanel.Box.OFF,
-                                false,
-                                0,
-                                () -> {
-                                    if (ticked) {
-                                        on.remove(key);
-                                    } else {
-                                        on.add(key);
-                                    }
-                                    changed();
-                                });
-                    }
-                });
-        for (int index = 0; index < keys.length; index++) {
-            String key = keys[index];
-            if (on.contains(key)) {
-                filters.pill(
-                        host.getString(labels[index]),
-                        () -> {
-                            on.remove(key);
-                            changed();
-                        });
-            }
+        for (String category : stored.task.categories()) {
+            items.add(TaskOrder.fold(category));
         }
+        if (items.isEmpty()) {
+            items.add(NO_CATEGORY);
+        }
+        return items;
     }
 
     /** The tasks {@code kept} keeps among those the other filters pass. */
@@ -1124,7 +974,7 @@ public final class TasksList {
 
     /** Due: any time, or before, on or after a day. */
     private void drawDue() {
-        Filter f = edited();
+        Filter f = applied;
         boolean on = !TaskOrder.DUE_ANY.equals(f.dueMode);
         String day =
                 Dates.date(
@@ -1174,7 +1024,7 @@ public final class TasksList {
 
     /** Asks for Due's day; clearing it turns Due off. */
     private void pickDueDay() {
-        Filter f = edited();
+        Filter f = applied;
         TaskDialogs.date(
                 host,
                 String.format(
@@ -1199,128 +1049,31 @@ public final class TasksList {
 
     /**
      * Calendars: every calendar the calendar filter syncs and that takes
-     * to-dos, then any other holding one, under their accounts, any of them
-     * hidden from this view alone.
+     * to-dos, then any other holding one, under their accounts; the ones
+     * ticked narrow this view alone, none meaning any.
      */
     private void drawCalendars() {
-        Filter f = edited();
+        Filter f = applied;
         List<EventStore.StoredCalendar> offered = new ArrayList<>(calendars);
         for (TaskStore.Stored stored : all) {
             if (stored.calendar != null) {
                 offered.add(stored.calendar);
             }
         }
-        Map<String, List<EventStore.StoredCalendar>> byAccount = new LinkedHashMap<>();
-        Map<String, String> names = new LinkedHashMap<>();
+        Map<String, Map<String, String>> byAccount = new LinkedHashMap<>();
+        Set<String> ids = new HashSet<>();
         for (EventStore.StoredCalendar calendar : offered) {
-            if (names.put(calendar.id, calendar.name) == null) {
+            if (ids.add(calendar.id)) {
                 byAccount
-                        .computeIfAbsent(calendar.accountEmail, account -> new ArrayList<>())
-                        .add(calendar);
+                        .computeIfAbsent(calendar.accountEmail, account -> new LinkedHashMap<>())
+                        .put(calendar.id, calendar.name);
             }
         }
         if (loaded) {
-            f.hidden.retainAll(names.keySet());
+            f.calendarsOn.retainAll(ids);
         }
-        if (names.isEmpty()) {
-            return;
-        }
-
-        String value = calendarsValue(byAccount, names);
-        filters.section(
-                "calendars",
-                R.string.filter_calendars,
-                value,
-                !f.hidden.isEmpty(),
-                list -> {
-                    for (Map.Entry<String, List<EventStore.StoredCalendar>> account :
-                            byAccount.entrySet()) {
-                        List<String> ids = new ArrayList<>();
-                        for (EventStore.StoredCalendar calendar : account.getValue()) {
-                            ids.add(calendar.id);
-                        }
-                        int hidden = 0;
-                        for (String id : ids) {
-                            hidden += f.hidden.contains(id) ? 1 : 0;
-                        }
-                        FilterPanel.Box box =
-                                hidden == 0
-                                        ? FilterPanel.Box.ON
-                                        : hidden == ids.size()
-                                                ? FilterPanel.Box.OFF
-                                                : FilterPanel.Box.PARTIAL;
-                        filters.check(
-                                list,
-                                account.getKey(),
-                                box,
-                                true,
-                                0,
-                                () -> {
-                                    if (box == FilterPanel.Box.OFF) {
-                                        f.hidden.removeAll(ids);
-                                    } else {
-                                        f.hidden.addAll(ids);
-                                    }
-                                    changed();
-                                });
-                        for (EventStore.StoredCalendar calendar : account.getValue()) {
-                            boolean hiddenOne = f.hidden.contains(calendar.id);
-                            filters.check(
-                                    list,
-                                    calendar.name,
-                                    hiddenOne ? FilterPanel.Box.OFF : FilterPanel.Box.ON,
-                                    false,
-                                    host.dp(24),
-                                    () -> {
-                                        if (hiddenOne) {
-                                            f.hidden.remove(calendar.id);
-                                        } else {
-                                            f.hidden.add(calendar.id);
-                                        }
-                                        changed();
-                                    });
-                        }
-                    }
-                });
-        if (!f.hidden.isEmpty()) {
-            filters.pill(
-                    value,
-                    () -> {
-                        f.hidden.clear();
-                        changed();
-                    });
-        }
-    }
-
-    /**
-     * What Calendars says: all, the one calendar shown, the one account
-     * shown whole, else how many of how many.
-     */
-    private String calendarsValue(
-            Map<String, List<EventStore.StoredCalendar>> byAccount, Map<String, String> names) {
-        Filter f = edited();
-        if (f.hidden.isEmpty()) {
-            return host.getString(R.string.filter_all);
-        }
-        List<String> shownIds = new ArrayList<>();
-        for (String id : names.keySet()) {
-            if (!f.hidden.contains(id)) {
-                shownIds.add(id);
-            }
-        }
-        if (shownIds.size() == 1) {
-            return names.get(shownIds.get(0));
-        }
-        for (Map.Entry<String, List<EventStore.StoredCalendar>> account : byAccount.entrySet()) {
-            List<String> ids = new ArrayList<>();
-            for (EventStore.StoredCalendar calendar : account.getValue()) {
-                ids.add(calendar.id);
-            }
-            if (!shownIds.isEmpty() && ids.containsAll(shownIds) && shownIds.containsAll(ids)) {
-                return account.getKey();
-            }
-        }
-        return host.getString(R.string.filter_count_of, shownIds.size(), names.size());
+        filters.collections(
+                "calendars", R.string.filter_calendars, byAccount, f.calendarsOn, this::changed);
     }
 
     private static int indexOf(String[] keys, String key) {
@@ -1346,7 +1099,13 @@ public final class TasksList {
      * on, else of nothing to do.
      */
     private int emptyOf() {
-        String state = applied.states.size() == 1 ? applied.states.iterator().next() : null;
+        List<String> ticked = new ArrayList<>();
+        for (String each : STATES) {
+            if (applied.statesOn.contains(each)) {
+                ticked.add(each);
+            }
+        }
+        String state = ticked.size() == 1 ? ticked.get(0) : null;
         switch (state != null ? state : only() != null ? only() : "") {
             case Task.INBOX:
                 return R.string.tasks_empty_inbox;
@@ -1469,7 +1228,7 @@ public final class TasksList {
             if (waiting && replied(row.stored)) {
                 badge.setText(R.string.task_reply_received);
                 badge.setVisibility(View.VISIBLE);
-            } else if (!applied.states.equals(Set.of(TaskOrder.PROGRESS))
+            } else if (!applied.statesOn.equals(Set.of(TaskOrder.PROGRESS))
                     && TaskOrder.underWay(task)) {
                 badge.setText(R.string.task_list_progress);
                 badge.setVisibility(View.VISIBLE);
@@ -1496,6 +1255,13 @@ public final class TasksList {
             ImageButton done = view.findViewById(R.id.task_done);
             boolean capture = Task.INBOX.equals(only()) && !closed;
             boolean picked = selected.containsKey(keyOf(row.stored));
+            // NOTE: a selected row's card takes the accent over its tone, so
+            // the selection reads at a glance, not by its box alone.
+            view.findViewById(R.id.row_card)
+                    .setBackgroundTintList(
+                            picked
+                                    ? android.content.res.ColorStateList.valueOf(selectedTone())
+                                    : null);
             done.setImageTintList(
                     android.content.res.ColorStateList.valueOf(
                             host.resolveColor(
