@@ -205,8 +205,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirSql<'local>(
     _class: JClass<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let statements: BTreeMap<&str, &str> = io_pimdir::sql::all().collect();
-        let json = to_string(&statements).unwrap_or_else(|err| error_json(err.to_string()));
+        let json =
+            to_string(&served_statements()).unwrap_or_else(|err| error_json(err.to_string()));
 
         Ok(env.new_string(json)?.into())
     })
@@ -224,8 +224,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirMigrations<'local>(
     _class: JClass<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let json =
-            to_string(io_pimdir::sql::MIGRATIONS).unwrap_or_else(|err| error_json(err.to_string()));
+        let json = to_string(served_migrations()).unwrap_or_else(|err| error_json(err.to_string()));
 
         Ok(env.new_string(json)?.into())
     })
@@ -289,4 +288,74 @@ struct DerivedReply<'a> {
     sort_key: &'a str,
     #[serde(serialize_with = "sorted")]
     summary: Option<SummaryJson>,
+}
+
+/// The statements `Native.pimdirSql` serves, keyed by their constant name.
+fn served_statements() -> BTreeMap<&'static str, &'static str> {
+    io_pimdir::sql::all().collect()
+}
+
+/// The migrations `Native.pimdirMigrations` serves, in order.
+fn served_migrations() -> &'static [&'static str] {
+    io_pimdir::sql::MIGRATIONS
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        env,
+        io::Write,
+        process::{Command, Stdio},
+    };
+
+    use crate::ffi::offline::{served_migrations, served_statements};
+
+    /// The SQLite of Android 8.0, the oldest the app runs on (flake.nix).
+    const FLOOR: &str = "3.18.2";
+
+    /// Every served migration runs, in order on a fresh database, and every
+    /// served statement prepares against the schema they leave, on the
+    /// floor build of PIMALAYA_SQLITE_FLOOR.
+    #[test]
+    fn served_sql_holds_to_the_sqlite_floor() {
+        let floor = env::var("PIMALAYA_SQLITE_FLOOR")
+            .expect("PIMALAYA_SQLITE_FLOOR is unset: run the tests through `nix develop`");
+
+        let migrations = served_migrations()
+            .iter()
+            .enumerate()
+            .map(|(index, sql)| ("migration", format!("{:04}", index + 1), *sql));
+        let statements = served_statements()
+            .into_iter()
+            .map(|(name, sql)| ("statement", name.to_owned(), sql));
+
+        let mut input = Vec::new();
+        for (kind, name, sql) in migrations.chain(statements) {
+            for part in [kind, name.as_str(), sql] {
+                input.extend_from_slice(part.as_bytes());
+                input.push(0);
+            }
+        }
+
+        let mut check = Command::new(format!("{floor}/bin/pimalaya-sqlite-floor-check"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("the floor check should start");
+        // NOTE: the check reads all its input before it writes a line.
+        check.stdin.take().unwrap().write_all(&input).unwrap();
+        let output = check.wait_with_output().unwrap();
+        let report = String::from_utf8_lossy(&output.stdout);
+
+        let mut lines = report.lines();
+        assert_eq!(lines.next(), Some(format!("sqlite {FLOOR}").as_str()));
+        let failures: Vec<&str> = lines.collect();
+        assert!(
+            output.status.success() && failures.is_empty(),
+            "{} failures on SQLite {FLOOR} ({}):\n{}",
+            failures.len(),
+            output.status,
+            failures.join("\n"),
+        );
+    }
 }

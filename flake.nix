@@ -149,6 +149,85 @@
             install -Dm644 libsqlite3x.so $out/lib/libsqlite3x.so
           '';
         };
+
+        # The oldest platform SQLite the app runs on: Android 8.0 (API 26)
+        # ships 3.18.2, built with the flags of AOSP external/sqlite
+        # dist/Android.mk on oreo-release (Android.bp came later):
+        # https://android.googlesource.com/platform/external/sqlite/+/refs/heads/oreo-release/dist/Android.mk
+        # FTS3 and FTS4 with the standard query syntax (no
+        # SQLITE_ENABLE_FTS3_PARENTHESIS), no FTS5, no JSON1; 3.18 predates
+        # SQLITE_DEFAULT_LEGACY_ALTER_TABLE. The device flags are taken
+        # whole, ICU included over nixpkgs' ICU4C. Dropped, being Android
+        # only: liblog, and libsqlite3_android, the functions and collators
+        # (PHONE_NUMBERS_EQUAL, _TOKENIZE, LOCALIZED, UNICODE) the framework
+        # registers on each connection, which no pimdir statement calls.
+        # AOSP's sqlite3.c is upstream 3.18.2 with an FTS3 pointer fix and
+        # the Android.patch hunks (fstat logging, fts1 and fts2 aliases
+        # under SQLITE_ENABLE_FTS3_BACKWARDS, fts3_tokenizer off), none of
+        # which changes what parses. sqlite.org has no 3.18.2 amalgamation
+        # zip, so the sources come from the autoconf tarball.
+        #
+        # bin/pimalaya-sqlite-floor-check (nix/sqlite-floor-check.c) runs
+        # the migrations and prepares the statements the bridge serves on
+        # it, for rust/src/ffi/offline.rs's floor test; bin/sqlite3 is the
+        # shell of the same build, lib/libsqlite3.so the library.
+        sqliteFloorVersion = "3.18.2";
+        sqliteFloor = pkgs.stdenv.mkDerivation {
+          pname = "sqlite-floor";
+          version = sqliteFloorVersion;
+          src = pkgs.fetchurl {
+            url = "https://www.sqlite.org/2017/sqlite-autoconf-3180200.tar.gz";
+            sha256 = "1fn188cpk8rl5n6f1jslyz2zbvvhap44m6ai1icmk98qm0p24h0d";
+          };
+          buildInputs = [ pkgs.icu ];
+          dontConfigure = true;
+          buildPhase = ''
+            flags="-DNDEBUG=1 -DHAVE_USLEEP=1 -DSQLITE_HAVE_ISNAN \
+              -DSQLITE_DEFAULT_JOURNAL_SIZE_LIMIT=1048576 -DSQLITE_THREADSAFE=2 \
+              -DSQLITE_TEMP_STORE=3 -DSQLITE_POWERSAFE_OVERWRITE=1 \
+              -DSQLITE_DEFAULT_FILE_FORMAT=4 -DSQLITE_DEFAULT_AUTOVACUUM=1 \
+              -DSQLITE_ENABLE_MEMORY_MANAGEMENT=1 -DSQLITE_ENABLE_FTS3 \
+              -DSQLITE_ENABLE_FTS3_BACKWARDS -DSQLITE_ENABLE_FTS4 \
+              -DSQLITE_OMIT_BUILTIN_TEST -DSQLITE_OMIT_COMPILEOPTION_DIAGS \
+              -DSQLITE_OMIT_LOAD_EXTENSION \
+              -DSQLITE_DEFAULT_FILE_PERMISSIONS=0600 -DSQLITE_SECURE_DELETE \
+              -DSQLITE_ENABLE_ICU -DUSE_PREAD64 -Dfdatasync=fdatasync \
+              -DHAVE_MALLOC_H=1 -DHAVE_MALLOC_USABLE_SIZE \
+              -DHAVE_POSIX_FALLOCATE=1 -O2 -fPIC -I."
+            libs="-licui18n -licuuc -ldl -lpthread -lm"
+
+            $CC $flags -c sqlite3.c -o sqlite3.o
+            $CC -shared -o libsqlite3.so sqlite3.o $libs
+            $CC $flags shell.c sqlite3.o -o sqlite3 $libs
+            $CC -O2 -Wall -Werror -I. ${./nix/sqlite-floor-check.c} sqlite3.o \
+              -o pimalaya-sqlite-floor-check $libs
+          '';
+          installPhase = ''
+            install -Dm644 libsqlite3.so $out/lib/libsqlite3.so
+            install -Dm644 sqlite3.h $out/include/sqlite3.h
+            install -Dm755 sqlite3 $out/bin/sqlite3
+            install -Dm755 pimalaya-sqlite-floor-check \
+              $out/bin/pimalaya-sqlite-floor-check
+          '';
+          # NOTE: the flags are proven, not trusted: the version, FTS4 and
+          # the standard query syntax (AND a term, not an operator) in, FTS5
+          # and JSON out.
+          doInstallCheck = true;
+          installCheckPhase = ''
+            sql=$out/bin/sqlite3
+            test "$($sql :memory: 'SELECT sqlite_version();')" = ${sqliteFloorVersion}
+            test "$($sql :memory: "CREATE VIRTUAL TABLE t USING fts4(x);
+              INSERT INTO t VALUES('a b');
+              SELECT count(*) FROM t WHERE t MATCH 'a AND b';")" = 0
+            for absent in 'CREATE VIRTUAL TABLE t USING fts5(x);' \
+              "SELECT json('{}');"; do
+              if $sql :memory: "$absent" 2>/dev/null; then
+                echo "the floor build accepts: $absent" >&2
+                exit 1
+              fi
+            done
+          '';
+        };
       in
       {
         devShells.default = pkgs.mkShell {
@@ -168,6 +247,9 @@
           ANDROID_NDK_HOME = "${sdkRoot}/ndk/${ndkVersion}";
           JAVA_HOME = pkgs.jdk17.home;
           PIMALAYA_SQLITE_HOST = "${sqliteHost}/lib";
+          # NOTE: an env var rather than a build input, so 3.18's sqlite3.h
+          # and libsqlite3.so never reach the compiler's search paths.
+          PIMALAYA_SQLITE_FLOOR = "${sqliteFloor}";
 
           # AGP ships a Maven aapt2 dynamically linked for generic Linux,
           # which cannot run on NixOS. The override must reach the Gradle
