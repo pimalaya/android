@@ -23,6 +23,9 @@ opt-level = "s"
 # NOTE: the std store, for the tests running the real sync engine and store
 # over a fake provider; the bridge itself compiles no SQLite.
 io-pimdir = { version = "0.8", features = ["client", "vendored"] }
+# NOTE: the canonical statements and the app's shape run side by side on
+# one SQLite (offline/shape/tests.rs), io-pimdir's own.
+rusqlite = { version = "0.41", default-features = false, features = ["bundled"] }
 tempfile = { version = "3", default-features = false }
 
 [dependencies]

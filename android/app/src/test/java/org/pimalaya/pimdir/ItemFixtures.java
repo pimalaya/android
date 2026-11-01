@@ -94,12 +94,16 @@ public final class ItemFixtures {
         PimdirSummary.write(db, collection, row.linkId, row.summary);
         if (row.revision != null) {
             db.execSQL(
+                    "UPDATE bindings SET base_revision = ?, base_present = 1"
+                            + " WHERE collection = ? AND link_id = ? AND source = ?",
+                    new Object[] {row.revision, collection, row.linkId, PimdirStorage.SERVER});
+            db.execSQL(
                     "INSERT INTO bindings(collection, link_id, source, handle, base_revision,"
-                            + " base_present) VALUES(?, ?, ?, ?, ?, 1)"
-                            + " ON CONFLICT(collection, link_id, source) DO UPDATE SET"
-                            + " base_revision = excluded.base_revision, base_present = 1",
+                            + " base_present) SELECT ?, ?, ?, ?, ?, 1 WHERE NOT EXISTS (SELECT 1"
+                            + " FROM bindings WHERE collection = ? AND link_id = ? AND source = ?)",
                     new Object[] {
-                        collection, row.linkId, PimdirStorage.SERVER, row.linkId, row.revision
+                        collection, row.linkId, PimdirStorage.SERVER, row.linkId, row.revision,
+                        collection, row.linkId, PimdirStorage.SERVER
                     });
         }
         items.adjustRefcount(db, previous, hash);
@@ -160,8 +164,7 @@ public final class ItemFixtures {
             throw new IllegalStateException("Could not store the body " + hash, error);
         }
         db.execSQL(
-                "INSERT INTO objects(hash, size, refcount) VALUES(?, ?, 0)"
-                        + " ON CONFLICT(hash) DO NOTHING",
+                "INSERT OR IGNORE INTO objects(hash, size, refcount) VALUES(?, ?, 0)",
                 new Object[] {hash, bytes.length});
     }
 }

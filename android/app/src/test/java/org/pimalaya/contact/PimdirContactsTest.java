@@ -68,14 +68,16 @@ public class PimdirContactsTest {
     private void bind(String collection, String linkId, String handle, String revision) {
         String object = objectOf(collection, linkId);
         db.execSQL(
+                "UPDATE bindings SET handle = ?, base_object = ?, base_revision = ?,"
+                        + " base_present = 1"
+                        + " WHERE collection = ? AND link_id = ? AND source = 'server'",
+                new Object[] {handle, object, revision, collection, linkId});
+        db.execSQL(
                 "INSERT INTO bindings(collection, link_id, source, handle, base_object,"
-                        + " base_revision, base_present) VALUES(?, ?, 'server', ?, ?, ?, 1)"
-                        + " ON CONFLICT(collection, link_id, source) DO UPDATE SET"
-                        + " handle = excluded.handle,"
-                        + " base_object = excluded.base_object,"
-                        + " base_revision = excluded.base_revision,"
-                        + " base_present = 1",
-                new Object[] {collection, linkId, handle, object, revision});
+                        + " base_revision, base_present) SELECT ?, ?, 'server', ?, ?, ?, 1"
+                        + " WHERE NOT EXISTS (SELECT 1 FROM bindings WHERE collection = ?"
+                        + " AND link_id = ? AND source = 'server')",
+                new Object[] {collection, linkId, handle, object, revision, collection, linkId});
         db.execSQL(
                 "UPDATE objects SET refcount = refcount + 1 WHERE hash = ?",
                 new Object[] {object});
@@ -242,8 +244,7 @@ public class PimdirContactsTest {
     private String storeBody(String body) {
         String hash = PimdirHash.of(body);
         db.execSQL(
-                "INSERT INTO objects(hash, size, refcount) VALUES(?, ?, 1)"
-                        + " ON CONFLICT(hash) DO NOTHING",
+                "INSERT OR IGNORE INTO objects(hash, size, refcount) VALUES(?, ?, 1)",
                 new Object[] {hash, body.length()});
         return hash;
     }

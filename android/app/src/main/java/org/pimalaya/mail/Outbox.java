@@ -12,6 +12,7 @@ import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.PimdirSql;
 import org.pimalaya.mail.MailStore.StoredMessage;
 import org.pimalaya.pimdir.PimdirAccount;
+import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirItems;
 import org.pimalaya.pimdir.PimdirQueue;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -213,14 +214,10 @@ public final class Outbox {
 
         List<Stranded> stranded = new ArrayList<>();
         try (Cursor cursor =
-                items.readable()
-                        .rawQuery(
-                                "SELECT i.link_id, i.sort_key, s.subject FROM items i"
-                                        + " LEFT JOIN mail_summary s ON s.collection = i.collection"
-                                        + " AND s.link_id = i.link_id"
-                                        + " WHERE i.collection = ? AND i.deleted = 0"
-                                        + " ORDER BY i.sort_key ASC",
-                                new String[] {collection})) {
+                PimdirDb.query(
+                        items.readable(),
+                        "LIST_LIVE_MAIL",
+                        PimdirSql.values("collection", collection))) {
             while (cursor.moveToNext()) {
                 stranded.add(
                         new Stranded(

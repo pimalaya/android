@@ -10,6 +10,7 @@ import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Flags;
+import org.pimalaya.client.PimdirSql;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirItems;
@@ -18,6 +19,7 @@ import org.pimalaya.pimdir.PimdirSummary;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The contacts store, on the pimdir tables.
@@ -95,17 +97,10 @@ public final class PimdirContacts {
     public List<Indexed> list(String collection) {
         SQLiteDatabase db = items.readable();
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT i.link_id, i.object_hash, b.conflicted,"
-                                + " b.conflict_object, b.handle, b.base_revision,"
-                                + " i.conflicted, i.conflict_object"
-                                + " FROM items i"
-                                + " LEFT JOIN bindings b ON b.collection = i.collection"
-                                + " AND b.link_id = i.link_id AND b.source = ?"
-                                + " WHERE i.collection = ? AND i.deleted = 0"
-                                + " AND i.retained_at IS NULL AND i.object_hash IS NOT NULL"
-                                + " ORDER BY i.sort_key",
-                        new String[] {SERVER, collection})) {
+                PimdirDb.query(
+                        db,
+                        "LIST_CARDS",
+                        PimdirSql.values("source", SERVER, "collection", collection))) {
             List<Indexed> cards = new ArrayList<>(cursor.getCount());
             while (cursor.moveToNext()) {
                 Card card =
@@ -176,11 +171,10 @@ public final class PimdirContacts {
     /** Whether the collection holds the card, staged removals included. */
     private boolean held(String collection, String linkId) {
         try (Cursor cursor =
-                items.readable()
-                        .rawQuery(
-                                "SELECT 1 FROM items WHERE collection = ? AND link_id = ?"
-                                        + " AND retained_at IS NULL",
-                                new String[] {collection, linkId})) {
+                PimdirDb.query(
+                        items.readable(),
+                        "ITEM_UNRETAINED",
+                        PimdirSql.values("collection", collection, "link_id", linkId))) {
             return cursor.moveToFirst();
         }
     }
@@ -212,14 +206,10 @@ public final class PimdirContacts {
         List<String[]> stale = new ArrayList<>();
 
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT i.collection, i.link_id, i.object_hash FROM items i"
-                                + " JOIN collections c ON c.id = i.collection"
-                                + " LEFT JOIN contact_summary s ON s.collection = i.collection"
-                                + " AND s.link_id = i.link_id"
-                                + " WHERE c.kind = ? AND i.object_hash IS NOT NULL"
-                                + " AND s.link_id IS NULL",
-                        new String[] {PimdirSummary.CONTACT})) {
+                PimdirDb.query(
+                        db,
+                        "ITEMS_WITHOUT_SUMMARY",
+                        PimdirSql.values("kind", PimdirSummary.CONTACT))) {
             while (cursor.moveToNext()) {
                 stale.add(
                         new String[] {
@@ -240,9 +230,13 @@ public final class PimdirContacts {
                 }
                 CardIndex index = indexOf(body);
                 PimdirSummary.write(db, row[0], row[1], index.summary());
-                db.execSQL(
-                        "UPDATE items SET sort_key = ? WHERE collection = ? AND link_id = ?",
-                        new Object[] {index.sortKey(), row[0], row[1]});
+                PimdirDb.exec(
+                        db,
+                        "SET_SORT_KEY",
+                        PimdirSql.values(
+                                "sort_key", index.sortKey(),
+                                "collection", row[0],
+                                "link_id", row[1]));
             }
             db.setTransactionSuccessful();
         } finally {
@@ -257,10 +251,7 @@ public final class PimdirContacts {
     List<String> collectionsOf(String linkId) {
         SQLiteDatabase db = items.readable();
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT collection FROM items WHERE link_id = ? AND deleted = 0"
-                                + " AND retained_at IS NULL",
-                        new String[] {linkId})) {
+                PimdirDb.query(db, "LIVE_COLLECTIONS_OF", PimdirSql.values("link_id", linkId))) {
             List<String> collections = new ArrayList<>(cursor.getCount());
             while (cursor.moveToNext()) {
                 collections.add(cursor.getString(0));
@@ -286,10 +277,10 @@ public final class PimdirContacts {
         db.beginTransaction();
         try {
             if (items.knows(db, target, linkId)) {
-                db.execSQL(
-                        "UPDATE items SET deleted = 0, retained_at = NULL, retained_by = NULL"
-                                + " WHERE collection = ? AND link_id = ?",
-                        new Object[] {target, linkId});
+                PimdirDb.exec(
+                        db,
+                        "REVIVE_ITEM",
+                        PimdirSql.values("collection", target, "link_id", linkId));
             } else {
                 copy(db, from, target, linkId);
             }
@@ -318,7 +309,8 @@ public final class PimdirContacts {
                         copy(db, collection, local, linkId);
                     }
                 }
-                db.execSQL("DELETE FROM collections WHERE id = ?", new Object[] {collection});
+                PimdirDb.exec(
+                        db, "DELETE_COLLECTION", PimdirSql.values("collection", collection));
             }
             items.collectGarbage(db);
             db.setTransactionSuccessful();
@@ -339,10 +331,10 @@ public final class PimdirContacts {
         String object;
         List<String> flags;
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT i.object_hash, " + PimdirItems.flagsOf("i") + " FROM items i"
-                                + " WHERE i.collection = ? AND i.link_id = ?",
-                        new String[] {from, linkId})) {
+                PimdirDb.query(
+                        db,
+                        "ITEM_OBJECT_FLAGS",
+                        PimdirSql.values("collection", from, "link_id", linkId))) {
             if (!cursor.moveToFirst()) {
                 return;
             }
@@ -351,13 +343,15 @@ public final class PimdirContacts {
         }
 
         CardIndex index = indexOf(items.body(object));
-        db.execSQL(
-                "INSERT INTO items(collection, link_id, seq, flags_known, object_hash,"
-                        + " sort_key, level) VALUES(?, ?, ?, 1, ?, ?, ?)",
-                new Object[] {
-                    target, linkId, PimdirItems.seqFor(db, target, linkId), object,
-                    index.sortKey(), PimdirItems.FULL
-                });
+        Map<String, Object> row = PimdirSql.values("collection", target, "link_id", linkId);
+        row.put("seq", PimdirItems.seqFor(db, target, linkId));
+        row.put("flags_known", 1);
+        row.put("object_hash", object);
+        row.put("sort_key", index.sortKey());
+        row.put("level", PimdirItems.FULL);
+        row.put("deleted", 0);
+        row.put("conflicted", 0);
+        PimdirDb.exec(db, "INSERT_ITEM", row);
         PimdirItems.writeFlags(db, target, linkId, flags);
         PimdirSummary.write(db, target, linkId, index.summary());
         items.adjustRefcount(db, null, object);
@@ -366,11 +360,10 @@ public final class PimdirContacts {
     /** Whether the placement is neither staged for deletion nor retained. */
     private static boolean live(SQLiteDatabase db, String collection, String linkId) {
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT 1 FROM items WHERE collection = ? AND link_id = ?"
-                                + " AND deleted = 0 AND retained_at IS NULL"
-                                + " AND object_hash IS NOT NULL",
-                        new String[] {collection, linkId})) {
+                PimdirDb.query(
+                        db,
+                        "ITEM_LIVE_HELD",
+                        PimdirSql.values("collection", collection, "link_id", linkId))) {
             return cursor.moveToFirst();
         }
     }

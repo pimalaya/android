@@ -19,16 +19,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Pattern;
 
 /**
  * The pimdir store's database, on the SQLite the app bundles.
  *
- * <p>Schema from io-pimdir over JNI ({@link PimdirSql}), never transcribed.
- * Bundled SQLite for its JSON1 and the statements the app still writes by
- * hand. One store for every account and kind, at storage-draft-08: a store
- * of another draft is refused, never reconciled nor migrated ({@link
- * #refusal}), and the app reinstalled.
+ * <p>Schema and statements over JNI ({@link PimdirSql}), never transcribed:
+ * io-pimdir's schema and the app's shape of the statements, which SQLite
+ * 3.18 (Android 8.0) runs. One store for every account and kind, at
+ * storage-draft-08: a store of another draft is refused, never reconciled
+ * nor migrated ({@link #refusal}), and the app reinstalled.
  */
 public final class PimdirDb extends SQLiteOpenHelper {
     /** The store directory under the app's private files. */
@@ -138,11 +137,12 @@ public final class PimdirDb extends SQLiteOpenHelper {
                         null,
                         SQLiteDatabase.OPEN_READONLY);
         try {
-            try (Cursor cursor = db.rawQuery("PRAGMA user_version", null)) {
+            try (Cursor cursor = query(db, "STORE_USER_VERSION", Map.of())) {
                 facts.put("userVersion", cursor.moveToFirst() ? cursor.getLong(0) : 0);
             }
-            facts.put("objects", new JSONObject(objects(db)));
-            JSONObject meta = meta(db);
+            Map<String, String> objects = objects(db);
+            facts.put("objects", new JSONObject(objects));
+            JSONObject meta = objects.containsKey("store_meta") ? meta(db) : null;
             if (meta != null) {
                 facts.put("meta", meta);
             }
@@ -154,46 +154,29 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * The {@code store_meta} row's columns the check reads, each left out
-     * where the store lacks it; null without the table or the row.
+     * The {@code store_meta} row of a database holding the table, by column
+     * name, NULL and binary values left out for the check to read the ones
+     * it knows; null without the row.
      */
     private static JSONObject meta(SQLiteDatabase db) throws JSONException {
-        Map<String, String> columns = new LinkedHashMap<>();
-        columns.put("format", "format");
-        columns.put("format_version", "formatVersion");
-        columns.put("version", "version");
-        columns.put("hash_algo", "hashAlgo");
-        columns.put("sync_version", "syncVersion");
-
-        StringBuilder select = new StringBuilder();
-        try (Cursor cursor =
-                db.rawQuery("SELECT name FROM pragma_table_info('store_meta')", null)) {
-            while (cursor.moveToNext()) {
-                String column = cursor.getString(0);
-                if (columns.containsKey(column)) {
-                    select.append(select.length() == 0 ? "" : ", ").append(column);
-                }
-            }
-        }
-        if (select.length() == 0) {
-            return null;
-        }
-
-        try (Cursor cursor =
-                db.rawQuery("SELECT " + select + " FROM store_meta WHERE id = 1", null)) {
+        try (Cursor cursor = query(db, "STORE_META_ROW", Map.of())) {
             if (!cursor.moveToFirst()) {
                 return null;
             }
             JSONObject meta = new JSONObject();
             for (int index = 0; index < cursor.getColumnCount(); index++) {
-                if (cursor.isNull(index)) {
-                    continue;
-                }
-                String key = columns.get(cursor.getColumnName(index));
-                if ("version".equals(key)) {
-                    meta.put(key, cursor.getLong(index));
-                } else {
-                    meta.put(key, cursor.getString(index));
+                switch (cursor.getType(index)) {
+                    case Cursor.FIELD_TYPE_INTEGER:
+                        meta.put(cursor.getColumnName(index), cursor.getLong(index));
+                        break;
+                    case Cursor.FIELD_TYPE_FLOAT:
+                        meta.put(cursor.getColumnName(index), cursor.getDouble(index));
+                        break;
+                    case Cursor.FIELD_TYPE_STRING:
+                        meta.put(cursor.getColumnName(index), cursor.getString(index));
+                        break;
+                    default:
+                        break;
                 }
             }
             return meta;
@@ -207,10 +190,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
     private static Map<String, String> objects(SQLiteDatabase db) {
         Map<String, String> objects = new LinkedHashMap<>();
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL"
-                                + " AND name NOT LIKE 'sqlite_%' AND name <> ?",
-                        new String[] {PLATFORM_TABLE})) {
+                query(db, "STORE_OBJECTS", PimdirSql.values("platform_table", PLATFORM_TABLE))) {
             while (cursor.moveToNext()) {
                 objects.put(cursor.getString(0), cursor.getString(1));
             }
@@ -291,7 +271,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
         meta.put("version", identity.optLong("version", 1));
         meta.put("derivation", identity.optLong("derivation"));
         PimdirSql.Bound init = PimdirSql.bind("INIT_STORE_META", meta);
-        db.execSQL(init.sql, init.args);
+        changed(db, init);
     }
 
     @Override
@@ -314,7 +294,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
         // NOTE: a database takes its vacuum mode only while it holds no
         // table (STORAGE §4.1), so a fresh store's is set before onCreate.
         if (objects(db).isEmpty()) {
-            pragma(db, "PRAGMA auto_vacuum = INCREMENTAL");
+            pragma(db, "AUTO_VACUUM_INCREMENTAL");
         }
         // NOTE: SQLite leaves foreign keys off and the schema's cascades
         // (bindings with items, items with collections) rely on them.
@@ -345,17 +325,17 @@ public final class PimdirDb extends SQLiteOpenHelper {
         // inside a transaction.
         db.beginTransaction();
         try {
-            pragma(db, "PRAGMA secure_delete = ON");
-            pragma(db, "PRAGMA trusted_schema = OFF");
+            pragma(db, "SECURE_DELETE_ON");
+            pragma(db, "TRUSTED_SCHEMA_OFF");
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
         }
     }
 
-    /** Runs a pragma, whether or not it answers a row. */
-    private static void pragma(SQLiteDatabase db, String pragma) {
-        try (Cursor cursor = db.rawQuery(pragma, null)) {
+    /** Runs a pragma by its name, whether or not it answers a row. */
+    private static void pragma(SQLiteDatabase db, String name) {
+        try (Cursor cursor = query(db, name, Map.of())) {
             cursor.moveToFirst();
         }
     }
@@ -366,7 +346,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
         values.put("collection", collection);
         values.put("role", PimdirCollections.ATTACHMENTS_ROLE);
         PimdirSql.Bound bound = PimdirSql.bind("SET_COLLECTION_ROLE", values);
-        db.execSQL(bound.sql, bound.args);
+        changed(db, bound);
     }
 
     /**
@@ -406,7 +386,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * Runs a canonical read and answers its cursor, its lists bound through
+     * Runs a read and answers its cursor, its lists bound through
      * {@code temp.param} first (STORAGE §4.4).
      *
      * <p>A read with no list streams as {@link #typed} does; one with lists
@@ -414,6 +394,9 @@ public final class PimdirDb extends SQLiteOpenHelper {
      * table being per connection, and answered as a copy.
      */
     public static Cursor query(SQLiteDatabase db, PimdirSql.Bound bound) {
+        if (!bound.steps.isEmpty()) {
+            return steps(db, bound, true).rows;
+        }
         if (bound.params.isEmpty()) {
             return typed(db, bound.sql, bound.args);
         }
@@ -459,7 +442,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * Runs a canonical read, its lists bound through {@code temp.param}
+     * Runs a read, its lists bound through {@code temp.param}
      * (STORAGE §4.4), and hands its cursor to {@code rows}.
      *
      * <p>The table is per connection, so the lists and the read share one:
@@ -468,6 +451,11 @@ public final class PimdirDb extends SQLiteOpenHelper {
      */
     public static <T> T read(SQLiteDatabase db, PimdirSql.Bound bound, Rows<T> rows)
             throws JSONException {
+        if (!bound.steps.isEmpty()) {
+            try (Cursor cursor = steps(db, bound, true).rows) {
+                return rows.read(cursor);
+            }
+        }
         if (bound.params.isEmpty()) {
             try (Cursor cursor = typed(db, bound.sql, bound.args)) {
                 return rows.read(cursor);
@@ -500,7 +488,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
      * then {@code bind_param} for each value in order.
      */
     private static void params(SQLiteDatabase db, PimdirSql.Bound bound) {
-        db.execSQL(PimdirSql.split(PimdirSql.of("CREATE_PARAM"))[0]);
+        db.execSQL(PimdirSql.bind("CREATE_PARAM", Map.of()).sql);
         db.execSQL(PimdirSql.bind("CLEAR_PARAM", Map.of()).sql);
         PimdirSql.Bound insert = PimdirSql.bind("BIND_PARAM", Map.of());
         try (SQLiteStatement statement = db.compileStatement(insert.sql)) {
@@ -520,15 +508,23 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * Runs a canonical write, {@code RETURNING} dropped; answers rows changed.
+     * Runs a write by its name ({@link PimdirSql#bind}); answers rows changed.
      *
      * <p>Never through a cursor: a refill of its 2 MB window reruns the
-     * statement, so a {@code DELETE ... RETURNING} deletes again, its later
-     * rows lost. Its lists are bound first, in the caller's transaction or
-     * one of its own.
+     * statement. Its lists are bound first, in the caller's transaction or
+     * one of its own; a name running several statements runs its writes
+     * alone, the read standing for a {@code RETURNING} left out.
      */
+    public static int exec(SQLiteDatabase db, String name, Map<String, Object> values) {
+        return changed(db, PimdirSql.bind(name, values));
+    }
+
+    /** {@link #exec} of a statement already bound. */
     public static int changed(SQLiteDatabase db, PimdirSql.Bound bound) {
-        String sql = RETURNING.matcher(bound.sql).replaceFirst("");
+        if (!bound.steps.isEmpty()) {
+            return steps(db, bound, false).changed;
+        }
+        String sql = bound.sql;
         if (bound.params.isEmpty()) {
             try (SQLiteStatement statement = db.compileStatement(sql)) {
                 bind(statement, bound.args);
@@ -557,9 +553,66 @@ public final class PimdirDb extends SQLiteOpenHelper {
         }
     }
 
-    /** A trailing {@code RETURNING} clause, which {@link #changed} drops. */
-    private static final Pattern RETURNING =
-            Pattern.compile("\\s+RETURNING\\s[^;]*;?\\s*$", Pattern.CASE_INSENSITIVE);
+    /**
+     * Runs a read by its name ({@link PimdirSql#bind}) and answers its
+     * cursor, its lists bound first ({@link #query}).
+     */
+    public static Cursor query(SQLiteDatabase db, String name, Map<String, Object> values) {
+        return query(db, PimdirSql.bind(name, values));
+    }
+
+    /** What {@link #steps} did: the rows its read answered, and its writes' changes. */
+    private static final class Ran {
+        Cursor rows;
+        int changed;
+    }
+
+    /**
+     * Runs the statements one name stands for, in order, in the caller's
+     * transaction or one of its own: SQLite 3.18 has no {@code RETURNING}
+     * nor upsert, so the app's shape writes them as a write and a read, an
+     * update and an insert, which only one transaction keeps one operation.
+     * Every write holds the store's writer from the first, so no other
+     * writer comes between two of them. The read's rows are copied whole
+     * when {@code rows} asks for them, and skipped otherwise.
+     */
+    private static Ran steps(SQLiteDatabase db, PimdirSql.Bound bound, boolean rows) {
+        Ran ran = new Ran();
+        boolean own = !db.inTransaction();
+        if (own) {
+            db.beginTransaction();
+        }
+        try {
+            if (!bound.params.isEmpty()) {
+                params(db, bound);
+            }
+            for (PimdirSql.Bound step : bound.steps) {
+                if (step.reads()) {
+                    if (rows) {
+                        try (Cursor cursor = typed(db, step.sql, step.args)) {
+                            ran.rows = copy(cursor);
+                        }
+                    }
+                    continue;
+                }
+                try (SQLiteStatement statement = db.compileStatement(step.sql)) {
+                    bind(statement, step.args);
+                    ran.changed += statement.executeUpdateDelete();
+                }
+            }
+            if (own) {
+                db.setTransactionSuccessful();
+            }
+        } finally {
+            if (own) {
+                db.endTransaction();
+            }
+        }
+        if (rows && ran.rows == null) {
+            ran.rows = new android.database.MatrixCursor(new String[0]);
+        }
+        return ran;
+    }
 
     private static void bind(SQLiteProgram query, Object[] args) {
         for (int index = 0; index < args.length; index++) {

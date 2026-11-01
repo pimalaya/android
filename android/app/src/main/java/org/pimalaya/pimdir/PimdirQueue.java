@@ -180,10 +180,7 @@ public final class PimdirQueue {
     /** The body one row pins, or null when it pins none. */
     private String pinOf(long id) {
         try (Cursor cursor =
-                store.getReadableDatabase()
-                        .rawQuery(
-                                "SELECT object_hash FROM queue WHERE id = ?",
-                                new String[] {String.valueOf(id)})) {
+                PimdirDb.query(store.getReadableDatabase(), "QUEUED_PIN", values("id", id))) {
             return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getString(0) : null;
         }
     }
@@ -217,7 +214,7 @@ public final class PimdirQueue {
         try {
             String hash = null;
             PimdirSql.Bound bound = PimdirSql.bind("CANCEL_ACTION", values("id", id));
-            try (Cursor cursor = db.rawQuery(bound.sql, strings(bound.args))) {
+            try (Cursor cursor = PimdirDb.query(db, bound)) {
                 if (cursor.moveToFirst() && !cursor.isNull(0)) {
                     hash = cursor.getString(0);
                 }
@@ -257,7 +254,7 @@ public final class PimdirQueue {
     /** Runs one canonical statement with the values it names. */
     private static void run(SQLiteDatabase db, String name, java.util.Map<String, Object> values) {
         PimdirSql.Bound bound = PimdirSql.bind(name, values);
-        db.execSQL(bound.sql, bound.args);
+        PimdirDb.changed(db, bound);
     }
 
     /**
@@ -301,7 +298,7 @@ public final class PimdirQueue {
 
     /** The row the enqueue just appended. */
     private static long lastId(SQLiteDatabase db) {
-        try (Cursor cursor = db.rawQuery("SELECT last_insert_rowid()", null)) {
+        try (Cursor cursor = PimdirDb.query(db, "LAST_QUEUED", values())) {
             return cursor.moveToFirst() ? cursor.getLong(0) : 0;
         }
     }

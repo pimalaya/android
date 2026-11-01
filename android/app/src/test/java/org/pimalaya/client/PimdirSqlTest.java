@@ -16,11 +16,12 @@ import org.robolectric.RobolectricTestRunner;
 import java.util.Map;
 
 /**
- * The canonical pimdir schema, applied to the bundled SQLite.
+ * The pimdir schema and the app's shape of its statements, applied to the
+ * SQLite the tests run on.
  *
- * <p>The seam itself: io-pimdir's statements over JNI, run by the Java binding,
- * so the driver must take its SQL verbatim. STRICT tables, partial indexes and
- * RETURNING are recent, which is why the app bundles SQLite.
+ * <p>The seam itself: the statements over JNI, run by the Java binding, so the
+ * driver takes its SQL verbatim, the oldest platform SQLite (3.18) parsing
+ * every one.
  */
 @RunWith(RobolectricTestRunner.class)
 public class PimdirSqlTest {
@@ -79,8 +80,8 @@ public class PimdirSqlTest {
     public void androidSqliteAcceptsTheCanonicalSchema() {
         SQLiteDatabase db = pimdir();
 
-        // NOTE: STRICT tables and partial indexes are what an older SQLite
-        // refuses, so check they exist rather than trust execSQL.
+        // NOTE: check the tables and the partial indexes exist rather than
+        // trust execSQL.
         try (Cursor cursor =
                 db.rawQuery(
                         "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name", null)) {
@@ -103,6 +104,33 @@ public class PimdirSqlTest {
                         "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE '%account%'",
                         null)) {
             assertTrue("the partial by-account index is missing", cursor.moveToFirst());
+        }
+        db.close();
+    }
+
+    /**
+     * Every statement the store serves compiles on the SQLite the tests run
+     * on, Android 8.0's 3.18.2 unless -Ppimalaya.sqlite=bundled says
+     * otherwise: no {@code RETURNING}, upsert, {@code UPDATE ... FROM},
+     * {@code STRICT} nor JSON (the app's shape, rust/pimdir/). A read
+     * wrapping another is compiled by the bridge's floor test, over each
+     * read it wraps.
+     */
+    @Test
+    public void everyServedStatementCompilesOnTheSqliteTheTestsRunOn() {
+        SQLiteDatabase db = pimdir();
+        db.execSQL(PimdirSql.bind("CREATE_PARAM", Map.of()).sql);
+        for (Map.Entry<String, String> statement : PimdirSql.all().entrySet()) {
+            if (statement.getValue().contains(":inner")) {
+                continue;
+            }
+            for (String piece : PimdirSql.split(statement.getValue())) {
+                try {
+                    db.compileStatement(piece).close();
+                } catch (RuntimeException refused) {
+                    throw new AssertionError(statement.getKey() + ": " + refused.getMessage());
+                }
+            }
         }
         db.close();
     }

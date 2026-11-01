@@ -24,7 +24,7 @@ The app SHALL write and query index.db on the same SQLite as the store, and SHAL
 - THEN one SQLite in the process holds both files, and the search answers once the refresh's current chunk commits
 
 ### Requirement: The store runs on the platform SQLite
-The app SHALL open every database it owns, the pimdir store and the index included, on the platform's `android.database.sqlite`, in the app's own shape of the pimdir model (`store_meta.shape` `pimalaya-android`), on every Android it supports (API 26 and up).
+The app SHALL open every database it owns, the pimdir store and the index included, on the platform's `android.database.sqlite`, the store's statements in the app's own shape (`pimalaya-android`) over the canonical schema, on every Android it supports (API 26 and up).
 
 #### Scenario: An Android 8 device
 - GIVEN a device whose platform SQLite is 3.18
@@ -32,7 +32,7 @@ The app SHALL open every database it owns, the pimdir store and the index includ
 - THEN both are created, and every statement runs, on the platform SQLite
 
 ### Requirement: An incompatible store blocks start-up
-The app SHALL refuse to start on a store of another shape, or one it cannot open, saying the store's version is not compatible and the app must be reinstalled, and SHALL neither read nor write it.
+The app SHALL refuse to start on a store of another draft or another schema, or one it cannot open, saying the store's version is not compatible and the app must be reinstalled, and SHALL neither read nor write it.
 
 #### Scenario: A store from an earlier test build
 - GIVEN a store written before the app's own shape, with `STRICT` tables

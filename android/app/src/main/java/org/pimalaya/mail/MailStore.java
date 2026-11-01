@@ -126,7 +126,7 @@ public final class MailStore {
             values.put("collection", PimdirAccount.collectionId(account, mailbox.name()));
             values.put("role", ROLES.contains(mailbox.role()) ? mailbox.role() : null);
             PimdirSql.Bound bound = PimdirSql.bind("SET_COLLECTION_ROLE", values);
-            db.execSQL(bound.sql, bound.args);
+            PimdirDb.changed(db, bound);
         }
 
         // NOTE: the junk and the trash are hidden the first time a roster
@@ -501,24 +501,15 @@ public final class MailStore {
     List<String> threadOf(String collection, String linkId) {
         List<String> thread = new ArrayList<>();
         String messageId;
-        try (Cursor cursor =
-                items.readable()
-                        .rawQuery(
-                                "SELECT message_id FROM mail_summary"
-                                        + " WHERE collection = ? AND link_id = ?",
-                                new String[] {collection, linkId})) {
+        Map<String, Object> key = PimdirSql.values("collection", collection, "link_id", linkId);
+        try (Cursor cursor = PimdirDb.query(items.readable(), "MESSAGE_ID_OF", key)) {
             if (!cursor.moveToNext() || cursor.isNull(0)) {
                 return thread;
             }
             messageId = cursor.getString(0);
         }
         // NOTE: the reply ids are rows of their own (Annex A.1), in order.
-        try (Cursor cursor =
-                items.readable()
-                        .rawQuery(
-                                "SELECT msg_id FROM mail_in_reply_to"
-                                        + " WHERE collection = ? AND link_id = ? ORDER BY position",
-                                new String[] {collection, linkId})) {
+        try (Cursor cursor = PimdirDb.query(items.readable(), "IN_REPLY_TO_OF", key)) {
             while (cursor.moveToNext()) {
                 thread.add("<" + cursor.getString(0) + ">");
             }
@@ -558,12 +549,12 @@ public final class MailStore {
         final String since;
 
         /**
-         * Rows left out, a JSON array of {@code [collection, link_id]}.
+         * Rows left out, each {@code [collection, link_id]}.
          *
          * <p>Null for none. Sent copies staged beside a waiting submission,
          * whose outbox row stands for them.
          */
-        final String hidden;
+        final List<String[]> hidden;
 
         /** How many rows {@link #hidden} names. */
         final int hiding;
@@ -580,11 +571,7 @@ public final class MailStore {
             this.pattern = pattern;
             this.since = null;
             this.held = new HashSet<>(collections);
-            JSONArray pairs = new JSONArray();
-            for (String[] pair : hidden) {
-                pairs.put(new JSONArray().put(pair[0]).put(pair[1]));
-            }
-            this.hidden = hidden.isEmpty() ? null : pairs.toString();
+            this.hidden = hidden.isEmpty() ? null : new ArrayList<>(hidden);
             this.hiding = hidden.size();
         }
 
@@ -704,7 +691,7 @@ public final class MailStore {
         }
         PimdirSql.Bound bound = query.pattern == null && query.hidden == null
                 ? unjoined(PimdirSql.bind("COUNT_MAIL", query.values(null, -1)), query.attachment)
-                : around("SELECT count(*) FROM (", listed(query), ")");
+                : PimdirSql.wrap("MAIL_COUNT", listed(query), Map.of());
         try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
             return cursor.moveToFirst() ? cursor.getLong(0) : 0;
         }
@@ -741,15 +728,8 @@ public final class MailStore {
             values.put("shift", minutes);
             bound = unjoined(PimdirSql.bind("COUNT_MAIL_BY_DAY", values), query.attachment);
         } else {
-            PimdirSql.Bound search = listed(query);
-            Object[] args = new Object[search.args.length + 1];
-            args[0] = minutes;
-            System.arraycopy(search.args, 0, args, 1, search.args.length);
-            bound = search.with(
-                    "SELECT date(nullif(sort_key, ''), coalesce(?, 0) || ' minutes') AS day,"
-                            + " count(*) FROM (" + search.sql + ")"
-                            + " GROUP BY day ORDER BY day DESC",
-                    args);
+            bound = PimdirSql.wrap(
+                    "MAIL_COUNT_BY_DAY", listed(query), PimdirSql.values("shift", minutes));
         }
         try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
             while (cursor.moveToNext()) {
@@ -897,11 +877,8 @@ public final class MailStore {
 
     /** A read narrowed to {@code limit} rows past the first {@code skip}. */
     private static PimdirSql.Bound skipping(PimdirSql.Bound inner, long skip, int limit) {
-        Object[] args = new Object[inner.args.length + 2];
-        System.arraycopy(inner.args, 0, args, 0, inner.args.length);
-        args[inner.args.length] = limit;
-        args[inner.args.length + 1] = skip;
-        return inner.with("SELECT * FROM (" + inner.sql + ") LIMIT ? OFFSET ?", args);
+        return PimdirSql.wrap(
+                "MAIL_SKIPPING", inner, PimdirSql.values("page_limit", limit, "skip", skip));
     }
 
     /** The rows of a page read as a list shows them. */
@@ -929,10 +906,7 @@ public final class MailStore {
         if (attachment != null) {
             return inner;
         }
-        return inner.with(
-                "WITH mail_summary(collection, link_id, attachment)"
-                        + " AS (SELECT NULL, NULL, NULL WHERE 0) " + inner.sql,
-                inner.args);
+        return PimdirSql.wrap("MAIL_UNJOINED", inner, Map.of());
     }
 
     /**
@@ -1059,7 +1033,7 @@ public final class MailStore {
      */
     private static PimdirSql.Bound listed(Query query) {
         String statement = query.pattern == null ? "LIST_MAIL_PAGE_FILTERED" : "SEARCH_MAIL";
-        return hiding(wrapped("", statement, "", query), query, -1);
+        return hiding(PimdirSql.bind(statement, query.values(null, -1)), query, -1);
     }
 
     /**
@@ -1072,32 +1046,19 @@ public final class MailStore {
         if (query.hidden == null) {
             return inner;
         }
-        Object[] args = new Object[inner.args.length + 2];
-        System.arraycopy(inner.args, 0, args, 0, inner.args.length);
-        args[inner.args.length] = query.hidden;
-        args[inner.args.length + 1] = limit;
-        return inner.with(
-                "SELECT * FROM (" + inner.sql + ") WHERE NOT EXISTS (SELECT 1 FROM json_each(?) h"
-                        + " WHERE json_extract(h.value, '$[0]') = collection"
-                        + " AND json_extract(h.value, '$[1]') = link_id)"
-                        + " ORDER BY sort_key DESC, seq DESC, collection DESC LIMIT ?",
-                args);
-    }
-
-    /** A bound statement between a prefix and a suffix. */
-    private static PimdirSql.Bound around(String prefix, PimdirSql.Bound inner, String suffix) {
-        return inner.with(prefix + inner.sql + suffix, inner.args);
-    }
-
-    /**
-     * A canonical statement read whole between a prefix and suffix.
-     *
-     * <p>No cursor, no limit ({@code -1}), its values bound in place.
-     */
-    private static PimdirSql.Bound wrapped(
-            String prefix, String statement, String suffix, Query query) {
-        PimdirSql.Bound inner = PimdirSql.bind(statement, query.values(null, -1));
-        return inner.with(prefix + inner.sql + suffix, inner.args);
+        List<String> collections = new ArrayList<>();
+        List<String> links = new ArrayList<>();
+        for (String[] pair : query.hidden) {
+            collections.add(pair[0]);
+            links.add(pair[1]);
+        }
+        return PimdirSql.wrap(
+                "MAIL_HIDING",
+                inner,
+                PimdirSql.values(
+                        "hidden_collections", collections,
+                        "hidden_links", links,
+                        "hiding_limit", limit));
     }
 
     /**
@@ -1411,7 +1372,7 @@ public final class MailStore {
             }
             // NOTE: the cascade drops pins no statement returns, so the
             // counts are recomputed before the collector reads them.
-            db.execSQL(PimdirSql.split(PimdirSql.of("RECOMPUTE_REFCOUNTS"))[0]);
+            PimdirDb.exec(db, "RECOMPUTE_REFCOUNTS", Map.of());
             items.collectGarbage(db);
             db.setTransactionSuccessful();
         } finally {
@@ -1447,7 +1408,7 @@ public final class MailStore {
         try {
             PimdirDb.changed(db, PimdirSql.bind("RELEASE_BASES_BEFORE", values));
             released = PimdirDb.changed(db, PimdirSql.bind("RELEASE_BEFORE", values));
-            db.execSQL(PimdirSql.split(PimdirSql.of("RECOMPUTE_REFCOUNTS"))[0]);
+            PimdirDb.exec(db, "RECOMPUTE_REFCOUNTS", Map.of());
             items.collectGarbage(db);
             db.setTransactionSuccessful();
         } finally {
@@ -1471,25 +1432,8 @@ public final class MailStore {
         try {
             List<String[]> linked = new ArrayList<>();
             try (Cursor cursor =
-                    db.rawQuery(
-                            "SELECT i.collection, i.link_id, i.object_hash FROM items i"
-                                    + " JOIN collections c ON c.id = i.collection"
-                                    + " WHERE c.account = ? AND c.kind = ?"
-                                    + " AND i.deleted = 0 AND i.conflicted = 0"
-                                    + " AND i.object_hash IS NOT NULL"
-                                    + " AND EXISTS (SELECT 1 FROM items o"
-                                    + " WHERE o.link_id = i.link_id AND o.collection <> i.collection"
-                                    + " AND o.object_hash = i.object_hash)"
-                                    + " AND EXISTS (SELECT 1 FROM bindings b"
-                                    + " WHERE b.collection = i.collection AND b.link_id = i.link_id)"
-                                    + " AND NOT EXISTS (SELECT 1 FROM bindings b"
-                                    + " WHERE b.collection = i.collection AND b.link_id = i.link_id"
-                                    + " AND (b.conflicted = 1"
-                                    + " OR NOT (b.base_present = 1 OR b.base_flags_known = 1"
-                                    + " OR b.base_object IS NOT NULL OR b.base_revision IS NOT NULL)"
-                                    + " OR (b.base_object IS NOT NULL"
-                                    + " AND b.base_object != i.object_hash)))",
-                            new String[] {accountId, PimdirSummary.MAIL})) {
+                    PimdirDb.query(
+                            db, "CROSS_LINKED_MAIL", PimdirSql.values("account", accountId))) {
                 while (cursor.moveToNext()) {
                     linked.add(
                             new String[] {
@@ -1498,25 +1442,18 @@ public final class MailStore {
                 }
             }
             for (String[] item : linked) {
-                db.execSQL(
-                        "UPDATE bindings SET base_object = NULL, base_present = 1"
-                                + " WHERE collection = ? AND link_id = ? AND base_object = ?",
-                        item);
                 // NOTE: a shared body naming the message's own lets go with it,
                 // a message having no cross-source merge to read it for, as
                 // release_bases_before does (STORAGE §11.4).
-                db.execSQL(
-                        "UPDATE bindings SET shared_object = NULL"
-                                + " WHERE collection = ? AND link_id = ? AND shared_object = ?",
-                        item);
-                db.execSQL(
-                        "UPDATE items SET object_hash = NULL, level = 1"
-                                + " WHERE collection = ? AND link_id = ?",
-                        new String[] {item[0], item[1]});
+                PimdirDb.exec(
+                        db,
+                        "RELEASE_MESSAGE_BODY",
+                        PimdirSql.values(
+                                "collection", item[0], "link_id", item[1], "object_hash", item[2]));
                 released++;
             }
             if (released > 0) {
-                db.execSQL(PimdirSql.split(PimdirSql.of("RECOMPUTE_REFCOUNTS"))[0]);
+                PimdirDb.exec(db, "RECOMPUTE_REFCOUNTS", Map.of());
                 items.collectGarbage(db);
             }
             db.setTransactionSuccessful();
@@ -1549,11 +1486,10 @@ public final class MailStore {
      */
     Flags flagsOf(String collection, String id) {
         try (Cursor cursor =
-                items.readable()
-                        .rawQuery(
-                                "SELECT " + PimdirItems.flagsOf("i") + " FROM items i"
-                                        + " WHERE i.collection = ? AND i.link_id = ?",
-                                new String[] {collection, id})) {
+                PimdirDb.query(
+                        items.readable(),
+                        "ITEM_FLAGS",
+                        PimdirSql.values("collection", collection, "link_id", id))) {
             if (!cursor.moveToFirst() || cursor.isNull(0)) {
                 return Flags.none();
             }

@@ -17,11 +17,15 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The canonical pimdir SQL, as the pimdir specification defines it.
+ * The pimdir SQL the app runs: io-pimdir's canonical schema, and the
+ * statements of the app's own shape, {@code pimalaya-android} (the canonical
+ * text where SQLite 3.18 runs it, the app's own where it does not, and the
+ * statements of the app's own beside them, rust/pimdir/).
  *
  * <p>io-pimdir comes without its {@code client} feature: schema and
- * statements cross JNI, never transcribed, and run on the app's bundled
- * SQLite (the platform's is too old below Android 14), not a second engine.
+ * statements cross JNI, never transcribed, and run on the app's SQLite, not
+ * a second engine. A name may run several statements in one transaction
+ * ({@link Bound#steps}), where 3.18 lacks {@code RETURNING} and upserts.
  */
 public final class PimdirSql {
     private static Map<String, String> statements;
@@ -193,7 +197,7 @@ public final class PimdirSql {
         return statements.toArray(new String[0]);
     }
 
-    /** Every canonical migration in order, as its own script (STORAGE §6). */
+    /** Every migration in order, as its own script (STORAGE §6): the canonical ones. */
     public static synchronized String[] migrations() {
         if (migrations == null) {
             migrations = loadMigrations();
@@ -202,23 +206,98 @@ public final class PimdirSql {
     }
 
     /**
-     * A canonical statement, its {@code :name} parameters made positional.
+     * A statement by name, its {@code :name} parameters made positional.
      *
      * <p>Android binds no named parameters; rewriting keeps column lists in the
      * crate. Values come from {@code values} by name: a missing one binds NULL,
      * a repeated one the same value. Comments are stripped first.
      */
     public static Bound bind(String name, Map<String, Object> values) {
-        Rewritten rewritten = rewritten(name);
-        Object[] args = new Object[rewritten.names.length];
-        for (int index = 0; index < args.length; index++) {
-            args[index] = values.get(rewritten.names[index]);
-        }
+        Rewritten[] rewritten = rewritten(name);
         Map<String, List<Object>> params = new LinkedHashMap<>();
-        for (String slot : rewritten.slots) {
-            params.put(slot, listOf(values.get(slot)));
+        List<Bound> steps = new ArrayList<>(rewritten.length);
+        for (Rewritten step : rewritten) {
+            Object[] args = new Object[step.names.length];
+            for (int index = 0; index < args.length; index++) {
+                args[index] = values.get(step.names[index]);
+            }
+            for (String slot : step.slots) {
+                params.put(slot, listOf(values.get(slot)));
+            }
+            steps.add(new Bound(step.sql, args));
         }
-        return new Bound(rewritten.sql, args, params);
+        if (steps.size() == 1) {
+            return new Bound(steps.get(0).sql, steps.get(0).args, params);
+        }
+        return new Bound(params, steps);
+    }
+
+    /**
+     * A read of the app's shape over another read: {@code name}'s text holds
+     * {@code :inner} where {@code inner}'s statement goes, as a subquery or
+     * after a {@code WITH}. Its own parameters bind from {@code values}, the
+     * lists of both through {@code temp.param}; nothing of the text is
+     * Java's.
+     */
+    public static Bound wrap(String name, Bound inner, Map<String, Object> values) {
+        if (!inner.steps.isEmpty()) {
+            throw new PimalayaException("A statement running several reads as no subquery");
+        }
+        Rewritten[] halves = wrappers.get(name);
+        if (halves == null) {
+            String[] statements = split(of(name));
+            String text = statements.length == 1 ? statements[0] : "";
+            int at = text.indexOf(INNER);
+            if (at < 0) {
+                throw new PimalayaException("The pimdir statement '" + name + "' wraps nothing");
+            }
+            halves =
+                    new Rewritten[] {
+                        rewrite(text.substring(0, at)), rewrite(text.substring(at + INNER.length()))
+                    };
+            wrappers.put(name, halves);
+        }
+        Rewritten before = halves[0];
+        Rewritten after = halves[1];
+        Object[] args = new Object[before.names.length + inner.args.length + after.names.length];
+        int at = 0;
+        for (String param : before.names) {
+            args[at++] = values.get(param);
+        }
+        System.arraycopy(inner.args, 0, args, at, inner.args.length);
+        at += inner.args.length;
+        for (String param : after.names) {
+            args[at++] = values.get(param);
+        }
+        Map<String, List<Object>> params = new LinkedHashMap<>(inner.params);
+        for (Rewritten half : halves) {
+            for (String slot : half.slots) {
+                params.put(slot, listOf(values.get(slot)));
+            }
+        }
+        return new Bound(before.sql + inner.sql + after.sql, args, params);
+    }
+
+    /** Where a wrapping read's text takes the read it wraps. */
+    private static final String INNER = ":inner";
+
+    /** The wrapping reads rewritten, by name: their text before and after. */
+    private static final Map<String, Rewritten[]> wrappers =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * The values of a statement's parameters, from alternating names and
+     * values: {@code values("collection", id, "link_id", key)}.
+     */
+    public static Map<String, Object> values(Object... pairs) {
+        if (pairs.length % 2 != 0) {
+            throw new IllegalArgumentException("Names and values come in pairs");
+        }
+        Map<String, Object> values = new HashMap<>();
+        for (int index = 0; index < pairs.length; index += 2) {
+            values.put((String) pairs[index], pairs[index + 1]);
+        }
+        return values;
     }
 
     /**
@@ -269,20 +348,33 @@ public final class PimdirSql {
             java.util.regex.Pattern.compile("slot\\s*=\\s*'([a-z_]+)'");
 
     /** The rewritten statements, by name: a sync binds thousands of times. */
-    private static final Map<String, Rewritten> rewrites = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<String, Rewritten[]> rewrites =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
-     * One statement's rewrite, done once: each {@code :name} becomes {@code ?}.
-     *
-     * <p>Its first statement, comment-free; names in string literals stay.
+     * One name's rewrite, done once: each of its statements comment-free, in
+     * order, each {@code :name} made {@code ?} (names in string literals
+     * stay).
      */
-    private static Rewritten rewritten(String name) {
-        Rewritten held = rewrites.get(name);
+    private static Rewritten[] rewritten(String name) {
+        Rewritten[] held = rewrites.get(name);
         if (held != null) {
             return held;
         }
         String[] statements = split(of(name));
-        String sql = statements.length == 0 ? "" : statements[0];
+        if (statements.length == 0) {
+            statements = new String[] {""};
+        }
+        Rewritten[] made = new Rewritten[statements.length];
+        for (int index = 0; index < statements.length; index++) {
+            made[index] = rewrite(statements[index]);
+        }
+        rewrites.put(name, made);
+        return made;
+    }
+
+    /** One statement made positional, the lists it reads named. */
+    private static Rewritten rewrite(String sql) {
         StringBuilder rewritten = new StringBuilder(sql.length());
         List<String> names = new ArrayList<>();
         boolean inString = false;
@@ -312,22 +404,31 @@ public final class PimdirSql {
         while (slot.find()) {
             slots.add(slot.group(1));
         }
-        Rewritten made =
-                new Rewritten(
-                        rewritten.toString(),
-                        names.toArray(new String[0]),
-                        slots.toArray(new String[0]));
-        rewrites.put(name, made);
-        return made;
+        return new Rewritten(
+                rewritten.toString(), names.toArray(new String[0]), slots.toArray(new String[0]));
     }
 
-    /** A statement with its arguments, as {@code execSQL} takes them. */
+    /**
+     * A statement with its arguments, as {@code execSQL} takes them, or the
+     * statements one name runs in order ({@link #steps}).
+     */
     public static final class Bound {
-        /** The statement, its parameters positional. */
+        /**
+         * The statement, its parameters positional; null for a name running
+         * several, which only the store's runner executes.
+         */
         public final String sql;
 
         /** The values, in the order the statement's parameters occur. */
         public final Object[] args;
+
+        /**
+         * The statements a name of the app's shape runs in order, in one
+         * transaction (a write and the read standing for its {@code
+         * RETURNING}, an update and the insert standing for an upsert), each
+         * bound on its own; empty for a name running one.
+         */
+        public final List<Bound> steps;
 
         /**
          * The lists the statement reads from {@code temp.param}, by slot, in
@@ -347,6 +448,9 @@ public final class PimdirSql {
          * subquery: the lists it reads go with it.
          */
         public Bound with(String sql, Object[] args) {
+            if (!steps.isEmpty()) {
+                throw new PimalayaException("A statement running several reads as no subquery");
+            }
             return new Bound(sql, args, params);
         }
 
@@ -355,6 +459,37 @@ public final class PimdirSql {
             this.sql = sql;
             this.args = args;
             this.params = params;
+            this.steps = Collections.emptyList();
+        }
+
+        /** The statements one name runs in order, and the lists they read. */
+        private Bound(Map<String, List<Object>> params, List<Bound> steps) {
+            this.sql = null;
+            this.args = new Object[0];
+            this.params = params;
+            this.steps = Collections.unmodifiableList(steps);
+        }
+
+        /**
+         * Whether this statement answers rows: a {@code SELECT} or a {@code
+         * WITH} read, for a step; a name running several answers its read's.
+         */
+        public boolean reads() {
+            if (!steps.isEmpty()) {
+                for (Bound step : steps) {
+                    if (step.reads()) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            String head = sql.trim();
+            int end = 0;
+            while (end < head.length() && Character.isLetter(head.charAt(end))) {
+                end++;
+            }
+            String keyword = head.substring(0, end).toUpperCase(Locale.ROOT);
+            return keyword.equals("SELECT") || keyword.equals("WITH") || keyword.equals("VALUES");
         }
     }
 

@@ -74,10 +74,10 @@ pub struct StoreFacts {
     pub meta: Option<MetaFacts>,
 }
 
-/// The columns of `store_meta` the check reads, each absent where the
-/// store lacks it.
+/// The columns of `store_meta` the check reads, by their names in the
+/// table, each absent where the store lacks it; the row's other columns
+/// are not read.
 #[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct MetaFacts {
     #[serde(default)]
     pub format: Option<String>,

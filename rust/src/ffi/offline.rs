@@ -37,7 +37,7 @@ use crate::{
     offline::{
         Driver, OfflineSync,
         blobs::{self, Filed},
-        merge, store,
+        merge, shape, store,
         summary::SummaryJson,
         wire::sorted,
     },
@@ -501,14 +501,15 @@ struct DerivedReply<'a> {
     summary: Option<SummaryJson>,
 }
 
-/// The statements `Native.pimdirSql` serves, keyed by their constant name.
+/// The statements `Native.pimdirSql` serves, keyed by their constant name:
+/// the app's shape ([`shape`]).
 fn served_statements() -> BTreeMap<&'static str, &'static str> {
-    io_pimdir::sql::all().collect()
+    shape::statements()
 }
 
 /// The migrations `Native.pimdirMigrations` serves, in order.
 fn served_migrations() -> &'static [&'static str] {
-    io_pimdir::sql::MIGRATIONS
+    shape::migrations()
 }
 
 #[cfg(test)]
@@ -519,7 +520,10 @@ mod tests {
         process::{Command, Stdio},
     };
 
-    use crate::ffi::offline::{served_migrations, served_statements};
+    use crate::{
+        ffi::offline::{served_migrations, served_statements},
+        offline::shape,
+    };
 
     /// The SQLite of Android 8.0, the oldest the app runs on (flake.nix).
     const FLOOR: &str = "3.18.2";
@@ -532,16 +536,28 @@ mod tests {
         let floor = env::var("PIMALAYA_SQLITE_FLOOR")
             .expect("PIMALAYA_SQLITE_FLOOR is unset: run the tests through `nix develop`");
 
+        let statements = served_statements();
         let migrations = served_migrations()
             .iter()
             .enumerate()
             .map(|(index, sql)| ("migration", format!("{:04}", index + 1), *sql));
-        let statements = served_statements()
-            .into_iter()
-            .map(|(name, sql)| ("statement", name.to_owned(), sql));
+        // NOTE: the list parameters' table is per connection, created by
+        // CREATE_PARAM before a statement reading one runs (STORAGE §4.4),
+        // so it is run on the floor too, after the schema.
+        let param = (
+            "migration",
+            "CREATE_PARAM".to_owned(),
+            statements["CREATE_PARAM"],
+        );
+        // NOTE: a wrapping read of the app's own is prepared over every read
+        // it wraps, as Java runs it.
+        let wrapped = shape::prepared();
+        let prepared = wrapped
+            .iter()
+            .map(|(name, sql)| ("statement", name.clone(), sql.as_str()));
 
         let mut input = Vec::new();
-        for (kind, name, sql) in migrations.chain(statements) {
+        for (kind, name, sql) in migrations.chain([param]).chain(prepared) {
             for part in [kind, name.as_str(), sql] {
                 input.extend_from_slice(part.as_bytes());
                 input.push(0);

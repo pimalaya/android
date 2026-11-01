@@ -81,7 +81,8 @@ public final class PimdirCollections {
                 // replace): a sent mailbox the server renamed while a
                 // message waits to go, say. The next replace takes it.
                 if (!listed.contains(stale) && !anchorsQueued(db, stale)) {
-                    db.execSQL("DELETE FROM collections WHERE id = ?", new Object[] {stale});
+                    PimdirDb.exec(
+                            db, "DELETE_COLLECTION", PimdirSql.values("collection", stale));
                 }
             }
             db.setTransactionSuccessful();
@@ -106,13 +107,14 @@ public final class PimdirCollections {
         String account = accounts.idOf(accountEmail);
         SQLiteDatabase db = store.getWritableDatabase();
 
-        db.execSQL(
-                PimdirSql.of("SET_COLLECTION_KIND")
-                        .replace(":collection", "?")
-                        .replace(":account", "?")
-                        .replace(":kind", "?"),
-                new Object[] {id, account, kind, id});
-        db.execSQL("UPDATE collections SET name = ? WHERE id = ?", new Object[] {name, id});
+        PimdirDb.exec(
+                db,
+                "SET_COLLECTION_KIND",
+                PimdirSql.values("collection", id, "account", account, "kind", kind));
+        PimdirDb.exec(
+                db,
+                "SET_COLLECTION_NAME",
+                PimdirSql.values("collection", id, "account", account, "name", name));
     }
 
     /**
@@ -281,7 +283,7 @@ public final class PimdirCollections {
         values.put("collection", collection);
         values.put("role", role);
         PimdirSql.Bound bound = PimdirSql.bind("SET_COLLECTION_ROLE", values);
-        db.execSQL(bound.sql, bound.args);
+        PimdirDb.changed(db, bound);
     }
 
     /** An address book roster in the shape {@link #replace} takes. */
@@ -304,9 +306,10 @@ public final class PimdirCollections {
     /** The account's collections of one kind, by id. */
     private static List<String> idsOf(SQLiteDatabase db, String account, String kind) {
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT id FROM collections WHERE account = ? AND kind = ?",
-                        new String[] {account, kind})) {
+                PimdirDb.query(
+                        db,
+                        "COLLECTIONS_OF_KIND",
+                        PimdirSql.values("account", account, "kind", kind))) {
             List<String> ids = new ArrayList<>(cursor.getCount());
             while (cursor.moveToNext()) {
                 ids.add(cursor.getString(0));
@@ -318,9 +321,7 @@ public final class PimdirCollections {
     /** Whether a queued action, pending or parked, is anchored on a collection. */
     private static boolean anchorsQueued(SQLiteDatabase db, String collection) {
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT 1 FROM queue WHERE collection = ? LIMIT 1",
-                        new String[] {collection})) {
+                PimdirDb.query(db, "ANCHORS_QUEUED", PimdirSql.values("collection", collection))) {
             return cursor.moveToFirst();
         }
     }
@@ -339,12 +340,11 @@ public final class PimdirCollections {
         String description = collection.description;
         String color = collection.color;
 
-        db.execSQL(
-                "INSERT INTO collections(id, account, kind, name, description, color)"
-                        + " VALUES(?, ?, ?, ?, ?, ?)"
-                        + " ON CONFLICT(id) DO UPDATE SET account = excluded.account,"
-                        + " kind = excluded.kind, name = excluded.name,"
-                        + " description = excluded.description, color = excluded.color",
-                new Object[] {id, account, kind, name == null ? id : name, description, color});
+        Map<String, Object> values = PimdirSql.values("collection", id, "account", account);
+        values.put("kind", kind);
+        values.put("name", name == null ? id : name);
+        values.put("description", description);
+        values.put("color", color);
+        PimdirDb.exec(db, "WRITE_COLLECTION", values);
     }
 }

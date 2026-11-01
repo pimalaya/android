@@ -228,6 +228,35 @@
             done
           '';
         };
+
+        # The binding of sqliteHost over the floor's SQLite: requery's JNI
+        # compiled against 3.18.2 with Android 8.0's flags (sqliteFloor's,
+        # ICU and the Android-only defines left out), so the JVM store tests
+        # run every statement the app executes on the oldest SQLite it
+        # supports (PIMALAYA_SQLITE_HOST_FLOOR, android/app/build.gradle.kts).
+        sqliteHostFloor = sqliteHost.overrideAttrs (old: {
+          pname = "sqlite-android-host-floor";
+          version = sqliteFloorVersion;
+          __intentionallyOverridingVersion = true;
+          nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.gnutar ];
+          buildPhase =
+            builtins.replaceStrings
+              [
+                "unzip -j ${sqliteAmalgamation} '*/sqlite3.c' '*/sqlite3.h' -d $jni"
+                "-DSQLITE_ENABLE_FTS3_PARENTHESIS -DSQLITE_ENABLE_FTS4 \\\n  -DSQLITE_ENABLE_FTS4_PARENTHESIS -DSQLITE_ENABLE_FTS5 \\\n  -DSQLITE_ENABLE_FTS5_PARENTHESIS -DSQLITE_ENABLE_JSON1 \\\n  -DSQLITE_ENABLE_RTREE=1 -DSQLITE_UNTESTABLE \\\n"
+              ]
+              [
+                "tar -xzf ${sqliteFloor.src} --strip-components=1 -C $jni sqlite-autoconf-3180200/sqlite3.c sqlite-autoconf-3180200/sqlite3.h"
+                "-DSQLITE_ENABLE_FTS3_BACKWARDS -DSQLITE_ENABLE_FTS4 \\\n  -DSQLITE_OMIT_BUILTIN_TEST -DSQLITE_SECURE_DELETE \\\n"
+              ]
+              old.buildPhase;
+          doInstallCheck = true;
+          installCheckPhase = ''
+            grep -qaF '${sqliteFloorVersion}' $out/lib/libsqlite3x.so
+            ! grep -qa 'json_each' $out/lib/libsqlite3x.so
+            ! grep -qa 'fts5' $out/lib/libsqlite3x.so
+          '';
+        });
       in
       {
         devShells.default = pkgs.mkShell {
@@ -247,6 +276,7 @@
           ANDROID_NDK_HOME = "${sdkRoot}/ndk/${ndkVersion}";
           JAVA_HOME = pkgs.jdk17.home;
           PIMALAYA_SQLITE_HOST = "${sqliteHost}/lib";
+          PIMALAYA_SQLITE_HOST_FLOOR = "${sqliteHostFloor}/lib";
           # NOTE: an env var rather than a build input, so 3.18's sqlite3.h
           # and libsqlite3.so never reach the compiler's search paths.
           PIMALAYA_SQLITE_FLOOR = "${sqliteFloor}";

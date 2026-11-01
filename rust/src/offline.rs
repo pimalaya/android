@@ -11,6 +11,7 @@
 
 pub mod blobs;
 pub mod merge;
+pub mod shape;
 pub mod store;
 pub mod summary;
 pub mod wire;

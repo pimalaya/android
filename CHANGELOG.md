@@ -54,6 +54,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Changed a contact or an entry edited both on the phone and on the server between two syncs to keep both edits, rather than the last one listed overwriting the other: the sync merges them when they touch different fields, and otherwise the contact or the entry shows as conflicted and its page offers both values, as a conflict with the server does; whichever values you keep, saving settles it on both sides.
 - Changed a mail listing narrowed by the download window on JMAP, Microsoft 365 and Gmail to end by reading the mailbox's every id, as IMAP already did, so a message with no date, or received before the window, is no longer taken for deleted; it costs a request per 500 to 1,000 ids of the mailbox at the end of such a listing.
 - Changed a queued message to be stored as the standard submission (pimdir Annex B.2), sent with the recipients it states, filed against the account's sent mailbox, the outbox still listing it, and one the app cannot read back to be kept and shown as refused rather than sent.
+- Changed the store's statements to the app's own, which SQLite 3.18 runs as Android 8.0 ships it, the step before the app uses the phone's SQLite instead of bundling one; a store the previous version wrote opens unchanged.
 
 ### Fixed
 

@@ -396,7 +396,7 @@ public final class DeletedItems {
 
     private static void exec(SQLiteDatabase db, String name, Map<String, Object> values) {
         PimdirSql.Bound bound = PimdirSql.bind(name, values);
-        db.execSQL(bound.sql, bound.args);
+        PimdirDb.changed(db, bound);
     }
 
     private static String text(Cursor cursor, String column) {

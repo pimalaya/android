@@ -122,7 +122,7 @@ public final class EventStore {
                         "detail",
                         refused ? "its supported-calendar-component-set names no VTODO" : null);
                 PimdirSql.Bound bound = PimdirSql.bind("SET_CAPABILITY", values);
-                db.execSQL(bound.sql, bound.args);
+                PimdirDb.changed(db, bound);
                 ensureSynced(db, collection);
             }
             db.setTransactionSuccessful();
@@ -151,7 +151,7 @@ public final class EventStore {
             }
         }
         PimdirSql.Bound upsert = PimdirSql.bind("UPSERT_CHECKPOINT", key);
-        db.execSQL(upsert.sql, upsert.args);
+        PimdirDb.changed(db, upsert);
     }
 
     /** Whether a calendar address is served over CalDAV (RFC 4791). */
@@ -416,18 +416,11 @@ public final class EventStore {
         List<StoredEvent> events = new ArrayList<>();
         Set<String> conflicted = conflicted();
         try (Cursor cursor =
-                items.readable()
-                        .rawQuery(
-                                "SELECT i.collection, i.link_id, i.object_hash, b.base_revision,"
-                                        + " b.handle"
-                                        + " FROM items i"
-                                        + " JOIN collections c ON c.id = i.collection"
-                                        + " LEFT JOIN bindings b ON b.collection = i.collection"
-                                        + " AND b.link_id = i.link_id AND b.source = ?"
-                                        + " WHERE c.kind = ? AND i.deleted = 0"
-                                        + " AND i.retained_at IS NULL"
-                                        + " AND i.object_hash IS NOT NULL",
-                                new String[] {PimdirStorage.SERVER, PimdirSummary.CALENDAR})) {
+                PimdirDb.query(
+                        items.readable(),
+                        "LIST_LIVE_ENTRIES",
+                        PimdirSql.values(
+                                "source", PimdirStorage.SERVER, "kind", PimdirSummary.CALENDAR))) {
             while (cursor.moveToNext()) {
                 String id = cursor.getString(1);
                 if (!wanted.test(cursor.getString(0) + "\n" + id)) {

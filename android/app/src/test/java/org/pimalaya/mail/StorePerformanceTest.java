@@ -265,7 +265,10 @@ public class StorePerformanceTest {
         values.put("collection", inbox);
         values.put("before", "2002-01-01T00:00:00Z");
         PimdirSql.Bound bound = PimdirSql.bind("COLLECT_BEFORE", values);
-        assertTrue("the canonical statement returns its rows", bound.sql.contains("RETURNING"));
+        // NOTE: the shape's text reads the rows it deletes beside the delete
+        // (no RETURNING on SQLite 3.18), and the count is the delete's alone.
+        assertEquals("a read, then the delete", 2, bound.steps.size());
+        assertTrue(bound.steps.get(0).reads());
         assertEquals(3, PimdirDb.changed(db, bound));
         assertEquals(0, scalar("SELECT count(*) FROM items"));
     }

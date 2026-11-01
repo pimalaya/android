@@ -1,6 +1,5 @@
 package org.pimalaya.pimdir;
 
-import android.content.ContentValues;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDoneException;
 import android.util.Log;
@@ -160,26 +159,7 @@ public final class PimdirStorage {
             return reply;
         }
 
-        List<String> args = new ArrayList<>(List.of(source, stored));
-        String narrowed = scopeClause(scope, stored, source, args);
-
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT i.link_id, " + PimdirItems.flagsOf("i") + ", i.object_hash,"
-                                + " i.sort_key, i.level, b.handle, "
-                                + PimdirItems.baseFlagsOf("b") + ", b.base_object, b.base_revision,"
-                                + " b.base_present, b.conflicted, b.conflict_revision,"
-                                + " b.conflict_object, i.deleted, i.conflicted, c.kind, s.date,"
-                                + " s.subject, s.sender"
-                                + " FROM items i"
-                                + " JOIN collections c ON c.id = i.collection"
-                                + " LEFT JOIN bindings b ON b.collection = i.collection"
-                                + " AND b.link_id = i.link_id AND b.source = ?"
-                                + " LEFT JOIN mail_summary s ON s.collection = i.collection"
-                                + " AND s.link_id = i.link_id"
-                                + " WHERE i.collection = ?"
-                                + " AND i.retained_at IS NULL" + narrowed,
-                        args.toArray(new String[0]))) {
+        try (Cursor cursor = PimdirDb.query(db, scoped(scope, stored, source))) {
             while (cursor.moveToNext()) {
                 // NOTE: one placement per item the source binds, and one
                 // create per item it does not bind but the store holds a body
@@ -296,7 +276,7 @@ public final class PimdirStorage {
         values.put("by_collection", collectionOf(byCollection));
         values.put("by_link_id", byLinkId);
         PimdirSql.Bound bound = PimdirSql.bind("SUPERSEDE_ITEM", values);
-        store.getWritableDatabase().execSQL(bound.sql, bound.args);
+        PimdirDb.changed(store.getWritableDatabase(), bound);
     }
 
     /** Writes to run as one, {@link #atomically}. */
@@ -435,28 +415,26 @@ public final class PimdirStorage {
     }
 
     /**
-     * The load scope's extra {@code WHERE}, its binds appended to {@code args}.
-     *
-     * <p>Empty for a whole collection. The list binds once as JSON through
-     * {@code json_each} (no variable limit); links seek the items' key, handles
-     * {@code bindings_by_handle}.
+     * The read of a load's placements over its scope ({@code
+     * load_placements}): the whole collection, or the link ids or handles the
+     * scope names, bound as lists (no variable limit); links seek the items'
+     * key, handles {@code bindings_by_handle}.
      */
-    private static String scopeClause(
-            JSONObject scope, String collection, String source, List<String> args)
+    private static PimdirSql.Bound scoped(JSONObject scope, String collection, String source)
             throws JSONException {
-        if (scope == null) {
-            return "";
-        }
-
-        String kind = scope.optString("kind", "all");
-        JSONArray values = scope.optJSONArray("handles".equals(kind) ? "handles" : "links");
-        if (values == null || values.length() == 0) {
-            return "";
+        Map<String, Object> values = PimdirSql.values("collection", collection, "source", source);
+        String kind = scope == null ? "all" : scope.optString("kind", "all");
+        JSONArray named =
+                scope == null
+                        ? null
+                        : scope.optJSONArray("handles".equals(kind) ? "handles" : "links");
+        if (named == null || named.length() == 0) {
+            return PimdirSql.bind("LOAD_PLACEMENTS", values);
         }
 
         if (!"handles".equals(kind)) {
-            args.add(values.toString());
-            return " AND i.link_id IN (SELECT value FROM json_each(?))";
+            values.put("links", named);
+            return PimdirSql.bind("LOAD_PLACEMENTS_BY_LINK", values);
         }
 
         // NOTE: an unbound row is placed under its provisional handle
@@ -465,19 +443,12 @@ public final class PimdirStorage {
         // comes back missing. A row that name reaches but whose binding holds
         // another handle is not one asked for.
         JSONArray names = new JSONArray();
-        for (int index = 0; index < values.length(); index++) {
-            names.put(nameOf(values.getString(index)));
+        for (int index = 0; index < named.length(); index++) {
+            names.put(nameOf(named.getString(index)));
         }
-        args.add(collection);
-        args.add(source);
-        args.add(values.toString());
-        args.add(names.toString());
-        args.add(values.toString());
-        return " AND i.link_id IN (SELECT link_id FROM bindings"
-                + " WHERE collection = ? AND source = ?"
-                + " AND handle IN (SELECT value FROM json_each(?))"
-                + " UNION ALL SELECT value FROM json_each(?))"
-                + " AND (b.handle IS NULL OR b.handle IN (SELECT value FROM json_each(?)))";
+        values.put("handles", named);
+        values.put("names", names);
+        return PimdirSql.bind("LOAD_PLACEMENTS_BY_HANDLE", values);
     }
 
     /**
@@ -645,13 +616,11 @@ public final class PimdirStorage {
         String stored = collectionOf(collection);
         String source = sourceOf(collection);
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT b.collection, b.handle FROM bindings b"
-                                + " JOIN items i ON i.collection = b.collection"
-                                + " AND i.link_id = b.link_id"
-                                + " WHERE b.link_id = ? AND b.source = ? AND b.collection <> ?"
-                                + " AND i.deleted = 0 AND i.retained_at IS NULL LIMIT 1",
-                        new String[] {linkId, source, stored})) {
+                PimdirDb.query(
+                        db,
+                        "BOUND_ELSEWHERE",
+                        PimdirSql.values(
+                                "link_id", linkId, "source", source, "collection", stored))) {
             if (!cursor.moveToFirst()) {
                 return null;
             }
@@ -686,16 +655,10 @@ public final class PimdirStorage {
         for (int index = 0; index < links.length(); index++) {
             String linkId = links.getString(index);
             try (Cursor cursor =
-                    db.rawQuery(
-                            "SELECT i.object_hash, o.size FROM items i"
-                                    + " JOIN collections c ON c.id = i.collection"
-                                    + " JOIN objects o ON o.hash = i.object_hash"
-                                    + " WHERE i.link_id = ? AND c.kind <> ?"
-                                    + (account == null ? "" : " AND c.account = ?")
-                                    + " LIMIT 1",
-                            account == null
-                                    ? new String[] {linkId, PimdirSummary.CONTACT}
-                                    : new String[] {linkId, PimdirSummary.CONTACT, account})) {
+                    PimdirDb.query(
+                            db,
+                            "HELD_OBJECT",
+                            PimdirSql.values("link_id", linkId, "account", account))) {
                 // NOTE: only a body read whole under its name links (STORAGE
                 // §7); one failing it goes to quarantine and is fetched.
                 if (cursor.moveToFirst() && blobs.verified(cursor.getString(0))) {
@@ -831,12 +794,12 @@ public final class PimdirStorage {
      */
     private void syncVersion(SQLiteDatabase db) {
         String engine = PimdirSql.identity().optString("syncVersion");
-        String stored = one(db, "SELECT sync_version FROM store_meta WHERE id = 1");
+        String stored = one(db, "STORE_SYNC_VERSION", Map.of());
         if (stored == null) {
             Map<String, Object> values = new HashMap<>();
             values.put("sync_version", engine);
             PimdirSql.Bound bound = PimdirSql.bind("SET_SYNC_VERSION", values);
-            db.execSQL(bound.sql, bound.args);
+            PimdirDb.changed(db, bound);
         } else if (!stored.equals(engine)) {
             throw new PimalayaException(
                     "sync-version: the store's sync state is " + stored + "'s, not "
@@ -926,13 +889,7 @@ public final class PimdirStorage {
         String[] item = new String[5];
         String[] binding = new String[2];
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT i.conflicted, i.conflict_object, i.object_hash, i.sort_key, "
-                                + PimdirItems.flagsOf("i") + ", b.conflicted, b.conflict_object"
-                                + " FROM items i LEFT JOIN bindings b"
-                                + " ON b.collection = i.collection AND b.link_id = i.link_id"
-                                + " AND b.source = ? WHERE i.collection = ? AND i.link_id = ?",
-                        new String[] {source, collection, linkId})) {
+                PimdirDb.query(db, "OVERRULED_STATE", binding(collection, linkId, source))) {
             if (!cursor.moveToFirst()) {
                 return;
             }
@@ -972,24 +929,25 @@ public final class PimdirStorage {
     private String keepOverruled(SQLiteDatabase db, String collection, String linkId,
             String handle, String source, String object, String sortKey, String flags) {
         String key = "dup:" + linkId + "#" + handle;
-        while (one(db, "SELECT 1 FROM items WHERE collection = ? AND link_id = ?",
-                collection, key) != null) {
+        while (one(db, "ITEM_EXISTS", PimdirItems.key(collection, key)) != null) {
             key = "dup:" + key + "#" + handle;
         }
-        db.execSQL(
-                "INSERT INTO items(collection, link_id, seq, flags_known, object_hash,"
-                        + " sort_key, level, deleted) VALUES(?, ?, ?, ?, ?, ?, 2, 1)",
-                new Object[] {
-                    collection, key, PimdirItems.seqFor(db, collection, key), flags == null ? 0 : 1,
-                    object, sortKey == null ? "" : sortKey
-                });
+        Map<String, Object> kept = PimdirItems.key(collection, key);
+        kept.put("seq", PimdirItems.seqFor(db, collection, key));
+        kept.put("flags_known", flags == null ? 0 : 1);
+        kept.put("object_hash", object);
+        kept.put("sort_key", sortKey == null ? "" : sortKey);
+        kept.put("level", PimdirItems.FULL);
+        kept.put("deleted", 1);
+        kept.put("conflicted", 0);
+        PimdirDb.exec(db, "INSERT_ITEM", kept);
         PimdirItems.writeFlags(db, collection, key, PimdirItems.flagsFrom(flags));
         Map<String, Object> values = new HashMap<>();
         values.put("collection", collection);
         values.put("link_id", key);
         values.put("source", source);
         PimdirSql.Bound retain = PimdirSql.bind("RETAIN_ITEM", values);
-        db.execSQL(retain.sql, retain.args);
+        PimdirDb.changed(db, retain);
         adjustRefcount(db, null, object);
         return key;
     }
@@ -1043,9 +1001,7 @@ public final class PimdirStorage {
     /** Whether any source binds the item. */
     private static boolean isBound(SQLiteDatabase db, String collection, String linkId) {
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT 1 FROM bindings WHERE collection = ? AND link_id = ? LIMIT 1",
-                        new String[] {collection, linkId})) {
+                PimdirDb.query(db, "ITEM_BOUND", PimdirItems.key(collection, linkId))) {
             return cursor.moveToFirst();
         }
     }
@@ -1062,10 +1018,8 @@ public final class PimdirStorage {
             if (!blobs.has(hash)) {
                 throw new PimalayaException("The body " + hash + " is not in the blob store");
             }
-            db.execSQL(
-                    "INSERT INTO objects(hash, size, refcount) VALUES(?, ?, 0)"
-                            + " ON CONFLICT(hash) DO NOTHING",
-                    new Object[] {hash, op.getLong("size")});
+            PimdirDb.exec(
+                    db, "FILE_OBJECT", PimdirSql.values("hash", hash, "size", op.getLong("size")));
             return;
         }
         // NOTE: a body that is not UTF-8 (a message's 8-bit parts) comes
@@ -1081,10 +1035,7 @@ public final class PimdirStorage {
         } catch (IOException error) {
             throw new JSONException("Could not store the body " + hash + ": " + error.getMessage());
         }
-        db.execSQL(
-                "INSERT INTO objects(hash, size, refcount) VALUES(?, ?, 0)"
-                        + " ON CONFLICT(hash) DO NOTHING",
-                new Object[] {hash, body.length});
+        PimdirDb.exec(db, "FILE_OBJECT", PimdirSql.values("hash", hash, "size", body.length));
     }
 
     /**
@@ -1170,11 +1121,7 @@ public final class PimdirStorage {
                 && !"conflict".equals(placement.optString("status", "clean"))) {
             int heldLevel =
                     Integer.parseInt(
-                            one(
-                                    db,
-                                    "SELECT level FROM items WHERE collection = ?"
-                                            + " AND link_id = ?",
-                                    collection, linkId));
+                            one(db, "ITEM_LEVEL", PimdirItems.key(collection, linkId)));
             if (level < heldLevel) {
                 kept = previousObject;
                 object = previousObject;
@@ -1217,44 +1164,32 @@ public final class PimdirStorage {
         }
 
         if (!exists) {
-            db.execSQL(
-                    "INSERT INTO items(collection, link_id, seq, flags_known, object_hash,"
-                            + " sort_key, level, deleted) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-                    new Object[] {
-                        collection,
-                        linkId,
-                        PimdirItems.seqFor(db, collection, linkId),
-                        flags == null ? 0 : 1,
-                        object,
-                        sortKey,
-                        level,
-                        tombstone ? 1 : 0
-                    });
+            Map<String, Object> row = PimdirItems.key(collection, linkId);
+            row.put("seq", PimdirItems.seqFor(db, collection, linkId));
+            row.put("flags_known", flags == null ? 0 : 1);
+            row.put("object_hash", object);
+            row.put("sort_key", sortKey);
+            row.put("level", level);
+            row.put("deleted", tombstone ? 1 : 0);
+            row.put("conflicted", 0);
+            PimdirDb.exec(db, "INSERT_ITEM", row);
         } else {
             // NOTE: a write not restating the key keeps it (SPEC.md §9.3); the
             // reference write replaces all, so blanking would reset ordering.
-            db.execSQL(
-                    "UPDATE items SET object_hash = ?, level = ?,"
-                            + " sort_key = CASE WHEN ? = '' THEN sort_key ELSE ? END,"
-                            + " deleted = ?, retained_at = NULL, retained_by = NULL"
-                            + " WHERE collection = ? AND link_id = ?",
-                    new Object[] {
-                        object,
-                        level,
-                        sortKey,
-                        sortKey,
-                        tombstone ? 1 : 0,
-                        collection,
-                        linkId
-                    });
+            Map<String, Object> row = PimdirItems.key(collection, linkId);
+            row.put("object_hash", object);
+            row.put("level", level);
+            row.put("sort_key", sortKey);
+            row.put("deleted", tombstone ? 1 : 0);
+            PimdirDb.exec(db, "RESTATE_ITEM", row);
         }
         // NOTE: the flags are rows (STORAGE §13), written after their item.
         PimdirItems.writeFlags(db, collection, linkId, flags);
         if (!mail) {
-            db.execSQL(
-                    "UPDATE items SET conflicted = ?, conflict_object = ?"
-                            + " WHERE collection = ? AND link_id = ?",
-                    new Object[] {conflicted ? 1 : 0, conflictObject, collection, linkId});
+            Map<String, Object> conflict = PimdirItems.key(collection, linkId);
+            conflict.put("conflicted", conflicted ? 1 : 0);
+            conflict.put("conflict_object", conflictObject);
+            PimdirDb.exec(db, "SET_ITEM_CONFLICT", conflict);
             adjustRefcount(db, previousConflict, conflictObject);
         }
 
@@ -1338,26 +1273,17 @@ public final class PimdirStorage {
             baseObject = previousBase;
         }
 
-        db.execSQL(
-                "INSERT INTO bindings(collection, link_id, source, handle, base_flags_known,"
-                        + " base_object, base_revision, base_present, conflicted,"
-                        + " conflict_revision, conflict_object, shared_object)"
-                        + " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                        + " ON CONFLICT(collection, link_id, source) DO UPDATE SET"
-                        + " handle = excluded.handle,"
-                        + " base_flags_known = excluded.base_flags_known,"
-                        + " base_object = excluded.base_object,"
-                        + " base_revision = excluded.base_revision,"
-                        + " base_present = excluded.base_present,"
-                        + " conflicted = excluded.conflicted,"
-                        + " conflict_revision = excluded.conflict_revision,"
-                        + " conflict_object = excluded.conflict_object,"
-                        + " shared_object = excluded.shared_object",
-                new Object[] {
-                    collection, linkId, source, handle, baseFlags == null ? 0 : 1, baseObject,
-                    baseRevision, base == null ? 0 : 1, conflicted ? 1 : 0, conflictRevision,
-                    conflictObject, shared
-                });
+        Map<String, Object> row = binding(collection, linkId, source);
+        row.put("handle", handle);
+        row.put("base_flags_known", baseFlags == null ? 0 : 1);
+        row.put("base_object", baseObject);
+        row.put("base_revision", baseRevision);
+        row.put("base_present", base == null ? 0 : 1);
+        row.put("conflicted", conflicted ? 1 : 0);
+        row.put("conflict_revision", conflictRevision);
+        row.put("conflict_object", conflictObject);
+        row.put("shared_object", shared);
+        PimdirDb.exec(db, "WRITE_BINDING", row);
         PimdirItems.writeBaseFlags(db, collection, linkId, source, baseFlags);
         adjustRefcount(db, previousBase, baseObject);
         adjustRefcount(db, previousConflict, conflictObject);
@@ -1390,9 +1316,7 @@ public final class PimdirStorage {
                 rebinding.putIfAbsent(collection + "\n" + source + "\n" + linkId, released);
             }
         }
-        db.execSQL(
-                "DELETE FROM bindings WHERE collection = ? AND link_id = ? AND source = ?",
-                new Object[] {collection, linkId, source});
+        PimdirDb.exec(db, "DELETE_BINDING", binding(collection, linkId, source));
         adjustRefcount(db, base, null);
         adjustRefcount(db, conflict, null);
         adjustRefcount(db, shared, null);
@@ -1402,11 +1326,7 @@ public final class PimdirStorage {
         }
 
         if (!isBound(db, collection, linkId)) {
-            db.execSQL(
-                    "UPDATE items SET deleted = 1,"
-                            + " retained_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),"
-                            + " retained_by = ? WHERE collection = ? AND link_id = ?",
-                    new Object[] {source, collection, linkId});
+            PimdirDb.exec(db, "RETAIN_ITEM", binding(collection, linkId, source));
             return;
         }
 
@@ -1415,9 +1335,7 @@ public final class PimdirStorage {
         // did: a tombstone there, which its next pass pushes as a removal,
         // the last of them retiring the item. Left live, the other source
         // would keep it and hand it back as a create.
-        db.execSQL(
-                "UPDATE items SET deleted = 1 WHERE collection = ? AND link_id = ?",
-                new Object[] {collection, linkId});
+        PimdirDb.exec(db, "TOMBSTONE_ITEM", PimdirItems.key(collection, linkId));
     }
 
     /**
@@ -1444,7 +1362,7 @@ public final class PimdirStorage {
         values.put("band", op.optBoolean("band", false) ? 1L : 0L);
 
         PimdirSql.Bound bound = PimdirSql.bind(statement, values);
-        db.execSQL(bound.sql, bound.args);
+        PimdirDb.changed(db, bound);
     }
 
     /** Stamps the bindings a page listed with the open round's id. */
@@ -1468,9 +1386,8 @@ public final class PimdirStorage {
 
     /** The collection row a source's sync state hangs off, made if missing. */
     private static void ensureCollection(SQLiteDatabase db, String collection) {
-        db.execSQL(PimdirSql.of("ENSURE_COLLECTION").replace(":collection", "?")
-                        .replace(":account", "NULL"),
-                new Object[] {collection, collection});
+        PimdirDb.exec(
+                db, "ENSURE_COLLECTION", PimdirSql.values("collection", collection, "account", null));
     }
 
     private void setCheckpoint(SQLiteDatabase db, JSONObject op) throws JSONException {
@@ -1482,11 +1399,11 @@ public final class PimdirStorage {
         // opaque bytes to the store.
         byte[] checkpoint =
                 op.optString("checkpoint", "").getBytes(StandardCharsets.UTF_8);
-        db.execSQL(
-                "INSERT INTO sources(collection, source, checkpoint) VALUES(?, ?, ?)"
-                        + " ON CONFLICT(collection, source) DO UPDATE SET"
-                        + " checkpoint = excluded.checkpoint",
-                new Object[] {collection, source, checkpoint});
+        PimdirDb.exec(
+                db,
+                "UPSERT_CHECKPOINT",
+                PimdirSql.values(
+                        "collection", collection, "source", source, "checkpoint", checkpoint));
     }
 
     /**
@@ -1506,10 +1423,7 @@ public final class PimdirStorage {
         }
 
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT " + PimdirItems.baseFlagsOf("b") + " FROM bindings b"
-                                + " WHERE b.collection = ? AND b.link_id = ? AND b.source = ?",
-                        new String[] {collection, linkId, source})) {
+                PimdirDb.query(db, "BASE_FLAGS", binding(collection, linkId, source))) {
             if (!cursor.moveToFirst() || cursor.isNull(0)) {
                 return null;
             }
@@ -1533,13 +1447,7 @@ public final class PimdirStorage {
         }
 
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT i.object_hash, i.deleted, b.handle, b.base_object, b.base_revision"
-                                + " FROM items i"
-                                + " LEFT JOIN bindings b ON b.collection = i.collection"
-                                + " AND b.link_id = i.link_id AND b.source = ?"
-                                + " WHERE i.collection = ? AND i.link_id = ?",
-                        new String[] {source, collection, linkId})) {
+                PimdirDb.query(db, "PUSH_ROW", binding(collection, linkId, source))) {
             if (!cursor.moveToFirst()) {
                 return null;
             }
@@ -1577,13 +1485,7 @@ public final class PimdirStorage {
         }
 
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT i.object_hash, b.conflict_object, b.base_object,"
-                                + " i.conflicted, i.conflict_object FROM items i"
-                                + " LEFT JOIN bindings b ON b.collection = i.collection"
-                                + " AND b.link_id = i.link_id AND b.source = ?"
-                                + " WHERE i.collection = ? AND i.link_id = ?",
-                        new String[] {source, collection, linkId})) {
+                PimdirDb.query(db, "CONFLICT_BODIES", binding(collection, linkId, source))) {
             if (!cursor.moveToFirst()) {
                 return null;
             }
@@ -1622,15 +1524,7 @@ public final class PimdirStorage {
         String source = sourceOf(engineCollection);
 
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT i.link_id, b.handle FROM items i"
-                                + " LEFT JOIN bindings b ON b.collection = i.collection"
-                                + " AND b.link_id = i.link_id AND b.source = ?"
-                                + " WHERE i.collection = ? AND i.deleted = 0"
-                                + " AND i.retained_at IS NULL"
-                                + " AND (i.level < 2 OR i.object_hash IS NULL"
-                                + " OR (b.conflicted = 1 AND b.conflict_object IS NULL))",
-                        new String[] {source, collection})) {
+                PimdirDb.query(db, "HANDLES_BELOW_FULL", source(collection, source))) {
             List<String> handles = new ArrayList<>(cursor.getCount());
             while (cursor.moveToNext()) {
                 handles.add(
@@ -1644,12 +1538,10 @@ public final class PimdirStorage {
     public boolean bindsAny(String engineCollection) {
         SQLiteDatabase db = store.getReadableDatabase();
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT EXISTS (SELECT 1 FROM bindings"
-                                + " WHERE collection = ? AND source = ?)",
-                        new String[] {
-                            collectionOf(engineCollection), sourceOf(engineCollection)
-                        })) {
+                PimdirDb.query(
+                        db,
+                        "BINDS_ANY",
+                        source(collectionOf(engineCollection), sourceOf(engineCollection)))) {
             return cursor.moveToFirst() && cursor.getInt(0) == 1;
         }
     }
@@ -1670,16 +1562,12 @@ public final class PimdirStorage {
             collections.put(collectionOf(engineCollection));
         }
         SQLiteDatabase db = store.getReadableDatabase();
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT DISTINCT handle FROM bindings"
-                                + " WHERE collection IN (SELECT value FROM json_each(?))"
-                                + " AND source = ? AND handle IN (SELECT value FROM json_each(?))",
-                        new String[] {
-                            collections.toString(),
-                            sourceOf(engineCollections.get(0)),
-                            new JSONArray(handles).toString()
-                        })) {
+        Map<String, Object> values =
+                PimdirSql.values(
+                        "collections", collections,
+                        "source", sourceOf(engineCollections.get(0)),
+                        "handles", handles);
+        try (Cursor cursor = PimdirDb.query(db, "HELD_HANDLES", values)) {
             while (cursor.moveToNext()) {
                 held.add(cursor.getString(0));
             }
@@ -1699,16 +1587,10 @@ public final class PimdirStorage {
             return bound;
         }
         SQLiteDatabase db = store.getReadableDatabase();
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT handle, link_id, base_revision FROM bindings"
-                                + " WHERE collection = ? AND source = ?"
-                                + " AND handle IN (SELECT value FROM json_each(?))",
-                        new String[] {
-                            collectionOf(engineCollection),
-                            sourceOf(engineCollection),
-                            new JSONArray(handles).toString()
-                        })) {
+        Map<String, Object> values =
+                source(collectionOf(engineCollection), sourceOf(engineCollection));
+        values.put("handles", handles);
+        try (Cursor cursor = PimdirDb.query(db, "BOUND_HANDLES", values)) {
             while (cursor.moveToNext()) {
                 bound.put(
                         cursor.getString(0),
@@ -1735,15 +1617,7 @@ public final class PimdirStorage {
 
         List<JSONObject> conflicts = new ArrayList<>();
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT i.link_id, i.object_hash, b.handle, b.base_object,"
-                                + " b.base_revision, b.conflict_revision, b.conflict_object"
-                                + " FROM items i"
-                                + " JOIN bindings b ON b.collection = i.collection"
-                                + " AND b.link_id = i.link_id AND b.source = ?"
-                                + " WHERE i.collection = ? AND i.deleted = 0"
-                                + " AND b.conflicted = 1 AND b.conflict_object IS NOT NULL",
-                        new String[] {source, collection})) {
+                PimdirDb.query(db, "BINDING_CONFLICTS", source(collection, source))) {
             while (cursor.moveToNext()) {
                 String linkId = cursor.getString(0);
                 JSONObject conflict = new JSONObject();
@@ -1784,18 +1658,7 @@ public final class PimdirStorage {
     private void itemConflicts(SQLiteDatabase db, String collection, String source,
             List<JSONObject> conflicts) throws JSONException {
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT i.link_id, i.object_hash, b.handle, b.base_revision,"
-                                + " i.conflict_object"
-                                + " FROM items i"
-                                + " JOIN bindings b ON b.collection = i.collection"
-                                + " AND b.link_id = i.link_id AND b.source = ?"
-                                + " WHERE i.collection = ? AND i.deleted = 0"
-                                + " AND i.retained_at IS NULL AND i.conflicted = 1"
-                                + " AND i.conflict_object IS NOT NULL"
-                                + " AND i.object_hash IS NOT NULL"
-                                + " AND NOT (b.conflicted = 1 AND b.conflict_object IS NOT NULL)",
-                        new String[] {source, collection})) {
+                PimdirDb.query(db, "ITEM_CONFLICTS", source(collection, source))) {
             while (cursor.moveToNext()) {
                 String linkId = cursor.getString(0);
                 String object = cursor.getString(1);
@@ -1826,11 +1689,12 @@ public final class PimdirStorage {
         String agreed =
                 one(
                         db,
-                        "SELECT ifnull(shared_object, base_object) FROM bindings"
-                                + " WHERE collection = ? AND link_id = ?"
-                                + " AND ifnull(shared_object, base_object) NOT IN (?, ?)"
-                                + " ORDER BY source LIMIT 1",
-                        collection, linkId, object, diverging);
+                        "ANCESTOR_OBJECT",
+                        PimdirSql.values(
+                                "collection", collection,
+                                "link_id", linkId,
+                                "object", object,
+                                "diverging", diverging));
         return agreed == null ? "" : bodyOf(agreed);
     }
 
@@ -1847,10 +1711,9 @@ public final class PimdirStorage {
         if (linkId == null) {
             return;
         }
-        db.execSQL(
-                "UPDATE bindings SET conflict_revision = ? WHERE collection = ?"
-                        + " AND link_id = ? AND source = ?",
-                new Object[] {revision, collection, linkId, source});
+        Map<String, Object> values = binding(collection, linkId, source);
+        values.put("conflict_revision", revision);
+        PimdirDb.exec(db, "SET_CONFLICT_REVISION", values);
     }
 
     /**
@@ -1865,19 +1728,7 @@ public final class PimdirStorage {
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT EXISTS (SELECT 1 FROM items i"
-                                + " LEFT JOIN bindings b ON b.collection = i.collection"
-                                + " AND b.link_id = i.link_id AND b.source = ?"
-                                + " WHERE i.collection = ?"
-                                + " AND (b.conflicted = 1"
-                                + " OR ((i.deleted = 1 OR i.retained_at IS NOT NULL)"
-                                + " AND b.handle IS NOT NULL)"
-                                + " OR (i.deleted = 0 AND i.retained_at IS NULL"
-                                + " AND i.object_hash IS NOT NULL"
-                                + " AND (b.base_object IS NULL"
-                                + " OR b.base_object <> i.object_hash))))",
-                        new String[] {source, collection})) {
+                PimdirDb.query(db, "SOURCE_PENDING", source(collection, source))) {
             return cursor.moveToFirst() && cursor.getInt(0) == 1;
         }
     }
@@ -1912,10 +1763,10 @@ public final class PimdirStorage {
     public int memberCount(String engineCollection) {
         SQLiteDatabase db = store.getReadableDatabase();
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT COUNT(*) FROM items WHERE collection = ? AND deleted = 0"
-                                + " AND retained_at IS NULL AND object_hash IS NOT NULL",
-                        new String[] {collectionOf(engineCollection)})) {
+                PimdirDb.query(
+                        db,
+                        "COUNT_HELD_MEMBERS",
+                        PimdirSql.values("collection", collectionOf(engineCollection)))) {
             return cursor.moveToFirst() ? cursor.getInt(0) : 0;
         }
     }
@@ -1928,12 +1779,13 @@ public final class PimdirStorage {
     public String handleFor(String engineCollection, String linkId) {
         SQLiteDatabase db = store.getReadableDatabase();
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT handle FROM bindings WHERE collection = ? AND link_id = ?"
-                                + " AND source = ?",
-                        new String[] {
-                            collectionOf(engineCollection), linkId, sourceOf(engineCollection)
-                        })) {
+                PimdirDb.query(
+                        db,
+                        "HANDLE_FOR_LINK",
+                        binding(
+                                collectionOf(engineCollection),
+                                linkId,
+                                sourceOf(engineCollection)))) {
             return cursor.moveToFirst() ? cursor.getString(0) : provisionalOf(linkId);
         }
     }
@@ -1989,19 +1841,10 @@ public final class PimdirStorage {
     /** The pending create a move staged here, own or minted key, or null. */
     public String pendingCreateOf(String engineCollection, String linkId) {
         SQLiteDatabase db = store.getReadableDatabase();
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT i.link_id FROM items i"
-                                + " JOIN bindings b ON b.collection = i.collection"
-                                + " AND b.link_id = i.link_id AND b.source = ?"
-                                + " WHERE i.link_id IN (?, ?) AND i.collection = ?"
-                                + " AND i.deleted = 0 AND b.base_present = 0 LIMIT 1",
-                        new String[] {
-                            sourceOf(engineCollection),
-                            linkId,
-                            mintedOf(linkId),
-                            collectionOf(engineCollection)
-                        })) {
+        Map<String, Object> values =
+                binding(collectionOf(engineCollection), linkId, sourceOf(engineCollection));
+        values.put("minted", mintedOf(linkId));
+        try (Cursor cursor = PimdirDb.query(db, "PENDING_CREATE_OF", values)) {
             return cursor.moveToFirst() ? cursor.getString(0) : null;
         }
     }
@@ -2015,22 +1858,10 @@ public final class PimdirStorage {
     public String[] moveSourceOf(String engineCollection, String linkId) {
         SQLiteDatabase db = store.getReadableDatabase();
         List<String> identities = identitiesOf(linkId);
-        StringBuilder marks = new StringBuilder();
-        List<String> args = new ArrayList<>(List.of(sourceOf(engineCollection)));
-        for (String identity : identities) {
-            marks.append(marks.length() == 0 ? "?" : ",?");
-            args.add(identity);
-        }
-        args.add(collectionOf(engineCollection));
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT i.collection, b.handle FROM items i"
-                                + " JOIN bindings b ON b.collection = i.collection"
-                                + " AND b.link_id = i.link_id AND b.source = ?"
-                                + " WHERE i.link_id IN (" + marks + ") AND i.collection <> ?"
-                                + " AND i.deleted = 1 AND i.retained_at IS NULL"
-                                + " AND b.base_present = 1 LIMIT 1",
-                        args.toArray(new String[0]))) {
+        Map<String, Object> values =
+                binding(collectionOf(engineCollection), linkId, sourceOf(engineCollection));
+        values.put("key", identities.size() > 1 ? identities.get(1) : null);
+        try (Cursor cursor = PimdirDb.query(db, "MOVE_SOURCE_OF", values)) {
             return cursor.moveToFirst()
                     ? new String[] {cursor.getString(0), cursor.getString(1)}
                     : null;
@@ -2041,16 +1872,13 @@ public final class PimdirStorage {
     public boolean isPendingCreate(String engineCollection, String linkId) {
         SQLiteDatabase db = store.getReadableDatabase();
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT 1 FROM items i"
-                                + " LEFT JOIN bindings b ON b.collection = i.collection"
-                                + " AND b.link_id = i.link_id AND b.source = ?"
-                                + " WHERE i.collection = ? AND i.link_id = ? AND i.deleted = 0"
-                                + " AND i.retained_at IS NULL"
-                                + " AND (b.link_id IS NULL OR b.base_present = 0)",
-                        new String[] {
-                            sourceOf(engineCollection), collectionOf(engineCollection), linkId
-                        })) {
+                PimdirDb.query(
+                        db,
+                        "IS_PENDING_CREATE",
+                        binding(
+                                collectionOf(engineCollection),
+                                linkId,
+                                sourceOf(engineCollection)))) {
             return cursor.moveToFirst();
         }
     }
@@ -2087,23 +1915,11 @@ public final class PimdirStorage {
     public Map<String, String> pendingCreatesByMessageId(String engineCollection) {
         SQLiteDatabase db = store.getReadableDatabase();
         Map<String, String> creates = new HashMap<>();
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT b.link_id, s.message_id FROM bindings b"
-                                + " JOIN items i ON i.collection = b.collection"
-                                + " AND i.link_id = b.link_id"
-                                + " JOIN mail_summary s ON s.collection = b.collection"
-                                + " AND s.link_id = b.link_id"
-                                + " WHERE b.collection = ? AND b.source = ?"
-                                + " AND b.handle >= ? AND b.handle < ?"
-                                + " AND b.base_present = 0 AND i.deleted = 0"
-                                + " AND s.message_id IS NOT NULL",
-                        new String[] {
-                            collectionOf(engineCollection),
-                            sourceOf(engineCollection),
-                            PROVISIONAL,
-                            String.valueOf((char) (PROVISIONAL.charAt(0) + 1))
-                        })) {
+        Map<String, Object> values =
+                source(collectionOf(engineCollection), sourceOf(engineCollection));
+        values.put("low", PROVISIONAL);
+        values.put("high", String.valueOf((char) (PROVISIONAL.charAt(0) + 1)));
+        try (Cursor cursor = PimdirDb.query(db, "PENDING_CREATES_BY_MESSAGE_ID", values)) {
             while (cursor.moveToNext()) {
                 creates.put(cursor.getString(1), cursor.getString(0));
             }
@@ -2114,7 +1930,7 @@ public final class PimdirStorage {
     /** Whether a stored collection holds mail, read within a write batch. */
     private boolean isMail(SQLiteDatabase db, String collection) {
         return PimdirSummary.MAIL.equals(
-                one(db, "SELECT kind FROM collections WHERE id = ?", collection));
+                one(db, "LOAD_KIND", PimdirSql.values("collection", collection)));
     }
 
     /**
@@ -2146,54 +1962,15 @@ public final class PimdirStorage {
         }
         // NOTE: the tables Annex A.1 files a message's summary in, copied
         // row for row whatever their columns.
-        boolean copied = copyRows(db, "mail_summary", fromCollection, fromLink, collection, linkId);
-        copyRows(db, "item_address", fromCollection, fromLink, collection, linkId);
+        Map<String, Object> values =
+                PimdirSql.values(
+                        "from_collection", fromCollection,
+                        "from_link_id", fromLink,
+                        "to_collection", collection,
+                        "to_link_id", linkId);
+        boolean copied = PimdirDb.exec(db, "COPY_MAIL_SUMMARY", values) > 0;
+        PimdirDb.exec(db, "COPY_ADDRESSES", values);
         return copied;
-    }
-
-    /** Copies one item's rows of a summary table onto another item. */
-    private static boolean copyRows(
-            SQLiteDatabase db,
-            String table,
-            String fromCollection,
-            String fromLink,
-            String toCollection,
-            String toLink) {
-        List<ContentValues> rows = new ArrayList<>();
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT * FROM " + table + " WHERE collection = ? AND link_id = ?",
-                        new String[] {fromCollection, fromLink})) {
-            while (cursor.moveToNext()) {
-                ContentValues values = new ContentValues();
-                for (int column = 0; column < cursor.getColumnCount(); column++) {
-                    String name = cursor.getColumnName(column);
-                    switch (cursor.getType(column)) {
-                        case Cursor.FIELD_TYPE_NULL:
-                            values.putNull(name);
-                            break;
-                        case Cursor.FIELD_TYPE_INTEGER:
-                            values.put(name, cursor.getLong(column));
-                            break;
-                        case Cursor.FIELD_TYPE_FLOAT:
-                            values.put(name, cursor.getDouble(column));
-                            break;
-                        case Cursor.FIELD_TYPE_BLOB:
-                            values.put(name, cursor.getBlob(column));
-                            break;
-                        default:
-                            values.put(name, cursor.getString(column));
-                    }
-                }
-                values.put("collection", toCollection);
-                values.put("link_id", toLink);
-                rows.add(values);
-            }
-        }
-        for (ContentValues values : rows) {
-            db.insertWithOnConflict(table, null, values, SQLiteDatabase.CONFLICT_REPLACE);
-        }
-        return !rows.isEmpty();
     }
 
     /**
@@ -2208,12 +1985,8 @@ public final class PimdirStorage {
         if (bound != null) {
             return bound;
         }
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT link_id FROM items WHERE collection = ? AND link_id = ?",
-                        new String[] {collection, nameOf(handle)})) {
-            return cursor.moveToFirst() ? cursor.getString(0) : null;
-        }
+        String name = nameOf(handle);
+        return one(db, "ITEM_EXISTS", PimdirItems.key(collection, name)) == null ? null : name;
     }
 
     /** An object's body as text, empty when the item carries none. */
@@ -2240,11 +2013,7 @@ public final class PimdirStorage {
     /** The body one source last agreed on, null when it agreed on none. */
     private String baseObjectOf(
             SQLiteDatabase db, String collection, String linkId, String source) {
-        return one(
-                db,
-                "SELECT base_object FROM bindings WHERE collection = ? AND link_id = ?"
-                        + " AND source = ?",
-                collection, linkId, source);
+        return one(db, "BINDING_BASE_OBJECT", binding(collection, linkId, source));
     }
 
     /**
@@ -2253,10 +2022,7 @@ public final class PimdirStorage {
      */
     private static String[] heldItem(SQLiteDatabase db, String collection, String linkId) {
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT ifnull(object_hash, ''), conflicted, conflict_object, level"
-                                + " FROM items WHERE collection = ? AND link_id = ?",
-                        new String[] {collection, linkId})) {
+                PimdirDb.query(db, "HELD_ITEM", PimdirItems.key(collection, linkId))) {
             if (!cursor.moveToFirst()) {
                 return null;
             }
@@ -2275,11 +2041,7 @@ public final class PimdirStorage {
      */
     private String sharedObjectOf(
             SQLiteDatabase db, String collection, String linkId, String source) {
-        return one(
-                db,
-                "SELECT shared_object FROM bindings WHERE collection = ? AND link_id = ?"
-                        + " AND source = ?",
-                collection, linkId, source);
+        return one(db, "BINDING_SHARED_OBJECT", binding(collection, linkId, source));
     }
 
     /**
@@ -2291,11 +2053,7 @@ public final class PimdirStorage {
             throws JSONException {
         JSONObject bindings = new JSONObject();
         try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT source, handle, base_present, base_object, base_revision,"
-                                + " conflicted, conflict_revision, conflict_object, shared_object"
-                                + " FROM bindings WHERE collection = ? AND link_id = ?",
-                        new String[] {collection, linkId})) {
+                PimdirDb.query(db, "ITEM_BINDINGS", PimdirItems.key(collection, linkId))) {
             while (cursor.moveToNext()) {
                 JSONObject binding = new JSONObject();
                 binding.put("handle", cursor.getString(1));
@@ -2378,28 +2136,19 @@ public final class PimdirStorage {
     /** The diverging body this source's binding is waiting on, or null. */
     private String conflictObjectOf(
             SQLiteDatabase db, String collection, String linkId, String source) {
-        return one(
-                db,
-                "SELECT conflict_object FROM bindings WHERE collection = ? AND link_id = ?"
-                        + " AND source = ?",
-                collection, linkId, source);
+        return one(db, "BINDING_CONFLICT_OBJECT", binding(collection, linkId, source));
     }
 
 
     /** The handle this source already binds the item under, or null. */
     private String handleOf(SQLiteDatabase db, String collection, String linkId, String source) {
-        return one(
-                db,
-                "SELECT handle FROM bindings WHERE collection = ? AND link_id = ? AND source = ?",
-                collection, linkId, source);
+        return one(db, "HANDLE_FOR_LINK", binding(collection, linkId, source));
     }
 
     private String linkOf(SQLiteDatabase db, String collection, String source, String handle) {
-        return one(
-                db,
-                "SELECT link_id FROM bindings WHERE collection = ? AND source = ?"
-                        + " AND handle = ? LIMIT 1",
-                collection, source, handle);
+        Map<String, Object> values = source(collection, source);
+        values.put("handle", handle);
+        return one(db, "LINK_FOR_HANDLE", values);
     }
 
     /** The write batch's compiled single-value reads; null outside one. */
@@ -2433,7 +2182,10 @@ public final class PimdirStorage {
      * <p>Compiled, not a cursor (a mail page runs several per message);
      * compiled once per write batch and rebound.
      */
-    private String one(SQLiteDatabase db, String sql, String... args) {
+    private String one(SQLiteDatabase db, String name, Map<String, Object> values) {
+        PimdirSql.Bound bound = PimdirSql.bind(name, values);
+        String sql = bound.sql;
+        Object[] args = bound.args;
         SQLiteStatement statement = compiled == null ? null : compiled.get(sql);
         boolean kept = statement != null;
         if (statement == null) {
@@ -2449,7 +2201,7 @@ public final class PimdirStorage {
                 if (args[index] == null) {
                     statement.bindNull(index + 1);
                 } else {
-                    statement.bindString(index + 1, args[index]);
+                    statement.bindString(index + 1, args[index].toString());
                 }
             }
             return statement.simpleQueryForString();
@@ -2467,30 +2219,26 @@ public final class PimdirStorage {
         if (sameObject(before, after)) {
             return;
         }
-        if (before != null) {
-            db.execSQL("UPDATE objects SET refcount = refcount - 1 WHERE hash = ?",
-                    new Object[] {before});
-        }
-        if (after != null) {
-            db.execSQL("UPDATE objects SET refcount = refcount + 1 WHERE hash = ?",
-                    new Object[] {after});
-        }
+        PimdirItems.adjust(db, before, -1);
+        PimdirItems.adjust(db, after, 1);
     }
 
     /** Drops unreferenced objects, blobs unlinked after the batch commits. */
     private void collectGarbage(SQLiteDatabase db) {
-        List<String> orphans = new ArrayList<>();
-        try (Cursor cursor =
-                db.rawQuery("SELECT hash FROM objects WHERE refcount <= 0", null)) {
-            while (cursor.moveToNext()) {
-                orphans.add(cursor.getString(0));
-            }
-        }
-        for (String hash : orphans) {
-            db.execSQL("DELETE FROM objects WHERE hash = ?", new Object[] {hash});
-        }
         // NOTE: the row goes inside the transaction, the file once it commits.
-        PimdirItems.deferUnlink(store, orphans);
+        PimdirItems.deferUnlink(store, PimdirItems.collectGarbageRows(db));
+    }
+
+    /** A source's binding of one item as a statement's values. */
+    private static Map<String, Object> binding(String collection, String linkId, String source) {
+        Map<String, Object> values = PimdirItems.key(collection, linkId);
+        values.put("source", source);
+        return values;
+    }
+
+    /** A collection and a source as a statement's values. */
+    private static Map<String, Object> source(String collection, String source) {
+        return PimdirSql.values("collection", collection, "source", source);
     }
 
     private static boolean sameObject(String left, String right) {

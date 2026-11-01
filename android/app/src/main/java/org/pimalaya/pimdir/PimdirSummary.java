@@ -189,7 +189,7 @@ public final class PimdirSummary {
     /** Runs one canonical statement with its named parameters bound. */
     private static void exec(SQLiteDatabase db, String name, Map<String, Object> values) {
         PimdirSql.Bound bound = PimdirSql.bind(name, values);
-        db.execSQL(bound.sql, bound.args);
+        PimdirDb.changed(db, bound);
     }
 
     /**

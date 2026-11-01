@@ -3,7 +3,7 @@ cairn: delta
 change: the-shape-follows-storage-draft-08
 ---
 
-Folds into spec/offline-store.md: what step 2a changes there, but for "An item conflict is settled by a person's choice", which folds into spec/conflicts.md. Not folded yet, the device check coming first.
+Folds into spec/offline-store.md: what steps 2a and 2b change there, but for "An item conflict is settled by a person's choice", which folds into spec/conflicts.md. Not folded yet, the device check coming first.
 
 ## ADDED Requirements
 
@@ -104,10 +104,23 @@ A mail round whose listing a date filter narrowed SHALL say so on every page, an
 - WHEN the round's last page lands
 - THEN the message stays, the label's ids naming it
 
+### Requirement: The store's statements run on Android 8's SQLite
+Every statement the app runs on the store SHALL prepare and run on SQLite 3.18 as Android 8.0 builds it (no `RETURNING`, upsert, `UPDATE ... FROM`, `STRICT` nor JSON), the store tests running on that build. A statement 3.18 lacks a construct for SHALL be the canonical one's effect in several statements run in order under its one name, in one transaction, never one at a time by its caller. No SQL SHALL be written in Java.
+
+#### Scenario: A summary written twice
+- GIVEN a message whose summary the store does not hold
+- WHEN a listing writes it, then a later one restates it with no invitation
+- THEN the row is inserted, then updated, keeping the invitation the first write stated
+
+#### Scenario: A store the previous build wrote
+- GIVEN a store created by io-pimdir's canonical statement text at storage-draft-08
+- WHEN this build starts
+- THEN the store opens, and its rows are read and written by the app's statements
+
 ## MODIFIED Requirements
 
 ### Requirement: The store's shape follows the canonical schema
-The store SHALL be created by the canonical draft-08 text alone (0001_init.sql and `init_store_meta`), served over JNI, and SHALL NOT reconcile, widen, narrow nor rebuild a store of another shape: drafts are exact (STORAGE §4.2), and a store whose schema differs from the canonical text is refused as damaged.
+The store SHALL be created by the canonical draft-08 schema alone (0001_init.sql and `init_store_meta`), served over JNI, and SHALL NOT reconcile, widen, narrow nor rebuild a store of another shape: drafts are exact (STORAGE §4.2), and a store whose schema differs from the canonical text is refused as damaged. The statements it runs SHALL be the app's own shape, `pimalaya-android` (STORAGE §4.4: each canonical statement's name, parameters, columns and effect kept, its text free), and the store SHALL record no shape: a store the canonical statement text wrote is the same store and opens.
 
 #### Scenario: A store whose index moved
 - GIVEN a store holding an index the canonical text does not declare

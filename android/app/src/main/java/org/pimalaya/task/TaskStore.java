@@ -207,14 +207,10 @@ public final class TaskStore {
      */
     public String[] mailOf(String messageId) {
         try (Cursor cursor =
-                new PimdirItems(parts.pimdir())
-                        .readable()
-                        .rawQuery(
-                                "SELECT m.collection, m.link_id FROM mail_summary m"
-                                        + " JOIN items i ON i.collection = m.collection"
-                                        + " AND i.link_id = m.link_id"
-                                        + " WHERE i.deleted = 0 AND m.message_id = ? LIMIT 1",
-                                new String[] {messageId})) {
+                PimdirDb.query(
+                        new PimdirItems(parts.pimdir()).readable(),
+                        "MAIL_OF_MESSAGE_ID",
+                        PimdirSql.values("message_id", messageId))) {
             return cursor.moveToNext()
                     ? new String[] {cursor.getString(0), cursor.getString(1)}
                     : null;

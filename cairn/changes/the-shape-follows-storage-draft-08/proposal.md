@@ -22,7 +22,7 @@ Built on 2026-11-01 (rust/, a copy with `io-pimdir = { path = "../io-pimdir" }` 
 
 The compiler sees none of these, since the owner is `PimdirDb` and `PimdirStorage`:
 
-- **Identity and versions** (STORAGE §4, §6): `store_meta.format_version` `storage-draft-08` with `shape` `pimalaya-android`, `store_id`, `incarnation`, `derivation` 3, `sync_version` `sync-draft-07` written by the first sync write and checked.
+- **Identity and versions** (STORAGE §4, §6): `store_meta.format_version` `storage-draft-08` (draft-08 records no shape: one on-disk format, STORAGE §4.1, §6), `store_id`, `incarnation`, `derivation` 3, `sync_version` `sync-draft-07` written by the first sync write and checked.
 - **The blob store** (§5, §7): BLAKE3 alone, one shard level `objects/<hash[0:2]>/<hash>`, a name checked (52 characters of `a-z2-7`) before any path, the no-replace write (link, then unlink the temporary), no link followed, quarantine/ for a body failing its name, verification before a body is served, parsed, pushed or copied; the drain reads `queue.object_hash` and parks a payload whose `object` differs.
 - **Strict payloads** (§15.3, Annex B.2, spec/payloads/): every row Java enqueues matches its schema (a `submit` naming no `object`, `source` required, flags valid per §13); the drain parks a malformed row whole.
 - **Reads re-signed** (keyset-reads-seek-their-bound): `_by_link` batch reads, `list_address_placements` paged, `count_mail_by_day` in minutes, `seq_for_link_any` with `:collection`, `list_unstamped_bindings` with `:narrowed` and `:enumerated` answering `LastPage`.
@@ -36,6 +36,6 @@ The compiler sees none of these, since the owner is `PimdirDb` and `PimdirStorag
 Step 2 splits in two, so a failure on the device points at the rules or at the SQL, not both (platform-sqlite's own reason for keeping steps 2 and 3 apart):
 
 - **2a. Draft-08 on requery, canonical text.** The pin moves to bff5737 and the app keeps serving io-pimdir's canonical draft-08 text on requery, whose SQLite runs it; the Java owner and the bridge take every rule above. Start-up is blocked on a store of another draft (reinstall), as step 2 already says for another shape.
-- **2b. The fork.** The `pimalaya-android` shape: the draft-08 text rewritten for SQLite 3.18 (rust/pimdir/), the guard green over it, the Java hand-written SQL moved in. Only SQL moves; the rules are 2a's.
+- **2b. The fork.** The `pimalaya-android` shape: the draft-08 statements rewritten for SQLite 3.18 (rust/pimdir/queries/), the guard green over it, the Java hand-written SQL moved in. Only SQL moves; the rules are 2a's. The schema is not forked: draft-08 makes the canonical 0001_init.sql the one on-disk format, loading on 3.18 (STORAGE §4.1), holds pimdir.db to it (§6) and drops `store_meta.shape` (pimdir cairn/log/2026-10-31-format-identity-and-versions.md, D3), a statement's text alone being free (§4.4); so a store 2a wrote is the same store, opens, and needs no reinstall.
 
 Then platform-sqlite steps 3 to 5. Started beside the four CLI ports (2026-11-01) rather than after them, the app being the long pole; a fix the CLIs find in io-pimdir moves the pin again, nothing more. Device checks per step, as platform-sqlite says.

@@ -25,7 +25,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The pimdir store on the bundled SQLite: schema, invariants, blob directory.
+ * The pimdir store on the SQLite the tests run on: schema, invariants, blob
+ * directory.
  *
  * <p>Not that SQLite works, but that the spec's schema behaves through the Java
  * binding as through rusqlite: cascades, unique indexes biting, one store
@@ -53,50 +54,6 @@ public class PimdirDbTest {
         db.execSQL(
                 "INSERT INTO bindings(collection, link_id, source, handle) VALUES(?, ?, 'server', ?)",
                 new Object[] {collection, linkId, linkId + ".vcf"});
-    }
-
-    /**
-     * The store's opener runs on a SQLite new enough for the schema.
-     *
-     * <p>Android below 14 ships 3.18 to 3.32, which parses none of the features
-     * below. On the host JVM this is the bundled binding over the same
-     * amalgamation (flake.nix).
-     */
-    @Test
-    public void theStoreRunsOnASqliteNewEnoughForTheSchema() {
-        try (Cursor cursor = db.rawQuery("SELECT sqlite_version()", null)) {
-            assertTrue(cursor.moveToFirst());
-            String[] version = cursor.getString(0).split("\\.");
-            int major = Integer.parseInt(version[0]);
-            int minor = Integer.parseInt(version[1]);
-            assertTrue(cursor.getString(0), major > 3 || (major == 3 && minor >= 37));
-        }
-
-        // NOTE: STRICT (3.37) enforced, not merely parsed: the canonical
-        // temp.param is one (create_param).
-        db.execSQL("CREATE TABLE probe(id INTEGER PRIMARY KEY, n INTEGER NOT NULL) STRICT");
-        try {
-            db.execSQL("INSERT INTO probe(n) VALUES('not a number')");
-            throw new AssertionError("a STRICT table took text into an INTEGER column");
-        } catch (SQLiteConstraintException expected) {
-            // NOTE: SQLITE_CONSTRAINT_DATATYPE, the STRICT refusal.
-        }
-
-        // NOTE: RETURNING (3.35).
-        try (Cursor cursor = db.rawQuery("INSERT INTO probe(n) VALUES(1) RETURNING id", null)) {
-            assertTrue(cursor.moveToFirst());
-            assertEquals(1, cursor.getLong(0));
-        }
-
-        // NOTE: UPDATE ... FROM (3.33) over json_each (JSON1), which the
-        // statements the app still writes by hand use until the 3.18 shape
-        // (cairn/changes/the-shape-follows-storage-draft-08, step 2b).
-        db.execSQL(
-                "UPDATE probe SET n = j.value FROM json_each('[41]') AS j WHERE probe.id = 1");
-        try (Cursor cursor = db.rawQuery("SELECT n FROM probe WHERE id = 1", null)) {
-            assertTrue(cursor.moveToFirst());
-            assertEquals(41, cursor.getLong(0));
-        }
     }
 
     @Test
@@ -351,7 +308,11 @@ public class PimdirDbTest {
         db.beginTransaction();
         try {
             assertEquals(1, pragma("PRAGMA secure_delete"));
-            assertEquals(0, pragma("PRAGMA trusted_schema"));
+            // NOTE: SQLite before 3.31 has no trusted_schema and answers no
+            // row; one that has it holds it off.
+            try (Cursor cursor = db.rawQuery("PRAGMA trusted_schema", null)) {
+                assertTrue(!cursor.moveToFirst() || cursor.getLong(0) == 0);
+            }
         } finally {
             db.endTransaction();
         }
@@ -404,7 +365,7 @@ public class PimdirDbTest {
         old.execSQL(
                 "CREATE TABLE store_meta (id INTEGER PRIMARY KEY CHECK (id = 1),"
                         + " format TEXT NOT NULL DEFAULT 'pimdir', version INTEGER NOT NULL,"
-                        + " hash_algo TEXT NOT NULL, created_at TEXT NOT NULL) STRICT");
+                        + " hash_algo TEXT NOT NULL, created_at TEXT NOT NULL)");
         old.execSQL(
                 "INSERT INTO store_meta(id, version, hash_algo, created_at)"
                         + " VALUES(1, 1, 'sha256-128', '2026-10-01T00:00:00Z')");
@@ -419,6 +380,64 @@ public class PimdirDbTest {
                 refusal == null ? null : refusal.optString("refused"));
         assertArrayEquals("nothing written", before, java.nio.file.Files.readAllBytes(file.toPath()));
         assertFalse("no journal opened", new File(file.getPath() + "-wal").exists());
+    }
+
+    /**
+     * A store the canonical statement text wrote (the app before its own
+     * shape, step 2a) is the same store: storage-draft-08 has one on-disk
+     * format and records no shape (STORAGE §4.1, §6), so it opens, and the
+     * shape's statements read and write its rows.
+     */
+    @Test
+    public void aStoreTheCanonicalTextWroteOpensAsTheSameStore() throws Exception {
+        store.close();
+        File file = new File(store.blobs().getParentFile(), "pimdir.db");
+        for (String suffix : new String[] {"", "-wal", "-shm"}) {
+            new File(file.getPath() + suffix).delete();
+        }
+        // NOTE: what 2a ran: io-pimdir's migrations and init_store_meta, then
+        // rows its canonical upserts wrote, the same rows whatever text
+        // wrote them.
+        SQLiteDatabase canonical = SQLiteDatabase.openOrCreateDatabase(file, null);
+        canonical.execSQL("PRAGMA auto_vacuum = INCREMENTAL");
+        for (String statement : PimdirSql.schema()) {
+            canonical.execSQL(statement);
+        }
+        PimdirSql.Bound meta =
+                PimdirSql.bind(
+                        "INIT_STORE_META",
+                        PimdirSql.values(
+                                "version", PimdirSql.version(),
+                                "derivation", PimdirSql.identity().optLong("derivation")));
+        canonical.execSQL(meta.sql, meta.args);
+        canonical.execSQL(
+                "INSERT INTO collections(id, account, kind, name) VALUES('INBOX', 'a',"
+                        + " 'message/rfc822', 'INBOX')");
+        canonical.execSQL(
+                "INSERT INTO items(collection, link_id, seq, level) VALUES('INBOX', 'm1', 1, 1)");
+        canonical.execSQL(
+                "INSERT INTO mail_summary(collection, link_id, subject, invitation)"
+                        + " VALUES('INBOX', 'm1', 'one', 'e1')");
+        canonical.setVersion(PimdirSql.version());
+        canonical.close();
+
+        assertNull(PimdirDb.refusal(RuntimeEnvironment.getApplication()));
+
+        store = new PimdirDb(RuntimeEnvironment.getApplication());
+        db = store.getWritableDatabase();
+        PimdirDb.exec(
+                db,
+                "UPSERT_MAIL_SUMMARY",
+                PimdirSql.values("collection", "INBOX", "link_id", "m1", "subject", "two"));
+        try (Cursor cursor =
+                db.rawQuery("SELECT subject, invitation FROM mail_summary", null)) {
+            assertTrue(cursor.moveToFirst());
+            assertEquals("two", cursor.getString(0));
+            assertEquals("an unknown invitation keeps the known one", "e1", cursor.getString(1));
+            assertFalse(cursor.moveToNext());
+        }
+        store.close();
+        assertNull(PimdirDb.refusal(RuntimeEnvironment.getApplication()));
     }
 
     /** A store of this draft whose schema text is not the canonical one. */

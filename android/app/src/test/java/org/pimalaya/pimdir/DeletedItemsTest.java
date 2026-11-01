@@ -89,12 +89,16 @@ public class DeletedItemsTest {
                 "SELECT object_hash FROM items WHERE collection = ? AND link_id = ?",
                 collection, linkId);
         db.execSQL(
+                "UPDATE bindings SET handle = ?, base_object = ?, base_revision = 'etag',"
+                        + " base_present = 1"
+                        + " WHERE collection = ? AND link_id = ? AND source = 'server'",
+                new Object[] {handle, object, collection, linkId});
+        db.execSQL(
                 "INSERT INTO bindings(collection, link_id, source, handle, base_object,"
-                        + " base_revision, base_present) VALUES(?, ?, 'server', ?, ?, 'etag', 1)"
-                        + " ON CONFLICT(collection, link_id, source) DO UPDATE SET"
-                        + " handle = excluded.handle, base_object = excluded.base_object,"
-                        + " base_revision = excluded.base_revision, base_present = 1",
-                new Object[] {collection, linkId, handle, object});
+                        + " base_revision, base_present) SELECT ?, ?, 'server', ?, ?, 'etag', 1"
+                        + " WHERE NOT EXISTS (SELECT 1 FROM bindings WHERE collection = ?"
+                        + " AND link_id = ? AND source = 'server')",
+                new Object[] {collection, linkId, handle, object, collection, linkId});
         db.execSQL(
                 "UPDATE objects SET refcount = refcount + 1 WHERE hash = ?",
                 new Object[] {object});

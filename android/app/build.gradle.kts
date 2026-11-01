@@ -106,16 +106,25 @@ val cargoHostBuild = tasks.register<Exec>("cargoHostBuild") {
     workingDir = file("../../rust")
     commandLine("cargo", "build")
     inputs.dir("../../rust/src")
+    inputs.dir("../../rust/pimdir")
+    inputs.file("../../rust/build.rs")
     inputs.file("../../rust/Cargo.toml")
     inputs.file("../../rust/Cargo.lock")
     outputs.file(hostLibrary)
 }
 
 // The bundled SQLite's .so is built for Android only, so the store tests
-// load a host build of the same binding and amalgamation, which the nix
-// devshell provides (PIMALAYA_SQLITE_HOST, see flake.nix). Without it they
-// would fail on a missing libsqlite3x, so the test task refuses to start.
-val hostSqlite = System.getenv("PIMALAYA_SQLITE_HOST")
+// load a host build of the same binding, which the nix devshell provides
+// (see flake.nix): by default over Android 8.0's SQLite 3.18.2, the oldest
+// the app runs on (PIMALAYA_SQLITE_HOST_FLOOR), with -Ppimalaya.sqlite=bundled
+// over the amalgamation the app bundles (PIMALAYA_SQLITE_HOST). Without it
+// they would fail on a missing libsqlite3x, so the test task refuses to start.
+val hostSqliteVariable = when (val sqlite = providers.gradleProperty("pimalaya.sqlite").getOrElse("floor")) {
+    "floor" -> "PIMALAYA_SQLITE_HOST_FLOOR"
+    "bundled" -> "PIMALAYA_SQLITE_HOST"
+    else -> throw GradleException("pimalaya.sqlite is floor or bundled, not $sqlite")
+}
+val hostSqlite = System.getenv(hostSqliteVariable)
 
 tasks.withType<Test>().configureEach {
     dependsOn(cargoHostBuild)
@@ -124,7 +133,7 @@ tasks.withType<Test>().configureEach {
     doFirst {
         if (hostSqlite == null) {
             throw GradleException(
-                "PIMALAYA_SQLITE_HOST is unset: run the tests through `nix develop`"
+                "$hostSqliteVariable is unset: run the tests through `nix develop`"
             )
         }
     }
