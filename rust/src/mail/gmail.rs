@@ -504,6 +504,21 @@ impl<H: Host> Gmail<'_, H> {
         })
     }
 
+    /// Every id a label holds, listed with no query, 500 a request: the
+    /// enumeration a narrowed round hands on its last page (SYNC §4).
+    pub fn label_ids(&mut self, label: &str) -> Result<Vec<String>, BridgeError> {
+        let mut ids = Vec::new();
+        let mut token: Option<String> = None;
+        loop {
+            let page = self.list_page(Some(label), None, token.as_deref())?;
+            ids.extend(page.ids);
+            match page.next {
+                Some(next) => token = Some(next),
+                None => return Ok(ids),
+            }
+        }
+    }
+
     /// What moved in the whole account since `start`, read unfiltered.
     ///
     /// 500 records a page; [`None`] when Gmail no longer holds history

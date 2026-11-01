@@ -40,10 +40,10 @@ public class OfflineClientTest {
 
     @Test
     public void aSyncReportMirrorsItsReply() {
-        String raw = Native.offlineSync(EMPTY, "c", false, true, "", true);
+        String raw = Native.offlineSync(EMPTY, "c", false, true, "", true, false);
         assertMirrors(SyncReport.class, raw);
         assertEquals(
-                new SyncReport(0, 0, false, 0, 0, 0, 0, 0, 0),
+                new SyncReport(0, 0, 0, 0, false, 0, 0, 0, 0, 0, 0),
                 new OfflineClient().sync(EMPTY, "c", false));
     }
 
@@ -52,10 +52,11 @@ public class OfflineClientTest {
         SyncReport report =
                 SyncReport.from(
                         new JSONObject(
-                                "{\"conflicts\":1,\"overruled\":7,\"parked\":true,\"pulled\":2,"
-                                        + "\"pushed\":3,\"refreshed\":4,\"rejected\":5,\"unreadable\":8,"
+                                "{\"absent\":30,\"bound\":40,\"conflicts\":1,\"overruled\":7,"
+                                        + "\"parked\":true,\"pulled\":2,\"pushed\":3,"
+                                        + "\"refreshed\":4,\"rejected\":5,\"unreadable\":8,"
                                         + "\"waiting\":6}"));
-        assertEquals(new SyncReport(1, 7, true, 2, 3, 4, 5, 8, 6), report);
+        assertEquals(new SyncReport(30, 40, 1, 7, true, 2, 3, 4, 5, 8, 6), report);
     }
 
     @Test

@@ -719,6 +719,8 @@ public final class PimdirStorage {
         SQLiteDatabase db = store.getWritableDatabase();
         db.beginTransaction();
         compiled = new HashMap<>();
+        rebinding = new HashMap<>();
+        overruling = new HashSet<>();
         try {
             Map<String, byte[]> bodies = new HashMap<>();
             List<JSONObject> stamps = new ArrayList<>();
@@ -738,8 +740,8 @@ public final class PimdirStorage {
                         break;
                     case "upsert": {
                         JSONObject placement = op.getJSONObject("placement");
-                        String kind =
-                                applyUpsert(db, placement, superseded, links, released, fresh);
+                        String kind = applyUpsert(
+                                db, placement, superseded, links, released, fresh, effects);
                         if (kind != null) {
                             effects.put(effect(placement.getString("collection"),
                                     placement.getString("handle"), kind));
@@ -770,6 +772,7 @@ public final class PimdirStorage {
                         break;
                     case "overrule":
                         overrule(db, op, effects);
+                        overruling.add(op.getString("collection") + "\n" + op.getString("handle"));
                         break;
                     default:
                         throw new JSONException("Unknown write op " + op.getString("op"));
@@ -809,6 +812,8 @@ public final class PimdirStorage {
                 statement.close();
             }
             compiled = null;
+            rebinding = null;
+            overruling = null;
             PimdirItems.unlinkCollected(store, db, blobs);
         }
     }
@@ -986,11 +991,13 @@ public final class PimdirStorage {
 
     /**
      * What a write batch recorded beyond its ops (SYNC §9), the engine's
-     * {@code Written} reply: the bodies kept as retained items, from the
-     * {@code overruled} effects {@link #applyWrites} answered.
+     * {@code Written} reply: the bodies kept as retained items and the handles
+     * whose upsert recorded a divergence on the item, from the {@code
+     * overruled} and {@code conflicted} effects {@link #applyWrites} answered.
      */
     public static JSONObject written(JSONArray effects) throws JSONException {
         JSONArray overruled = new JSONArray();
+        JSONArray conflicted = new JSONArray();
         for (int index = 0; index < effects.length(); index++) {
             JSONObject effect = effects.getJSONObject(index);
             if ("overruled".equals(effect.optString("kind"))) {
@@ -998,11 +1005,16 @@ public final class PimdirStorage {
                         new JSONObject()
                                 .put("handle", effect.getString("handle"))
                                 .put("linkId", effect.getString("linkId")));
+            } else if ("conflicted".equals(effect.optString("kind"))) {
+                conflicted.put(effect.getString("handle"));
             }
         }
         JSONObject written = new JSONObject();
         if (overruled.length() > 0) {
             written.put("overruled", overruled);
+        }
+        if (conflicted.length() > 0) {
+            written.put("conflicted", conflicted);
         }
         return written;
     }
@@ -1078,8 +1090,8 @@ public final class PimdirStorage {
      * created.
      */
     private String applyUpsert(SQLiteDatabase db, JSONObject placement, Set<String> superseded,
-            Set<String> links, Map<String, String> released, Set<String> fresh)
-            throws JSONException {
+            Set<String> links, Map<String, String> released, Set<String> fresh,
+            JSONArray effects) throws JSONException {
         String engineCollection = placement.getString("collection");
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
@@ -1132,15 +1144,14 @@ public final class PimdirStorage {
         }
 
         // NOTE: an empty hash for a row holding none, so a missing row and a
-        // bodiless one read apart.
-        String held =
-                one(
-                        db,
-                        "SELECT ifnull(object_hash, '') FROM items WHERE collection = ?"
-                                + " AND link_id = ?",
-                        collection, linkId);
+        // bodiless one read apart; then the item's conflict, which the
+        // cross-source merge reads and settles (SYNC §9).
+        String[] item = heldItem(db, collection, linkId);
+        String held = item == null ? null : item[0];
         boolean exists = held != null;
         String previousObject = held == null || held.isEmpty() ? null : held;
+        String previousConflict = item == null ? null : item[2];
+        String incoming = object;
 
         // NOTE: a message's body never changes under its link id, so an
         // upsert carrying none below the level the row holds is one the
@@ -1163,6 +1174,38 @@ public final class PimdirStorage {
                 kept = previousObject;
                 object = previousObject;
                 level = heldLevel;
+            }
+        }
+
+        // NOTE: a mutable kind several sources hold settles its body by
+        // io-pimdir's cross-source merge (SYNC §9): a change one source made
+        // flows in, two sources changing it diverge, the item keeping its
+        // body, recording the incoming one and standing conflicted, and the
+        // upsert reported in Written.conflicted. A message is one identity,
+        // one body, and never diverges.
+        boolean conflicted = item != null && "1".equals(item[1]);
+        String conflictObject = previousConflict;
+        String shared;
+        if (mail) {
+            shared = incoming != null && !conflicted
+                    ? object
+                    : exists ? sharedObjectOf(db, collection, linkId, source) : null;
+        } else {
+            JSONObject merged = merge(db, collection, source, linkId, placement, item,
+                    overruling != null && overruling.contains(engineCollection + "\n" + handle));
+            object = merged.optString("object", null);
+            conflicted = merged.optBoolean("conflicted");
+            conflictObject = merged.optString("conflictObject", null);
+            shared = merged.optString("sharedObject", null);
+            if (merged.optBoolean("keptShared")) {
+                // NOTE: the summary and the sort key describe the body the
+                // item kept, so they stay too.
+                summary = null;
+                sortKey = "";
+                level = object == null ? 1 : Math.max(level, Integer.parseInt(item[3]));
+            }
+            if (merged.optBoolean("diverged")) {
+                effects.put(effect(engineCollection, handle, "conflicted"));
             }
         }
 
@@ -1200,6 +1243,13 @@ public final class PimdirStorage {
         }
         // NOTE: the flags are rows (STORAGE §13), written after their item.
         PimdirItems.writeFlags(db, collection, linkId, flags);
+        if (!mail) {
+            db.execSQL(
+                    "UPDATE items SET conflicted = ?, conflict_object = ?"
+                            + " WHERE collection = ? AND link_id = ?",
+                    new Object[] {conflicted ? 1 : 0, conflictObject, collection, linkId});
+            adjustRefcount(db, previousConflict, conflictObject);
+        }
 
         // NOTE: a write without summary keeps the stored row (flag pushes,
         // pulled deletions). A message created from another (a landed create,
@@ -1215,7 +1265,8 @@ public final class PimdirStorage {
             PimdirSummary.write(db, collection, linkId, summary, !exists);
         }
         links.add(collection + "\n" + linkId);
-        writeBinding(db, collection, source, linkId, handle, placement, superseded, !exists, kept);
+        writeBinding(db, collection, source, linkId, handle, placement, superseded, !exists, kept,
+                shared);
         adjustRefcount(db, previousObject, object);
 
         if (!exists) {
@@ -1230,11 +1281,12 @@ public final class PimdirStorage {
      *
      * <p>A duplicated identity is two link ids, never one binding; a handle
      * moves only on a rebind the batch supersedes. {@code kept} is what {@link
-     * #applyUpsert} kept, or null.
+     * #applyUpsert} kept, or null; {@code shared} the body the binding agrees
+     * with the item on (SYNC §9), pinned as the base is (STORAGE §5).
      */
     private void writeBinding(SQLiteDatabase db, String collection, String source, String linkId,
             String handle, JSONObject placement, Set<String> superseded, boolean fresh,
-            String kept) throws JSONException {
+            String kept, String shared) throws JSONException {
         JSONObject base = placement.optJSONObject("base");
         List<String> baseFlags = base == null || base.optJSONArray("flags") == null
                 ? null
@@ -1269,6 +1321,7 @@ public final class PimdirStorage {
         String previousBase = fresh ? null : baseObjectOf(db, collection, linkId, source);
         String previousConflict =
                 fresh ? null : conflictObjectOf(db, collection, linkId, source);
+        String previousShared = fresh ? null : sharedObjectOf(db, collection, linkId, source);
         // NOTE: the body applyUpsert kept, the base agreed on it kept too.
         if (kept != null && baseObject == null && kept.equals(previousBase)) {
             baseObject = previousBase;
@@ -1277,8 +1330,8 @@ public final class PimdirStorage {
         db.execSQL(
                 "INSERT INTO bindings(collection, link_id, source, handle, base_flags_known,"
                         + " base_object, base_revision, base_present, conflicted,"
-                        + " conflict_revision, conflict_object)"
-                        + " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                        + " conflict_revision, conflict_object, shared_object)"
+                        + " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                         + " ON CONFLICT(collection, link_id, source) DO UPDATE SET"
                         + " handle = excluded.handle,"
                         + " base_flags_known = excluded.base_flags_known,"
@@ -1287,15 +1340,17 @@ public final class PimdirStorage {
                         + " base_present = excluded.base_present,"
                         + " conflicted = excluded.conflicted,"
                         + " conflict_revision = excluded.conflict_revision,"
-                        + " conflict_object = excluded.conflict_object",
+                        + " conflict_object = excluded.conflict_object,"
+                        + " shared_object = excluded.shared_object",
                 new Object[] {
                     collection, linkId, source, handle, baseFlags == null ? 0 : 1, baseObject,
                     baseRevision, base == null ? 0 : 1, conflicted ? 1 : 0, conflictRevision,
-                    conflictObject
+                    conflictObject, shared
                 });
         PimdirItems.writeBaseFlags(db, collection, linkId, source, baseFlags);
         adjustRefcount(db, previousBase, baseObject);
         adjustRefcount(db, previousConflict, conflictObject);
+        adjustRefcount(db, previousShared, shared);
     }
 
     /**
@@ -1306,7 +1361,8 @@ public final class PimdirStorage {
      * so a rebuilt spine is renumbered, not retired.
      */
     private void applyDrop(
-            SQLiteDatabase db, String engineCollection, String handle, boolean deleted) {
+            SQLiteDatabase db, String engineCollection, String handle, boolean deleted)
+            throws JSONException {
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
 
@@ -1316,11 +1372,19 @@ public final class PimdirStorage {
         }
         String base = baseObjectOf(db, collection, linkId, source);
         String conflict = conflictObjectOf(db, collection, linkId, source);
+        String shared = sharedObjectOf(db, collection, linkId, source);
+        if (!deleted && rebinding != null) {
+            JSONObject released = bindingsOf(db, collection, linkId).optJSONObject(source);
+            if (released != null) {
+                rebinding.putIfAbsent(collection + "\n" + source + "\n" + linkId, released);
+            }
+        }
         db.execSQL(
                 "DELETE FROM bindings WHERE collection = ? AND link_id = ? AND source = ?",
                 new Object[] {collection, linkId, source});
         adjustRefcount(db, base, null);
         adjustRefcount(db, conflict, null);
+        adjustRefcount(db, shared, null);
 
         if (!deleted) {
             return;
@@ -2089,6 +2153,129 @@ public final class PimdirStorage {
                 collection, linkId, source);
     }
 
+    /**
+     * One item's body (empty for none), conflict flag, diverging body and
+     * level, in that order; null when the collection holds no such item.
+     */
+    private static String[] heldItem(SQLiteDatabase db, String collection, String linkId) {
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT ifnull(object_hash, ''), conflicted, conflict_object, level"
+                                + " FROM items WHERE collection = ? AND link_id = ?",
+                        new String[] {collection, linkId})) {
+            if (!cursor.moveToFirst()) {
+                return null;
+            }
+            return new String[] {
+                cursor.getString(0),
+                cursor.getString(1),
+                cursor.isNull(2) ? null : cursor.getString(2),
+                cursor.getString(3)
+            };
+        }
+    }
+
+    /**
+     * The shared body this source's binding last agreed with (SYNC §9), null
+     * until it has folded once.
+     */
+    private String sharedObjectOf(
+            SQLiteDatabase db, String collection, String linkId, String source) {
+        return one(
+                db,
+                "SELECT shared_object FROM bindings WHERE collection = ? AND link_id = ?"
+                        + " AND source = ?",
+                collection, linkId, source);
+    }
+
+    /**
+     * Every binding of one item by source, as {@link PimdirSql#merge} reads
+     * them: the handle, the base's body and revision, the conflict and the
+     * shared body, every absent value left out.
+     */
+    private static JSONObject bindingsOf(SQLiteDatabase db, String collection, String linkId)
+            throws JSONException {
+        JSONObject bindings = new JSONObject();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT source, handle, base_present, base_object, base_revision,"
+                                + " conflicted, conflict_revision, conflict_object, shared_object"
+                                + " FROM bindings WHERE collection = ? AND link_id = ?",
+                        new String[] {collection, linkId})) {
+            while (cursor.moveToNext()) {
+                JSONObject binding = new JSONObject();
+                binding.put("handle", cursor.getString(1));
+                if (cursor.getInt(2) == 1) {
+                    JSONObject base = new JSONObject();
+                    putText(base, "object", cursor, 3);
+                    putText(base, "revision", cursor, 4);
+                    binding.put("base", base);
+                }
+                binding.put("conflicted", cursor.getInt(5) == 1);
+                putText(binding, "conflictRevision", cursor, 6);
+                putText(binding, "conflictObject", cursor, 7);
+                putText(binding, "sharedObject", cursor, 8);
+                bindings.put(cursor.getString(0), binding);
+            }
+        }
+        return bindings;
+    }
+
+    /** Puts a text column under {@code key}, leaving NULL out. */
+    private static void putText(JSONObject json, String key, Cursor cursor, int column)
+            throws JSONException {
+        if (!cursor.isNull(column)) {
+            json.put(key, cursor.getString(column));
+        }
+    }
+
+    /**
+     * The cross-source merge of one upsert of a mutable kind (SYNC §9),
+     * io-pimdir's ({@link PimdirSql#merge}): read before the upsert writes
+     * anything, over the item as stored ({@code held}: its body, conflict
+     * flag and diverging body, null for a new item) and every binding it
+     * holds, the one a drop of this batch released standing in for a source
+     * holding none.
+     */
+    private JSONObject merge(SQLiteDatabase db, String collection, String source,
+            String linkId, JSONObject placement, String[] held, boolean overruled)
+            throws JSONException {
+        JSONObject input = new JSONObject();
+        Map<String, Object> values = new HashMap<>();
+        values.put("collection", collection);
+        PimdirSql.Bound policy = PimdirSql.bind("LOAD_CONFLICT", values);
+        try (Cursor cursor = db.rawQuery(policy.sql, stringsOf(policy.args))) {
+            if (cursor.moveToFirst() && !cursor.isNull(0)) {
+                input.put("policy", cursor.getString(0));
+            }
+        }
+        input.put("source", source);
+        if (held != null) {
+            JSONObject item = new JSONObject();
+            if (held[0] != null && !held[0].isEmpty()) {
+                item.put("object", held[0]);
+            }
+            item.put("conflicted", "1".equals(held[1]));
+            if (held[2] != null) {
+                item.put("conflictObject", held[2]);
+            }
+            input.put("item", item);
+        }
+        JSONObject bindings = bindingsOf(db, collection, linkId);
+        JSONObject released = rebinding == null
+                ? null
+                : rebinding.remove(collection + "\n" + source + "\n" + linkId);
+        if (released != null && !bindings.has(source)) {
+            bindings.put(source, released);
+        }
+        input.put("bindings", bindings);
+        input.put("placement", new JSONObject(placement.toString()).put("linkId", linkId));
+        if (overruled) {
+            input.put("overruling", true);
+        }
+        return PimdirSql.merge(input);
+    }
+
     /** The diverging body this source's binding is waiting on, or null. */
     private String conflictObjectOf(
             SQLiteDatabase db, String collection, String linkId, String source) {
@@ -2118,6 +2305,21 @@ public final class PimdirStorage {
 
     /** The write batch's compiled single-value reads; null outside one. */
     private Map<String, SQLiteStatement> compiled;
+
+    /**
+     * The bindings a superseded or rekeyed drop released within the write
+     * batch, by collection, source and link id, as {@link #merge} reads them:
+     * the upsert moving the binding onto its new handle continues it (SYNC
+     * §10). Null outside a batch.
+     */
+    private Map<String, JSONObject> rebinding;
+
+    /**
+     * The handles an {@code overrule} op named within the write batch, by
+     * engine collection and handle: their next upsert is an overruling edit
+     * (SYNC §7). Null outside a batch.
+     */
+    private Set<String> overruling;
 
     /**
      * The first column of a read's first row, null for none or NULL.

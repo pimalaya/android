@@ -240,10 +240,38 @@ final class Native {
     /**
      * A queue row read strictly as its payload schema types it (§15.3).
      *
-     * <p>Returns {@code {targetCollection?}} or {@code {error}}; an empty
+     * <p>Returns {@code {targetCollection?}}, {@code {skipped}} for a later
+     * payload version (left pending, §15.2) or {@code {error}}; an empty
      * {@code objectHash} pins no body.
      */
     static native String pimdirAction(String kind, String payload, String objectHash);
+
+    /**
+     * The {@code submit} payload queuing {@code message} for {@code source}
+     * to send from {@code from} (Annex B.2), its recipients and subject read
+     * off the message.
+     *
+     * <p>Returns {@code {payload}} or {@code {error}}.
+     */
+    static native String pimdirSubmit(String source, String from, byte[] message);
+
+    /**
+     * Renames {@code from} to {@code to} unless a name holds {@code to},
+     * never replacing it (STORAGE §5): {@code renameat2(RENAME_NOREPLACE)}.
+     *
+     * <p>Returns {@code {held}}, true when the name was kept and {@code from}
+     * left where it was, or {@code {error}}.
+     */
+    static native String pimdirRename(String from, String to);
+
+    /**
+     * One upsert absorbed into the item it names by io-pimdir's hub (SYNC
+     * §9): {@code {policy?, source, item?, bindings, placement, overruling?}}.
+     *
+     * <p>Returns {@code {object?, conflicted, conflictObject?, sharedObject?,
+     * diverged, keptShared}} or {@code {error}}.
+     */
+    static native String pimdirMerge(String input);
 
     /**
      * The account's mailboxes, a JSON array of {@code {name, role}}.
@@ -384,12 +412,13 @@ final class Native {
      * Hands one stored message over, to the account's submit URL or the
      * session's API.
      *
-     * <p>The envelope comes off the address headers, {@code Bcc} stripped on
-     * the way. Returns {@code {messageId?}}, or an error flagged
-     * {@code permanent} or {@code uncertain}.
+     * <p>The envelope is the {@code submit} payload's {@code from} and
+     * {@code rcpts} (Annex B.2), {@code Bcc} stripped on the way; a malformed
+     * payload is refused for good. Returns {@code {messageId?}}, or an error
+     * flagged {@code permanent} or {@code uncertain}.
      */
     static native String submitMessage(
-            Transport transport, long session, byte[] source);
+            Transport transport, long session, byte[] source, String payload);
 
     /**
      * Moves one message into {@code target}, returning {@code {}}.
@@ -727,7 +756,8 @@ final class Native {
      *
      * <p>{@code full} ignores the checkpoint; no {@code content}, no body
      * pushed. {@code since} bounds mail by {@code Date} (empty for none);
-     * {@code scopeBound}: the checkpoint is bound to its scope.
+     * {@code scopeBound}: the checkpoint is bound to its scope;
+     * {@code acceptAbsences}: a round that would park closes (SYNC §5).
      */
     static native String offlineSync(
             OfflineDriver driver,
@@ -735,7 +765,8 @@ final class Native {
             boolean full,
             boolean content,
             String since,
-            boolean scopeBound);
+            boolean scopeBound,
+            boolean acceptAbsences);
 
     /**
      * Raises handles (a JSON array) to the full tier.

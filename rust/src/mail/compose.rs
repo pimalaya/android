@@ -199,6 +199,24 @@ pub fn envelope(raw: &[u8]) -> Result<Composed, BridgeError> {
     })
 }
 
+/// One stored message as a `submit` intent hands it over (STORAGE Annex
+/// B.2): the envelope its payload states, `from` and `rcpts`, and the
+/// bytes with the `Bcc` header taken out (RFC 5322 section 3.6.3).
+pub fn stated(raw: &[u8], from: &str, rcpts: &[String]) -> Composed {
+    Composed {
+        message: without_bcc(raw),
+        sender: from.to_string(),
+        recipients: rcpts.to_vec(),
+    }
+}
+
+/// The subject one message's header states, decoded, `None` without one.
+pub fn subject(raw: &[u8]) -> Option<String> {
+    MessageParser::default()
+        .parse_headers(raw)
+        .and_then(|parsed| parsed.subject().map(str::to_string))
+}
+
 /// The bare addresses of one address header, for the envelope.
 fn envelope_addresses(header: Option<&Address>) -> Vec<String> {
     let Some(header) = header else {

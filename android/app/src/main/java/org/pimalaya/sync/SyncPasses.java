@@ -531,7 +531,7 @@ public final class SyncPasses {
         for (Outbox.Outgoing waiting : mail.outbox().outgoing(account.email)) {
             String filed;
             try {
-                filed = clients.mail().submit(session, waiting.source);
+                filed = clients.mail().submit(session, waiting.source, waiting.payload);
             } catch (SubmissionRefused refused) {
                 Log.w("pimalaya", "submission refused: " + AccountEntry.redacted(account.email), refused);
                 mail.outbox().parkOutgoing(waiting.id, refused.getMessage());

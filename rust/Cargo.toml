@@ -42,6 +42,7 @@ io-smtp = { version = "0.5", default-features = false }
 io-webdav = { version = "0.5", default-features = false }
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 jni = "0.22"
+libc = { version = "0.2", default-features = false }
 log = { version = "0.4", default-features = false }
 mail-parser = { version = "0.11", default-features = false, features = ["full_encoding"] }
 percent-encoding = "2"

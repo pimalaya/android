@@ -24,6 +24,7 @@ use std::{
     sync::Arc,
 };
 
+use io_pimdir::intent::PimdirSubmit;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -1029,12 +1030,17 @@ impl<H: Host> Mail<'_, '_, H> {
         }
     }
 
-    /// Submits one stored message, over SMTP or the session's own API.
+    /// Submits one stored message, over SMTP or the session's own API, as
+    /// the `submit` intent queued with it states (STORAGE Annex B.2).
     ///
-    /// Answers the `Message-ID` the provider filed its sent copy under when
-    /// it stamped its own. The sent copy is a create staged when queued,
-    /// landed by the provider's filing or pushed as an IMAP append.
-    pub fn submit(&mut self, raw: &[u8]) -> Result<Option<String>, Refused> {
+    /// SMTP and JMAP take the payload's `from` and `rcpts` as the envelope;
+    /// Graph and Gmail state none, reading the headers the payload's were
+    /// derived from. Answers the `Message-ID` the provider filed its sent
+    /// copy under when it stamped its own. The sent copy is a create staged
+    /// when queued, landed by the provider's filing or pushed as an IMAP
+    /// append.
+    pub fn submit(&mut self, raw: &[u8], intent: &PimdirSubmit) -> Result<Option<String>, Refused> {
+        let composed = compose::stated(raw, &intent.from, &intent.rcpts);
         match self.session.kind {
             MailKind::Jmap(_) => {
                 // NOTE: the server files the copy in Sent once it accepts
@@ -1045,7 +1051,7 @@ impl<H: Host> Mail<'_, '_, H> {
                     session_url: url,
                     auth: self.session.auth(),
                 };
-                if let Err(err) = jmap.send_message(raw) {
+                if let Err(err) = jmap.send_message(&composed) {
                     let unanswered = jmap.client.unanswered();
                     return Err(Refused::http(err, unanswered, |status| {
                         matches!(status, 413 | REFUSED)
@@ -1099,7 +1105,6 @@ impl<H: Host> Mail<'_, '_, H> {
                     ));
                 }
 
-                let composed = compose::envelope(raw).map_err(Refused::transient)?;
                 let submit = parse_url(submit_url).map_err(Refused::transient)?;
                 smtp::send(self.client, &submit, &self.session.auth(), &composed).map_err(
                     |err| Refused {

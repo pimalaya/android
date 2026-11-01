@@ -10,4 +10,16 @@ package org.pimalaya.client;
 public interface OfflineDriver {
     /** Services one engine yield, returning its JSON reply. */
     String serve(String yieldJson);
+
+    /**
+     * Whether the user accepted the absences a round of {@code collection}
+     * finds, so one that would park closes instead (pimdir SYNC §5); asked
+     * once per sync, before it runs.
+     */
+    default boolean acceptAbsences(String collection) {
+        return false;
+    }
+
+    /** Told what one sync of {@code collection} did, once it returned. */
+    default void synced(String collection, SyncReport report) {}
 }

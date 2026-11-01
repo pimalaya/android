@@ -283,12 +283,12 @@ public class MailEngineTest {
 
     @Test
     public void anOutgoingMessageIsQueuedRatherThanStaged() {
-        String source = "From: jane@example.com\r\nSubject: Hi\r\n\r\nthe body\r\n";
         String date = "Mon, 5 Jan 2026 09:00:00 +0000";
+        String source = new String(
+                MailFixtures.outgoing(EMAIL, "queued@example.com", "Hi", date),
+                StandardCharsets.UTF_8);
 
-        store.outbox().queueSubmission(
-                Submission.of(EMAIL, "queued@example.com", "Hi", date),
-                source.getBytes(StandardCharsets.UTF_8));
+        MailFixtures.queue(store, EMAIL, "queued@example.com", "Hi", date);
 
         // NOTE: a message on its way out is an action the engine never sees, so
         // nothing it stages is kept out of a reconcile or held back from a

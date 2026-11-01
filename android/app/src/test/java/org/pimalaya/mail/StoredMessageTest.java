@@ -30,12 +30,10 @@ import java.util.List;
 public class StoredMessageTest {
     private static final String ONE = "jane@example.com";
     private static final String DATE = "Mon, 5 Jan 2026 09:00:00 +0000";
-    private static final byte[] SOURCE =
-            "From: a@example.org\r\n\r\nthe body\r\n".getBytes(StandardCharsets.UTF_8);
-
-    /** The name the queued body is filed under (STORAGE §5). */
-    private static String queued() {
-        return org.pimalaya.pimdir.PimdirHash.of(SOURCE);
+    /** The name a queued body is filed under (STORAGE §5). */
+    private static String queued(String messageId, String subject, String date) {
+        return org.pimalaya.pimdir.PimdirHash.of(
+                MailFixtures.outgoing(ONE, messageId, subject, date));
     }
 
     private PimdirDb pimdir;
@@ -108,15 +106,9 @@ public class StoredMessageTest {
                 "[]");
         envelope("Work", "5", "Undated", "N", null, 0, false, null, null);
 
-        store.outbox().queueSubmission(
-                Submission.of(ONE, "out1@example.org", "Out one", PimdirSummary.mailSortKey(DATE)),
-                SOURCE);
-        store.outbox().queueSubmission(
-                Submission.of(ONE, "out2@example.org", "Out two", ""),
-                SOURCE);
-        store.outbox().queueSubmission(
-                Submission.of(ONE, "out3@example.org", "Out three", ""),
-                SOURCE);
+        MailFixtures.queue(store, ONE, "out1@example.org", "Out one", DATE);
+        MailFixtures.queue(store, ONE, "out2@example.org", "Out two", null);
+        MailFixtures.queue(store, ONE, "out3@example.org", "Out three", null);
         store.outbox().parkOutgoing(2, "550 refused");
         store.outbox().parkUncertain(3, "eof");
 
@@ -126,9 +118,9 @@ public class StoredMessageTest {
         }
         assertEquals(
                 List.of(
-                        "jane@example.com|A/\u0001outbox|Outbox|Outbox|out3@example.org|Out three||jane@example.com|jane@example.com|0||0|seen=true|answered=false|flagged=false|deleted=false|clip=false|0|null|bodied=true|q=3|" + queued() + "|failed=true|uncertain=true|pending=true|endpoint=false",
-                        "jane@example.com|A/\u0001outbox|Outbox|Outbox|out2@example.org|Out two||jane@example.com|jane@example.com|0||0|seen=true|answered=false|flagged=false|deleted=false|clip=false|0|null|bodied=true|q=2|" + queued() + "|failed=true|uncertain=false|pending=true|endpoint=false",
-                        "jane@example.com|A/\u0001outbox|Outbox|Outbox|out1@example.org|Out one||jane@example.com|jane@example.com|1767603600000||0|seen=true|answered=false|flagged=false|deleted=false|clip=false|0|null|bodied=true|q=1|" + queued() + "|failed=false|uncertain=false|pending=true|endpoint=false",
+                        "jane@example.com|A/\u0001outbox|Outbox|Outbox|out3@example.org|Out three||jane@example.com|jane@example.com|0||0|seen=true|answered=false|flagged=false|deleted=false|clip=false|0|null|bodied=true|q=3|" + queued("out3@example.org", "Out three", null) + "|failed=true|uncertain=true|pending=true|endpoint=false",
+                        "jane@example.com|A/\u0001outbox|Outbox|Outbox|out2@example.org|Out two||jane@example.com|jane@example.com|0||0|seen=true|answered=false|flagged=false|deleted=false|clip=false|0|null|bodied=true|q=2|" + queued("out2@example.org", "Out two", null) + "|failed=true|uncertain=false|pending=true|endpoint=false",
+                        "jane@example.com|A/\u0001outbox|Outbox|Outbox|out1@example.org|Out one||jane@example.com|jane@example.com|1767603600000||0|seen=true|answered=false|flagged=false|deleted=false|clip=false|0|null|bodied=true|q=1|" + queued("out1@example.org", "Out one", DATE) + "|failed=false|uncertain=false|pending=true|endpoint=false",
                         "jane@example.com|A/Work|Work|Work|4|Bad flags|N|sender@example.org|N|1767862800000|2026-01-08T09:00:00Z|4|seen=false|answered=false|flagged=false|deleted=false|clip=true|1|null|bodied=false|q=0|null|failed=false|uncertain=false|pending=false|endpoint=true",
                         "jane@example.com|A/Bin|Bin|Trash|3|Gone|Name|sender@example.org|Name|1767776400000|2026-01-07T09:00:00Z|3|seen=true|answered=false|flagged=false|deleted=true|clip=false|0|10|bodied=false|q=0|null|failed=false|uncertain=false|pending=false|endpoint=true",
                         "jane@example.com|A/INBOX|INBOX|Inbox|2|Marked||sender@example.org|sender@example.org|1767690000000|2026-01-06T09:00:00Z|2|seen=true|answered=true|flagged=true|deleted=false|clip=true|1|1234|bodied=true|q=0|null|failed=false|uncertain=false|pending=false|endpoint=true",

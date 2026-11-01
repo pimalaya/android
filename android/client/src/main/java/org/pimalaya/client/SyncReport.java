@@ -7,6 +7,9 @@ import org.json.JSONObject;
  *
  * <p>Mirrors rs/offline/wire.rs {@code SyncReportJson}.
  *
+ * @param absent the bound members a parked round's listing left out, 0 for
+ *     a closed round
+ * @param bound the bound members a parked round counted, 0 for a closed one
  * @param conflicts placements left conflicted
  * @param overruled bodies a policy did not adopt, kept as retained items
  * @param parked whether the round was parked, its last page finding most of
@@ -19,6 +22,8 @@ import org.json.JSONObject;
  * @param waiting local changes left staged for a later pass
  */
 public record SyncReport(
+        int absent,
+        int bound,
         int conflicts,
         int overruled,
         boolean parked,
@@ -30,6 +35,8 @@ public record SyncReport(
         int waiting) {
     static SyncReport from(JSONObject json) {
         return new SyncReport(
+                Json.integer(json, "absent"),
+                Json.integer(json, "bound"),
                 Json.integer(json, "conflicts"),
                 Json.integer(json, "overruled"),
                 json.optBoolean("parked"),

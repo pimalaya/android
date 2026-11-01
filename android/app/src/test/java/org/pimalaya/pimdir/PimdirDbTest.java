@@ -21,6 +21,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -239,6 +240,71 @@ public class PimdirDbTest {
         assertArrayEquals(body, blobs.get(hash));
     }
 
+    /**
+     * The blob store never hard links: Android's SELinux policy denies
+     * {@code link} to an app on its own data files, which failed every body
+     * write on a device while the host, allowing it, passed (found on a
+     * OnePlus 5, Android 15, 2026-11-01). The write renames instead.
+     */
+    @Test
+    public void theOwnerNeverHardLinks() throws IOException {
+        java.util.List<String> linking = new java.util.ArrayList<>();
+        for (String root : new String[] {"src/main/java", "../client/src/main/java"}) {
+            try (java.util.stream.Stream<java.nio.file.Path> files =
+                    java.nio.file.Files.walk(java.nio.file.Paths.get(root))) {
+                for (java.nio.file.Path file :
+                        (Iterable<java.nio.file.Path>)
+                                files.filter(p -> p.toString().endsWith(".java"))::iterator) {
+                    String source = new String(
+                            java.nio.file.Files.readAllBytes(file), StandardCharsets.UTF_8);
+                    if (source.contains("createLink(")) {
+                        linking.add(file.toString());
+                    }
+                }
+            }
+        }
+        assertEquals(java.util.List.of(), linking);
+    }
+
+    /**
+     * The no-replace rename (STORAGE §5): a free name takes the source, a
+     * name held keeps what holds it and leaves the source where it was.
+     */
+    @Test
+    public void aRenameNeverReplacesAName() throws IOException {
+        File dir = new File(store.blobs(), "ab");
+        assertTrue(dir.mkdirs());
+        File temp = new File(dir, ".x.tmp");
+        File name = new File(dir, "x");
+        java.nio.file.Files.write(temp.toPath(), new byte[] {1});
+
+        assertTrue(PimdirSql.renameNoReplace(temp, name));
+        assertFalse(temp.exists());
+        assertArrayEquals(new byte[] {1}, java.nio.file.Files.readAllBytes(name.toPath()));
+
+        java.nio.file.Files.write(temp.toPath(), new byte[] {2});
+        assertFalse("held", PimdirSql.renameNoReplace(temp, name));
+        assertArrayEquals(new byte[] {1}, java.nio.file.Files.readAllBytes(name.toPath()));
+        assertArrayEquals(new byte[] {2}, java.nio.file.Files.readAllBytes(temp.toPath()));
+    }
+
+    /** An adopted file is renamed under its name, the source gone after. */
+    @Test
+    public void anAdoptedFileTakesItsName() throws IOException {
+        PimdirBlobs blobs = new PimdirBlobs(store.blobs());
+        byte[] body = "downloaded".getBytes(StandardCharsets.UTF_8);
+        String hash = PimdirHash.of(body);
+        File source = new File(store.blobs().getParentFile(), "download.part");
+        java.nio.file.Files.write(source.toPath(), body);
+
+        blobs.adopt(hash, source);
+
+        assertFalse(source.exists());
+        assertArrayEquals(body, blobs.get(hash));
+        assertEquals(0, blobs.pathOf(hash).getParentFile().listFiles(
+                (dir, name) -> name.startsWith(".")).length);
+    }
+
     @Test
     public void aBodyReachingTwoAccountsIsStoredOnce() throws IOException {
         PimdirBlobs blobs = new PimdirBlobs(store.blobs());
@@ -259,6 +325,43 @@ public class PimdirDbTest {
             assertEquals(1, cursor.getInt(1));
         }
         assertArrayEquals(body, blobs.get(hash));
+    }
+
+    /**
+     * Opening a fresh store opens the writer alone: a reader opened while the
+     * store is configured, before onCreate made its tables, caches the empty
+     * schema, and its first statements fail once each ("no such table:
+     * collections" on a first launch) before SQLite reloads it.
+     */
+    @Test
+    public void openingAFreshStoreOpensNoReaderBeforeItsSchema() {
+        // NOTE: setUp created this test's store, and nothing read it since.
+        assertEquals(
+                "the writer alone",
+                List.of(db.getPath()),
+                io.requery.android.database.sqlite.PoolProbe.connections(db.getPath()));
+    }
+
+    /**
+     * The erasure and the schema trust STORAGE §11.5 and §18 ask hold on the
+     * connection that writes, read inside a transaction, which runs there.
+     */
+    @Test
+    public void theWriterErasesAndTrustsNoSchema() {
+        db.beginTransaction();
+        try {
+            assertEquals(1, pragma("PRAGMA secure_delete"));
+            assertEquals(0, pragma("PRAGMA trusted_schema"));
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    private long pragma(String sql) {
+        try (Cursor cursor = db.rawQuery(sql, null)) {
+            assertTrue(cursor.moveToFirst());
+            return cursor.getLong(0);
+        }
     }
 
     /**

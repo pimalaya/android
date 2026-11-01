@@ -11,8 +11,13 @@ use std::{collections::BTreeMap, path::Path};
 use io_jmap::{
     coroutine::{JmapCoroutine, JmapCoroutineState, JmapYield},
     rfc8620::{
-        blob_download::JmapBlobDownload, blob_upload::JmapBlobUpload, changes::*,
-        error::JmapMethodError, filter::JmapFilter, session::JmapSession,
+        blob_download::JmapBlobDownload,
+        blob_upload::JmapBlobUpload,
+        changes::*,
+        error::JmapMethodError,
+        filter::JmapFilter,
+        query::{JmapQuery, JmapQueryOptions},
+        session::JmapSession,
     },
     rfc8621::{
         JMAP_MAIL_CAPABILITY,
@@ -49,7 +54,7 @@ use crate::{
     error::{BridgeError, converged, coroutine_error},
     mail::{
         Mailbox,
-        compose::{self, Composed},
+        compose::Composed,
         jmap_step::{
             JmapDelta, JmapRun, JmapStepped, Sources, Start, StepItem, StepQuery, StepRequest,
             received,
@@ -170,13 +175,61 @@ impl<H: Host> Jmap<'_, H> {
             .collect();
 
         // NOTE: `after` and `before` miss an undated message and one whose
-        // `Date` runs ahead of its arrival (SYNC §4); no enumeration is
-        // handed, a whole mailbox's ids costing a query per page of it.
+        // `Date` runs ahead of its arrival (SYNC §4), so the last page of a
+        // narrowed round hands the mailbox's every id, `Email/query`
+        // filtered by the mailbox alone: a query per page of ids.
         let narrowed = scope.since.is_some() || scope.until.is_some();
+        let enumerated = match narrowed && !more {
+            true => Some(self.mailbox_ids(&session, &auth, &api_url, mailbox_id, limit)?),
+            false => None,
+        };
         Ok(
             MailPage::round(items, more.then(|| reached.to_string()), checkpoint)
-                .narrowed(narrowed, None),
+                .narrowed(narrowed, enumerated),
         )
+    }
+
+    /// Every email id a mailbox holds, `Email/query` filtered by the mailbox
+    /// alone and paged by position, ids only (RFC 8620 §5.5).
+    fn mailbox_ids(
+        &mut self,
+        session: &JmapSession,
+        auth: &SecretString,
+        api_url: &Url,
+        mailbox_id: &str,
+        limit: u64,
+    ) -> Result<Vec<String>, BridgeError> {
+        let account = session.primary_account_id_for(JMAP_MAIL_CAPABILITY);
+        let mut ids = Vec::new();
+        loop {
+            let filter = JmapEmailFilter {
+                in_mailbox: Some(mailbox_id.to_string()),
+                ..Default::default()
+            };
+            let opts = JmapQueryOptions::<_, JmapEmailComparator> {
+                filter: Some(JmapFilter::Condition(filter)),
+                position: Some(ids.len() as u64),
+                limit: Some(limit),
+                calculate_total: true,
+                ..Default::default()
+            };
+            let coroutine = JmapQuery::new(
+                account.to_string(),
+                auth,
+                api_url,
+                "Email/query",
+                vec![JMAP_MAIL_CAPABILITY.to_string()],
+                opts,
+            )
+            .map_err(|err| err.to_string())?;
+            let page = self.run(api_url, coroutine)?;
+            let listed = page.ids.len();
+            ids.extend(page.ids);
+            let total = page.total.unwrap_or(0) as usize;
+            if listed == 0 || ids.len() >= total {
+                return Ok(ids);
+            }
+        }
     }
 
     /// Takes a mailbox's newest emails below the floor's ceiling until its
@@ -551,7 +604,7 @@ impl<H: Host> Jmap<'_, H> {
     ///
     /// A session advertising no submission is refused for good before
     /// anything is written: no later pass changes what the server offers.
-    pub fn send_message(&mut self, raw: &[u8]) -> Result<(), BridgeError> {
+    pub fn send_message(&mut self, composed: &Composed) -> Result<(), BridgeError> {
         let mut calls = self.calls()?;
         if !calls
             .session
@@ -562,7 +615,7 @@ impl<H: Host> Jmap<'_, H> {
         }
         let max_upload = calls.session.core_capability().max_size_upload;
 
-        calls.send(raw, max_upload)
+        calls.send(composed, max_upload)
     }
 }
 
@@ -664,18 +717,19 @@ impl<H: Host> JmapCalls<'_, '_, H> {
 impl<H: Host> JmapCalls<'_, '_, H> {
     /// Sends one stored message over the session (RFC 8621 section 7).
     ///
-    /// Imported into Drafts without `Bcc` ([`compose::envelope`]), submitted as
-    /// [`identity_for`] to an envelope also naming the blind recipients, moved
-    /// to Sent. What no later pass changes is refused for good ([`refused`]).
-    fn send(&mut self, raw: &[u8], max_upload: Option<u64>) -> Result<(), BridgeError> {
+    /// Imported into Drafts without `Bcc`, submitted as [`identity_for`] to
+    /// the envelope its intent states ([`compose::stated`]), the blind
+    /// recipients among them, moved to Sent. What no later pass changes is
+    /// refused for good ([`refused`]).
+    fn send(&mut self, composed: &Composed, max_upload: Option<u64>) -> Result<(), BridgeError> {
         let Composed {
             message,
             sender,
             recipients,
-        } = compose::envelope(raw).map_err(|err| refused(err.message))?;
+        } = composed;
 
         let identities = self.identities()?;
-        let identity = identity_for(&identities, &sender)
+        let identity = identity_for(&identities, sender)
             .ok_or_else(|| refused(format!("No identity of this account sends as {sender}")))?;
 
         let mailboxes =
@@ -697,7 +751,7 @@ impl<H: Host> JmapCalls<'_, '_, H> {
             )));
         }
 
-        let blob = self.upload_message(message)?;
+        let blob = self.upload_message(message.clone())?;
         let imported = self.import_draft(&blob, &drafts)?;
         if let Some(err) = imported.not_created.into_values().next() {
             let message = format!("The server refused the message: {err}");
@@ -721,7 +775,7 @@ impl<H: Host> JmapCalls<'_, '_, H> {
             identity_id: identity.id.clone(),
             email_id: email.clone(),
             envelope: Some(JmapEnvelope {
-                mail_from: address(&sender),
+                mail_from: address(sender),
                 rcpt_to: recipients.iter().map(|to| address(to)).collect(),
             }),
         };

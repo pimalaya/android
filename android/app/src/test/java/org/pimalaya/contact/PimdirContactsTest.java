@@ -187,7 +187,8 @@ public class PimdirContactsTest {
                 scalar("SELECT count(DISTINCT seq) FROM items WHERE link_id = 'u5'"));
         assertEquals("the body is stored once", 1,
                 scalar("SELECT count(*) FROM objects WHERE hash = ?", objectOf(BOOK, "u5")));
-        assertEquals("and every pointer at it is counted: two placements and one base", 3,
+        assertEquals("and every pointer at it is counted: two placements, one base and"
+                        + " one shared body", 4,
                 scalar("SELECT refcount FROM objects WHERE hash = ?", objectOf(BOOK, "u5")));
         assertEquals("the new placement is unpushed", 1, scalar("SELECT count(*) FROM bindings"));
     }

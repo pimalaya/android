@@ -15,6 +15,7 @@ use std::{
     path::Path,
 };
 
+use io_pimdir::intent::PimdirSubmit;
 use jni::{
     EnvUnowned,
     errors::Error,
@@ -657,11 +658,13 @@ pub extern "system" fn Java_org_pimalaya_client_Native_markdownRich<'local>(
 }
 
 /// `Native.submitMessage`: hands one stored message over, over SMTP to the
-/// session account's submit URL or through the session's API.
+/// session account's submit URL or through the session's API, as the
+/// `submit` intent's `payload` states (STORAGE Annex B.2).
 ///
 /// Returns `{messageId}`, the provider's own or null, or `{"error": "..",
-/// "permanent": bool, "uncertain": bool}`. The submission opens its own
-/// connection, SMTP being a second server.
+/// "permanent": bool, "uncertain": bool}`, a malformed payload refused for
+/// good. The submission opens its own connection, SMTP being a second
+/// server.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_submitMessage<'local>(
     mut env: EnvUnowned<'local>,
@@ -669,14 +672,24 @@ pub extern "system" fn Java_org_pimalaya_client_Native_submitMessage<'local>(
     transport: JObject<'local>,
     handle: i64,
     source: JByteArray<'local>,
+    payload: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let raw = env.convert_byte_array(&source).unwrap_or_default();
+        let payload = read_string(env, &payload);
 
         let mut client = Client::new(JniHost::new(env, &transport, None));
-        let submitted = unsafe { bind(handle, &mut client) }
-            .map_err(Refused::transient)
-            .and_then(|mut mail| mail.submit(&raw));
+        let submitted = PimdirSubmit::from_payload(&payload)
+            .map_err(|err| Refused {
+                permanent: true,
+                uncertain: false,
+                message: format!("Malformed submit payload: {err}"),
+            })
+            .and_then(|intent| {
+                unsafe { bind(handle, &mut client) }
+                    .map_err(Refused::transient)
+                    .and_then(|mut mail| mail.submit(&raw, &intent))
+            });
         let json = match submitted {
             Ok(message_id) => to_string(&SubmittedReply { message_id })
                 .unwrap_or_else(|err| error_json(err.to_string())),

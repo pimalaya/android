@@ -14,11 +14,23 @@ public class OfflineClient {
      * Reconciles a collection with its remote, the driver serving every yield.
      *
      * <p>With {@code full} the checkpoint is ignored and the whole remote
-     * enumerated.
+     * enumerated. The driver says whether the run accepts the absences it
+     * finds ({@link OfflineDriver#acceptAbsences}) and is told what it did.
      */
     public SyncReport sync(OfflineDriver driver, String collection, boolean full) {
-        return SyncReport.from(
-                Replies.object(Native.offlineSync(driver, collection, full, true, "", true)));
+        SyncReport report =
+                SyncReport.from(
+                        Replies.object(
+                                Native.offlineSync(
+                                        driver,
+                                        collection,
+                                        full,
+                                        true,
+                                        "",
+                                        true,
+                                        driver.acceptAbsences(collection))));
+        driver.synced(collection, report);
+        return report;
     }
 
     /**
@@ -30,15 +42,19 @@ public class OfflineClient {
      */
     public SyncReport syncImmutable(
             OfflineDriver driver, String collection, String since, boolean scopeBound) {
-        return SyncReport.from(
-                Replies.object(
-                        Native.offlineSync(
-                                driver,
-                                collection,
-                                false,
-                                false,
-                                since == null ? "" : since,
-                                scopeBound)));
+        SyncReport report =
+                SyncReport.from(
+                        Replies.object(
+                                Native.offlineSync(
+                                        driver,
+                                        collection,
+                                        false,
+                                        false,
+                                        since == null ? "" : since,
+                                        scopeBound,
+                                        driver.acceptAbsences(collection))));
+        driver.synced(collection, report);
+        return report;
     }
 
     /**

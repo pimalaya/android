@@ -193,7 +193,8 @@ public class MailClient {
     }
 
     /**
-     * Hands one stored message over; answers Gmail's own sent-copy Message-ID.
+     * Hands one stored message over as its {@code submit} payload states
+     * (Annex B.2); answers Gmail's own sent-copy Message-ID.
      *
      * <p>Null when the provider stamped none. The sent copy is a create staged
      * when queued, which the sync carries out.
@@ -201,12 +202,12 @@ public class MailClient {
      * @throws SubmissionRefused when refused for good: parked, not requeued
      * @throws SubmissionUncertain when sent whole with no verdict: parked
      */
-    public String submit(MailSession session, byte[] source) {
+    public String submit(MailSession session, byte[] source, String payload) {
         // NOTE: run once, never retried: sending is not idempotent, and an
         // accepted submission that lost its answer would go twice. A failure
         // leaves it queued for the outbox instead.
         String json =
-                Native.submitMessage(session.transport(), session.handle(), source);
+                Native.submitMessage(session.transport(), session.handle(), source, payload);
 
         JSONObject reply = Replies.read(json);
         String error = reply.optString("error");

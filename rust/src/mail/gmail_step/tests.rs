@@ -947,11 +947,17 @@ fn an_expired_history_lists_a_labels_ids_by_their_markers_alone() {
     assert_eq!(marked["m0005"], ["\\Seen"]);
     assert!(page.items.iter().all(|item| item.summary.is_none()));
     assert_eq!(page.checkpoint.as_deref(), Some("1"));
+    let afters = gmail.lock().afters.clone();
     assert_eq!(
-        gmail.lock().afters.last().copied().flatten(),
+        afters[afters.len() - 2],
         Some(millis(&days_back(19)) / 1000 - 1),
         "from the oldest reception held, a second earlier"
     );
+    // NOTE: `after:` narrows the round, so its last page hands the label's
+    // every id, listed with no query (SYNC §4).
+    assert!(page.narrowed);
+    assert_eq!(afters.last(), Some(&None));
+    assert_eq!(page.enumerated.as_ref().map(Vec::len), Some(19));
 
     let before = gmail.counts();
     harness.pass();

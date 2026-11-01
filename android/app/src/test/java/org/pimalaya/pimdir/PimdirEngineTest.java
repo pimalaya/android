@@ -193,6 +193,17 @@ public class PimdirEngineTest {
         engine.sync(COLLECTION);
 
         assertEquals(Map.of("ev-1.ics", BODY), stored());
+        // NOTE: kept for the user to settle (pimdir SYNC §5), whose
+        // acceptance the next run closes the round with.
+        assertEquals(
+                List.of(new ParkedRounds.Parked(COLLECTION, 1, 1)), pimdir.parked().unoffered());
+        engine.sync(COLLECTION);
+        assertEquals("parked again", Map.of("ev-1.ics", BODY), stored());
+
+        pimdir.parked().accept(List.of(COLLECTION));
+        engine.sync(COLLECTION);
+        assertEquals("accepted, the absence retires it", Map.of(), stored());
+        assertFalse(pimdir.parked().accepts(COLLECTION));
     }
 
     @Test

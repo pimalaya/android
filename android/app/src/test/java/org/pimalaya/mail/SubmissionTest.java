@@ -1,18 +1,23 @@
 package org.pimalaya.mail;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
 import android.database.Cursor;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.PimalayaException;
+import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
-import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.pimdir.PimdirQueue;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -21,24 +26,20 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The submission payload the queue persists, byte for byte as before.
+ * The submission the queue persists: Annex B.2's {@code submit}, strict.
  *
- * <p>Written as the version before the typed {@link Submission} wrote it
- * (Android's org.json, insertion order), and that version's payloads read back
- * to the same values; literals captured on that version.
+ * <p>The payload is the standard's alone; what the outbox lists, the {@code
+ * Message-ID}, the subject and the date, is derived from the message.
  */
 @RunWith(RobolectricTestRunner.class)
 public class SubmissionTest {
     private static final String ONE = "jane@example.com";
     private static final String DATE = "Mon, 5 Jan 2026 09:00:00 +0000";
-    private static final byte[] SOURCE =
-            "From: a@example.org\r\n\r\nthe body\r\n".getBytes(StandardCharsets.UTF_8);
 
-    /** A payload as the version before wrote it, with an unknown key. */
-    private static final String OLD =
-            "{\"v\":1,\"from\":\"jane@example.com\",\"messageId\":\"old\\/x@example.org\","
-                    + "\"subject\":\"Old \\u00e9\",\"sortKey\":\"2026-01-05T09:00:00Z\","
-                    + "\"extra\":{\"k\":[1,2]}}";
+    /** The payload this app queued before draft-08: not Annex B.2's. */
+    private static final String FORMER =
+            "{\"v\":1,\"from\":\"jane@example.com\",\"messageId\":\"m1@example.org\","
+                    + "\"subject\":\"Hello\",\"sortKey\":\"2026-01-05T09:00:00Z\"}";
 
     private PimdirDb pimdir;
     private MailStore store;
@@ -52,15 +53,17 @@ public class SubmissionTest {
     }
 
     private List<String> payloads() {
-        List<String> payloads = new ArrayList<>();
-        try (Cursor cursor =
-                pimdir.getReadableDatabase()
-                        .rawQuery("SELECT payload FROM queue ORDER BY id", null)) {
+        return column("SELECT payload FROM queue ORDER BY id");
+    }
+
+    private List<String> column(String sql) {
+        List<String> values = new ArrayList<>();
+        try (Cursor cursor = pimdir.getReadableDatabase().rawQuery(sql, null)) {
             while (cursor.moveToNext()) {
-                payloads.add(cursor.getString(0));
+                values.add(cursor.isNull(0) ? null : cursor.getString(0));
             }
         }
-        return payloads;
+        return values;
     }
 
     private void payload(long id, String text) {
@@ -68,95 +71,127 @@ public class SubmissionTest {
                 .execSQL("UPDATE queue SET payload = ? WHERE id = ?", new Object[] {text, id});
     }
 
-    @Test
-    public void thePayloadIsWrittenAsBefore() {
-        String key = PimdirSummary.mailSortKey(DATE);
-        store.outbox().queueSubmission(Submission.of(ONE, "m1@example.org", "Hello", key), SOURCE);
-        store.outbox().queueSubmission(
-                Submission.of(
-                        ONE,
-                        "a/b@example.org",
-                        "Quote \" back\\slash / tab\t \u00e9 \ud83d\ude00 \u0001",
-                        key),
-                SOURCE);
-        store.outbox().queueSubmission(Submission.of(ONE, "empty@example.org", "", ""), SOURCE);
-        store.outbox().queueSubmission(Submission.of(ONE, "nul@example.org", null, null), SOURCE);
-
-        assertEquals(
-                List.of(
-                        "{\"v\":1,\"from\":\"jane@example.com\",\"messageId\":\"m1@example.org\","
-                                + "\"subject\":\"Hello\",\"sortKey\":\"2026-01-05T09:00:00Z\"}",
-                        "{\"v\":1,\"from\":\"jane@example.com\",\"messageId\":\"a\\/b@example.org\","
-                                + "\"subject\":\"Quote \\\" back\\\\slash \\/ tab\\t \u00e9"
-                                + " \ud83d\ude00 \\u0001\",\"sortKey\":\"2026-01-05T09:00:00Z\"}",
-                        "{\"v\":1,\"from\":\"jane@example.com\",\"messageId\":\"empty@example.org\","
-                                + "\"subject\":\"\",\"sortKey\":\"\"}",
-                        "{\"v\":1,\"from\":\"jane@example.com\",\"messageId\":\"nul@example.org\"}"),
-                payloads());
-
+    private List<String> listed() {
         List<String> rows = new ArrayList<>();
         for (MailStore.StoredMessage message : MailFixtures.merged(store, 10)) {
             rows.add(message.accountEmail + "|" + message.mailbox + "|" + message.id + "|"
                     + message.subject + "|" + message.fromAddress + "|" + message.stamp);
         }
+        return rows;
+    }
+
+    @Test
+    public void thePayloadIsAnnexB2sAndTheListingDerivesFromTheMessage() throws Exception {
+        byte[] message = ("Date: " + DATE + "\r\n"
+                + "Message-ID: <m1@example.org>\r\n"
+                + "From: Jane <jane@example.com>\r\n"
+                + "To: Bob <bob@example.org>, carol@example.org\r\n"
+                + "Bcc: eve@example.org\r\n"
+                + "Subject: =?UTF-8?B?UsOpdW5pb24=?=\r\n\r\nHi\r\n")
+                .getBytes(StandardCharsets.UTF_8);
+        store.outbox().queueSubmission(ONE, message);
+
+        JSONObject payload = new JSONObject(payloads().get(0));
+        assertEquals(1, payload.getInt("v"));
+        assertEquals("server", payload.getString("source"));
+        assertEquals(ONE, payload.getString("from"));
         assertEquals(
-                List.of(
-                        "jane@example.com|Outbox|nul@example.org||jane@example.com|0",
-                        "jane@example.com|Outbox|empty@example.org||jane@example.com|0",
-                        "jane@example.com|Outbox|a/b@example.org|Quote \" back\\slash / tab\t \u00e9"
-                                + " \ud83d\ude00 \u0001|jane@example.com|1767603600000",
-                        "jane@example.com|Outbox|m1@example.org|Hello|jane@example.com|1767603600000"),
-                rows);
+                List.of("bob@example.org", "carol@example.org", "eve@example.org"),
+                strings(payload.getJSONArray("rcpts")));
+        assertEquals("Réunion", payload.getString("subject"));
+        assertEquals("nothing of the app's own", 5, payload.length());
+
+        assertEquals(
+                List.of("jane@example.com|Outbox|m1@example.org|Réunion|jane@example.com"
+                        + "|1767603600000"),
+                listed());
+        Outbox.Outgoing waiting = store.outbox().outgoing(ONE).get(0);
+        assertEquals("m1@example.org", waiting.messageId);
+        assertEquals(payloads().get(0), waiting.payload);
+        assertTrue(store.outbox().submitting("m1@example.org"));
+    }
+
+    @Test
+    public void aMessageNamingNobodyIsNeverQueued() {
+        byte[] nobody = "From: jane@example.com\r\nSubject: x\r\n\r\nHi\r\n"
+                .getBytes(StandardCharsets.UTF_8);
+        assertThrows(PimalayaException.class, () -> store.outbox().queueSubmission(ONE, nobody));
+        assertEquals(List.of(), payloads());
+    }
+
+    /** A producer never appends a payload its schema refuses (§15.3). */
+    @Test
+    public void aMalformedPayloadIsNeverQueued() {
+        PimdirQueue queue =
+                new PimdirQueue(pimdir, new PimdirAccount(RuntimeEnvironment.getApplication()));
+        byte[] message = MailFixtures.outgoing(ONE, "m1@example.org", "Hello", DATE);
+
+        assertThrows(
+                PimalayaException.class,
+                () -> queue.enqueue(
+                        new PimdirQueue.Enqueued(
+                                store.outbox().outboxOf(ONE),
+                                ONE,
+                                PimdirQueue.SUBMIT,
+                                FORMER,
+                                message)));
+        assertEquals(List.of(), payloads());
+    }
+
+    /**
+     * The drain reads a row strictly before handing anything over: a malformed
+     * one is parked whole, never sent, and stays listed with why.
+     */
+    @Test
+    public void theDrainParksAMalformedRowWhole() {
+        MailFixtures.queue(store, ONE, "m1@example.org", "Hello", DATE);
+        MailFixtures.queue(store, ONE, "m2@example.org", "Next", DATE);
+        payload(1, FORMER);
 
         List<String> waiting = new ArrayList<>();
         for (Outbox.Outgoing outgoing : store.outbox().outgoing(ONE)) {
             waiting.add(outgoing.messageId);
         }
-        assertEquals(
-                List.of("m1@example.org", "a/b@example.org", "empty@example.org", "nul@example.org"),
-                waiting);
+        assertEquals("the row behind it goes on", List.of("m2@example.org"), waiting);
+
+        List<String> errors = column("SELECT error FROM queue ORDER BY id");
+        assertTrue(errors.get(0), errors.get(0).contains("messageId"));
+        assertNull(errors.get(1));
+        assertEquals("still listed, as refused", 2, store.outbox().outgoing().size());
     }
 
+    /**
+     * A row stating a later payload version is a later program's: skipped,
+     * left pending and untouched, never parked (§15.2).
+     */
     @Test
-    public void aPayloadWrittenBeforeReadsTheSame() {
-        store.outbox().queueSubmission(Submission.of(ONE, "old@example.org", "x", ""), SOURCE);
-        store.outbox().queueSubmission(Submission.of(ONE, "bad@example.org", "x", ""), SOURCE);
-        payload(1, OLD);
-        payload(2, "not json");
+    public void theDrainSkipsALaterPayloadVersion() {
+        MailFixtures.queue(store, ONE, "m1@example.org", "Hello", DATE);
+        payload(1, "{\"v\":2,\"source\":\"server\",\"route\":\"later\"}");
 
-        List<String> rows = new ArrayList<>();
-        for (MailStore.StoredMessage message : MailFixtures.merged(store, 10)) {
-            rows.add(message.accountEmail + "|" + message.mailbox + "|" + message.id + "|"
-                    + message.subject + "|" + message.fromAddress + "|" + message.stamp);
-        }
-        assertEquals(
-                "an unreadable payload reads as empty parts",
-                List.of(
-                        "|Outbox||||0",
-                        "jane@example.com|Outbox|old/x@example.org|Old \u00e9|jane@example.com"
-                                + "|1767603600000"),
-                rows);
-
-        List<String> waiting = new ArrayList<>();
-        for (Outbox.Outgoing outgoing : store.outbox().outgoing(ONE)) {
-            waiting.add(outgoing.id + " " + outgoing.messageId);
-        }
-        assertEquals(List.of("1 old/x@example.org", "2 "), waiting);
-
-        assertTrue(store.outbox().submitting("old/x@example.org"));
-        assertFalse(store.outbox().submitting("bad@example.org"));
-        assertTrue("the unreadable one names the empty id", store.outbox().submitting(""));
+        assertEquals(List.of(), store.outbox().outgoing(ONE));
+        assertEquals(java.util.Collections.singletonList(null),
+                column("SELECT error FROM queue"));
+        assertEquals(List.of("0"), column("SELECT attempts FROM queue"));
     }
 
     @Test
     public void aResentPayloadKeepsItsText() {
-        store.outbox().queueSubmission(Submission.of(ONE, "old@example.org", "x", ""), SOURCE);
-        payload(1, OLD);
+        MailFixtures.queue(store, ONE, "m1@example.org", "Hello", DATE);
+        String text = payloads().get(0);
         store.outbox().parkUncertain(1, "eof");
 
         store.outbox().resendOutgoing(1);
 
-        assertEquals("unknown keys and escapes kept as written", List.of(OLD), payloads());
-        assertEquals("old/x@example.org", store.outbox().outgoing(ONE).get(0).messageId);
+        assertEquals(List.of(text), payloads());
+        assertEquals("m1@example.org", store.outbox().outgoing(ONE).get(0).messageId);
+    }
+
+    private static List<String> strings(JSONArray array) throws Exception {
+        List<String> values = new ArrayList<>();
+        for (int index = 0; index < array.length(); index++) {
+            values.add(array.getString(index));
+        }
+        return values;
     }
 }

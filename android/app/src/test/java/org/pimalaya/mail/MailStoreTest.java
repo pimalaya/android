@@ -42,6 +42,12 @@ public class MailStoreTest {
     private static final String DATE = "Mon, 5 Jan 2026 09:00:00 +0000";
     private static final String SOURCE = "From: a@example.org\r\n\r\nthe body\r\n";
 
+    /** A message {@link MailFixtures#queue} queued, as stored. */
+    private static String outgoing(String messageId, String subject) {
+        return new String(
+                MailFixtures.outgoing(ONE, messageId, subject, DATE), StandardCharsets.UTF_8);
+    }
+
     private PimdirDb pimdir;
     private PimdirItems items;
     private ItemFixtures fixtures;
@@ -288,9 +294,7 @@ public class MailStoreTest {
         mailboxes(ONE, "INBOX");
         String outbox = store.outbox().outboxOf(ONE);
 
-        store.outbox().queueSubmission(
-                Submission.of(ONE, "queued@example.org", "Waiting", DATE),
-                SOURCE.getBytes(StandardCharsets.UTF_8));
+        MailFixtures.queue(store, ONE, "queued@example.org", "Waiting", DATE);
 
         // NOTE: a roster replace drops every mail collection the account no
         // longer lists, and no server lists an outbox: its silence is no
@@ -300,7 +304,9 @@ public class MailStoreTest {
 
         List<Outbox.Outgoing> waiting = store.outbox().outgoing(ONE);
         assertEquals(1, waiting.size());
-        assertEquals(SOURCE, new String(waiting.get(0).source, StandardCharsets.UTF_8));
+        assertEquals(
+                outgoing("queued@example.org", "Waiting"),
+                new String(waiting.get(0).source, StandardCharsets.UTF_8));
 
         assertEquals("read back with no network to ask", "Bin", store.policy().trashOf(ONE));
 
@@ -311,7 +317,9 @@ public class MailStoreTest {
         assertFalse(row.failed);
         assertEquals("Waiting", row.subject);
         assertEquals(outbox, row.collection);
-        assertEquals(SOURCE, new String(store.source(row), StandardCharsets.UTF_8));
+        assertEquals(
+                outgoing("queued@example.org", "Waiting"),
+                new String(store.source(row), StandardCharsets.UTF_8));
 
         store.outbox().acknowledge(waiting.get(0).id);
         assertTrue(store.outbox().outgoing(ONE).isEmpty());
@@ -321,9 +329,7 @@ public class MailStoreTest {
     @Test
     public void aParkedSubmissionLeavesTheDrainAndStaysVisible() {
         mailboxes(ONE, "INBOX");
-        store.outbox().queueSubmission(
-                Submission.of(ONE, "refused@example.org", "Refused", DATE),
-                SOURCE.getBytes(StandardCharsets.UTF_8));
+        MailFixtures.queue(store, ONE, "refused@example.org", "Refused", DATE);
 
         long queued = store.outbox().outgoing(ONE).get(0).id;
         store.outbox().parkOutgoing(queued, "550 no such recipient");
@@ -335,15 +341,15 @@ public class MailStoreTest {
         MailStore.StoredMessage row = MailFixtures.merged(store, 10).get(0);
         assertTrue(row.failed);
         assertTrue(row.pending());
-        assertEquals(SOURCE, new String(store.source(row), StandardCharsets.UTF_8));
+        assertEquals(
+                outgoing("refused@example.org", "Refused"),
+                new String(store.source(row), StandardCharsets.UTF_8));
     }
 
     @Test
     public void anUncertainSubmissionWaitsForTheUserToSendItAgain() {
         mailboxes(ONE, "INBOX");
-        store.outbox().queueSubmission(
-                Submission.of(ONE, "maybe@example.org", "Maybe", DATE),
-                SOURCE.getBytes(StandardCharsets.UTF_8));
+        MailFixtures.queue(store, ONE, "maybe@example.org", "Maybe", DATE);
 
         long queued = store.outbox().outgoing(ONE).get(0).id;
         store.outbox().parkUncertain(queued, "Reached unexpected EOF on SMTP stream");
@@ -360,7 +366,9 @@ public class MailStoreTest {
         List<Outbox.Outgoing> waiting = store.outbox().outgoing(ONE);
         assertEquals(1, waiting.size());
         assertEquals("maybe@example.org", waiting.get(0).messageId);
-        assertEquals(SOURCE, new String(waiting.get(0).source, StandardCharsets.UTF_8));
+        assertEquals(
+                outgoing("maybe@example.org", "Maybe"),
+                new String(waiting.get(0).source, StandardCharsets.UTF_8));
         MailStore.StoredMessage again = MailFixtures.merged(store, 10).get(0);
         assertFalse(again.uncertain);
         assertFalse(again.failed);
@@ -370,9 +378,7 @@ public class MailStoreTest {
     @Test
     public void anActionOfAnotherKindIsLeftAlone() {
         mailboxes(ONE, "INBOX");
-        store.outbox().queueSubmission(
-                Submission.of(ONE, "mine@example.org", "Mine", DATE),
-                SOURCE.getBytes(StandardCharsets.UTF_8));
+        MailFixtures.queue(store, ONE, "mine@example.org", "Mine", DATE);
         queueForeign(store.outbox().outboxOf(ONE));
 
         // NOTE: skipped rather than parked or applied: an owner that does not
@@ -397,6 +403,10 @@ public class MailStoreTest {
     @Test
     public void anOutboxWrittenAsItemsMovesOntoTheQueue() {
         mailboxes(ONE, "INBOX");
+        // NOTE: what the outbox lists is the message's own, its subject
+        // derived from it (Annex A).
+        String source =
+                "From: a@example.org\r\nTo: b@example.org\r\nSubject: Waiting\r\n\r\nthe body\r\n";
         String outbox = store.outbox().outboxOf(ONE);
 
         // NOTE: the shape the version before wrote: an item in a mail
@@ -413,9 +423,9 @@ public class MailStoreTest {
                     outbox,
                     new ItemFixtures.Row(
                             "stranded@example.org",
-                            SOURCE,
+                            source,
                             PimdirSummary.mail(
-                                    null, "Waiting", "", ONE, null, DATE, SOURCE.length(), false),
+                                    null, "Waiting", "", ONE, null, DATE, source.length(), false),
                             PimdirSummary.mailSortKey(DATE),
                             "[]",
                             null));
@@ -426,7 +436,7 @@ public class MailStoreTest {
 
         List<Outbox.Outgoing> waiting = store.outbox().outgoing(ONE);
         assertEquals(1, waiting.size());
-        assertEquals(SOURCE, new String(waiting.get(0).source, StandardCharsets.UTF_8));
+        assertEquals(source, new String(waiting.get(0).source, StandardCharsets.UTF_8));
 
         assertEquals("the item is gone", 0, scalar("SELECT count(*) FROM items"));
         assertEquals("and it is on the queue", 1, MailFixtures.merged(store, 10).size());

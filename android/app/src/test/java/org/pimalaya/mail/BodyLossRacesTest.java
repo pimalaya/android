@@ -145,7 +145,7 @@ public class BodyLossRacesTest {
                                         .put("hash", hash)
                                         .put("body", new String(SOURCE, StandardCharsets.UTF_8)))
                         .put(full));
-        assertEquals("item and base", "2", refcount(hash));
+        assertEquals("item, base and the shared body", "3", refcount(hash));
 
         JSONArray flagged = new JSONArray().put("\\Flagged");
         storage.applyWrites(new JSONArray().put(listed("m1", flagged, flagsBase(flagged))));
@@ -155,7 +155,7 @@ public class BodyLossRacesTest {
         assertEquals("the base kept", hash,
                 text("SELECT base_object FROM bindings WHERE collection = ? AND link_id = 'm1'",
                         inbox));
-        assertEquals("item and base still", "2", refcount(hash));
+        assertEquals("item, base and the shared body still", "3", refcount(hash));
         assertTrue(blobs.has(hash));
     }
 
@@ -218,7 +218,7 @@ public class BodyLossRacesTest {
         new PimdirItems(pimdir).unlinkCollected();
 
         assertEquals("2", item("level", "m2"));
-        assertEquals("item and base", "2", refcount(hash));
+        assertEquals("item, base and the shared body", "3", refcount(hash));
         assertTrue("row and file", blobs.has(hash));
     }
 

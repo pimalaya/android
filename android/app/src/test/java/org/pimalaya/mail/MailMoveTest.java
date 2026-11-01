@@ -333,10 +333,9 @@ public class MailMoveTest {
     @Test
     public void aSentCopyIsHiddenWhileItsSubmissionWaits() throws Exception {
         String date = "2026-10-08T09:00:00Z";
-        String body = "Message-ID: <m2@example.com>\r\nSubject: Hi\r\n\r\nbody\r\n";
-        store.outbox().queueSubmission(
-                Submission.of(EMAIL, "m2@example.com", "Hi", PimdirSummary.mailSortKey(date)),
-                body.getBytes(StandardCharsets.UTF_8));
+        String body = "Message-ID: <m2@example.com>\r\nFrom: " + EMAIL + "\r\n"
+                + "To: bob@example.org\r\nSubject: Hi\r\n\r\nbody\r\n";
+        store.outbox().queueSubmission(EMAIL, body.getBytes(StandardCharsets.UTF_8));
         stager().mutateAdd(
                 sent,
                 "m2@example.com",

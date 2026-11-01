@@ -9,6 +9,8 @@
 //! phases, not items. Java computes content hashes, the engine only
 //! compares them; summaries are typed rows (STORAGE Annex A, [`summary`]).
 
+pub mod blobs;
+pub mod merge;
 pub mod store;
 pub mod summary;
 pub mod wire;
@@ -75,6 +77,10 @@ pub struct OfflineSync<'a> {
     /// A Graph delta link under a `$filter` is; IMAP `CHANGEDSINCE`, Gmail
     /// history and JMAP state are not, so a widening lists only its band.
     pub scope_bound: bool,
+    /// Whether the caller confirmed the absences a round finds, so one
+    /// finding most of its scope absent, or a listing naming no member,
+    /// closes rather than parks (SYNC §5).
+    pub accept_absences: bool,
 }
 
 /// The engine's driver: the host whose `OfflineDriver` services its yields.
@@ -94,6 +100,7 @@ impl<H: Host> Driver<H> {
         let opts = PimdirSyncOptions {
             full: sync.full,
             scope,
+            accept_absences: sync.accept_absences,
             ..sync_options(sync.content)
         };
         let coroutine = PimdirSync::new(sync.collection, opts).scope_bound(sync.scope_bound);

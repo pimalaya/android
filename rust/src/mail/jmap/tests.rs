@@ -98,7 +98,7 @@ impl FakeMail {
             session,
             auth: SecretString::from("Bearer token"),
         };
-        calls.send(raw, max_upload)
+        calls.send(&crate::mail::compose::envelope(raw)?, max_upload)
     }
 
     /// Answers one request: a blob upload (RFC 8620 section 6.1), or one
@@ -449,4 +449,55 @@ fn a_delete_destroys() {
     let args = to_value(destroy_args("m1")).unwrap();
 
     assert_eq!(args, json!({ "destroy": ["m1"] }));
+}
+
+/// A narrowed round's enumeration: `Email/query` filtered by the mailbox
+/// alone, no date, ids only, paged by position until the total is read
+/// (SYNC §4).
+#[test]
+fn a_mailboxs_every_id_is_queried_by_the_mailbox_alone() {
+    let held: Vec<String> = (0..5).map(|index| format!("e{index}")).collect();
+    let mut queries = Vec::new();
+    let mut client = Client::new(FakeServer::new(|request: &FakeRequest| {
+        let calls: Vec<(String, Map<String, Value>, String)> =
+            from_value(request.json::<Value>()["methodCalls"].take()).unwrap();
+        let (name, args, id) = calls.into_iter().next().unwrap();
+        assert_eq!(name, "Email/query", "ids alone, no Email/get");
+        assert_eq!(args["filter"], json!({ "inMailbox": "mb-inbox" }));
+        let position = args["position"].as_u64().unwrap() as usize;
+        let limit = args["limit"].as_u64().unwrap() as usize;
+        queries.push(position);
+        let ids: Vec<&String> = held.iter().skip(position).take(limit).collect();
+        let result = json!({
+            "accountId": "u42",
+            "queryState": "q1",
+            "canCalculateChanges": false,
+            "position": position,
+            "ids": ids,
+            "total": held.len(),
+        });
+        let body =
+            json!({ "methodResponses": [["Email/query", result, id]], "sessionState": "s1" });
+        FakeResponse::json(200, &body)
+    }));
+    let mut jmap = Jmap {
+        client: &mut client,
+        session_url: Url::parse("https://api.example.com/jmap/session").unwrap(),
+        auth: Auth::Bearer("token"),
+    };
+    let api_url = Url::parse("https://api.example.com/jmap/").unwrap();
+    let ids = jmap
+        .mailbox_ids(
+            &session(""),
+            &SecretString::from("Bearer token"),
+            &api_url,
+            "mb-inbox",
+            2,
+        )
+        .unwrap();
+    drop(jmap);
+    drop(client);
+
+    assert_eq!(ids, held);
+    assert_eq!(queries, [0, 2, 4], "a query per page of two");
 }

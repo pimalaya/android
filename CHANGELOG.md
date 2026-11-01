@@ -50,6 +50,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Changed a marker push to carry only what changed (read, important, answered), so a marker another client changed meanwhile is no longer set back, and a mail listing narrowed by the download window to say so, so a message with no date, or dated ahead of its arrival, is no longer taken for deleted.
 - Changed a sync whose listing comes back empty to keep what the collection holds rather than empty it, until a later listing names its members.
 - Changed an attachment saved into a folder on the phone to no longer read as downloaded on its message, the folder being the phone's own and not the message's account.
+- Changed a sync finding most of a collection gone from the server, or a listing coming back empty, to ask once it ends: the items stay on the phone until you remove them too, or keep them for the next sync to decide again.
+- Changed a contact or an entry edited both on the phone and on the server between two syncs to keep both edits, the phone's shown and the server's recorded beside it, rather than the last one listed overwriting the other.
+- Changed a mail listing narrowed by the download window on JMAP, Microsoft 365 and Gmail to end by reading the mailbox's every id, as IMAP already did, so a message with no date, or received before the window, is no longer taken for deleted; it costs a request per 500 to 1,000 ids of the mailbox at the end of such a listing.
+- Changed a queued message to be stored as the standard submission (pimdir Annex B.2), sent with the recipients it states, and one the app cannot read back to be kept and shown as refused rather than sent.
 
 ### Fixed
 

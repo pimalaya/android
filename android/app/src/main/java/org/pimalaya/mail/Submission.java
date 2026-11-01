@@ -3,67 +3,69 @@ package org.pimalaya.mail;
 import android.util.Log;
 
 import org.json.JSONObject;
-import org.pimalaya.pimdir.PimdirQueue;
+import org.pimalaya.client.Derived;
+import org.pimalaya.client.PimdirSql;
+import org.pimalaya.pimdir.PimdirSummary;
 
 /**
- * The payload of a submission: what this app queues.
+ * What a listing draws of one queued submission.
  *
- * <p>It carries what a listing draws, since a waiting message has no summary
- * row and parsing it is what the sort key avoids. The queue keeps the payload
- * as written text: a row sent again is queued with its text as it is.
+ * <p>The queued payload is Annex B.2's {@code submit} and nothing more ({@link
+ * #payload}): what the app needs beyond it, the message's {@code Message-ID},
+ * subject and date, is derived from the message, the row's body (STORAGE Annex
+ * A), never added to the payload.
  *
- * @param v the payload version it was written with
+ * @param from the envelope sender the payload names, the account's address
  * @param messageId the {@code Message-ID} it was stamped with, bare
+ * @param subject the subject, empty for none
+ * @param sortKey its sort key, empty when the message states no date
  */
-record Submission(int v, String from, String messageId, String subject, String sortKey) {
-    /** The payload version this app writes and reads. */
-    private static final int VERSION = 1;
+record Submission(String from, String messageId, String subject, String sortKey) {
+    /** The source performing every submission this app queues (§15.6). */
+    static final String SOURCE = "server";
 
-    /** A submission this app queues, at the version it writes. */
-    static Submission of(String from, String messageId, String subject, String sortKey) {
-        return new Submission(VERSION, from, messageId, subject, sortKey);
+    /**
+     * The {@code submit} payload queuing {@code message} from {@code from}:
+     * its recipients and subject read off the message by io-pimdir's rules.
+     */
+    static String payload(String from, byte[] message) {
+        return PimdirSql.submit(SOURCE, from, message);
     }
 
     /**
-     * The submission one queued action carries, read off its payload.
-     *
-     * <p>Every part empty when it cannot be read back.
+     * The submission a payload and its message make, every part empty when
+     * one cannot be read back.
      */
-    static Submission from(PimdirQueue.Action action) {
-        JSONObject payload = payload(action.payload());
-        return new Submission(
-                payload.optInt("v"),
-                payload.optString("from"),
-                payload.optString("messageId"),
-                payload.optString("subject"),
-                payload.optString("sortKey"));
+    static Submission of(String payload, byte[] message) {
+        String from = senderOf(payload);
+        if (message == null) {
+            return new Submission(from, "", "", "");
+        }
+        Derived derived;
+        try {
+            derived = PimdirSql.derive(PimdirSummary.MAIL, message);
+        } catch (RuntimeException unreadable) {
+            Log.w("pimalaya", "unreadable queued message: " + unreadable.getMessage());
+            return new Submission(from, "", "", "");
+        }
+        JSONObject summary = derived.summary();
+        JSONObject mail = summary == null ? null : summary.optJSONObject("mail");
+        String subject =
+                mail == null || mail.isNull("subject") ? "" : mail.optString("subject");
+        return new Submission(from, derived.linkId(), subject, derived.sortKey());
     }
 
-    /** The payload text the queue keeps. */
-    String text() {
-        try {
-            return new JSONObject()
-                    .put("v", v)
-                    .put("from", from)
-                    .put("messageId", messageId)
-                    .put("subject", subject)
-                    .put("sortKey", sortKey)
-                    .toString();
-        } catch (org.json.JSONException error) {
-            throw new IllegalStateException("Could not write the submission payload", error);
-        }
-    }
-
-    /** A payload as it was written, empty when it cannot be read back. */
-    private static JSONObject payload(String json) {
-        if (json == null) {
-            return new JSONObject();
+    /** The envelope sender a payload names, empty when it names none. */
+    private static String senderOf(String payload) {
+        if (payload == null) {
+            return "";
         }
         try {
-            return new JSONObject(json);
+            JSONObject json = new JSONObject(payload);
+            return json.isNull("from") ? "" : json.optString("from");
         } catch (org.json.JSONException error) {
             Log.w("pimalaya", "unreadable queue payload: " + error.getMessage());
-            return new JSONObject();
+            return "";
         }
     }
 }

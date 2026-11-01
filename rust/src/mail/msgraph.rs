@@ -458,8 +458,8 @@ impl<H: Host> Msgraph<'_, H> {
     ///
     /// No checkpoint: a band round keeps the source's, and a first chunk
     /// lands before any delta link exists. Every page is narrowed (SYNC
-    /// §4): the `sentDateTime` filter misses an undated message, and no
-    /// enumeration is handed, a folder's ids costing a request per 1,000.
+    /// §4): the `sentDateTime` filter misses an undated message, so the last
+    /// page hands the folder's every id ([`Self::folder_ids`]).
     fn band_page(
         &mut self,
         folder: &str,
@@ -496,7 +496,8 @@ impl<H: Host> Msgraph<'_, H> {
         }
 
         if !page.more {
-            return Ok(MailPage::round(items, None, None).narrowed(true, None));
+            let ids = self.folder_ids(folder)?;
+            return Ok(MailPage::round(items, None, None).narrowed(true, Some(ids)));
         }
         let next = match oldest {
             Some(oldest) if fresh > 0 => {
@@ -521,13 +522,40 @@ impl<H: Host> Msgraph<'_, H> {
             },
             // NOTE: a page of undated messages alone, which no ceiling
             // resumes below; the delta's first pass names the rest.
-            _ => return Ok(MailPage::round(items, None, None).narrowed(true, None)),
+            _ => {
+                let ids = self.folder_ids(folder)?;
+                return Ok(MailPage::round(items, None, None).narrowed(true, Some(ids)));
+            }
         };
         let cursor = serde_json::to_string(&next).map_err(|err| err.to_string())?;
         Ok(
             MailPage::round(items, Some(format!("{BAND_CURSOR}{cursor}")), None)
                 .narrowed(true, None),
         )
+    }
+
+    /// Every message id a folder holds, `/messages` selecting the id alone
+    /// and paged by `$skip`, 1,000 a request: the enumeration a narrowed
+    /// round hands on its last page (SYNC §4).
+    fn folder_ids(&mut self, folder: &str) -> Result<Vec<String>, BridgeError> {
+        let auth = HttpAuthBearer::new(self.token);
+        let mut ids = Vec::new();
+        loop {
+            let params = MsgraphMessagesListParams {
+                top: Some(GRAPH_PAGE),
+                skip: (!ids.is_empty()).then_some(ids.len() as u32),
+                select: Some("id"),
+                ..Default::default()
+            };
+            let coroutine = MsgraphMessagesList::new(&auth, "me", Some(folder), &params)
+                .map_err(|err| err.to_string())?;
+            let page = self.run(coroutine)?;
+            let more = page.next_link.is_some() && !page.value.is_empty();
+            ids.extend(page.value.into_iter().map(|message| message.id));
+            if !more {
+                return Ok(ids);
+            }
+        }
     }
 
     /// One page of the unfiltered delta's first pass, as a round page: the

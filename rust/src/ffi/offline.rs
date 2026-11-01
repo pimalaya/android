@@ -34,14 +34,21 @@ use crate::{
     contact::sync,
     ffi::{ErrorReply, error_json, host::JniHost, parse_facts, parse_strings, read_string},
     mail::derivable,
-    offline::{Driver, OfflineSync, store, summary::SummaryJson, wire::sorted},
+    offline::{
+        Driver, OfflineSync,
+        blobs::{self, Filed},
+        merge, store,
+        summary::SummaryJson,
+        wire::sorted,
+    },
 };
 
 /// `Native.offlineSync`: reconciles a collection, answering its sync report.
 ///
 /// `{"pulled", "pushed", "conflicts", "rejected", "refreshed", "waiting"}`;
 /// `full` skips the checkpoint, `content` pushes bodies, `since` bounds mail
-/// on `Date` (RFC 3339 `Z`, or empty), `scope_bound` binds the checkpoint.
+/// on `Date` (RFC 3339 `Z`, or empty), `scope_bound` binds the checkpoint,
+/// `accept_absences` closes a round that would park (SYNC §5).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_offlineSync<'local>(
     mut env: EnvUnowned<'local>,
@@ -52,6 +59,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineSync<'local>(
     content: jboolean,
     since: JString<'local>,
     scope_bound: jboolean,
+    accept_absences: jboolean,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let collection = read_string(env, &collection);
@@ -63,6 +71,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineSync<'local>(
             content,
             since: &since,
             scope_bound,
+            accept_absences,
         }) {
             Ok(report) => to_string(&report).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
@@ -371,9 +380,10 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirCheck<'local>(
 
 /// `Native.pimdirAction`: a queue row read strictly as its payload schema
 /// types it (STORAGE §15.3), its body the one the row pins; answers
-/// `{"targetCollection"?}`, or `{"error"}` for a malformed row, which a
-/// producer never appends and the drain parks whole. `objectHash` is empty
-/// for a row pinning none. Pure.
+/// `{"targetCollection"?}`, `{"skipped"}` for a row stating a later
+/// payload version, which the drain leaves pending (§15.2), or `{"error"}`
+/// for a malformed row, which a producer never appends and the drain parks
+/// whole. `objectHash` is empty for a row pinning none. Pure.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_pimdirAction<'local>(
     mut env: EnvUnowned<'local>,
@@ -390,6 +400,78 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirAction<'local>(
         let json = match store::action(&kind, &payload, object_hash) {
             Ok(facts) => to_string(&facts).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(format!("Malformed {kind} payload: {err}")),
+        };
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.pimdirSubmit`: the `submit` payload queuing `message` for
+/// `source` to send from `from` (STORAGE Annex B.2), its recipients and
+/// subject read off the message; answers `{"payload"}`, or `{"error"}` for
+/// a message naming no recipient. Pure.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_pimdirSubmit<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    source: JString<'local>,
+    from: JString<'local>,
+    message: JByteArray<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let source = read_string(env, &source);
+        let from = read_string(env, &from);
+        let message = env.convert_byte_array(&message).unwrap_or_default();
+        let json = match store::submit_payload(&source, &from, &message) {
+            Ok(payload) => serde_json::json!({ "payload": payload }).to_string(),
+            Err(err) => error_json(err),
+        };
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.pimdirMerge`: one upsert absorbed into the item it names by
+/// io-pimdir's hub (SYNC §9, [`merge::merge`]): takes `{policy?, source,
+/// item?, bindings, placement, overruling?}`, answers `{object?,
+/// conflicted, conflictObject?, sharedObject?, diverged, keptShared}`, or
+/// `{"error"}` for input it cannot read. Pure.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_pimdirMerge<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    input: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let input = read_string(env, &input);
+        let json = match serde_json::from_str(&input) {
+            Ok(input) => {
+                to_string(&merge::merge(input)).unwrap_or_else(|err| error_json(err.to_string()))
+            }
+            Err(err) => error_json(format!("Unreadable merge input: {err}")),
+        };
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.pimdirRename`: renames `from` to `to` unless a name holds `to`,
+/// never replacing it (STORAGE §5, [`blobs::rename_noreplace`]); answers
+/// `{"held": bool}`, `held` when the name was kept and `from` left where
+/// it was, or `{"error"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_pimdirRename<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    from: JString<'local>,
+    to: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let from = read_string(env, &from);
+        let to = read_string(env, &to);
+        let json = match blobs::rename_noreplace(Path::new(&from), Path::new(&to)) {
+            Ok(filed) => serde_json::json!({ "held": filed == Filed::Held }).to_string(),
+            Err(err) => error_json(format!("Could not rename {from} to {to}: {err}")),
         };
         Ok(env.new_string(json)?.into())
     })

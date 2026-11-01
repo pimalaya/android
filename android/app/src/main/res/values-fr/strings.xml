@@ -389,6 +389,11 @@
     <string name="sync_cards">Récupération des contacts de %1$s</string>
     <string name="sync_no_addressbook">Aucun carnet d\'adresses trouvé.</string>
     <string name="sync_failed">Impossible de synchroniser</string>
+    <string name="sync_parked_title">Absents du serveur</string>
+    <string name="sync_parked_body">Le serveur ne liste plus ces éléments. Ils sont toujours sur ce téléphone.</string>
+    <string name="sync_parked_row">%1$s, %2$s : %3$d sur %4$d</string>
+    <string name="sync_parked_remove">Les supprimer</string>
+    <string name="sync_parked_keep">Les garder</string>
     <string name="conflict_auto_resolved">Conflit résolu automatiquement ; les modifications partent à la prochaine synchronisation</string>
     <string name="contact_diverged_pending">Des champs divergents attendent une revue</string>
     <string name="sync_busy">Attendez la fin de la synchronisation</string>

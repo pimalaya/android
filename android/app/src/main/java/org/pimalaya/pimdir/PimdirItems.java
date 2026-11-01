@@ -459,18 +459,19 @@ public final class PimdirItems {
     /**
      * Every body the item's bindings pin.
      *
-     * <p>Each source's agreed base, and a conflicted source's diverging remote.
+     * <p>Each source's agreed base, a conflicted source's diverging remote, and
+     * the shared body each last agreed with (STORAGE §5).
      */
     private static List<String> bindingObjectsOf(
             SQLiteDatabase db, String collection, String linkId) {
         try (Cursor cursor =
                 db.rawQuery(
-                        "SELECT base_object, conflict_object FROM bindings"
+                        "SELECT base_object, conflict_object, shared_object FROM bindings"
                                 + " WHERE collection = ? AND link_id = ?",
                         new String[] {collection, linkId})) {
             List<String> pinned = new ArrayList<>(cursor.getCount());
             while (cursor.moveToNext()) {
-                for (int column = 0; column < 2; column++) {
+                for (int column = 0; column < 3; column++) {
                     if (!cursor.isNull(column)) {
                         pinned.add(cursor.getString(column));
                     }

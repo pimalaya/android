@@ -12,12 +12,15 @@
 use std::collections::BTreeMap;
 
 use io_pimdir::{
-    codec::{PimdirAction, action_from_payload},
-    hash::HASH_ALGO,
+    codec::{PimdirAction, PimdirActionError, action_from_payload},
+    hash::{self, HASH_ALGO},
+    intent::{PimdirSubmit, SUBMIT},
     sql,
     sync::SYNC_VERSION,
 };
 use serde::{Deserialize, Serialize};
+
+use crate::mail::compose;
 
 /// The Annex A revision io-pimdir derives summaries, addresses and sort
 /// keys under, recorded in `store_meta.derivation` (STORAGE §6); the
@@ -212,21 +215,38 @@ fn normalised(sql: &str) -> String {
 
 /// What a queue row states, read strictly as its payload schema types it
 /// (STORAGE §15.3, Annex B.2, spec/payloads/).
-#[derive(Debug, Eq, PartialEq, Serialize)]
+#[derive(Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionFacts {
     /// The collection it names beside its own, `queue.target_collection`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_collection: Option<String>,
+    /// Why the row is skipped rather than read: it states a payload
+    /// version this app does not know, a later producer's, left pending
+    /// and untouched for a later owner (§15.2), never parked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
 }
 
 /// Reads a queue row as the owner applies it: its payload parsed strictly
 /// as its schema types it, and the body an `add` or an `update` names
-/// being the one the row pins (`object_hash`), else the row is malformed
-/// and parked whole, never applied in part (§15.3). A producer runs it
-/// before appending, so it never queues what an owner would park.
+/// being the one the row pins (`object_hash`), a `submit` pinning the
+/// message it sends, else the row is malformed and parked whole, never
+/// applied in part (§15.3). A row stating a later payload version is
+/// skipped (§15.2), as io-pimdir's drain and pending reads skip it. A
+/// producer runs it before appending, so it never queues what an owner
+/// would park.
 pub fn action(kind: &str, payload: &str, object_hash: Option<&str>) -> Result<ActionFacts, String> {
-    let action = action_from_payload(kind, payload).map_err(|err| err.to_string())?;
+    let action = match action_from_payload(kind, payload) {
+        Ok(action) => action,
+        Err(err @ PimdirActionError::UnknownVersion(Some(_))) => {
+            return Ok(ActionFacts {
+                skipped: Some(err.to_string()),
+                ..ActionFacts::default()
+            });
+        }
+        Err(err) => return Err(err.to_string()),
+    };
 
     let named = match &action {
         PimdirAction::Add { object, .. } => object.as_ref(),
@@ -242,19 +262,46 @@ pub fn action(kind: &str, payload: &str, object_hash: Option<&str>) -> Result<Ac
             object_hash.unwrap_or("none")
         ));
     }
+    if kind == SUBMIT && object_hash.is_none() {
+        return Err("A submit pins the message it sends, and this row pins none".into());
+    }
 
     Ok(ActionFacts {
         target_collection: action
             .target_collection()
             .map(|target| target.as_str().to_string()),
+        skipped: None,
     })
+}
+
+/// The `submit` payload queuing `message` for `source` to send from
+/// `from` (STORAGE Annex B.2): the envelope recipients its `To`, `Cc` and
+/// `Bcc` headers name, and its subject, for reports. No member of the
+/// payload is the app's own: what a listing draws is derived from the
+/// message, the row's body.
+pub fn submit_payload(source: &str, from: &str, message: &[u8]) -> Result<String, String> {
+    let rcpts = compose::envelope(message)
+        .map_err(|err| err.message)?
+        .recipients;
+    let submit = PimdirSubmit {
+        source: source.to_string(),
+        from: from.to_string(),
+        rcpts,
+        subject: compose::subject(message),
+        copy: None,
+    };
+    match submit.to_action(hash::hash(message)) {
+        Ok(PimdirAction::Unknown { payload, .. }) => Ok(payload),
+        Ok(_) => Err("A submit is an intent".into()),
+        Err(err) => Err(err.to_string()),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
-    use crate::offline::store::{MetaFacts, StoreFacts, action, check};
+    use crate::offline::store::{MetaFacts, StoreFacts, action, check, submit_payload};
 
     /// io-pimdir's payload vectors (spec/vectors/payloads.json): every valid
     /// payload reads, every malformed one is refused.
@@ -270,8 +317,13 @@ mod tests {
             let kind = case["action"].as_str().unwrap();
             let payload = &case["payload"];
             // NOTE: the row pins the body the payload names, as a producer
-            // writes it; a payload naming none pins none.
-            let object = payload["object"].as_str();
+            // writes it, and a submit the message it sends; any other
+            // payload pins none.
+            let message = "a".repeat(52);
+            let object = match kind {
+                "submit" => Some(message.as_str()),
+                _ => payload["object"].as_str(),
+            };
             let read = action(kind, &payload.to_string(), object);
             assert_eq!(
                 read.is_ok(),
@@ -302,6 +354,81 @@ mod tests {
 
         let moved = action("move", r#"{"v": 1, "seq": 3, "to": "acct/Trash"}"#, None).unwrap();
         assert_eq!(moved.target_collection.as_deref(), Some("acct/Trash"));
+    }
+
+    /// A row a later producer queued is skipped, left pending for a later
+    /// owner, never parked (§15.2), as io-pimdir's drain skips it; a row
+    /// stating no version is malformed.
+    #[test]
+    fn a_later_payload_version_is_skipped_not_parked() {
+        let hash = "a".repeat(52);
+        let later = r#"{"v": 2, "source": "server", "from": "a@x.org", "rcpts": [], "new": 1}"#;
+        let read = action("submit", later, Some(&hash)).unwrap();
+        assert!(read.skipped.is_some(), "{read:?}");
+        let later = r#"{"v": 2, "seq": 3}"#;
+        assert!(action("remove", later, None).unwrap().skipped.is_some());
+
+        let unversioned = r#"{"seq": 3}"#;
+        assert!(action("remove", unversioned, None).is_err());
+        let current = action("remove", r#"{"v": 1, "seq": 3}"#, None).unwrap();
+        assert_eq!(current, Default::default(), "read, not skipped");
+    }
+
+    /// The message is the submit's body, `queue.object_hash`, never a
+    /// member of its payload (Annex B.2).
+    #[test]
+    fn a_submit_pins_the_message_it_sends() {
+        let submit = r#"{"v": 1, "source": "server", "from": "a@x.org", "rcpts": ["b@y.org"]}"#;
+        assert!(action("submit", submit, Some(&"a".repeat(52))).is_ok());
+        assert!(action("submit", submit, None).is_err());
+    }
+
+    /// The payload the app queued before draft-08 is no `submit` of Annex
+    /// B.2: no `source` nor `rcpts`, and members v1 does not define.
+    #[test]
+    fn the_app_s_former_submit_payload_is_malformed() {
+        let former = r#"{"v":1,"from":"jane@example.com","messageId":"m1@example.org","subject":"Hello","sortKey":"2026-01-05T09:00:00Z"}"#;
+        assert!(action("submit", former, Some(&"a".repeat(52))).is_err());
+    }
+
+    #[test]
+    fn the_app_s_submit_payload_is_annex_b2_s() {
+        let message = b"Date: Mon, 5 Jan 2026 09:00:00 +0000\r\n\
+            Message-ID: <m1@example.org>\r\n\
+            From: Jane <jane@example.com>\r\n\
+            To: Bob <bob@example.org>, carol@example.org\r\n\
+            Cc: dan@example.org\r\n\
+            Bcc: eve@example.org\r\n\
+            Subject: =?UTF-8?B?UsOpdW5pb24=?=\r\n\
+            \r\n\
+            Hi\r\n";
+
+        let payload = submit_payload("server", "jane@example.com", message).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "v": 1,
+                "source": "server",
+                "from": "jane@example.com",
+                "rcpts": [
+                    "bob@example.org",
+                    "carol@example.org",
+                    "dan@example.org",
+                    "eve@example.org"
+                ],
+                "subject": "R\u{e9}union",
+            })
+        );
+        let hash = io_pimdir::hash::hash(message);
+        assert!(action("submit", &payload, Some(hash.as_str())).is_ok());
+
+        let untitled = b"From: jane@example.com\r\nTo: bob@example.org\r\n\r\nHi\r\n";
+        let payload = submit_payload("server", "jane@example.com", untitled).unwrap();
+        assert!(!payload.contains("subject"), "{payload}");
+
+        let nobody = b"From: jane@example.com\r\nSubject: x\r\n\r\nHi\r\n";
+        assert!(submit_payload("server", "jane@example.com", nobody).is_err());
     }
 
     fn current() -> StoreFacts {

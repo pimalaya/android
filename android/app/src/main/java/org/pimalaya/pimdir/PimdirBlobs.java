@@ -2,13 +2,14 @@ package org.pimalaya.pimdir;
 
 import android.util.Log;
 
+import org.pimalaya.client.PimdirSql;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -23,11 +24,12 @@ import java.util.UUID;
  * <p>Beside the database (pimdir STORAGE §5), one shard level deep, {@code
  * objects/<hash[0:2]>/<hash>}, named by a hash the caller decided (engine or
  * {@link PimdirHash}) and checked to be a name before any path is built. A
- * write never replaces a file: the temporary is linked to its name, a name
- * held keeping what holds it. No link under objects/ is followed. A body is
- * checked against its name before it is served, parsed, pushed or copied
- * ({@link #get}, {@link #verified}); one failing it is moved into
- * quarantine/ (§7), never unlinked.
+ * write never replaces a file: the temporary is renamed to its name with
+ * {@code RENAME_NOREPLACE}, a name held keeping what holds it, never by a hard
+ * link, which Android's SELinux policy denies an app on its own files. No link
+ * under objects/ is followed. A body is checked against its name before it is
+ * served, parsed, pushed or copied ({@link #get}, {@link #verified}); one
+ * failing it is moved into quarantine/ (§7), never unlinked.
  */
 public final class PimdirBlobs {
     private final File root;
@@ -112,10 +114,10 @@ public final class PimdirBlobs {
     }
 
     /**
-     * Files a file under its hash by linking it; the source is gone after.
+     * Files a file under its hash by renaming it; the source is gone after.
      *
-     * <p>On {@link #put(String, byte[])}'s terms: synced, then linked into
-     * its shard, copied where the link cannot be made (another file system).
+     * <p>On {@link #put(String, byte[])}'s terms: synced, then renamed into its
+     * shard, copied where the rename cannot be made (another file system).
      */
     public void adopt(String hash, File source) throws IOException {
         try {
@@ -128,12 +130,12 @@ public final class PimdirBlobs {
             }
             shard(target);
             try {
-                Files.createLink(target.toPath(), source.toPath());
-                sync(target.getParentFile());
-            } catch (FileAlreadyExistsException held) {
-                // NOTE: another writer filed the same name meanwhile: its file
-                // holds these very bytes, and is kept.
-            } catch (IOException | UnsupportedOperationException unlinkable) {
+                // NOTE: a name another writer filed meanwhile holds these
+                // very bytes, and is kept; the source goes either way.
+                if (PimdirSql.renameNoReplace(source, target)) {
+                    sync(target.getParentFile());
+                }
+            } catch (IOException unrenamable) {
                 put(hash, source);
             }
         } finally {
@@ -241,15 +243,15 @@ public final class PimdirBlobs {
     }
 
     /**
-     * Links a written temporary to its name and unlinks it (§5): a name held
-     * keeps what holds it, never replaced.
+     * Renames a written temporary to its name (§5), never replacing it: a name
+     * held keeps what holds it, the temporary deleted.
      */
     private static void commit(File temp, File target) throws IOException {
         try {
-            Files.createLink(target.toPath(), temp.toPath());
-            sync(target.getParentFile());
-        } catch (FileAlreadyExistsException held) {
-            // NOTE: the same name filed by another writer: the same bytes.
+            // NOTE: a name held was filed by another writer: the same bytes.
+            if (PimdirSql.renameNoReplace(temp, target)) {
+                sync(target.getParentFile());
+            }
         } finally {
             temp.delete();
         }

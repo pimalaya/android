@@ -10,6 +10,7 @@ import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mutation;
 import org.pimalaya.client.OfflineDriver;
 import org.pimalaya.client.PimalayaException;
+import org.pimalaya.client.SyncReport;
 
 /** A driver's storage half: load, lookup and write yields, staged edits. */
 public abstract class Stager implements OfflineDriver {
@@ -26,11 +27,25 @@ public abstract class Stager implements OfflineDriver {
      */
     public final Locks locks;
 
+    /** The rounds the store's syncs parked ({@link PimdirDb#parked}). */
+    private final ParkedRounds parked;
+
     /** A stager over {@code pimdir}, the bridge through {@code clients}. */
     protected Stager(PimdirDb pimdir, Clients clients) {
         this.offline = new PimdirStorage(pimdir);
         this.clients = clients;
         this.locks = pimdir.locks();
+        this.parked = pimdir.parked();
+    }
+
+    @Override
+    public boolean acceptAbsences(String collection) {
+        return parked.accepts(collection);
+    }
+
+    @Override
+    public void synced(String collection, SyncReport report) {
+        parked.synced(collection, report);
     }
 
     /**

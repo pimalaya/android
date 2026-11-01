@@ -1,5 +1,6 @@
 package org.pimalaya.sync;
 
+import android.app.AlertDialog;
 import android.util.Log;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -31,8 +32,12 @@ import org.pimalaya.mail.MailSync;
 import org.pimalaya.mail.MailTally;
 import org.pimalaya.mail.MailWindow;
 import org.pimalaya.phone.Accounts;
+import org.pimalaya.pimdir.ParkedRounds;
+import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirEngine;
+import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.SyncDock;
 
@@ -201,13 +206,70 @@ public final class SyncCoordinator implements MailSync {
 
     /** Pushes the sync flag to every subscriber; ending frees the lock. */
     private void setSyncing(boolean value) {
-        if (syncing && !value) {
+        boolean ended = syncing && !value;
+        if (ended) {
             pimdir.locks().releaseSync();
         }
         syncing = value;
         for (Consumer<Boolean> observer : syncObservers) {
             observer.accept(value);
         }
+        if (ended) {
+            offerParked();
+        }
+    }
+
+    /**
+     * Asks about the rounds a pass parked rather than closed (pimdir SYNC §5):
+     * a listing naming nothing, or most of a collection gone. Their items stay
+     * until the user removes them too, which runs the drawer's sync with
+     * those collections accepting the absences; keeping them leaves the
+     * rounds parked, asked about again only when what they find changes.
+     */
+    private void offerParked() {
+        List<ParkedRounds.Parked> parked = new ArrayList<>(pimdir.parked().unoffered());
+        // NOTE: a phone book listing nothing is a permission withdrawn as
+        // often as a book emptied, and accepting it would delete every card
+        // from the server: it stays parked, never offered.
+        parked.removeIf(round -> PimdirStorage.isPhoneCollection(round.collection()));
+        if (parked.isEmpty()) {
+            return;
+        }
+        Map<String, PimdirCollections.Stored> stored = new HashMap<>();
+        PimdirCollections collections = new PimdirCollections(pimdir, host);
+        for (String kind :
+                new String[] {PimdirSummary.MAIL, PimdirSummary.CONTACT, PimdirSummary.CALENDAR}) {
+            for (PimdirCollections.Stored one : collections.listAll(kind)) {
+                stored.put(one.id, one);
+            }
+        }
+        StringBuilder rows = new StringBuilder(host.getString(R.string.sync_parked_body));
+        List<String> engines = new ArrayList<>();
+        for (ParkedRounds.Parked round : parked) {
+            engines.add(round.collection());
+            PimdirCollections.Stored one =
+                    stored.get(PimdirStorage.collectionOf(round.collection()));
+            String name = one == null ? round.collection() : one.name;
+            String account = one == null ? "" : one.accountEmail;
+            rows.append("\n\n")
+                    .append(host.getString(
+                            R.string.sync_parked_row,
+                            name,
+                            account,
+                            round.absent(),
+                            round.bound()));
+        }
+        new AlertDialog.Builder(host)
+                .setTitle(R.string.sync_parked_title)
+                .setMessage(rows.toString())
+                .setPositiveButton(
+                        R.string.sync_parked_remove,
+                        (dialog, which) -> {
+                            pimdir.parked().accept(engines);
+                            syncAll();
+                        })
+                .setNegativeButton(R.string.sync_parked_keep, null)
+                .show();
     }
 
     /** Whether a sync pass is running. */

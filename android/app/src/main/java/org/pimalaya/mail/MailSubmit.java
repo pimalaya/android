@@ -94,13 +94,7 @@ public final class MailSubmit {
         String date = draft.date();
 
         byte[] source = client.compose(draft);
-        mail.outbox().queueSubmission(
-                Submission.of(
-                        sender,
-                        PimdirSummary.bare(messageId),
-                        subject,
-                        PimdirSummary.mailSortKey(date)),
-                source);
+        mail.outbox().queueSubmission(sender, source);
         stageSentCopy(
                 sender, messageId, subject, Objects.requireNonNullElse(draft.to(), ""), date, source);
     }

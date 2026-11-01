@@ -110,7 +110,9 @@ public final class PimdirSql {
 
     /**
      * A queue row read strictly as its payload schema types it (STORAGE
-     * §15.3): its {@code targetCollection}, if any.
+     * §15.3): its {@code targetCollection}, if any, or {@code skipped} when
+     * it states a later payload version, which the drain leaves pending and
+     * untouched (§15.2).
      *
      * @throws PimalayaException naming what is malformed, a row a producer
      *     never appends and the drain parks whole
@@ -118,6 +120,56 @@ public final class PimdirSql {
     public static JSONObject action(String kind, String payload, String objectHash) {
         return Replies.object(
                 Native.pimdirAction(kind, payload, objectHash == null ? "" : objectHash));
+    }
+
+    /**
+     * The {@code submit} payload queuing {@code message} for {@code source} to
+     * send from {@code from} (STORAGE Annex B.2): its envelope recipients and
+     * subject read off the message, nothing of the app's own.
+     *
+     * @throws PimalayaException for a message naming no recipient
+     */
+    public static String submit(String source, String from, byte[] message) {
+        return Replies.object(Native.pimdirSubmit(source, from, message)).optString("payload");
+    }
+
+    /**
+     * One upsert of a mutable kind absorbed into the item it names, by
+     * io-pimdir's own cross-source merge (SYNC §9): the body the item keeps,
+     * its conflict, the source's {@code sharedObject}, whether the upsert
+     * {@code diverged} and whether the item {@code keptShared} its body.
+     *
+     * @param input {@code {policy?, source, item?, bindings, placement,
+     *     overruling?}}, the item and bindings as stored before the upsert
+     */
+    public static JSONObject merge(JSONObject input) {
+        return Replies.object(Native.pimdirMerge(input.toString()));
+    }
+
+    /**
+     * Renames {@code from} to {@code to} unless a name holds {@code to}, never
+     * replacing it (STORAGE §5); answers false when the name was kept and
+     * {@code from} left where it was.
+     *
+     * <p>A rename rather than a hard link: Android's SELinux policy denies
+     * {@code link} on an app's own data files.
+     *
+     * @throws java.io.IOException when the rename fails otherwise (another
+     *     file system, a missing source)
+     */
+    public static boolean renameNoReplace(java.io.File from, java.io.File to)
+            throws java.io.IOException {
+        JSONObject reply;
+        try {
+            reply = new JSONObject(
+                    Native.pimdirRename(from.getAbsolutePath(), to.getAbsolutePath()));
+        } catch (JSONException error) {
+            throw new java.io.IOException("Unreadable rename reply: " + error.getMessage());
+        }
+        if (reply.has("error")) {
+            throw new java.io.IOException(reply.optString("error"));
+        }
+        return !reply.optBoolean("held");
     }
 
     /** Every statement, by name; unmodifiable. */

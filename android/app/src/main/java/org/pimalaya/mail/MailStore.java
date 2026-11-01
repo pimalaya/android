@@ -680,7 +680,7 @@ public final class MailStore {
         // where the outbox shows, whose row then stands for it.
         List<String[]> hidden = new ArrayList<>();
         for (PimdirQueue.Action action : outbox.submissions()) {
-            Submission submission = Submission.from(action);
+            Submission submission = outbox.submission(action);
             String from = submission.from();
             String sent = sentOf(from);
             if (sent != null && ids.contains(sent) && accepts.test(from, outbox.outboxOf(from))) {
@@ -1506,6 +1506,13 @@ public final class MailStore {
                 db.execSQL(
                         "UPDATE bindings SET base_object = NULL, base_present = 1"
                                 + " WHERE collection = ? AND link_id = ? AND base_object = ?",
+                        item);
+                // NOTE: a shared body naming the message's own lets go with it,
+                // a message having no cross-source merge to read it for, as
+                // release_bases_before does (STORAGE §11.4).
+                db.execSQL(
+                        "UPDATE bindings SET shared_object = NULL"
+                                + " WHERE collection = ? AND link_id = ? AND shared_object = ?",
                         item);
                 db.execSQL(
                         "UPDATE items SET object_hash = NULL, level = 1"

@@ -95,6 +95,9 @@ struct FakeGraph {
     page: usize,
     /// Messages `/messages` answered, all pages counted.
     listed: usize,
+    /// Requests listing the folder's ids alone, a narrowed round's
+    /// enumeration (SYNC §4).
+    id_lists: usize,
     /// Rows delta pages answered.
     delta_rows: usize,
     /// First passes begun.
@@ -279,6 +282,9 @@ impl FakeGraph {
     /// One page of the band the `$filter` names, newest first, `$top` at
     /// most, a next link when Graph holds more.
     fn messages(&mut self, request: &FakeRequest) -> FakeResponse {
+        if request.param("$select") == Some("id") {
+            return self.ids(request);
+        }
         assert_eq!(request.param("$select"), Some(MESSAGE_SELECT));
         assert_eq!(request.param("$expand"), Some(MESSAGE_EXPAND));
         assert_eq!(request.param("$orderby"), Some("sentDateTime desc"));
@@ -318,6 +324,25 @@ impl FakeGraph {
             value: ids.iter().map(|id| self.message(id)).collect(),
             next_link: (matching.len() > take).then(|| format!("{MESSAGES}?$skip={take}")),
         };
+        FakeResponse::json(200, &page)
+    }
+
+    /// One page of the folder's ids alone, in the fake's order, from
+    /// `$skip`: what a narrowed round enumerates.
+    fn ids(&mut self, request: &FakeRequest) -> FakeResponse {
+        assert_eq!(request.param("$filter"), None, "no date filter");
+        self.id_lists += 1;
+        let top: usize = request.param("$top").unwrap().parse().unwrap();
+        let skip: usize = request
+            .param("$skip")
+            .map_or(0, |skip| skip.parse().unwrap());
+        let take = top.min(self.page);
+        let ids: Vec<&String> = self.folder.keys().skip(skip).take(take).collect();
+        let more = skip + ids.len() < self.folder.len();
+        let page = json!({
+            "value": ids.iter().map(|id| json!({ "id": id })).collect::<Vec<_>>(),
+            "@odata.nextLink": more.then(|| format!("{MESSAGES}?$skip={}", skip + take)),
+        });
         FakeResponse::json(200, &page)
     }
 
@@ -1724,4 +1749,51 @@ mod step {
             .serve(|graph| graph.read_sources(&[("a".into(), Some(10))], Path::new(dir.path())));
         assert_eq!(read.unwrap_err().status, Some(401));
     }
+}
+
+/// The `sentDateTime` filter misses an undated message, so a band round's
+/// last page hands the folder's every id, listed with no filter, 1,000 a
+/// request (SYNC §4).
+#[test]
+fn a_band_rounds_last_page_hands_the_folders_every_id() {
+    let mut graph = FakeGraph::new(0);
+    graph.page = 4;
+    for index in 0..9 {
+        graph.add(&format!("t{index:02}"), Some(hours_back(index)));
+    }
+    graph.add("undated", None);
+
+    let mut cursor: Option<String> = None;
+    let mut pages = Vec::new();
+    loop {
+        let request = MailRequest {
+            listing: Listing::Round {
+                cursor: cursor.clone(),
+                band: true,
+            },
+            scope: Scope {
+                since: Some(hours_back(100)),
+                until: None,
+            },
+            covered: false,
+            received: None,
+        };
+        let page = graph
+            .serve(|graph| graph.list_page(FOLDER, &request))
+            .unwrap();
+        assert!(page.narrowed);
+        cursor = page.cursor.clone();
+        pages.push(page);
+        if cursor.is_none() {
+            break;
+        }
+    }
+
+    let (last, before) = pages.split_last().unwrap();
+    assert!(before.iter().all(|page| page.enumerated.is_none()));
+    let mut enumerated = last.enumerated.clone().expect("the folder's every id");
+    enumerated.sort();
+    assert_eq!(enumerated.len(), 10, "the undated one too: {enumerated:?}");
+    assert!(enumerated.contains(&"undated".to_string()));
+    assert_eq!(graph.id_lists, 3, "ten ids, four a page");
 }

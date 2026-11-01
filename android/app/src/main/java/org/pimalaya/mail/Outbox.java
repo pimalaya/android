@@ -5,8 +5,11 @@ import android.database.Cursor;
 import android.util.Log;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
+import org.json.JSONObject;
 import org.pimalaya.R;
 import org.pimalaya.client.Flags;
+import org.pimalaya.client.PimalayaException;
+import org.pimalaya.client.PimdirSql;
 import org.pimalaya.mail.MailStore.StoredMessage;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirItems;
@@ -14,7 +17,10 @@ import org.pimalaya.pimdir.PimdirQueue;
 import org.pimalaya.pimdir.PimdirSummary;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The outbox: each account's pending submissions on the store's queue.
@@ -40,6 +46,18 @@ public final class Outbox {
     private final PimdirAccount accounts;
     private final PimdirQueue queue;
 
+    /**
+     * What each queued row's message derives to, by body and payload: a body
+     * is immutable under its name, so a listing derives it once.
+     */
+    private final Map<String, Submission> derived =
+            Collections.synchronizedMap(new LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, Submission> eldest) {
+                    return size() > 256;
+                }
+            });
+
     Outbox(Context context, PimdirItems items, PimdirAccount accounts, PimdirQueue queue) {
         this.context = context;
         this.items = items;
@@ -54,11 +72,25 @@ public final class Outbox {
      */
     boolean submitting(String messageId) {
         for (PimdirQueue.Action action : submissions()) {
-            if (messageId.equals(Submission.from(action).messageId())) {
+            if (messageId.equals(submission(action).messageId())) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * What a listing draws of one queued submission, derived from its message
+     * ({@link Submission}).
+     */
+    Submission submission(PimdirQueue.Action action) {
+        String key = action.objectHash() + "\n" + action.payload();
+        Submission known = derived.get(key);
+        if (known == null) {
+            known = Submission.of(action.payload(), queue.body(action.objectHash()));
+            derived.put(key, known);
+        }
+        return known;
     }
 
     /** Every submission still in an outbox, waiting or parked. */
@@ -80,19 +112,16 @@ public final class Outbox {
     }
 
     /**
-     * Stages one composed message for the next drain to hand over.
-     *
-     * <p>The sort key rather than the date it was written from: it is what
-     * a row is ordered and dated by everywhere else in this store, and
-     * deriving it once here keeps the listing from parsing anything.
+     * Stages one composed message from {@code from} for the next drain to hand
+     * over, as Annex B.2's {@code submit} ({@link Submission#payload}).
      */
-    void queueSubmission(Submission submission, byte[] source) {
+    void queueSubmission(String from, byte[] source) {
         queue.enqueue(
                 new PimdirQueue.Enqueued(
-                        outboxOf(submission.from()),
-                        submission.from(),
+                        outboxOf(from),
+                        from,
                         PimdirQueue.SUBMIT,
-                        submission.text(),
+                        Submission.payload(from, source),
                         source));
     }
 
@@ -113,7 +142,7 @@ public final class Outbox {
 
     /** One queued submission as a row, read off its payload. */
     private StoredMessage outgoing(PimdirQueue.Action action) {
-        Submission submission = Submission.from(action);
+        Submission submission = submission(action);
         String from = submission.from();
 
         return StoredMessage.outgoing(
@@ -174,9 +203,7 @@ public final class Outbox {
                 Log.w("pimalaya", "an outbox message had no body, dropped: " + message.linkId);
                 continue;
             }
-            queueSubmission(
-                    Submission.of(accountEmail, message.linkId, message.subject, message.sortKey),
-                    source);
+            queueSubmission(accountEmail, source);
         }
 
         SQLiteDatabase db = items.writable();
@@ -217,10 +244,14 @@ public final class Outbox {
         /** The message itself, as handed over. */
         public final byte[] source;
 
-        Outgoing(long id, String messageId, byte[] source) {
+        /** The {@code submit} payload, whose envelope it is sent with. */
+        public final String payload;
+
+        Outgoing(long id, String messageId, byte[] source, String payload) {
             this.id = id;
             this.messageId = messageId;
             this.source = source;
+            this.payload = payload;
         }
     }
 
@@ -244,9 +275,29 @@ public final class Outbox {
                 // section 15.2).
                 continue;
             }
+            // NOTE: read strictly by its schema before anything is sent: a
+            // malformed row is parked whole, never handed over in part, and
+            // one stating a later payload version is skipped, left pending
+            // and untouched for a later owner (STORAGE sections 15.2, 15.3).
+            JSONObject read;
+            try {
+                read = PimdirSql.action(action.kind(), action.payload(), action.objectHash());
+            } catch (PimalayaException malformed) {
+                Log.w("pimalaya", "malformed submission parked: " + malformed.getMessage());
+                queue.park(action.id(), malformed.getMessage());
+                continue;
+            }
+            if (read.has("skipped")) {
+                continue;
+            }
             byte[] source = queue.body(action.objectHash());
             if (source != null) {
-                waiting.add(new Outgoing(action.id(), Submission.from(action).messageId(), source));
+                waiting.add(
+                        new Outgoing(
+                                action.id(),
+                                submission(action).messageId(),
+                                source,
+                                action.payload()));
             }
         }
         return waiting;
@@ -295,7 +346,7 @@ public final class Outbox {
             queue.enqueue(
                     new PimdirQueue.Enqueued(
                             action.collection(),
-                            Submission.from(action).from(),
+                            submission(action).from(),
                             PimdirQueue.SUBMIT,
                             action.payload(),
                             source));

@@ -180,7 +180,7 @@ impl From<&PimdirPlacement> for PlacementJson {
 /// Its existence is the membership base, so no separate present field.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct BaseJson {
+pub(crate) struct BaseJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     flags: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1171,7 +1171,12 @@ pub enum TierJson {
 
 /// A sync report on the JSON wire (engine to Java only).
 #[derive(Serialize)]
+/// `absent` and `bound` are a parked round's counts, 0 for a closed one.
 pub struct SyncReportJson {
+    /// The based bindings a parked round's listing left out.
+    pub absent: usize,
+    /// The based bindings a parked round counted.
+    pub bound: usize,
     pub conflicts: usize,
     /// The bodies a policy did not adopt, kept as retained items (SYNC §9).
     pub overruled: usize,
@@ -1191,6 +1196,8 @@ pub struct SyncReportJson {
 impl From<&PimdirSyncReport> for SyncReportJson {
     fn from(report: &PimdirSyncReport) -> Self {
         Self {
+            absent: report.parked.map_or(0, |parked| parked.absent),
+            bound: report.parked.map_or(0, |parked| parked.bound),
             conflicts: report.conflicts,
             overruled: overruled(&report.events),
             parked: report.parked.is_some(),

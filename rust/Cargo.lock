@@ -989,6 +989,7 @@ dependencies = [
  "io-webdav",
  "jiff",
  "jni",
+ "libc",
  "log",
  "mail-parser",
  "percent-encoding",

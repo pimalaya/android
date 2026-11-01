@@ -57,6 +57,9 @@ public final class PimdirDb extends SQLiteOpenHelper {
     /** The store's locks, which every engine and reader over it takes. */
     private final Locks locks = new Locks();
 
+    /** The rounds its syncs parked, for the user to settle (SYNC §5). */
+    private final ParkedRounds parked = new ParkedRounds();
+
     /**
      * The per-domain databases this store replaced, deleted on open.
      *
@@ -249,6 +252,11 @@ public final class PimdirDb extends SQLiteOpenHelper {
         return locks;
     }
 
+    /** The rounds this store's syncs parked, process-wide. */
+    public ParkedRounds parked() {
+        return parked;
+    }
+
     /** The content-addressed blob directory beside the database. */
     public File blobs() {
         return blobs;
@@ -311,16 +319,38 @@ public final class PimdirDb extends SQLiteOpenHelper {
         // NOTE: SQLite leaves foreign keys off and the schema's cascades
         // (bindings with items, items with collections) rely on them.
         db.setForeignKeyConstraintsEnabled(true);
-        db.enableWriteAheadLogging();
-        // NOTE: the durability and erasure STORAGE §4.1 and §11.5 ask of
-        // every connection, and a schema read as one from elsewhere (§18).
-        pragma(db, "PRAGMA synchronous = FULL");
-        pragma(db, "PRAGMA secure_delete = ON");
-        pragma(db, "PRAGMA trusted_schema = OFF");
         // NOTE: a page of mail runs a dozen statements per message, the
         // canonical ones and the store's own, and more than the default 25
         // distinct ones per pass: a cache that small recompiles them by turns.
         db.setMaxSqlCacheSize(SQLiteDatabase.MAX_SQL_CACHE_SIZE);
+    }
+
+    /**
+     * Turns write-ahead logging on once the store has its tables.
+     *
+     * <p>Not in {@link #onConfigure}: logging gives the pool its readers, and
+     * the helper reads the version (a read-only statement, so on a reader)
+     * before {@link #onCreate}. That reader cached the schema of a store with
+     * no table yet, and every statement it then ran failed once ("no such
+     * table: collections") before SQLite reloaded the schema.
+     */
+    @Override
+    public void onOpen(SQLiteDatabase db) {
+        db.enableWriteAheadLogging();
+        // NOTE: the erasure STORAGE §11.5 asks, and a schema read as one
+        // from elsewhere (§18), on the writer: a transaction holds it, where
+        // a read-only statement alone would run on a reader. §4.1's
+        // synchronous FULL is not set: the binding resets every connection
+        // to NORMAL under write-ahead logging, and SQLite refuses the change
+        // inside a transaction.
+        db.beginTransaction();
+        try {
+            pragma(db, "PRAGMA secure_delete = ON");
+            pragma(db, "PRAGMA trusted_schema = OFF");
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
     }
 
     /** Runs a pragma, whether or not it answers a row. */

@@ -254,9 +254,10 @@ public class PimdirStorageTest {
         PimdirBlobs blobs = new PimdirBlobs(store.blobs());
         assertEquals("BEGIN:VCARD\r\nEND:VCARD", blobs.getText(h("bb22")));
 
-        // NOTE: the row references the body; it does not contain it.
+        // NOTE: the row references the body; it does not contain it. The item
+        // and the body its binding agreed on pin it (STORAGE §5).
         assertEquals(1, scalar("SELECT count(*) FROM objects WHERE hash = '" + h("bb22") + "'"));
-        assertEquals(1, scalar("SELECT refcount FROM objects WHERE hash = '" + h("bb22") + "'"));
+        assertEquals(2, scalar("SELECT refcount FROM objects WHERE hash = '" + h("bb22") + "'"));
     }
 
     @Test
@@ -279,7 +280,8 @@ public class PimdirStorageTest {
     @Test
     public void refcountsMoveByTheDifferenceAndOrphansAreCollected() throws Exception {
         storage.applyWrites(batch(storeObject("ee55", "one"), upsert("e.vcf", "uid-e", h("ee55"), "eve")));
-        assertEquals(1, scalar("SELECT refcount FROM objects WHERE hash = '" + h("ee55") + "'"));
+        assertEquals("the item and the body its binding agreed on", 2,
+                scalar("SELECT refcount FROM objects WHERE hash = '" + h("ee55") + "'"));
 
         // NOTE: re-pointing the item at a new body releases the old one, which
         // then has no reference and goes, blob and all.
@@ -288,7 +290,7 @@ public class PimdirStorageTest {
         assertEquals("the replaced body is gone", 0,
                 scalar("SELECT count(*) FROM objects WHERE hash = '" + h("ee55") + "'"));
         assertFalse(new PimdirBlobs(store.blobs()).has(h("ee55")));
-        assertEquals(1, scalar("SELECT refcount FROM objects WHERE hash = '" + h("ff66") + "'"));
+        assertEquals(2, scalar("SELECT refcount FROM objects WHERE hash = '" + h("ff66") + "'"));
     }
 
     @Test
@@ -408,12 +410,12 @@ public class PimdirStorageTest {
                 scalar("SELECT count(DISTINCT seq) FROM items WHERE link_id = 'uid-i'"));
         assertEquals(2, scalar("SELECT count(*) FROM items WHERE link_id = 'uid-i'"));
 
-        // NOTE: the body is stored once and referenced twice: the refcount
-        // counts pointers (SPEC.md §5), so two placements is two references to
-        // one object row and one blob. Deduplication is the single copy, not a
-        // count of one.
+        // NOTE: the body is stored once and referenced four times: the
+        // refcount counts pointers (STORAGE §5), so two placements and the body
+        // each binding agreed on are four references to one object row and one
+        // blob. Deduplication is the single copy, not a count of one.
         assertEquals("one object row", 1, scalar("SELECT count(*) FROM objects WHERE hash = '" + h("cc99") + "'"));
-        assertEquals("referenced twice", 2, scalar("SELECT refcount FROM objects WHERE hash = '" + h("cc99") + "'"));
+        assertEquals("referenced four times", 4, scalar("SELECT refcount FROM objects WHERE hash = '" + h("cc99") + "'"));
     }
 
     @Test
@@ -1247,5 +1249,122 @@ public class PimdirStorageTest {
         } catch (PimalayaException refused) {
             assertTrue(refused.getMessage(), refused.getMessage().startsWith("conflict-unread"));
         }
+    }
+
+    /** One source's upsert of {@code uid-c} at {@code revision}, synced there. */
+    private JSONObject sourced(String collection, String handle, String hash, String revision)
+            throws Exception {
+        JSONObject placement = placement(handle, "uid-c", hash, "cara");
+        placement.put("collection", collection);
+        JSONObject base = new JSONObject().put("revision", revision);
+        if (hash != null) {
+            base.put("object", hash);
+        } else {
+            placement.put("level", "meta");
+        }
+        placement.put("base", base);
+        return new JSONObject().put("op", "upsert").put("placement", placement);
+    }
+
+    /** Every object's refcount equals the pointers at it (STORAGE §5). */
+    private void assertRefcountsHold() {
+        java.util.Map<String, Long> held = new java.util.HashMap<>();
+        try (Cursor cursor = db.rawQuery("SELECT hash, refcount FROM objects", null)) {
+            while (cursor.moveToNext()) {
+                held.put(cursor.getString(0), cursor.getLong(1));
+            }
+        }
+        db.execSQL(org.pimalaya.client.PimdirSql.split(
+                org.pimalaya.client.PimdirSql.of("RECOMPUTE_REFCOUNTS"))[0]);
+        try (Cursor cursor = db.rawQuery("SELECT hash, refcount FROM objects", null)) {
+            while (cursor.moveToNext()) {
+                assertEquals(cursor.getString(0), held.get(cursor.getString(0)),
+                        Long.valueOf(cursor.getLong(1)));
+            }
+        }
+    }
+
+    private String sharedOf(String collection) {
+        return stringOf(
+                "SELECT shared_object FROM bindings WHERE collection = 'acct/Contacts'"
+                        + " AND link_id = 'uid-c' AND source = ?",
+                PimdirStorage.sourceOf(collection));
+    }
+
+    /**
+     * {@code bindings.shared_object} is what the binding last agreed with the
+     * item (STORAGE §5, SYNC §9): moved by an upsert carrying a body, never by
+     * one carrying none, and pinned as the base is, so it outlives the item's
+     * own body.
+     */
+    @Test
+    public void theSharedObjectMovesWithABodyAndIsPinned() throws Exception {
+        String server = "acct/Contacts";
+        storage.applyWrites(batch(storeObject("cc01", "ONE"),
+                sourced(server, "c.vcf", h("cc01"), "e1")));
+        assertEquals(h("cc01"), sharedOf(server));
+        assertEquals("item, base and shared", 3,
+                scalar("SELECT refcount FROM objects WHERE hash = ?", h("cc01")));
+        assertRefcountsHold();
+
+        // NOTE: a pull at meta took the item's body away and agreed to none.
+        storage.applyWrites(batch(sourced(server, "c.vcf", null, "e1")));
+        assertNull(stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+        assertEquals("not moved by a bodiless upsert", h("cc01"), sharedOf(server));
+        assertEquals("pinned by the shared body alone", 1,
+                scalar("SELECT refcount FROM objects WHERE hash = ?", h("cc01")));
+        assertRefcountsHold();
+
+        storage.applyWrites(batch(storeObject("cc02", "TWO"),
+                sourced(server, "c.vcf", h("cc02"), "e2")));
+        assertEquals(h("cc02"), sharedOf(server));
+        assertEquals("released and collected", 0,
+                scalar("SELECT count(*) FROM objects WHERE hash = ?", h("cc01")));
+        assertRefcountsHold();
+    }
+
+    /**
+     * Two sources changing one item diverge (SYNC §9): the item keeps its body,
+     * records the incoming one and stands conflicted for every source, the
+     * write reports the handle in {@code Written.conflicted}, and the
+     * agreement point does not move.
+     */
+    @Test
+    public void twoSourcesChangingOneItemDiverge() throws Exception {
+        String server = "acct/Contacts";
+        String phone = PimdirStorage.phoneCollection(server);
+        storage.applyWrites(batch(storeObject("dd01", "BASE"),
+                sourced(server, "c.vcf", h("dd01"), "e1")));
+        storage.applyWrites(batch(sourced(phone, "raw-1", h("dd01"), "v1")));
+
+        JSONArray phoneEdit =
+                storage.applyWrites(batch(storeObject("dd02", "PHONE"),
+                        sourced(phone, "raw-1", h("dd02"), "v2")));
+        assertEquals("a change one source made flows in", h("dd02"),
+                stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+        assertFalse(PimdirStorage.written(phoneEdit).has("conflicted"));
+
+        JSONArray effects =
+                storage.applyWrites(batch(storeObject("dd03", "SERVER"),
+                        sourced(server, "c.vcf", h("dd03"), "e2")));
+
+        assertEquals("the item keeps its body", h("dd02"),
+                stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+        assertEquals(1, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
+        assertEquals("and records the incoming one", h("dd03"),
+                stringOf("SELECT conflict_object FROM items WHERE link_id = 'uid-c'"));
+        assertEquals("the agreement point stays", h("dd01"), sharedOf(server));
+        assertEquals(List.of("c.vcf"), stringsOf(
+                PimdirStorage.written(effects).getJSONArray("conflicted")));
+        assertEquals("conflict", statusOf("c.vcf"));
+        assertRefcountsHold();
+    }
+
+    private static List<String> stringsOf(JSONArray array) throws Exception {
+        List<String> values = new java.util.ArrayList<>();
+        for (int index = 0; index < array.length(); index++) {
+            values.add(array.getString(index));
+        }
+        return values;
     }
 }

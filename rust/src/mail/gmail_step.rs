@@ -501,9 +501,14 @@ impl<H: Host> Gmail<'_, H> {
         let next = page.next.map(|next| format!("{LABEL_CURSOR}{next}"));
         let checkpoint = cursor.is_none().then_some(start);
         // NOTE: `after:` misses a message received before it, whatever its
-        // `Date` (SYNC §4); no enumeration is handed, a whole label's ids
-        // costing a request per 500 of them.
-        Ok(MailPage::round(items, next, checkpoint).narrowed(since.is_some(), None))
+        // `Date` (SYNC §4), so the last page of a narrowed round hands the
+        // label's every id, listed with no query: a request per 500 ids.
+        let narrowed = since.is_some();
+        let enumerated = match narrowed && next.is_none() {
+            true => Some(self.label_ids(label)?),
+            false => None,
+        };
+        Ok(MailPage::round(items, next, checkpoint).narrowed(narrowed, enumerated))
     }
 
     /// One label's delta, projected from the account's history.

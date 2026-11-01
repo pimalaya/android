@@ -21,8 +21,9 @@ public final class PimdirQueue {
     /**
      * The app's action kind: hand this message to the submission endpoint.
      *
-     * <p>An open string (§15.3); the store owes it append order, blob pinning
-     * and the skip rule, nothing else.
+     * <p>Annex B.2's intent, its payload typed by payloads/submit.v1 and the
+     * message its body; the store owes it append order, blob pinning and the
+     * skip rule.
      */
     public static final String SUBMIT = "submit";
 
@@ -47,7 +48,7 @@ public final class PimdirQueue {
      *
      * @param id the queue row
      * @param collection the collection it is against, which scopes a read
-     * @param kind the kind, an open string; this app writes {@link #SUBMIT}
+     * @param kind the kind; this app writes {@link #SUBMIT}
      * @param payload the versioned payload, as it was written
      * @param objectHash the body the action carries, or null for none
      * @param createdAt when it was appended, as the statement stamped it
@@ -88,6 +89,9 @@ public final class PimdirQueue {
      * <p>§15.1's order: collection ensured (foreign key), body stored and
      * indexed, pin taken, row appended. Without the pin the next collector
      * unlinks an unsent message.
+     *
+     * @throws org.pimalaya.client.PimalayaException for a payload its schema
+     *     refuses (§15.3), nothing appended
      */
     public long enqueue(Enqueued action) {
         String collection = action.collection();
@@ -98,6 +102,12 @@ public final class PimdirQueue {
 
         String account = accounts.idOf(accountEmail);
         String hash = body == null ? null : PimdirHash.of(body);
+
+        // NOTE: a payload its schema refuses is never queued for the drain
+        // to park (STORAGE section 15.3): this throws before anything is
+        // written. One stating a later version is a later program's, queued
+        // as it stands, as io-pimdir's producer does.
+        PimdirSql.action(kind, payload, hash);
 
         SQLiteDatabase db = store.getWritableDatabase();
         db.beginTransaction();
