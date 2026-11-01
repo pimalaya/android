@@ -664,4 +664,75 @@ public class MailStoreTest {
                 MailScope.since(6),
                 store.windowOf(ONE));
     }
+
+    /**
+     * A submission is anchored where Annex B.2 says, on the collection its
+     * sent copy belongs to, which io-pimdir's drain reads its account and
+     * performer off (STORAGE section 15.6); the outbox still lists and drains
+     * it, under its own name.
+     */
+    @Test
+    public void aSubmissionIsAnchoredOnItsSentMailbox() {
+        store.replaceMailboxes(
+                ONE, List.of(new Mailbox("INBOX", ""), new Mailbox("Sent", "sent")));
+        String sent = store.collectionOf(ONE, "Sent");
+
+        MailFixtures.queue(store, ONE, "anchored@example.org", "Anchored", DATE);
+
+        assertEquals(sent, stringOf("SELECT collection FROM queue"));
+        assertEquals(1, store.outbox().outgoing(ONE).size());
+        assertTrue("another account drains none of it",
+                store.outbox().outgoing(TWO).isEmpty());
+        MailStore.StoredMessage row = MailFixtures.merged(store, 10).get(0);
+        assertTrue(row.pending());
+        assertEquals(store.outbox().outboxOf(ONE), row.collection);
+    }
+
+    /**
+     * A sent mailbox a roster no longer lists stays while a submission is
+     * anchored on it, so the replace goes through and the message still waits
+     * (STORAGE section 14, collections_keep_queued); once it is settled, the
+     * next replace takes the mailbox.
+     */
+    @Test
+    public void aSentMailboxAnchoringASubmissionOutlivesARosterReplace() {
+        store.replaceMailboxes(
+                ONE, List.of(new Mailbox("INBOX", ""), new Mailbox("Sent", "sent")));
+        String sent = store.collectionOf(ONE, "Sent");
+        MailFixtures.queue(store, ONE, "waiting@example.org", "Waiting", DATE);
+
+        store.replaceMailboxes(ONE, List.of(new Mailbox("INBOX", "")));
+
+        List<Outbox.Outgoing> waiting = store.outbox().outgoing(ONE);
+        assertEquals(1, waiting.size());
+        assertEquals(1, scalar("SELECT count(*) FROM collections WHERE id = ?", sent));
+
+        store.outbox().acknowledge(waiting.get(0).id);
+        store.replaceMailboxes(ONE, List.of(new Mailbox("INBOX", "")));
+        assertEquals(0, scalar("SELECT count(*) FROM collections WHERE id = ?", sent));
+    }
+
+    /**
+     * Forgetting an account cancels its submissions wherever they are
+     * anchored, releasing their bodies, before its mailboxes go.
+     */
+    @Test
+    public void forgettingAnAccountCancelsItsSubmissionsOnItsSentMailbox() {
+        store.replaceMailboxes(
+                ONE, List.of(new Mailbox("INBOX", ""), new Mailbox("Sent", "sent")));
+        MailFixtures.queue(store, ONE, "gone@example.org", "Gone", DATE);
+
+        store.forget(ONE);
+
+        assertEquals(0, scalar("SELECT count(*) FROM queue"));
+        assertEquals(0, scalar("SELECT count(*) FROM collections WHERE account = ?",
+                store.accountIdOf(ONE)));
+        assertEquals("the body's pin released", 0, scalar("SELECT count(*) FROM objects"));
+    }
+
+    private String stringOf(String sql, String... args) {
+        try (Cursor cursor = pimdir.getReadableDatabase().rawQuery(sql, args)) {
+            return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getString(0) : null;
+        }
+    }
 }

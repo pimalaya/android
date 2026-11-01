@@ -1,8 +1,10 @@
 package org.pimalaya.calendar;
 
+import org.json.JSONException;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.EventAlarm;
 import org.pimalaya.client.EventEdit;
+import org.pimalaya.client.EventMerge;
 import org.pimalaya.client.EventScope;
 import org.pimalaya.client.EventSide;
 import org.pimalaya.client.EventSides;
@@ -107,6 +109,40 @@ final class EventWrites {
                         "");
             } else {
                 engine.mutateEdit(into, handle, written, null, "");
+            }
+        }
+        if (settling != null) {
+            settleLeft(engine, settling);
+        }
+    }
+
+    /**
+     * Stages a resolution the merge settled on its own, as the page's tap
+     * does, then what it leaves ({@link #settleLeft}).
+     */
+    static void settle(CalendarStager on, EventStore.StoredConflict conflict, String ical)
+            throws JSONException {
+        on.mutateEdit(conflict.collection, conflict.handle, ical, null, "");
+        settleLeft(on, conflict);
+    }
+
+    /**
+     * Settles the item conflict a resolution left, when its merge asks
+     * nothing (SYNC §9): a source's conflict resolved after another source
+     * moved the entry is recorded as the item's, the resolution its diverging
+     * body. The page showed that entry as local, so it merges clean, and the
+     * entry no longer reads as conflicted once saved.
+     */
+    private static void settleLeft(CalendarStager on, EventStore.StoredConflict settled)
+            throws JSONException {
+        for (EventStore.StoredConflict left :
+                EventStore.conflictsOf(on.offline, settled.collection)) {
+            if (!left.linkId.equals(settled.linkId)) {
+                continue;
+            }
+            EventMerge merge = CalendarClient.mergeEvent(left.base, left.local, left.remote);
+            if (merge.resolved()) {
+                on.mutateEdit(left.collection, left.handle, merge.ical(), null, "");
             }
         }
     }

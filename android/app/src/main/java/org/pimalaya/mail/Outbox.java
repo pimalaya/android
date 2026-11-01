@@ -30,7 +30,8 @@ import java.util.Map;
  */
 public final class Outbox {
     /**
-     * The collection the outbox's queue rows are filed against.
+     * The outbox's own collection: what its rows show under, and the anchor
+     * of a submission whose account marks no sent mailbox.
      *
      * <p>A control character no server hands out and no user types, so it never
      * collides with a real mailbox. It holds no items.
@@ -46,6 +47,9 @@ public final class Outbox {
     private final PimdirAccount accounts;
     private final PimdirQueue queue;
 
+    /** An account's sent mailbox, or null ({@link MailStore#sentOf}). */
+    private final java.util.function.Function<String, String> sent;
+
     /**
      * What each queued row's message derives to, by body and payload: a body
      * is immutable under its name, so a listing derives it once.
@@ -58,11 +62,13 @@ public final class Outbox {
                 }
             });
 
-    Outbox(Context context, PimdirItems items, PimdirAccount accounts, PimdirQueue queue) {
+    Outbox(Context context, PimdirItems items, PimdirAccount accounts, PimdirQueue queue,
+            java.util.function.Function<String, String> sent) {
         this.context = context;
         this.items = items;
         this.accounts = accounts;
         this.queue = queue;
+        this.sent = sent;
     }
 
     /**
@@ -106,19 +112,47 @@ public final class Outbox {
         return collection.endsWith(OUTBOX);
     }
 
-    /** Where one account's outgoing messages wait. */
+    /** Where one account's outgoing messages show, in the list and the filter. */
     public String outboxOf(String accountEmail) {
         return PimdirAccount.collectionId(accounts.idOf(accountEmail), OUTBOX);
     }
 
     /**
+     * The collection a submission from one account is anchored on (STORAGE
+     * Annex B.2, section 15.6): the one its sent copy belongs to, the
+     * account's sent mailbox, else the outbox's own, for an account marking
+     * none or whose roster has not been read yet.
+     */
+    String anchorOf(String accountEmail) {
+        String anchor = sent.apply(accountEmail);
+        return anchor != null ? anchor : outboxOf(accountEmail);
+    }
+
+    /** Whether a queue row is anchored on one of the account's collections. */
+    private boolean anchoredIn(String accountEmail, PimdirQueue.Action action) {
+        return action.collection()
+                .startsWith(PimdirAccount.collectionId(accounts.idOf(accountEmail), ""));
+    }
+
+    /**
+     * Every submission of one account still in the outbox, waiting or parked,
+     * wherever it is anchored.
+     */
+    List<PimdirQueue.Action> submissions(String accountEmail) {
+        List<PimdirQueue.Action> actions = submissions();
+        actions.removeIf(action -> !anchoredIn(accountEmail, action));
+        return actions;
+    }
+
+    /**
      * Stages one composed message from {@code from} for the next drain to hand
-     * over, as Annex B.2's {@code submit} ({@link Submission#payload}).
+     * over, as Annex B.2's {@code submit} ({@link Submission#payload}),
+     * anchored on its sent copy's mailbox ({@link #anchorOf}).
      */
     void queueSubmission(String from, byte[] source) {
         queue.enqueue(
                 new PimdirQueue.Enqueued(
-                        outboxOf(from),
+                        anchorOf(from),
                         from,
                         PimdirQueue.SUBMIT,
                         Submission.payload(from, source),
@@ -146,9 +180,11 @@ public final class Outbox {
         String from = submission.from();
 
         return StoredMessage.outgoing(
+                // NOTE: under the outbox, wherever the row is anchored: the
+                // filter's outbox box shows and drains it.
                 new StoredMessage.MessageHeader(
                         from,
-                        action.collection(),
+                        outboxOf(from),
                         outboxName(),
                         submission.messageId(),
                         submission.subject(),
@@ -263,11 +299,16 @@ public final class Outbox {
      * one conversation apart by nothing else.
      */
     public List<Outgoing> outgoing(String accountEmail) {
-        String collection = outboxOf(accountEmail);
         migrateOutbox(accountEmail);
 
+        // NOTE: the account's rows wherever anchored: its sent mailbox, or the
+        // outbox an account marking none, or a version before this one,
+        // anchored them on.
         List<Outgoing> waiting = new ArrayList<>();
-        for (PimdirQueue.Action action : queue.pending(collection)) {
+        for (PimdirQueue.Action action : queue.pending()) {
+            if (!anchoredIn(accountEmail, action)) {
+                continue;
+            }
             if (!PimdirQueue.SUBMIT.equals(action.kind())) {
                 // NOTE: skipped, not parked, and not the end of the drain
                 // either: an action of a kind this app does not carry out

@@ -75,7 +75,12 @@ public final class PimdirCollections {
             }
 
             for (String stale : idsOf(db, account, kind)) {
-                if (!listed.contains(stale)) {
+                // NOTE: a collection a queued action is anchored on stays
+                // until the drain settles the row, as STORAGE section 14
+                // says (collections_keep_queued would refuse the whole
+                // replace): a sent mailbox the server renamed while a
+                // message waits to go, say. The next replace takes it.
+                if (!listed.contains(stale) && !anchorsQueued(db, stale)) {
                     db.execSQL("DELETE FROM collections WHERE id = ?", new Object[] {stale});
                 }
             }
@@ -307,6 +312,16 @@ public final class PimdirCollections {
                 ids.add(cursor.getString(0));
             }
             return ids;
+        }
+    }
+
+    /** Whether a queued action, pending or parked, is anchored on a collection. */
+    private static boolean anchorsQueued(SQLiteDatabase db, String collection) {
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT 1 FROM queue WHERE collection = ? LIMIT 1",
+                        new String[] {collection})) {
+            return cursor.moveToFirst();
         }
     }
 

@@ -62,7 +62,7 @@ public final class MailStore {
         this.collections = new PimdirCollections(store, context);
         this.accounts = new PimdirAccount(context);
         this.queue = new PimdirQueue(store, accounts);
-        this.outbox = new Outbox(context, items, accounts, queue);
+        this.outbox = new Outbox(context, items, accounts, queue, this::sentOf);
         this.policy = new MailPolicy(context, accounts);
         this.context = context;
     }
@@ -154,14 +154,9 @@ public final class MailStore {
 
     /** Drops all of one account's mail, its outbox included. */
     public void forget(String accountEmail) {
-        String outbox = this.outbox.outboxOf(accountEmail);
-        List<PimdirQueue.Action> waiting = new ArrayList<>(queue.pending(outbox));
-        for (PimdirQueue.Action action : queue.parked()) {
-            if (action.collection().equals(outbox)) {
-                waiting.add(action);
-            }
-        }
-        for (PimdirQueue.Action action : waiting) {
+        // NOTE: before its collections go, which a row anchored on one of
+        // them would refuse (collections_keep_queued).
+        for (PimdirQueue.Action action : outbox.submissions(accountEmail)) {
             queue.acknowledge(action.id());
         }
 

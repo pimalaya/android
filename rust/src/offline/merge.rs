@@ -10,6 +10,10 @@
 //! Only whether the upsert recorded a divergence (`Written.conflicted`)
 //! is read off the three facts here: io-pimdir keeps the hub's record of
 //! it to the crate.
+//!
+//! One rule is the bridge's own: a person's edit of a conflicted item
+//! settles it (SYNC §7), which the hub of io-pimdir bff5737 does only when
+//! the edit is a change one source alone made.
 
 use std::collections::BTreeMap;
 
@@ -47,6 +51,10 @@ pub struct MergeJson {
     /// Whether an `Overrule` of its handle precedes it in the batch.
     #[serde(default)]
     overruling: bool,
+    /// Whether a person's edit settles its item's conflict (SYNC §7), a
+    /// `settle` op of the bridge preceding it in the batch.
+    #[serde(default)]
+    settling: bool,
 }
 
 /// The item's content columns the merge reads.
@@ -115,6 +123,24 @@ pub fn merge(input: MergeJson) -> MergedJson {
         .as_deref()
         .map(conflict_from_str)
         .unwrap_or_default();
+
+    // NOTE: SYNC §7, which io-pimdir bff5737's hub leaves to the content
+    // rule alone: a person's edit of a conflicted item resolves it, whatever
+    // body it keeps and whichever source it is made through. The item takes
+    // the edit's body, its diverging one released, and the source agrees on
+    // it; every other source then owes it where its base differs.
+    let conflicted = input.item.as_ref().is_some_and(|item| item.conflicted);
+    if input.settling
+        && conflicted
+        && placement.status != PimdirStatus::Tombstone
+        && let Some(object) = &placement.object
+    {
+        return MergedJson {
+            object: Some(object.0.clone()),
+            shared_object: Some(object.0.clone()),
+            ..MergedJson::default()
+        };
+    }
 
     let sources: BTreeMap<PimdirSourceId, PimdirBinding> = input
         .bindings
@@ -369,5 +395,72 @@ mod tests {
         assert!(!merged.conflicted, "{merged:?}");
         assert_eq!(merged.conflict_object, None);
         assert_eq!(merged.shared_object.as_deref(), Some("phone2"));
+    }
+
+    /// The item conflict two sources left: the phone's edit kept, the
+    /// server's recorded, the server agreeing still on the ancestor.
+    fn item_conflict(source: &str, handle: &str, object: &str, base: &str) -> serde_json::Value {
+        json!({
+            "source": source,
+            "item": { "object": "phone2", "conflicted": true, "conflictObject": "server2" },
+            "bindings": {
+                "server": { "handle": "a.vcf", "base": { "object": "server2", "revision": "e2" }, "sharedObject": "b1" },
+                "phone": { "handle": "1", "base": { "object": "phone2", "revision": "v2" }, "sharedObject": "phone2" },
+            },
+            "settling": true,
+            "placement": {
+                "collection": "acct/book",
+                "handle": handle,
+                "linkId": "uid-a",
+                "object": object,
+                "level": "full",
+                "status": "dirty",
+                "base": { "object": base, "revision": "x" },
+            },
+        })
+    }
+
+    /// A person's edit of a conflicted item settles it whichever body it
+    /// keeps and whichever source it is made through (SYNC §7): the item
+    /// takes the body, its diverging one released, and the source agrees on
+    /// it. io-pimdir's hub alone left the item conflicted for every pick
+    /// through the server, the source the item moved away from, and for the
+    /// phone's own body through the phone.
+    #[test]
+    fn a_persons_edit_settles_the_item_conflict_whatever_it_keeps() {
+        for (source, handle, base) in [("server", "a.vcf", "server2"), ("phone", "1", "phone2")] {
+            for pick in ["phone2", "server2", "merged"] {
+                let merged = run(item_conflict(source, handle, pick, base));
+                assert_eq!(
+                    merged,
+                    MergedJson {
+                        object: Some(pick.into()),
+                        shared_object: Some(pick.into()),
+                        ..MergedJson::default()
+                    },
+                    "{pick} through the {source}"
+                );
+            }
+        }
+    }
+
+    /// A person's edit of an item in no conflict is the hub's to fold: one
+    /// settling a source's own conflict while the item moved through
+    /// another diverges (vector 28).
+    #[test]
+    fn a_persons_edit_of_an_item_in_no_conflict_is_the_hubs() {
+        let merged = run(json!({
+            "source": "server",
+            "item": { "object": "phone2" },
+            "bindings": {
+                "server": { "handle": "a.vcf", "base": { "object": "b1", "revision": "e1" }, "conflicted": true, "conflictRevision": "e2", "conflictObject": "server2", "sharedObject": "b1" },
+                "phone": { "handle": "1", "base": { "object": "phone2", "revision": "v2" }, "sharedObject": "phone2" },
+            },
+            "settling": true,
+            "placement": placement("server2", json!({ "object": "server2", "revision": "e2" })),
+        }));
+        assert!(merged.conflicted && merged.diverged, "{merged:?}");
+        assert_eq!(merged.object.as_deref(), Some("phone2"));
+        assert_eq!(merged.conflict_object.as_deref(), Some("server2"));
     }
 }

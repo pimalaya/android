@@ -510,8 +510,10 @@ public final class EventView {
                     () -> {
                         Exception failure = null;
                         try {
-                            new CalendarStager(parts.pimdir(), parts.clients())
-                                    .mutateEdit(settled.collection, settled.handle, ical, null, "");
+                            EventWrites.settle(
+                                    new CalendarStager(parts.pimdir(), parts.clients()),
+                                    settled,
+                                    ical);
                         } catch (Exception error) {
                             Log.w("pimalaya", "event merge failed: " + event.id, error);
                             failure = error;

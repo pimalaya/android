@@ -721,6 +721,7 @@ public final class PimdirStorage {
         compiled = new HashMap<>();
         rebinding = new HashMap<>();
         overruling = new HashSet<>();
+        settling = new HashSet<>();
         try {
             Map<String, byte[]> bodies = new HashMap<>();
             List<JSONObject> stamps = new ArrayList<>();
@@ -774,6 +775,9 @@ public final class PimdirStorage {
                         overrule(db, op, effects);
                         overruling.add(op.getString("collection") + "\n" + op.getString("handle"));
                         break;
+                    case "settle":
+                        settling.add(op.getString("collection") + "\n" + op.getString("handle"));
+                        break;
                     default:
                         throw new JSONException("Unknown write op " + op.getString("op"));
                 }
@@ -814,6 +818,7 @@ public final class PimdirStorage {
             compiled = null;
             rebinding = null;
             overruling = null;
+            settling = null;
             PimdirItems.unlinkCollected(store, db, blobs);
         }
     }
@@ -1191,8 +1196,10 @@ public final class PimdirStorage {
                     ? object
                     : exists ? sharedObjectOf(db, collection, linkId, source) : null;
         } else {
+            String key = engineCollection + "\n" + handle;
             JSONObject merged = merge(db, collection, source, linkId, placement, item,
-                    overruling != null && overruling.contains(engineCollection + "\n" + handle));
+                    overruling != null && overruling.contains(key),
+                    settling != null && settling.contains(key));
             object = merged.optString("object", null);
             conflicted = merged.optBoolean("conflicted");
             conflictObject = merged.optString("conflictObject", null);
@@ -1297,11 +1304,15 @@ public final class PimdirStorage {
         String baseRevision = base == null || base.isNull("revision")
                 ? null
                 : base.optString("revision", null);
-        boolean conflicted = "conflict".equals(placement.optString("status", "clean"));
+        // NOTE: the binding's own divergence is the one the row carries, its
+        // revision (SYNC §9), as io-pimdir writes it: a placement projected
+        // Conflict for its item's conflict carries none, and reading its
+        // status would leave the binding conflicted once the item settles.
         String conflictRevision = placement.isNull("conflictRevision")
                 ? null
                 : placement.optString("conflictRevision", null);
-        String conflictObject = placement.isNull("conflictObject")
+        boolean conflicted = conflictRevision != null;
+        String conflictObject = !conflicted || placement.isNull("conflictObject")
                 ? null
                 : placement.optString("conflictObject", null);
 
@@ -1553,6 +1564,8 @@ public final class PimdirStorage {
      *
      * <p>Null until the remote body is captured. The base falls back to the
      * local body (a create collision), so remote changes merge in cleanly.
+     * With no binding conflict, the server's binding reads the item's own
+     * ({@link #itemConflicts}): its body local, the diverging one remote.
      */
     public JSONObject loadConflict(String engineCollection, String handle) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -1565,20 +1578,33 @@ public final class PimdirStorage {
 
         try (Cursor cursor =
                 db.rawQuery(
-                        "SELECT i.object_hash, b.conflict_object, b.base_object FROM items i"
+                        "SELECT i.object_hash, b.conflict_object, b.base_object,"
+                                + " i.conflicted, i.conflict_object FROM items i"
                                 + " LEFT JOIN bindings b ON b.collection = i.collection"
                                 + " AND b.link_id = i.link_id AND b.source = ?"
                                 + " WHERE i.collection = ? AND i.link_id = ?",
                         new String[] {source, collection, linkId})) {
-            if (!cursor.moveToFirst() || cursor.isNull(1)) {
+            if (!cursor.moveToFirst()) {
                 return null;
             }
 
-            String local = bodyOf(cursor.isNull(0) ? null : cursor.getString(0));
+            String object = cursor.isNull(0) ? null : cursor.getString(0);
+            String local = bodyOf(object);
             JSONObject bodies = new JSONObject();
             bodies.put("local", local);
-            bodies.put("base", cursor.isNull(2) ? local : bodyOf(cursor.getString(2)));
-            bodies.put("remote", bodyOf(cursor.getString(1)));
+            if (!cursor.isNull(1)) {
+                bodies.put("base", cursor.isNull(2) ? local : bodyOf(cursor.getString(2)));
+                bodies.put("remote", bodyOf(cursor.getString(1)));
+                return bodies;
+            }
+            // NOTE: else the item's own conflict, offered on the server's
+            // binding alone (loadConflicts).
+            if (!SERVER.equals(source) || cursor.getInt(3) != 1 || cursor.isNull(4)
+                    || object == null) {
+                return null;
+            }
+            bodies.put("base", ancestorOf(db, collection, linkId, object, cursor.getString(4)));
+            bodies.put("remote", bodyOf(cursor.getString(4)));
             return bodies;
         }
     }
@@ -1699,13 +1725,15 @@ public final class PimdirStorage {
      *
      * <p>Local, base and remote bodies plus the remote revision marked. A row
      * awaiting its remote body is left out until hydrate ({@link
-     * #handlesBelowFull}) lands it.
+     * #handlesBelowFull}) lands it. The server's list ends with the items two
+     * sources diverged on ({@link #itemConflicts}).
      */
     public List<JSONObject> loadConflicts(String engineCollection) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
 
+        List<JSONObject> conflicts = new ArrayList<>();
         try (Cursor cursor =
                 db.rawQuery(
                         "SELECT i.link_id, i.object_hash, b.handle, b.base_object,"
@@ -1716,7 +1744,6 @@ public final class PimdirStorage {
                                 + " WHERE i.collection = ? AND i.deleted = 0"
                                 + " AND b.conflicted = 1 AND b.conflict_object IS NOT NULL",
                         new String[] {source, collection})) {
-            List<JSONObject> conflicts = new ArrayList<>(cursor.getCount());
             while (cursor.moveToNext()) {
                 String linkId = cursor.getString(0);
                 JSONObject conflict = new JSONObject();
@@ -1736,8 +1763,75 @@ public final class PimdirStorage {
                 conflict.put("remoteVcard", bodyOf(cursor.getString(6)));
                 conflicts.add(conflict);
             }
-            return conflicts;
         }
+        if (SERVER.equals(source)) {
+            itemConflicts(db, collection, source, conflicts);
+        }
+        return conflicts;
+    }
+
+    /**
+     * One collection's item conflicts (SYNC §9), the merge inputs of each in
+     * {@link #loadConflicts}' shape: the item's body local, the diverging one
+     * remote, the ancestor the disagreeing source last agreed on the base
+     * (empty when none is known, so every field the two set apart is asked).
+     *
+     * <p>Every binding of a conflicted item projects the conflict, so it is
+     * offered once, on the server's binding, and a resolution staged there
+     * settles it for every source (SYNC §7). A binding's own conflict with
+     * its body is offered first: settling it settles the item too.
+     */
+    private void itemConflicts(SQLiteDatabase db, String collection, String source,
+            List<JSONObject> conflicts) throws JSONException {
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT i.link_id, i.object_hash, b.handle, b.base_revision,"
+                                + " i.conflict_object"
+                                + " FROM items i"
+                                + " JOIN bindings b ON b.collection = i.collection"
+                                + " AND b.link_id = i.link_id AND b.source = ?"
+                                + " WHERE i.collection = ? AND i.deleted = 0"
+                                + " AND i.retained_at IS NULL AND i.conflicted = 1"
+                                + " AND i.conflict_object IS NOT NULL"
+                                + " AND i.object_hash IS NOT NULL"
+                                + " AND NOT (b.conflicted = 1 AND b.conflict_object IS NOT NULL)",
+                        new String[] {source, collection})) {
+            while (cursor.moveToNext()) {
+                String linkId = cursor.getString(0);
+                String object = cursor.getString(1);
+                String diverging = cursor.getString(4);
+                JSONObject conflict = new JSONObject();
+                conflict.put("handle", cursor.getString(2));
+                conflict.put("id", linkId);
+                conflict.put("uri", cursor.getString(2));
+                if (!cursor.isNull(3)) {
+                    conflict.put("etag", cursor.getString(3));
+                }
+                conflict.put("vcard", bodyOf(object));
+                conflict.put("baseVcard", ancestorOf(db, collection, linkId, object, diverging));
+                conflict.put("remoteVcard", bodyOf(diverging));
+                conflicts.add(conflict);
+            }
+        }
+    }
+
+    /**
+     * The body two sources diverged from (SYNC §9): what a binding last
+     * agreed with the item, its {@code shared_object} or else its base, where
+     * that is neither side, so the source the item moved away from; empty
+     * when no binding names one.
+     */
+    private String ancestorOf(SQLiteDatabase db, String collection, String linkId,
+            String object, String diverging) throws JSONException {
+        String agreed =
+                one(
+                        db,
+                        "SELECT ifnull(shared_object, base_object) FROM bindings"
+                                + " WHERE collection = ? AND link_id = ?"
+                                + " AND ifnull(shared_object, base_object) NOT IN (?, ?)"
+                                + " ORDER BY source LIMIT 1",
+                        collection, linkId, object, diverging);
+        return agreed == null ? "" : bodyOf(agreed);
     }
 
     /**
@@ -2235,10 +2329,12 @@ public final class PimdirStorage {
      * anything, over the item as stored ({@code held}: its body, conflict
      * flag and diverging body, null for a new item) and every binding it
      * holds, the one a drop of this batch released standing in for a source
-     * holding none.
+     * holding none. {@code settled} says a person's edit settles the item's
+     * conflict (SYNC §7), the bridge's {@code settle} op before it.
      */
     private JSONObject merge(SQLiteDatabase db, String collection, String source,
-            String linkId, JSONObject placement, String[] held, boolean overruled)
+            String linkId, JSONObject placement, String[] held, boolean overruled,
+            boolean settled)
             throws JSONException {
         JSONObject input = new JSONObject();
         Map<String, Object> values = new HashMap<>();
@@ -2272,6 +2368,9 @@ public final class PimdirStorage {
         input.put("placement", new JSONObject(placement.toString()).put("linkId", linkId));
         if (overruled) {
             input.put("overruling", true);
+        }
+        if (settled) {
+            input.put("settling", true);
         }
         return PimdirSql.merge(input);
     }
@@ -2320,6 +2419,13 @@ public final class PimdirStorage {
      * (SYNC §7). Null outside a batch.
      */
     private Set<String> overruling;
+
+    /**
+     * The handles a {@code settle} op named within the write batch, by engine
+     * collection and handle: their next upsert is a person's edit settling
+     * the item's conflict (SYNC §7). Null outside a batch.
+     */
+    private Set<String> settling;
 
     /**
      * The first column of a read's first row, null for none or NULL.

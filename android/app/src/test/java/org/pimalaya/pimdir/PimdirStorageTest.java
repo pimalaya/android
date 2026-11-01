@@ -13,6 +13,7 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.PimalayaException;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
@@ -1366,5 +1367,203 @@ public class PimdirStorageTest {
             values.add(array.getString(index));
         }
         return values;
+    }
+
+    /**
+     * The divergence {@link #twoSourcesChangingOneItemDiverge} leaves: the item
+     * keeps the phone's {@code PHONE}, records the server's {@code SERVER},
+     * and the server still agrees on {@code BASE}, the ancestor.
+     */
+    private void diverged() throws Exception {
+        String server = "acct/Contacts";
+        String phone = PimdirStorage.phoneCollection(server);
+        storage.applyWrites(batch(storeObject("dd01", "BASE"),
+                sourced(server, "c.vcf", h("dd01"), "e1")));
+        storage.applyWrites(batch(sourced(phone, "raw-1", h("dd01"), "v1")));
+        storage.applyWrites(batch(storeObject("dd02", "PHONE"),
+                sourced(phone, "raw-1", h("dd02"), "v2")));
+        storage.applyWrites(batch(storeObject("dd03", "SERVER"),
+                sourced(server, "c.vcf", h("dd03"), "e2")));
+        assertEquals(1, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
+    }
+
+    /** One handle's projected status in an engine collection. */
+    private String statusIn(String collection, String handle) throws Exception {
+        JSONArray placements = storage.loadCollection(collection, null).getJSONArray("placements");
+        for (int index = 0; index < placements.length(); index++) {
+            JSONObject placement = placements.getJSONObject(index);
+            if (handle.equals(placement.getString("handle"))) {
+                return placement.getString("status");
+            }
+        }
+        return null;
+    }
+
+    /**
+     * An item two sources diverged on is offered to the resolution, once, on
+     * the server's binding (SYNC §9): its body local, the diverging one
+     * remote, the body the server last agreed on the base. Before, only a
+     * binding's own conflict was, and such an item stayed as the store kept
+     * it, pushed by neither source.
+     */
+    @Test
+    public void anItemConflictIsOfferedOnTheServerWithItsAncestor() throws Exception {
+        diverged();
+        String server = "acct/Contacts";
+
+        List<JSONObject> conflicts = storage.loadConflicts(server);
+        assertEquals(1, conflicts.size());
+        JSONObject conflict = conflicts.get(0);
+        assertEquals("c.vcf", conflict.getString("handle"));
+        assertEquals("uid-c", conflict.getString("id"));
+        assertEquals("PHONE", conflict.getString("vcard"));
+        assertEquals("BASE", conflict.getString("baseVcard"));
+        assertEquals("SERVER", conflict.getString("remoteVcard"));
+        assertFalse("no binding revision to refresh", conflict.has("conflictRevision"));
+        assertTrue("offered once", storage.loadConflicts(
+                PimdirStorage.phoneCollection(server)).isEmpty());
+
+        JSONObject bodies = storage.loadConflict(server, "c.vcf");
+        assertEquals("PHONE", bodies.getString("local"));
+        assertEquals("BASE", bodies.getString("base"));
+        assertEquals("SERVER", bodies.getString("remote"));
+    }
+
+    /**
+     * A binding projected conflicted for its item's conflict carries no
+     * divergence of its own, and is written so (SYNC §9): read off its status,
+     * it would stand conflicted once the item settles, asking the hydrate for
+     * a body no remote diverged on.
+     */
+    @Test
+    public void aBindingIsConflictedByItsOwnDivergenceAlone() throws Exception {
+        diverged();
+        JSONObject restated = sourced("acct/Contacts", "c.vcf", h("dd02"), "e2");
+        restated.getJSONObject("placement").put("status", "conflict");
+        restated.getJSONObject("placement").getJSONObject("base").put("object", h("dd03"));
+        storage.applyWrites(batch(restated));
+
+        assertEquals(0, scalar("SELECT count(*) FROM bindings WHERE conflicted = 1"));
+        assertEquals(1, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
+    }
+
+    /**
+     * A person's resolution of an item conflict, staged on the server's
+     * binding as the form stages it, settles the item whatever body it keeps
+     * (SYNC §7): the item takes it, its diverging body released, no binding
+     * left conflicted, and each source owes it where its base differs.
+     */
+    @Test
+    public void keepingTheItemsOwnBodySettlesItsConflict() throws Exception {
+        resolvesTo("PHONE");
+    }
+
+    @Test
+    public void takingTheDivergingBodySettlesItsConflict() throws Exception {
+        resolvesTo("SERVER");
+    }
+
+    @Test
+    public void aMergedBodySettlesItsConflict() throws Exception {
+        resolvesTo("MERGED");
+    }
+
+    private void resolvesTo(String body) throws Exception {
+        diverged();
+        String server = "acct/Contacts";
+        new Stager(store, Clients.real()) {}.mutateEdit(server, "c.vcf", body, null, "");
+
+        assertEquals(0, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
+        assertNull(stringOf("SELECT conflict_object FROM items WHERE link_id = 'uid-c'"));
+        assertEquals(PimdirHash.of(body),
+                stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+        assertEquals(0, scalar("SELECT count(*) FROM bindings WHERE conflicted = 1"));
+        assertEquals("the server agrees on it", PimdirHash.of(body), sharedOf(server));
+        assertEquals("SERVER".equals(body) ? "clean" : "dirty", statusIn(server, "c.vcf"));
+        assertEquals("PHONE".equals(body) ? "clean" : "dirty",
+                statusIn(PimdirStorage.phoneCollection(server), "raw-1"));
+        assertTrue("nothing left to resolve", storage.loadConflicts(server).isEmpty());
+        assertRefcountsHold();
+    }
+
+    /**
+     * The server's conflict resolved in the form after the phone moved the
+     * card becomes the item's conflict (SYNC §9, vector 28): offered on the
+     * server, the body the server last agreed on its ancestor, and settled
+     * there by the person's choice. Before, the card stood conflicted with no
+     * mark, the resolution recorded and pushed nowhere.
+     */
+    @Test
+    public void aResolutionOverAPhoneChangeIsOfferedAsTheItemsConflict() throws Exception {
+        String server = "acct/Contacts";
+        String phone = PimdirStorage.phoneCollection(server);
+        storage.applyWrites(batch(storeObject("dd01", "BASE"),
+                sourced(server, "c.vcf", h("dd01"), "e1")));
+        storage.applyWrites(batch(sourced(phone, "raw-1", h("dd01"), "v1")));
+
+        // NOTE: the server's conflict, left to the form: a field both sides
+        // set apart.
+        JSONObject serverBody = storeObject("dd03", "SERVER");
+        JSONObject conflicted = sourced(server, "c.vcf", h("dd01"), "e1");
+        conflicted.getJSONObject("placement").put("status", "conflict")
+                .put("conflictRevision", "e2").put("conflictObject", h("dd03"));
+        storage.applyWrites(batch(serverBody, conflicted));
+        // NOTE: then the phone's own edit, which nothing stands against there.
+        storage.applyWrites(batch(storeObject("dd02", "PHONE"),
+                sourced(phone, "raw-1", h("dd02"), "v2")));
+
+        Stager stager = new Stager(store, Clients.real()) {};
+        stager.mutateEdit(server, "c.vcf", "MERGED", null, "");
+
+        assertEquals(1, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
+        List<JSONObject> conflicts = storage.loadConflicts(server);
+        assertEquals(1, conflicts.size());
+        assertEquals("PHONE", conflicts.get(0).getString("vcard"));
+        assertEquals("BASE", conflicts.get(0).getString("baseVcard"));
+        assertEquals("MERGED", conflicts.get(0).getString("remoteVcard"));
+
+        stager.mutateEdit(server, "c.vcf", "MERGED", null, "");
+        assertEquals(0, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
+        assertEquals(PimdirHash.of("MERGED"),
+                stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+        assertEquals("dirty", statusIn(server, "c.vcf"));
+        assertEquals("dirty", statusIn(phone, "raw-1"));
+        assertRefcountsHold();
+    }
+
+    private static String card(String name, String tel) {
+        return "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:uid-c\r\nFN:" + name + "\r\n"
+                + (tel == null ? "" : "TEL:" + tel + "\r\n") + "END:VCARD\r\n";
+    }
+
+    /**
+     * The form's save settles at once the item conflict its resolution leaves
+     * when the phone moved the card meanwhile: the person saw the moved card
+     * as local, so the two merge with nothing to ask, and the card does not
+     * read as conflicted again.
+     */
+    @Test
+    public void aSavedResolutionSettlesTheItemConflictItLeaves() throws Exception {
+        String server = "acct/Contacts";
+        String phone = PimdirStorage.phoneCollection(server);
+        storage.applyWrites(batch(storeObject("dd01", card("Jo", null)),
+                sourced(server, "c.vcf", h("dd01"), "e1")));
+        storage.applyWrites(batch(sourced(phone, "raw-1", h("dd01"), "v1")));
+        JSONObject serverBody = storeObject("dd03", card("Joe", null));
+        JSONObject conflicted = sourced(server, "c.vcf", h("dd01"), "e1");
+        conflicted.getJSONObject("placement").put("status", "conflict")
+                .put("conflictRevision", "e2").put("conflictObject", h("dd03"));
+        storage.applyWrites(batch(serverBody, conflicted));
+        storage.applyWrites(batch(storeObject("dd02", card("Jo", "+33100")),
+                sourced(phone, "raw-1", h("dd02"), "v2")));
+
+        new org.pimalaya.contact.ContactStager(store, Clients.real())
+                .resolve(server, "c.vcf", card("Joe", "+33100"));
+
+        assertEquals(0, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
+        assertEquals(PimdirHash.of(card("Joe", "+33100")),
+                stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+        assertTrue(storage.loadConflicts(server).isEmpty());
+        assertRefcountsHold();
     }
 }

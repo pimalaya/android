@@ -1,8 +1,10 @@
 package org.pimalaya.contact;
 
 import org.json.JSONException;
+import org.json.JSONObject;
 import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.ConflictForm;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
@@ -27,6 +29,29 @@ public final class ContactStager extends Stager {
      */
     public void edit(String url, String handle, String vcard) throws JSONException {
         edit(this, url, handle, vcard);
+    }
+
+    /**
+     * Stages a conflict's resolution on one card, then settles the item
+     * conflict it leaves when its merge asks nothing (SYNC §9).
+     *
+     * <p>A server conflict resolved after the phone moved the card is recorded
+     * as the item's conflict, the resolution its diverging body; the form
+     * showed the moved card as local, so it merges clean, and the card no
+     * longer reads as conflicted once saved.
+     */
+    public void resolve(String url, String handle, String vcard) throws JSONException {
+        edit(url, handle, vcard);
+        JSONObject left = offline.loadConflict(url, handle);
+        if (left == null) {
+            return;
+        }
+        ConflictForm again =
+                ContactClient.mergeConflictForm(
+                        left.optString("base"), left.optString("local"), left.optString("remote"));
+        if (again.resolved()) {
+            edit(url, handle, again.vcard());
+        }
     }
 
     /** {@link #edit} on any driver: a pass stages its own resolutions. */

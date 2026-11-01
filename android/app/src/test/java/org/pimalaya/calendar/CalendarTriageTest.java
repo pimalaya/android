@@ -203,4 +203,46 @@ public class CalendarTriageTest {
         assertEquals("etag-remote", row.getString("etag"));
         assertTrue(EventStore.conflictsOf(storage, calendar).isEmpty());
     }
+
+    /** One source's pull of {@code body} at {@code revision}, agreed there. */
+    private static JSONObject pulled(String collection, String handle, String body,
+            String revision) throws Exception {
+        JSONObject placement = placement(collection, handle, body);
+        placement.getJSONObject("base").put("revision", revision).put("object", PimdirHash.of(body));
+        return new JSONObject().put("op", "upsert").put("placement", placement);
+    }
+
+    /**
+     * An entry the phone and the server changed apart, the item keeping the
+     * phone's and recording the server's (SYNC §9), is marked in the agenda
+     * and triaged on the server like a source's conflict: the body the server
+     * last agreed is the ancestor, and the merge settles it for both sources.
+     */
+    @Test
+    public void anEntryTwoSourcesDivergedOnIsTriagedOnTheServer() throws Exception {
+        String phone = PimdirStorage.phoneCollection(calendar);
+        String local = entry("Standup, late", "Room 1", "20260201T100000Z");
+        String remote = entry("Standup", "Room 2", "20260201T110000Z");
+        storage.applyWrites(new JSONArray().put(storeObject(BASE))
+                .put(pulled(calendar, "e.ics", BASE, "etag-base")));
+        storage.applyWrites(new JSONArray().put(pulled(phone, "raw-7", BASE, "v1")));
+        storage.applyWrites(new JSONArray().put(storeObject(local))
+                .put(pulled(phone, "raw-7", local, "v2")));
+        storage.applyWrites(new JSONArray().put(storeObject(remote))
+                .put(pulled(calendar, "e.ics", remote, "etag-remote")));
+
+        assertTrue(stored().conflicted);
+        EventStore.StoredConflict found = events.conflictOf(stored());
+        assertEquals(calendar, found.collection);
+        assertEquals(BASE, found.base);
+        assertEquals(local, found.local);
+        assertEquals(remote, found.remote);
+
+        assertEquals(1, engine.triage(calendar));
+
+        assertFalse(stored().conflicted);
+        String staged = storage.loadRow(calendar, "e.ics").getString("vcard");
+        assertTrue(staged, staged.contains("SUMMARY:Standup, late\r\n"));
+        assertTrue(staged, staged.contains("LOCATION:Room 2\r\n"));
+    }
 }

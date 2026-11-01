@@ -87,6 +87,9 @@ pub struct OfflineSync<'a> {
 pub struct Driver<H> {
     host: H,
     dated: Dated,
+    /// The handle a person's edit under way settles, whose upsert the write
+    /// yield marks so (SYNC §7, [`settles`]).
+    settle: Option<PimdirHandle>,
 }
 
 /// The engine's coroutines, run to completion through the Java driver.
@@ -140,9 +143,31 @@ impl<H: Host> Driver<H> {
         let mutation: MutationJson =
             from_str(mutation).map_err(|err| format!("Invalid mutation: {err}"))?;
         let mutation = PimdirMutation::try_from(mutation)?;
-        let report = self.run(PimdirMutate::new(collection, mutation))?;
+        self.settle = settles(&mutation);
+        let report = self.run(PimdirMutate::new(collection, mutation));
+        self.settle = None;
+        let report = report?;
 
         Ok(MutateReportJson::from(&report))
+    }
+}
+
+/// The handle whose item conflict `mutation` settles as a person's choice
+/// (SYNC §7): an `Edit` stating no `overrule`, which resolves a conflicted
+/// item whichever body it keeps, and keeps nothing it discards.
+///
+/// io-pimdir bff5737 says so of the binding alone: its hub clears the item's
+/// conflict only when the edit is a change of a body one source alone made,
+/// so an edit keeping the item's own body, or made through the source the
+/// item moved away from, left it conflicted.
+fn settles(mutation: &PimdirMutation) -> Option<PimdirHandle> {
+    match mutation {
+        PimdirMutation::Edit {
+            handle,
+            overrule: false,
+            ..
+        } => Some(handle.clone()),
+        _ => None,
     }
 }
 
@@ -247,6 +272,7 @@ impl<H: Host> Driver<H> {
         Self {
             host,
             dated: Dated::default(),
+            settle: None,
         }
     }
 
@@ -264,7 +290,9 @@ impl<H: Host> Driver<H> {
                 PimdirCoroutineState::Complete(Err(err)) => return Err(err.to_string().into()),
                 PimdirCoroutineState::Yielded(yielded) => {
                     let yielded = self.dated.strip(yielded);
-                    let reply = self.host.serve(&yield_json(&yielded))?;
+                    let reply = self
+                        .host
+                        .serve(&yield_json(&yielded, self.settle.as_ref()))?;
                     let parsed = parse_arg(&yielded, &reply)?;
                     self.dated.record(&parsed);
                     arg = Some(parsed);
@@ -274,8 +302,9 @@ impl<H: Host> Driver<H> {
     }
 }
 
-/// Serializes one engine yield to its JSON envelope.
-fn yield_json(yielded: &PimdirYield) -> String {
+/// Serializes one engine yield to its JSON envelope, marking the upsert of
+/// `settle` as a person's settle (SYNC §7) when a write carries it.
+fn yield_json(yielded: &PimdirYield, settle: Option<&PimdirHandle>) -> String {
     let envelope = match yielded {
         PimdirYield::WantsLoad {
             collection,
@@ -291,7 +320,7 @@ fn yield_json(yielded: &PimdirYield) -> String {
             links: links.iter().map(PimdirLinkId::as_str).collect(),
         },
         PimdirYield::WantsWrite(ops) => YieldJson::Write {
-            writes: ops.iter().map(WriteOpJson::from).collect(),
+            writes: write_ops(ops, settle),
         },
         PimdirYield::WantsEnumerate {
             collection,
@@ -321,6 +350,23 @@ fn yield_json(yielded: &PimdirYield) -> String {
     // NOTE: through a `Value`, keys come out alphabetical, as Java expects;
     // a typed tag would lead, and nested mirrors keep declaration order.
     to_value(&envelope).unwrap_or_default().to_string()
+}
+
+/// A write batch's ops, a `settle` op before the upsert of `settle`.
+fn write_ops(ops: &[PimdirWriteOp], settle: Option<&PimdirHandle>) -> Vec<WriteOpJson> {
+    let mut writes = Vec::with_capacity(ops.len() + 1);
+    for op in ops {
+        if let PimdirWriteOp::UpsertPlacement(placement) = op
+            && Some(&placement.handle) == settle
+        {
+            writes.push(WriteOpJson::Settle {
+                collection: placement.collection.as_str().into(),
+                handle: placement.handle.as_str().into(),
+            });
+        }
+        writes.push(WriteOpJson::from(op));
+    }
+    writes
 }
 
 /// Parses the Java reply to the pending yield into the next resume's arg.
@@ -535,6 +581,11 @@ mod tests {
 
     use crate::offline::{enumerate_json, parse_arg, wire::WriteOpJson, yield_json};
 
+    /// A yield as the driver sends it outside a person's edit.
+    fn yield_json_unsettled(yielded: &PimdirYield) -> String {
+        yield_json(yielded, None)
+    }
+
     /// A file of the pimdir spec io-pimdir vendors (spec/), from the git
     /// checkout cargo made of the pinned revision (Cargo.toml's
     /// `[patch.crates-io]`), so its vectors run against the bridge.
@@ -577,23 +628,25 @@ mod tests {
             collection: PimdirCollectionId::from("acct/INBOX"),
             selection,
         };
-        let narrowed: Value =
-            serde_json::from_str(&yield_json(&load(PimdirLoadSelection::LastPage {
+        let narrowed: Value = serde_json::from_str(&yield_json_unsettled(&load(
+            PimdirLoadSelection::LastPage {
                 narrowed: true,
                 enumerated: Some(vec![PimdirHandle("7".into())]),
-            })))
-            .unwrap();
+            },
+        )))
+        .unwrap();
         assert_eq!(
             narrowed["selection"],
             serde_json::json!({"kind": "lastPage", "narrowed": true, "enumerated": ["7"]})
         );
 
-        let whole: Value =
-            serde_json::from_str(&yield_json(&load(PimdirLoadSelection::LastPage {
+        let whole: Value = serde_json::from_str(&yield_json_unsettled(&load(
+            PimdirLoadSelection::LastPage {
                 narrowed: false,
                 enumerated: None,
-            })))
-            .unwrap();
+            },
+        )))
+        .unwrap();
         assert_eq!(
             whole["selection"],
             serde_json::json!({"kind": "lastPage", "narrowed": false}),
@@ -607,7 +660,7 @@ mod tests {
     #[test]
     fn verify_and_write_replies_reach_the_engine() {
         let verify = PimdirYield::WantsVerify(vec![PimdirHash("a".into()), PimdirHash("b".into())]);
-        let envelope: Value = serde_json::from_str(&yield_json(&verify)).unwrap();
+        let envelope: Value = serde_json::from_str(&yield_json_unsettled(&verify)).unwrap();
         assert_eq!(envelope["op"], "verify");
         assert_eq!(envelope["hashes"], serde_json::json!(["a", "b"]));
         let PimdirArg::Verified(verified) = parse_arg(&verify, r#"{"verified": ["b"]}"#).unwrap()
@@ -759,7 +812,7 @@ mod tests {
                     break;
                 }
             };
-            let envelope: Value = serde_json::from_str(&yield_json(&yielded)).unwrap();
+            let envelope: Value = serde_json::from_str(&yield_json_unsettled(&yielded)).unwrap();
             let reply = match envelope["op"].as_str().unwrap() {
                 "load" => loaded.to_string(),
                 "enumerate" => listed.to_string(),
@@ -812,7 +865,7 @@ mod tests {
                     break;
                 }
             };
-            let envelope: Value = serde_json::from_str(&yield_json(&yielded)).unwrap();
+            let envelope: Value = serde_json::from_str(&yield_json_unsettled(&yielded)).unwrap();
             let reply = match envelope["op"].as_str().unwrap() {
                 "load" => loaded.to_string(),
                 "enumerate" => r#"{"items": [], "complete": true}"#.to_string(),
@@ -834,5 +887,77 @@ mod tests {
             pushed[0]["supersedes"],
             serde_json::json!({"collection": "acct/work", "handle": "gate.ics", "ifMatch": "e0"}),
         );
+    }
+
+    /// A person's edit crosses with a `settle` op before its upsert, which
+    /// the Java owner reads to settle the item's conflict (SYNC §7); an
+    /// overruling edit, a rule's, crosses without one.
+    #[test]
+    fn a_persons_edit_marks_its_upsert_as_a_settle() {
+        use io_pimdir::{
+            load::PimdirLoaded,
+            mutate::{PimdirMutate, PimdirMutation},
+            placement::{
+                PimdirBase, PimdirFlags, PimdirLevel, PimdirLinkId, PimdirPlacement, PimdirStatus,
+            },
+        };
+
+        use crate::offline::settles;
+
+        let ops = |overrule| {
+            let edit = PimdirMutation::Edit {
+                handle: PimdirHandle("a.vcf".into()),
+                object: PimdirObject {
+                    hash: PimdirHash("b2".into()),
+                    size: 2,
+                },
+                body: b"b2".to_vec(),
+                summary: None,
+                sort_key: None,
+                if_match: None,
+                overrule,
+            };
+            let settle = settles(&edit);
+            let mut mutate = PimdirMutate::new("acct/book", edit);
+            let _ = mutate.resume(None);
+            let loaded = PimdirLoaded {
+                placements: vec![PimdirPlacement {
+                    collection: "acct/book".into(),
+                    handle: PimdirHandle("a.vcf".into()),
+                    link_id: Some(PimdirLinkId("uid-a".into())),
+                    object: Some(PimdirHash("b1".into())),
+                    level: PimdirLevel::Full,
+                    summary: None,
+                    sort_key: Default::default(),
+                    flags: PimdirFlags::default(),
+                    status: PimdirStatus::Conflict,
+                    conflict_revision: None,
+                    conflict_object: None,
+                    base: Some(PimdirBase {
+                        flags: PimdirFlags::default(),
+                        revision: Some("e1".into()),
+                        object: Some(PimdirHash("b1".into())),
+                    }),
+                    origin: None,
+                }],
+                ..Default::default()
+            };
+            let PimdirCoroutineState::Yielded(yielded) =
+                mutate.resume(Some(PimdirArg::Load(loaded)))
+            else {
+                panic!("a write");
+            };
+            let envelope: Value =
+                serde_json::from_str(&yield_json(&yielded, settle.as_ref())).unwrap();
+            envelope["writes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|op| op["op"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(ops(false), ["storeObject", "settle", "upsert"]);
+        assert_eq!(ops(true), ["storeObject", "overrule", "upsert"]);
     }
 }

@@ -97,7 +97,8 @@ public final class PimdirContacts {
         try (Cursor cursor =
                 db.rawQuery(
                         "SELECT i.link_id, i.object_hash, b.conflicted,"
-                                + " b.conflict_object, b.handle, b.base_revision"
+                                + " b.conflict_object, b.handle, b.base_revision,"
+                                + " i.conflicted, i.conflict_object"
                                 + " FROM items i"
                                 + " LEFT JOIN bindings b ON b.collection = i.collection"
                                 + " AND b.link_id = i.link_id AND b.source = ?"
@@ -113,7 +114,12 @@ public final class PimdirContacts {
                                 cursor.isNull(4) ? null : cursor.getString(4),
                                 cursor.isNull(5) ? null : cursor.getString(5),
                                 items.body(cursor.getString(1)));
-                boolean conflicted = cursor.getInt(2) == 1 && !cursor.isNull(3);
+                // NOTE: the server binding's own conflict, or the item's two
+                // sources left (SYNC §9), which the server's binding offers.
+                boolean conflicted =
+                        (cursor.getInt(2) == 1 && !cursor.isNull(3))
+                                || (!cursor.isNull(4) && cursor.getInt(6) == 1
+                                        && !cursor.isNull(7));
                 cards.add(new Indexed(card, indexOf(card.vcard()), conflicted));
             }
             return cards;

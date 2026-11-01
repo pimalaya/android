@@ -188,7 +188,7 @@ public final class ContactEditor {
             // the vanishing conflict flag reads as a bug.
             try {
                 new ContactStager(parts.pimdir(), parts.clients())
-                        .edit(replica.book.url(), handle, resolution.vcard());
+                        .resolve(replica.book.url(), handle, resolution.vcard());
             } catch (Exception error) {
                 host.showError(error, R.string.save_failed);
                 return;

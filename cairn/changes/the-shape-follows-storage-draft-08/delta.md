@@ -3,7 +3,7 @@ cairn: delta
 change: the-shape-follows-storage-draft-08
 ---
 
-Folds into spec/offline-store.md: what step 2a changes there. Not folded yet, the device check coming first.
+Folds into spec/offline-store.md: what step 2a changes there, but for "An item conflict is settled by a person's choice", which folds into spec/conflicts.md. Not folded yet, the device check coming first.
 
 ## ADDED Requirements
 
@@ -37,7 +37,17 @@ The blob store SHALL file a body under its BLAKE3 name, one shard level deep (`o
 - THEN the first file stays and the temporary is deleted
 
 ### Requirement: A queued action is read strictly
-Every row the app appends to the queue SHALL match its payload schema (STORAGE §15.3, payloads/), checked before anything is written. A message to send SHALL be queued as Annex B.2's `submit`: `source`, `from`, `rcpts` and `subject` alone, the message the row's body; what the outbox lists (the `Message-ID`, the subject and the date) SHALL be derived from the message, never added to the payload. The drain SHALL read each row by its schema before handing anything over: a malformed row is parked whole, naming what is malformed, and a row stating a later payload version is skipped, left pending and untouched. A submission SHALL go out with the envelope its payload states.
+Every row the app appends to the queue SHALL match its payload schema (STORAGE §15.3, payloads/), checked before anything is written. A message to send SHALL be queued as Annex B.2's `submit`: `source`, `from`, `rcpts` and `subject` alone, the message the row's body; it SHALL be anchored on the collection its sent copy belongs to, the account's sent mailbox, or on the account's outbox when the account marks none; what the outbox lists (the `Message-ID`, the subject and the date) SHALL be derived from the message, never added to the payload. The drain SHALL read each row by its schema before handing anything over: a malformed row is parked whole, naming what is malformed, and a row stating a later payload version is skipped, left pending and untouched. A submission SHALL go out with the envelope its payload states.
+
+#### Scenario: A message queued from an account with a sent mailbox
+- GIVEN an account whose roster marks a sent mailbox
+- WHEN a message is sent from it
+- THEN its row is anchored on that mailbox, the outbox lists it, and the next mail pass of that account hands it over
+
+#### Scenario: A sent mailbox the server drops while a message waits
+- GIVEN a message waiting, anchored on the sent mailbox
+- WHEN a roster no longer lists that mailbox
+- THEN the mailbox stays until the message is settled, and the roster's other changes are written
 
 #### Scenario: A row of the earlier payload
 - GIVEN a queued submission carrying `messageId` and `sortKey` and no `source` nor `rcpts`
@@ -64,6 +74,19 @@ The store SHALL merge a source's upsert of a mutable kind into the shared item b
 - GIVEN a card the phone edited and the store took
 - WHEN the server's listing brings its own edit of the card
 - THEN the card keeps the phone's body, records the server's and reads as conflicted, and nothing is pushed over either
+
+### Requirement: An item conflict is settled by a person's choice
+An item two sources diverged on SHALL be offered, once, as the conflicts of its collection's server binding are: merged three ways by the sync pass first, the item's body the local side, its diverging body the remote one, and the body the disagreeing source last agreed with the item (its `shared_object`, else its base) the ancestor, none when no binding names one; a clean merge staged as the resolution, a field both sides set apart left to the resolution form, the contact or the entry carrying the conflicted mark meanwhile. A person's resolution, staged on that binding, SHALL settle the item whatever body it keeps (SYNC §7): the item takes the body, its diverging one released and kept nowhere, and each source owes the body where its base differs. A binding SHALL be conflicted by its own divergence alone, the remote revision it records, never by the status its item's conflict projects.
+
+#### Scenario: Keeping the phone's card
+- GIVEN a card the phone and the server changed, the phone's kept and the server's recorded
+- WHEN the form is saved keeping every value the phone set
+- THEN the card is no longer conflicted, the phone owes nothing and the server is pushed the phone's card
+
+#### Scenario: A server conflict resolved after the phone moved the card
+- GIVEN a card whose server conflict waits for the form, and the phone changing the card meanwhile
+- WHEN the form is saved over the card the phone moved
+- THEN the item's conflict this records merges with nothing to ask and is settled by the same save, and the card does not read as conflicted
 
 ### Requirement: A round finding most of a collection gone asks first
 A round whose listing names no member while the store binds some, or finds more than half of at least 20 bound members absent (SYNC §5, §8), SHALL park rather than remove them, and the app SHALL say so once the pass ends, naming each collection and how many of its items the server no longer lists, offering to remove them too or to keep them. Removing them SHALL run the next sync of those collections accepting the absences; keeping them SHALL leave the round parked, decided again by the next pass.

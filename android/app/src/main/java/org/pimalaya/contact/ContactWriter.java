@@ -125,7 +125,7 @@ final class ContactWriter {
         Entry replica = editor.edit().replicas.get(0);
         String resolved = ContactClient.applyCard(editor.edit().vcard, model);
         new ContactStager(parts.pimdir(), parts.clients())
-                .edit(
+                .resolve(
                         replica.book.url(),
                         PimdirStorage.rowHandle(replica.card.uri(), replica.card.id()),
                         resolved);
