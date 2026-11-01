@@ -10,8 +10,7 @@ import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
 import android.database.Cursor;
-
-import io.requery.android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteDatabase;
 
 import org.json.JSONArray;
 import org.json.JSONException;

@@ -31,6 +31,14 @@ The app SHALL open every database it owns, the pimdir store and the index includ
 - WHEN the app creates the store and the index
 - THEN both are created, and every statement runs, on the platform SQLite
 
+### Requirement: The store's writer syncs every commit
+The store's writing connection SHALL run with `synchronous = FULL` (STORAGE §4.1) once write-ahead logging is on, whatever the platform's default under logging, SHALL set `trusted_schema` off where the platform's SQLite has it (3.31 and later), and the store SHALL log the SQLite version it runs on as it opens.
+
+#### Scenario: A build whose default is NORMAL
+- GIVEN a device whose platform syncs write-ahead logs NORMAL by default
+- WHEN the app opens its store
+- THEN the writer syncs at every commit, and the log names the SQLite version
+
 ### Requirement: An incompatible store blocks start-up
 The app SHALL refuse to start on a store of another draft or another schema, or one it cannot open, saying the store's version is not compatible and the app must be reinstalled, and SHALL neither read nor write it.
 

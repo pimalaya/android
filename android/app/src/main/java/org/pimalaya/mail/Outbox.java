@@ -2,9 +2,9 @@ package org.pimalaya.mail;
 
 import android.content.Context;
 import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
 import android.util.Log;
 
-import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONObject;
 import org.pimalaya.R;
 import org.pimalaya.client.Flags;

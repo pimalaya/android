@@ -5,7 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import io.requery.android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteDatabase;
 import java.io.File;
 import org.junit.Test;
 import org.junit.runner.RunWith;

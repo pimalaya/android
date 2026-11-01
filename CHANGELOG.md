@@ -55,6 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Changed a mail listing narrowed by the download window on JMAP, Microsoft 365 and Gmail to end by reading the mailbox's every id, as IMAP already did, so a message with no date, or received before the window, is no longer taken for deleted; it costs a request per 500 to 1,000 ids of the mailbox at the end of such a listing.
 - Changed a queued message to be stored as the standard submission (pimdir Annex B.2), sent with the recipients it states, filed against the account's sent mailbox, the outbox still listing it, and one the app cannot read back to be kept and shown as refused rather than sent.
 - Changed the store's statements to the app's own, which SQLite 3.18 runs as Android 8.0 ships it, the step before the app uses the phone's SQLite instead of bundling one; a store the previous version wrote opens unchanged.
+- Changed the store to run on the phone's own SQLite rather than one bundled with the app, which makes each APK 1.3 to 1.9 MB smaller (10.5 MB instead of 12.4 MB on arm64-v8a); a store the previous version wrote opens unchanged. Every commit to the store is now synced to disk before it is answered, whatever the phone's default.
 
 ### Fixed
 

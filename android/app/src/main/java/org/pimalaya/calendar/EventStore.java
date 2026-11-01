@@ -2,11 +2,10 @@ package org.pimalaya.calendar;
 
 import android.content.Context;
 import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
 
 import org.json.JSONException;
 import org.json.JSONObject;
-
-import io.requery.android.database.sqlite.SQLiteDatabase;
 
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.Event;

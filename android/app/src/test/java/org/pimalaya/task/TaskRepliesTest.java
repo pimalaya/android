@@ -3,8 +3,8 @@ package org.pimalaya.task;
 import static org.junit.Assert.assertEquals;
 
 import android.content.Context;
+import android.database.sqlite.SQLiteDatabase;
 
-import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Before;

@@ -1,8 +1,8 @@
 package org.pimalaya.pimdir;
 
+import android.database.sqlite.SQLiteDatabase;
 import android.util.Log;
 
-import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONObject;
 
 import java.io.IOException;

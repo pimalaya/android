@@ -2,12 +2,13 @@ package org.pimalaya.pimdir;
 
 import android.content.Context;
 import android.database.Cursor;
+import android.database.sqlite.SQLiteCursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteOpenHelper;
+import android.database.sqlite.SQLiteProgram;
+import android.database.sqlite.SQLiteStatement;
+import android.util.Log;
 
-import io.requery.android.database.sqlite.SQLiteCursor;
-import io.requery.android.database.sqlite.SQLiteDatabase;
-import io.requery.android.database.sqlite.SQLiteOpenHelper;
-import io.requery.android.database.sqlite.SQLiteProgram;
-import io.requery.android.database.sqlite.SQLiteStatement;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.PimdirSql;
@@ -21,7 +22,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * The pimdir store's database, on the SQLite the app bundles.
+ * The pimdir store's database, on the platform's SQLite.
  *
  * <p>Schema and statements over JNI ({@link PimdirSql}), never transcribed:
  * io-pimdir's schema and the app's shape of the statements, which SQLite
@@ -317,19 +318,51 @@ public final class PimdirDb extends SQLiteOpenHelper {
     @Override
     public void onOpen(SQLiteDatabase db) {
         db.enableWriteAheadLogging();
+        // NOTE: STORAGE §4.1's sync at every commit, set once logging is on,
+        // turning it on having set the platform's default (FULL on AOSP,
+        // NORMAL on some builds). SQLite refuses the change inside a
+        // transaction and applies it as it compiles the pragma, which the
+        // platform does on the writer for any statement but a SELECT
+        // (SQLiteProgram): compiled, never run, so no reader opens for it.
+        db.compileStatement(PimdirSql.bind("SYNCHRONOUS_FULL", Map.of()).sql).close();
         // NOTE: the erasure STORAGE §11.5 asks, and a schema read as one
         // from elsewhere (§18), on the writer: a transaction holds it, where
-        // a read-only statement alone would run on a reader. §4.1's
-        // synchronous FULL is not set: the binding resets every connection
-        // to NORMAL under write-ahead logging, and SQLite refuses the change
-        // inside a transaction.
+        // a read-only statement alone would run on a reader. trusted_schema
+        // exists from SQLite 3.31 (Android 12) only, and the platform offers
+        // no way to set SQLITE_DBCONFIG_DEFENSIVE at all.
+        String version;
         db.beginTransaction();
         try {
+            version = sqliteVersion(db);
             pragma(db, "SECURE_DELETE_ON");
-            pragma(db, "TRUSTED_SCHEMA_OFF");
+            if (atLeast(version, 3, 31)) {
+                pragma(db, "TRUSTED_SCHEMA_OFF");
+            }
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
+        }
+        Log.i("pimalaya", "store on sqlite " + version);
+    }
+
+    /** The SQLite version the platform runs, {@code 3.18.2} on Android 8.0. */
+    private static String sqliteVersion(SQLiteDatabase db) {
+        try (Cursor cursor = query(db, "SQLITE_VERSION", Map.of())) {
+            return cursor.moveToFirst() ? cursor.getString(0) : "";
+        }
+    }
+
+    /** Whether {@code version} is {@code major.minor} or later. */
+    private static boolean atLeast(String version, int major, int minor) {
+        String[] parts = version.split("\\.");
+        try {
+            int have = Integer.parseInt(parts[0]);
+            if (have != major) {
+                return have > major;
+            }
+            return parts.length > 1 && Integer.parseInt(parts[1]) >= minor;
+        } catch (NumberFormatException unreadable) {
+            return false;
         }
     }
 
@@ -463,7 +496,10 @@ public final class PimdirDb extends SQLiteOpenHelper {
         }
         boolean own = !db.inTransaction();
         if (own) {
-            db.beginTransactionDeferred();
+            // NOTE: the platform has no deferred transaction below API 35.
+            // An immediate one costs nothing more: either holds the writer's
+            // connection, the only one that writes, for the read's length.
+            db.beginTransactionNonExclusive();
         }
         try {
             params(db, bound);

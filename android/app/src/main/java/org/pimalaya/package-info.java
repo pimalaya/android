@@ -60,9 +60,9 @@
  * <h2>Store</h2>
  *
  * <p>One pimdir store holds every account and every domain
- * ({@link org.pimalaya.pimdir.PimdirDb}, on a bundled SQLite): collections by
- * kind and account, items whose bodies are content-addressed blobs in a
- * directory beside the database.
+ * ({@link org.pimalaya.pimdir.PimdirDb}, on the platform SQLite):
+ * collections by kind and account, items whose bodies are content-addressed
+ * blobs in a directory beside the database.
  *
  * <p>Its schema and canonical statements come from io-pimdir over JNI
  * ({@link org.pimalaya.client.PimdirSql}), never transcribed. The domain

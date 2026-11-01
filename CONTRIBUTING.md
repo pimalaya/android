@@ -26,7 +26,7 @@ Three layers, each knowing only the one below:
 - `:client` (Android library, Java): the public API exposed to the app. Owns the JNI boundary, the sockets and TLS (the platform trust store, at no APK cost), and the parsing of the bridge's replies into typed records.
 - `libpimalaya.so` (Rust): the Pimalaya I/O-free libraries exposed over JNI: io-http, io-imap, io-smtp, io-jmap, io-webdav, io-gmail, io-gpeople, io-gcal, io-msgraph, io-oauth, io-pim-discovery, vcard-rs and ical-rs, and io-pimdir, the offline store and sync engine. Socket I/O is delegated back to Java on each read and write.
 
-TLS and TCP live in Java on purpose: the `.so` stays a small set of state machines that cross-compiles trivially, and certificate validation is handled by Android. The app is plain Java and XML framework Views, no Kotlin and no Jetpack beyond two AndroidX widgets (the drawer and the pull to refresh), to keep the toolchain small and the APK minimal. The store is SQLite, bundled so every Android version gets the same one.
+TLS and TCP live in Java on purpose: the `.so` stays a small set of state machines that cross-compiles trivially, and certificate validation is handled by Android. The app is plain Java and XML framework Views, no Kotlin and no Jetpack beyond two AndroidX widgets (the drawer and the pull to refresh), to keep the toolchain small and the APK minimal. The store is the platform's SQLite (`android.database.sqlite`, 3.18 on Android 8.0), its statements written for the oldest one the app runs on.
 
 `:app` is laid out by domain packages (`account`, `contact`, `calendar`, `mail`, `sync`, `setup`...), each referencing only the packages below it; android/app/src/main/java/org/pimalaya/package-info.java documents the layout and `LayeringTest` enforces it.
 
@@ -51,7 +51,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-The app's logic (the store, the sync steps and passes, the mappings onto the phone's Contacts and Calendar, the filter) is covered by JVM unit tests mirroring the packages, under Robolectric where they need Android types. They load the host build of libpimalaya.so, so a bridge change runs them again, and fake only the `:client` domain clients:
+The app's logic (the store, the sync steps and passes, the mappings onto the phone's Contacts and Calendar, the filter) is covered by JVM unit tests mirroring the packages, under Robolectric where they need Android types. They load the host build of libpimalaya.so, so a bridge change runs them again, and fake only the `:client` domain clients. The store runs through the platform's own SQLite classes over Android 8.0's SQLite 3.18.2, which flake.nix builds for the host (`PIMALAYA_SQLITE_HOST`) and the tests' Robolectric shadows call:
 
 ```sh
 nix develop --command gradle -p android :app:assembleDebug :app:testDebugUnitTest :client:testDebugUnitTest --console=plain

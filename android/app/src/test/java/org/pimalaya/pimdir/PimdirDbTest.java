@@ -8,20 +8,22 @@ import static org.junit.Assert.assertTrue;
 
 import android.database.Cursor;
 import android.database.sqlite.SQLiteConstraintException;
+import android.database.sqlite.SQLiteDatabase;
 
-import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.PimdirSql;
+import org.pimalaya.sqlite.ShadowHostSqliteConnection;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.shadows.ShadowLog;
+import org.robolectric.shadows.ShadowSQLiteConnection;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -289,14 +291,15 @@ public class PimdirDbTest {
      * store is configured, before onCreate made its tables, caches the empty
      * schema, and its first statements fail once each ("no such table:
      * collections" on a first launch) before SQLite reloads it.
+     *
+     * <p>Counted as opened, not as open: the platform the tests run (API 36)
+     * closes such a reader again before the store is handed out, which an
+     * older one may not, and reopens its writer when logging turns on.
      */
     @Test
     public void openingAFreshStoreOpensNoReaderBeforeItsSchema() {
         // NOTE: setUp created this test's store, and nothing read it since.
-        assertEquals(
-                "the writer alone",
-                List.of(db.getPath()),
-                io.requery.android.database.sqlite.PoolProbe.connections(db.getPath()));
+        assertEquals("no reader", 0, ShadowHostSqliteConnection.openedBeside(db.getPath()));
     }
 
     /**
@@ -313,6 +316,44 @@ public class PimdirDbTest {
             try (Cursor cursor = db.rawQuery("PRAGMA trusted_schema", null)) {
                 assertTrue(!cursor.moveToFirst() || cursor.getLong(0) == 0);
             }
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /** The store names the SQLite it runs on as it opens, for a device's log. */
+    @Test
+    public void theStoreLogsItsSqliteAtOpen() {
+        assertTrue(
+                ShadowLog.getLogsForTag("pimalaya").stream()
+                        .anyMatch(log -> log.msg.equals("store on sqlite 3.18.2")));
+    }
+
+    /**
+     * The writer syncs the log at every commit (STORAGE §4.1) whatever the
+     * platform's default under write-ahead logging, which a manufacturer may
+     * set to NORMAL, and which the platform applies when logging turns on.
+     */
+    @Test
+    public void theWriterSyncsEveryCommit() {
+        store.close();
+        new File(db.getPath()).delete();
+        ShadowSQLiteConnection.setDefaultSyncMode("NORMAL");
+        store = new PimdirDb(RuntimeEnvironment.getApplication());
+        db = store.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            assertEquals("FULL", 2, pragma("PRAGMA synchronous"));
+        } finally {
+            db.endTransaction();
+        }
+        // NOTE: a store opened again, the logging already on in its file.
+        store.close();
+        store = new PimdirDb(RuntimeEnvironment.getApplication());
+        db = store.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            assertEquals("FULL", 2, pragma("PRAGMA synchronous"));
         } finally {
             db.endTransaction();
         }
@@ -378,6 +419,37 @@ public class PimdirDbTest {
 
         assertEquals(refusal == null ? null : refusal.toString(), "store-version",
                 refusal == null ? null : refusal.optString("refused"));
+        assertArrayEquals("nothing written", before, java.nio.file.Files.readAllBytes(file.toPath()));
+        assertFalse("no journal opened", new File(file.getPath() + "-wal").exists());
+    }
+
+    /**
+     * A store of the app before its own shape, whose {@code STRICT} tables
+     * SQLite 3.18 to 3.36 cannot even read, is refused on them as one it
+     * cannot open, and left as it was: the reinstall screen, not a crash.
+     */
+    @Test
+    public void aStoreWithStrictTablesIsRefusedAndLeftAsItWas() throws Exception {
+        store.close();
+        File file = new File(store.blobs().getParentFile(), "pimdir.db");
+        for (String suffix : new String[] {"", "-wal", "-shm"}) {
+            new File(file.getPath() + suffix).delete();
+        }
+        // NOTE: 3.18 creates no STRICT table, so its text is written into
+        // the schema as a newer SQLite would have left it.
+        SQLiteDatabase old = SQLiteDatabase.openOrCreateDatabase(file, null);
+        old.execSQL("CREATE TABLE items (collection TEXT NOT NULL, link_id TEXT NOT NULL)");
+        old.execSQL("PRAGMA writable_schema = ON");
+        old.execSQL("UPDATE sqlite_master SET sql = sql || ' STRICT' WHERE name = 'items'");
+        old.execSQL("PRAGMA writable_schema = OFF");
+        old.setVersion(1);
+        old.close();
+        byte[] before = java.nio.file.Files.readAllBytes(file.toPath());
+
+        org.json.JSONObject refusal = PimdirDb.refusal(RuntimeEnvironment.getApplication());
+
+        assertEquals("store-foreign", refusal == null ? null : refusal.optString("refused"));
+        assertTrue(refusal.optString("detail"), refusal.optString("detail").contains("STRICT"));
         assertArrayEquals("nothing written", before, java.nio.file.Files.readAllBytes(file.toPath()));
         assertFalse("no journal opened", new File(file.getPath() + "-wal").exists());
     }

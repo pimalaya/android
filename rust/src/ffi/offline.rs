@@ -522,7 +522,7 @@ mod tests {
 
     use crate::{
         ffi::offline::{served_migrations, served_statements},
-        offline::shape,
+        offline::{shape, store},
     };
 
     /// The SQLite of Android 8.0, the oldest the app runs on (flake.nix).
@@ -583,6 +583,78 @@ mod tests {
             failures.len(),
             output.status,
             failures.join("\n"),
+        );
+    }
+
+    /// A store a newer SQLite wrote opens on the floor build, as one requery's
+    /// 3.49 wrote on a device opens on the platform's 3.18 since
+    /// platform-sqlite step 3: the canonical schema under write-ahead
+    /// logging, its rows read, written and checked whole.
+    #[test]
+    fn a_store_a_newer_sqlite_wrote_opens_on_the_floor() {
+        let floor = env::var("PIMALAYA_SQLITE_FLOOR")
+            .expect("PIMALAYA_SQLITE_FLOOR is unset: run the tests through `nix develop`");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pimdir.db");
+
+        let newer = rusqlite::Connection::open(&path).unwrap();
+        let version: String = newer
+            .query_row("SELECT sqlite_version()", [], |row| row.get(0))
+            .unwrap();
+        assert_ne!(version, FLOOR, "the store is written by a newer SQLite");
+        newer
+            .execute_batch("PRAGMA auto_vacuum = INCREMENTAL; PRAGMA journal_mode = WAL;")
+            .unwrap();
+        for migration in served_migrations() {
+            newer.execute_batch(migration).unwrap();
+        }
+        let identity = store::identity();
+        newer
+            .execute(
+                served_statements()["INIT_STORE_META"],
+                rusqlite::named_params! {
+                    ":version": identity.version,
+                    ":derivation": identity.derivation,
+                },
+            )
+            .unwrap();
+        newer
+            .execute_batch(
+                "INSERT INTO collections(id, account, kind, name)
+                   VALUES('INBOX', 'a', 'message/rfc822', 'INBOX');
+                 INSERT INTO items(collection, link_id, seq, level)
+                   VALUES('INBOX', 'm1', 1, 1);
+                 INSERT INTO mail_summary(collection, link_id, subject)
+                   VALUES('INBOX', 'm1', 'one');",
+            )
+            .unwrap();
+        newer
+            .pragma_update(None, "user_version", identity.version)
+            .unwrap();
+        drop(newer);
+
+        let output = Command::new(format!("{floor}/bin/sqlite3"))
+            .arg(&path)
+            .arg(
+                "PRAGMA foreign_keys = ON;
+                 SELECT sqlite_version();
+                 PRAGMA journal_mode;
+                 SELECT format_version FROM store_meta;
+                 UPDATE mail_summary SET subject = 'two';
+                 SELECT subject FROM mail_summary;
+                 PRAGMA integrity_check;
+                 PRAGMA foreign_key_check;",
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            format!("{FLOOR}\nwal\nstorage-draft-08\ntwo\nok\n"),
         );
     }
 }

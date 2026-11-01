@@ -69,87 +69,6 @@
         androidSdk = androidComposition.androidsdk;
         sdkRoot = "${androidSdk}/libexec/android-sdk";
 
-        # The app bundles SQLite through com.github.requery:sqlite-android
-        # (android/app/build.gradle.kts), whose .so is built for Android
-        # only. The unit tests run on the host JVM (Robolectric), so this
-        # builds the same binding JNI over the same amalgamation, with the
-        # flags of its Android.mk, as a host libsqlite3x.so the test JVM
-        # loads. Bump both sources together with the Gradle dependency.
-        sqliteAndroidVersion = "3.49.0";
-        sqliteAndroidSrc = pkgs.fetchFromGitHub {
-          owner = "requery";
-          repo = "sqlite-android";
-          rev = sqliteAndroidVersion;
-          sha256 = "0x0763yxaz5xfjsq6pyvnpm1ir9k538n0scqg5y8crhg8zz2y6yd";
-        };
-        sqliteAmalgamation = pkgs.fetchurl {
-          url = "https://www.sqlite.org/2025/sqlite-amalgamation-3490000.zip";
-          sha256 = "0fzijga1rvjl79c80xvlqi93b26ppd1gc82c05r3d4blmpmm2s6b";
-        };
-        sqliteHost = pkgs.stdenv.mkDerivation {
-          pname = "sqlite-android-host";
-          version = sqliteAndroidVersion;
-          src = sqliteAndroidSrc;
-          nativeBuildInputs = [ pkgs.unzip ];
-          buildPhase = ''
-            jni=sqlite-android/src/main/jni/sqlite
-            unzip -j ${sqliteAmalgamation} '*/sqlite3.c' '*/sqlite3.h' -d $jni
-
-            # The binding logs through liblog; on the host it goes to stderr.
-            mkdir -p stub/android
-            cat > stub/android/log.h <<'EOF'
-            #pragma once
-            #include <stdarg.h>
-            #include <stdio.h>
-            enum { ANDROID_LOG_VERBOSE = 2, ANDROID_LOG_DEBUG, ANDROID_LOG_INFO,
-                   ANDROID_LOG_WARN, ANDROID_LOG_ERROR, ANDROID_LOG_FATAL };
-            static inline int __android_log_print(int prio, const char *tag,
-                                                  const char *fmt, ...) {
-              va_list args;
-              va_start(args, fmt);
-              fprintf(stderr, "%s: ", tag);
-              int n = vfprintf(stderr, fmt, args);
-              fputc('\n', stderr);
-              va_end(args);
-              return n;
-            }
-            EOF
-            # The NDK's jni.h names the C view of JNIEnv, OpenJDK's does not.
-            cat > stub/c_jnienv.h <<'EOF'
-            #pragma once
-            #include <jni.h>
-            typedef const struct JNINativeInterface_ *C_JNIEnv;
-            EOF
-
-            flags="-DNDEBUG=1 -DHAVE_USLEEP=1 -DSQLITE_HAVE_ISNAN \
-              -DSQLITE_DEFAULT_JOURNAL_SIZE_LIMIT=1048576 -DSQLITE_THREADSAFE=2 \
-              -DSQLITE_TEMP_STORE=3 -DSQLITE_POWERSAFE_OVERWRITE=1 \
-              -DSQLITE_DEFAULT_FILE_FORMAT=4 -DSQLITE_DEFAULT_AUTOVACUUM=1 \
-              -DSQLITE_ENABLE_MEMORY_MANAGEMENT=1 -DSQLITE_ENABLE_FTS3 \
-              -DSQLITE_ENABLE_FTS3_PARENTHESIS -DSQLITE_ENABLE_FTS4 \
-              -DSQLITE_ENABLE_FTS4_PARENTHESIS -DSQLITE_ENABLE_FTS5 \
-              -DSQLITE_ENABLE_FTS5_PARENTHESIS -DSQLITE_ENABLE_JSON1 \
-              -DSQLITE_ENABLE_RTREE=1 -DSQLITE_UNTESTABLE \
-              -DSQLITE_OMIT_COMPILEOPTION_DIAGS \
-              -DSQLITE_DEFAULT_FILE_PERMISSIONS=0600 -DSQLITE_DEFAULT_MEMSTATUS=0 \
-              -DSQLITE_MAX_EXPR_DEPTH=0 -DSQLITE_USE_ALLOCA \
-              -DSQLITE_ENABLE_BATCH_ATOMIC_WRITE -DPACKED= -O2 -fPIC \
-              -I$jni -Istub -I${pkgs.jdk17.home}/include \
-              -I${pkgs.jdk17.home}/include/linux"
-
-            $CC $flags -c $jni/sqlite3.c -o sqlite3.o
-            for source in $jni/*.cpp; do
-              $CXX $flags -include stub/c_jnienv.h -Wno-conversion-null -c "$source" -o "$(basename "$source" .cpp).o"
-            done
-            # NOTE: -Bsymbolic binds the binding to its own sqlite3_*, never
-            # to another SQLite the test JVM may have loaded first.
-            $CXX -shared -Wl,-Bsymbolic -o libsqlite3x.so *.o -ldl -lpthread
-          '';
-          installPhase = ''
-            install -Dm644 libsqlite3x.so $out/lib/libsqlite3x.so
-          '';
-        };
-
         # The oldest platform SQLite the app runs on: Android 8.0 (API 26)
         # ships 3.18.2, built with the flags of AOSP external/sqlite
         # dist/Android.mk on oreo-release (Android.bp came later):
@@ -172,6 +91,20 @@
         # it, for rust/src/ffi/offline.rs's floor test; bin/sqlite3 is the
         # shell of the same build, lib/libsqlite3.so the library.
         sqliteFloorVersion = "3.18.2";
+        sqliteFloorFlags = builtins.concatStringsSep " " [
+          "-DNDEBUG=1 -DHAVE_USLEEP=1 -DSQLITE_HAVE_ISNAN"
+          "-DSQLITE_DEFAULT_JOURNAL_SIZE_LIMIT=1048576 -DSQLITE_THREADSAFE=2"
+          "-DSQLITE_TEMP_STORE=3 -DSQLITE_POWERSAFE_OVERWRITE=1"
+          "-DSQLITE_DEFAULT_FILE_FORMAT=4 -DSQLITE_DEFAULT_AUTOVACUUM=1"
+          "-DSQLITE_ENABLE_MEMORY_MANAGEMENT=1 -DSQLITE_ENABLE_FTS3"
+          "-DSQLITE_ENABLE_FTS3_BACKWARDS -DSQLITE_ENABLE_FTS4"
+          "-DSQLITE_OMIT_BUILTIN_TEST -DSQLITE_OMIT_COMPILEOPTION_DIAGS"
+          "-DSQLITE_OMIT_LOAD_EXTENSION"
+          "-DSQLITE_DEFAULT_FILE_PERMISSIONS=0600 -DSQLITE_SECURE_DELETE"
+          "-DSQLITE_ENABLE_ICU -DUSE_PREAD64 -Dfdatasync=fdatasync"
+          "-DHAVE_MALLOC_H=1 -DHAVE_MALLOC_USABLE_SIZE"
+          "-DHAVE_POSIX_FALLOCATE=1 -O2 -fPIC"
+        ];
         sqliteFloor = pkgs.stdenv.mkDerivation {
           pname = "sqlite-floor";
           version = sqliteFloorVersion;
@@ -182,18 +115,7 @@
           buildInputs = [ pkgs.icu ];
           dontConfigure = true;
           buildPhase = ''
-            flags="-DNDEBUG=1 -DHAVE_USLEEP=1 -DSQLITE_HAVE_ISNAN \
-              -DSQLITE_DEFAULT_JOURNAL_SIZE_LIMIT=1048576 -DSQLITE_THREADSAFE=2 \
-              -DSQLITE_TEMP_STORE=3 -DSQLITE_POWERSAFE_OVERWRITE=1 \
-              -DSQLITE_DEFAULT_FILE_FORMAT=4 -DSQLITE_DEFAULT_AUTOVACUUM=1 \
-              -DSQLITE_ENABLE_MEMORY_MANAGEMENT=1 -DSQLITE_ENABLE_FTS3 \
-              -DSQLITE_ENABLE_FTS3_BACKWARDS -DSQLITE_ENABLE_FTS4 \
-              -DSQLITE_OMIT_BUILTIN_TEST -DSQLITE_OMIT_COMPILEOPTION_DIAGS \
-              -DSQLITE_OMIT_LOAD_EXTENSION \
-              -DSQLITE_DEFAULT_FILE_PERMISSIONS=0600 -DSQLITE_SECURE_DELETE \
-              -DSQLITE_ENABLE_ICU -DUSE_PREAD64 -Dfdatasync=fdatasync \
-              -DHAVE_MALLOC_H=1 -DHAVE_MALLOC_USABLE_SIZE \
-              -DHAVE_POSIX_FALLOCATE=1 -O2 -fPIC -I."
+            flags="${sqliteFloorFlags} -I."
             libs="-licui18n -licuuc -ldl -lpthread -lm"
 
             $CC $flags -c sqlite3.c -o sqlite3.o
@@ -229,34 +151,226 @@
           '';
         };
 
-        # The binding of sqliteHost over the floor's SQLite: requery's JNI
-        # compiled against 3.18.2 with Android 8.0's flags (sqliteFloor's,
-        # ICU and the Android-only defines left out), so the JVM store tests
-        # run every statement the app executes on the oldest SQLite it
-        # supports (PIMALAYA_SQLITE_HOST_FLOOR, android/app/build.gradle.kts).
-        sqliteHostFloor = sqliteHost.overrideAttrs (old: {
-          pname = "sqlite-android-host-floor";
+        # The platform's SQLite for the JVM tests. The app opens its
+        # databases through android.database.sqlite, whose natives
+        # Robolectric shadows; the tests' own shadows
+        # (android/app/src/test/java/org/pimalaya/sqlite/) hand them to this
+        # library, so the platform's helper, pool and cursors run every
+        # statement on the floor's SQLite, built with sqliteFloor's flags
+        # (PIMALAYA_SQLITE_HOST, android/app/build.gradle.kts). The natives
+        # are the AOSP JNI as requery's binding carries it, built for the
+        # host, with a stderr stub standing for liblog and a C_JNIEnv shim
+        # for OpenJDK's jni.h. requery's Java is not used, and nothing of it
+        # reaches the app.
+        sqliteJniVersion = "3.49.0";
+        sqliteJni = pkgs.fetchFromGitHub {
+          owner = "requery";
+          repo = "sqlite-android";
+          rev = sqliteJniVersion;
+          sha256 = "0x0763yxaz5xfjsq6pyvnpm1ir9k538n0scqg5y8crhg8zz2y6yd";
+        };
+        # The JNI of sqliteHost: requery's SQLiteConnection, CursorWindow and
+        # SQLiteGlobal natives, unchanged, registered on the tests' class
+        # org.pimalaya.sqlite.HostSqlite. Only the natives the platform's
+        # classes declare are registered: requery's own (custom functions,
+        # the update hook, extensions) are left out, and the three the
+        # platform added from API 35 (nativeLastInsertRowId, nativeChanges,
+        # nativeTotalChanges) are written here.
+        sqliteHostJni = pkgs.writeText "sqlite-host-jni.cpp" ''
+          #include "sqlite3.h"
+
+          // NOTE: Android builds SQLite without extension loading, and
+          // requery's nativeLoadExtension, never registered, names these.
+          extern "C" int sqlite3_enable_load_extension(sqlite3*, int) {
+              return SQLITE_ERROR;
+          }
+
+          extern "C" int sqlite3_load_extension(sqlite3*, const char*,
+                                                const char*, char**) {
+              return SQLITE_ERROR;
+          }
+
+          #define JNI_OnLoad requery_JNI_OnLoad
+          #define sMethods sConnectionMethods
+          #include "android_database_SQLiteConnection.cpp"
+          #undef sMethods
+          #undef JNI_OnLoad
+          #undef LOG_TAG
+
+          #define sMethods sWindowMethods
+          #include "android_database_CursorWindow.cpp"
+          #undef sMethods
+          #undef LOG_TAG
+
+          #define sMethods sGlobalMethods
+          #include "android_database_SQLiteGlobal.cpp"
+          #undef sMethods
+
+          #include <cstring>
+          #include <vector>
+
+          namespace android {
+
+          static jlong nativeLastInsertRowId(JNIEnv*, jclass, jlong pointer) {
+              SQLiteConnection* connection =
+                  reinterpret_cast<SQLiteConnection*>(pointer);
+              return sqlite3_last_insert_rowid(connection->db);
+          }
+
+          static jlong nativeChanges(JNIEnv*, jclass, jlong pointer) {
+              SQLiteConnection* connection =
+                  reinterpret_cast<SQLiteConnection*>(pointer);
+              return sqlite3_changes(connection->db);
+          }
+
+          static jlong nativeTotalChanges(JNIEnv*, jclass, jlong pointer) {
+              SQLiteConnection* connection =
+                  reinterpret_cast<SQLiteConnection*>(pointer);
+              return sqlite3_total_changes(connection->db);
+          }
+
+          static const char* const sLeftOut[] = {
+              "nativeRegisterCustomFunction",
+              "nativeRegisterFunction",
+              "nativeRegisterUpdateHook",
+              "nativeHasCodec",
+              "nativeLoadExtension",
+          };
+
+          static bool leftOut(const char* name) {
+              for (const char* out : sLeftOut) {
+                  if (strcmp(name, out) == 0) {
+                      return true;
+                  }
+              }
+              return false;
+          }
+
+          static JNINativeMethod native(const char* name, void* function) {
+              return {const_cast<char*>(name), const_cast<char*>("(J)J"),
+                      function};
+          }
+
+          } // namespace android
+
+          extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
+              JNIEnv* env = nullptr;
+              if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6)
+                      != JNI_OK) {
+                  return JNI_ERR;
+              }
+              android::gpJavaVM = vm;
+              android::sqliteInitialize();
+
+              // NOTE: what register_android_database_CursorWindow sets up,
+              // but for the class it registers on.
+              jclass buffer = env->FindClass("android/database/CharArrayBuffer");
+              if (buffer == nullptr) {
+                  return JNI_ERR;
+              }
+              android::gCharArrayBufferClassInfo.data =
+                  env->GetFieldID(buffer, "data", "[C");
+              android::gCharArrayBufferClassInfo.sizeCopied =
+                  env->GetFieldID(buffer, "sizeCopied", "I");
+              android::gEmptyString = static_cast<jstring>(
+                  env->NewGlobalRef(env->NewStringUTF("")));
+
+              std::vector<JNINativeMethod> methods;
+              for (const JNINativeMethod& method : android::sConnectionMethods) {
+                  if (!android::leftOut(method.name)) {
+                      methods.push_back(method);
+                  }
+              }
+              for (const JNINativeMethod& method : android::sWindowMethods) {
+                  methods.push_back(method);
+              }
+              methods.push_back(android::native("nativeLastInsertRowId",
+                  reinterpret_cast<void*>(android::nativeLastInsertRowId)));
+              methods.push_back(android::native("nativeChanges",
+                  reinterpret_cast<void*>(android::nativeChanges)));
+              methods.push_back(android::native("nativeTotalChanges",
+                  reinterpret_cast<void*>(android::nativeTotalChanges)));
+
+              jclass host = env->FindClass("org/pimalaya/sqlite/HostSqlite");
+              if (host == nullptr
+                      || env->RegisterNatives(host, methods.data(),
+                             static_cast<jint>(methods.size())) < 0) {
+                  return JNI_ERR;
+              }
+              return JNI_VERSION_1_6;
+          }
+        '';
+        sqliteHost = pkgs.stdenv.mkDerivation {
+          pname = "sqlite-platform-host";
           version = sqliteFloorVersion;
-          __intentionallyOverridingVersion = true;
-          nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.gnutar ];
-          buildPhase =
-            builtins.replaceStrings
-              [
-                "unzip -j ${sqliteAmalgamation} '*/sqlite3.c' '*/sqlite3.h' -d $jni"
-                "-DSQLITE_ENABLE_FTS3_PARENTHESIS -DSQLITE_ENABLE_FTS4 \\\n  -DSQLITE_ENABLE_FTS4_PARENTHESIS -DSQLITE_ENABLE_FTS5 \\\n  -DSQLITE_ENABLE_FTS5_PARENTHESIS -DSQLITE_ENABLE_JSON1 \\\n  -DSQLITE_ENABLE_RTREE=1 -DSQLITE_UNTESTABLE \\\n"
-              ]
-              [
-                "tar -xzf ${sqliteFloor.src} --strip-components=1 -C $jni sqlite-autoconf-3180200/sqlite3.c sqlite-autoconf-3180200/sqlite3.h"
-                "-DSQLITE_ENABLE_FTS3_BACKWARDS -DSQLITE_ENABLE_FTS4 \\\n  -DSQLITE_OMIT_BUILTIN_TEST -DSQLITE_SECURE_DELETE \\\n"
-              ]
-              old.buildPhase;
+          src = sqliteJni;
+          nativeBuildInputs = [ pkgs.gnutar ];
+          buildInputs = [ pkgs.icu ];
+          buildPhase = ''
+            jni=sqlite-android/src/main/jni/sqlite
+            tar -xzf ${sqliteFloor.src} --strip-components=1 -C $jni \
+              sqlite-autoconf-3180200/sqlite3.c sqlite-autoconf-3180200/sqlite3.h
+            # NOTE: the platform throws its own cancellation, requery
+            # AndroidX's.
+            substituteInPlace $jni/android_database_SQLiteCommon.cpp \
+              --replace-fail androidx/core/os/OperationCanceledException \
+                android/os/OperationCanceledException
+
+            # The binding logs through liblog; on the host it goes to stderr.
+            mkdir -p stub/android
+            cat > stub/android/log.h <<'EOF'
+            #pragma once
+            #include <stdarg.h>
+            #include <stdio.h>
+            enum { ANDROID_LOG_VERBOSE = 2, ANDROID_LOG_DEBUG, ANDROID_LOG_INFO,
+                   ANDROID_LOG_WARN, ANDROID_LOG_ERROR, ANDROID_LOG_FATAL };
+            static inline int __android_log_print(int prio, const char *tag,
+                                                  const char *fmt, ...) {
+              va_list args;
+              va_start(args, fmt);
+              fprintf(stderr, "%s: ", tag);
+              int n = vfprintf(stderr, fmt, args);
+              fputc('\n', stderr);
+              va_end(args);
+              return n;
+            }
+            EOF
+            # The NDK's jni.h names the C view of JNIEnv, OpenJDK's does not.
+            cat > stub/c_jnienv.h <<'EOF'
+            #pragma once
+            #include <jni.h>
+            typedef const struct JNINativeInterface_ *C_JNIEnv;
+            EOF
+
+            flags="${sqliteFloorFlags} -DPACKED= -I$jni -Istub \
+              -I${pkgs.jdk17.home}/include -I${pkgs.jdk17.home}/include/linux"
+            cxxflags="$flags -include stub/c_jnienv.h -Wno-conversion-null \
+              -Wno-write-strings"
+
+            $CC $flags -c $jni/sqlite3.c -o sqlite3.o
+            for source in android_database_SQLiteCommon \
+              android_database_SQLiteDebug android_database_SQLiteFunction \
+              CursorWindow JNIHelp JNIString; do
+              $CXX $cxxflags -c $jni/$source.cpp -o $source.o
+            done
+            $CXX $cxxflags -c -x c++ ${sqliteHostJni} -o sqlite-host-jni.o
+            # NOTE: -Bsymbolic binds the natives to their own sqlite3_*,
+            # never to another SQLite the test JVM may have loaded first
+            # (Robolectric's runtime carries one).
+            $CXX -shared -Wl,-Bsymbolic -Wl,--no-undefined \
+              -o libsqlitehost.so *.o -licui18n -licuuc -ldl -lpthread -lm
+          '';
+          installPhase = ''
+            install -Dm644 libsqlitehost.so $out/lib/libsqlitehost.so
+          '';
           doInstallCheck = true;
           installCheckPhase = ''
-            grep -qaF '${sqliteFloorVersion}' $out/lib/libsqlite3x.so
-            ! grep -qa 'json_each' $out/lib/libsqlite3x.so
-            ! grep -qa 'fts5' $out/lib/libsqlite3x.so
+            grep -qaF '${sqliteFloorVersion}' $out/lib/libsqlitehost.so
+            ! grep -qa 'json_each' $out/lib/libsqlitehost.so
+            ! grep -qa 'fts5' $out/lib/libsqlitehost.so
           '';
-        });
+        };
+
       in
       {
         devShells.default = pkgs.mkShell {
@@ -276,7 +390,6 @@
           ANDROID_NDK_HOME = "${sdkRoot}/ndk/${ndkVersion}";
           JAVA_HOME = pkgs.jdk17.home;
           PIMALAYA_SQLITE_HOST = "${sqliteHost}/lib";
-          PIMALAYA_SQLITE_HOST_FLOOR = "${sqliteHostFloor}/lib";
           # NOTE: an env var rather than a build input, so 3.18's sqlite3.h
           # and libsqlite3.so never reach the compiler's search paths.
           PIMALAYA_SQLITE_FLOOR = "${sqliteFloor}";

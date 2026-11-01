@@ -7,8 +7,8 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
 
-import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
@@ -110,11 +110,10 @@ public class PimdirSqlTest {
 
     /**
      * Every statement the store serves compiles on the SQLite the tests run
-     * on, Android 8.0's 3.18.2 unless -Ppimalaya.sqlite=bundled says
-     * otherwise: no {@code RETURNING}, upsert, {@code UPDATE ... FROM},
-     * {@code STRICT} nor JSON (the app's shape, rust/pimdir/). A read
-     * wrapping another is compiled by the bridge's floor test, over each
-     * read it wraps.
+     * on, Android 8.0's 3.18.2 under the platform's own classes: no {@code
+     * RETURNING}, upsert, {@code UPDATE ... FROM}, {@code STRICT} nor JSON
+     * (the app's shape, rust/pimdir/). A read wrapping another is compiled
+     * by the bridge's floor test, over each read it wraps.
      */
     @Test
     public void everyServedStatementCompilesOnTheSqliteTheTestsRunOn() {

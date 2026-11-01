@@ -113,18 +113,13 @@ val cargoHostBuild = tasks.register<Exec>("cargoHostBuild") {
     outputs.file(hostLibrary)
 }
 
-// The bundled SQLite's .so is built for Android only, so the store tests
-// load a host build of the same binding, which the nix devshell provides
-// (see flake.nix): by default over Android 8.0's SQLite 3.18.2, the oldest
-// the app runs on (PIMALAYA_SQLITE_HOST_FLOOR), with -Ppimalaya.sqlite=bundled
-// over the amalgamation the app bundles (PIMALAYA_SQLITE_HOST). Without it
-// they would fail on a missing libsqlite3x, so the test task refuses to start.
-val hostSqliteVariable = when (val sqlite = providers.gradleProperty("pimalaya.sqlite").getOrElse("floor")) {
-    "floor" -> "PIMALAYA_SQLITE_HOST_FLOOR"
-    "bundled" -> "PIMALAYA_SQLITE_HOST"
-    else -> throw GradleException("pimalaya.sqlite is floor or bundled, not $sqlite")
-}
-val hostSqlite = System.getenv(hostSqliteVariable)
+// The store opens its databases through the platform's android.database.sqlite,
+// whose natives the tests hand to a host build of the platform's JNI over
+// Android 8.0's SQLite 3.18.2, the oldest the app runs on (flake.nix
+// sqliteHost, robolectric.properties). The nix devshell provides it as
+// PIMALAYA_SQLITE_HOST; without it every store test would fail on a missing
+// libsqlitehost, so the test task refuses to start.
+val hostSqlite = System.getenv("PIMALAYA_SQLITE_HOST")
 
 tasks.withType<Test>().configureEach {
     dependsOn(cargoHostBuild)
@@ -133,7 +128,7 @@ tasks.withType<Test>().configureEach {
     doFirst {
         if (hostSqlite == null) {
             throw GradleException(
-                "$hostSqliteVariable is unset: run the tests through `nix develop`"
+                "PIMALAYA_SQLITE_HOST is unset: run the tests through `nix develop`"
             )
         }
     }
@@ -187,18 +182,6 @@ dependencies {
     // Pull-to-refresh over the contacts list (triggers an account sync).
     // Another small, standalone AndroidX ViewGroup, no theme needed.
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
-
-    // SQLite bundled for every device: the pimdir store needs 3.37+ (STRICT
-    // tables, RETURNING, json_each) and the platform's is 3.18 to 3.32 below
-    // Android 14. The AOSP android.database.sqlite code under
-    // io.requery.android.database.sqlite, SQLite 3.49.0 with JSON1. Bump it
-    // with the host build in flake.nix. It asks androidx.core 1.15, which
-    // would pull Kotlin coroutines, lifecycle and an app-startup provider
-    // into an app that has none, for androidx.core.os.CancellationSignal
-    // alone: the core the drawer already resolves (1.3) carries it.
-    implementation("com.github.requery:sqlite-android:3.49.0") {
-        exclude(group = "androidx.core", module = "core")
-    }
 
     // JVM-only test dependencies (nothing ships in the APK). The org.json
     // artifact stands in for the android.jar stubs so Mapping runs on the

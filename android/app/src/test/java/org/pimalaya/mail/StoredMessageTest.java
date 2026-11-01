@@ -3,8 +3,8 @@ package org.pimalaya.mail;
 import static org.junit.Assert.assertEquals;
 
 import android.content.Context;
+import android.database.sqlite.SQLiteDatabase;
 
-import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;

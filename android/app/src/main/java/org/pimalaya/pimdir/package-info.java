@@ -2,7 +2,7 @@
  * The pimdir store: the one database every account and domain shares, and
  * the half of an engine driver no domain owns.
  *
- * <p>{@link PimdirDb} opens it on the bundled SQLite with io-pimdir's schema
+ * <p>{@link PimdirDb} opens it on the platform SQLite with io-pimdir's schema
  * ({@code PimdirSql}, over JNI), {@link PimdirBlobs} holding the bodies.
  * {@link PimdirCollections}, {@link PimdirItems}, {@link PimdirSummary} and
  * {@link PimdirQueue} write the rows pimdir STORAGE fixes.
