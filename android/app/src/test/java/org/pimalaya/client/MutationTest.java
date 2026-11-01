@@ -90,6 +90,26 @@ public class MutationTest {
                 last());
     }
 
+    /**
+     * A resolution states the diverging bodies it was decided over (SYNC
+     * §7), an ordinary edit no {@code resolves} key at all, never null nor
+     * an empty array.
+     */
+    @Test
+    public void aResolutionNamesWhatItResolves() throws Exception {
+        stager.mutateResolve("c", "h9", "B", null, "", List.of(name("R1"), name("R2")));
+        assertSameJson(
+                "{\"op\":\"edit\",\"handle\":\"h9\",\"hash\":\"" + name("B") + "\","
+                        + "\"size\":1,\"body\":\"B\",\"sortKey\":\"\","
+                        + "\"resolves\":[\"" + name("R1") + "\",\"" + name("R2") + "\"]}",
+                last());
+        stager.mutateResolve("c", "h9", "B", null, "", null);
+        assertSameJson(
+                "{\"op\":\"edit\",\"handle\":\"h9\",\"hash\":\"" + name("B") + "\","
+                        + "\"size\":1,\"body\":\"B\",\"sortKey\":\"\"}",
+                last());
+    }
+
     @Test
     public void adds() throws Exception {
         stager.mutateAdd(

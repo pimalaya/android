@@ -173,11 +173,11 @@ public class PimdirDbTest {
     }
 
     /**
-     * A write never replaces a file under a name (STORAGE §5), and a body
-     * failing its name is never served: it moves into quarantine/ (§7).
+     * A body failing its name is never served: it moves into quarantine/
+     * (§7), never unlinked.
      */
     @Test
-    public void aBodyFailingItsNameIsQuarantinedNeverReplacedNorServed() throws IOException {
+    public void aBodyFailingItsNameIsQuarantinedNeverServed() throws IOException {
         PimdirBlobs blobs = new PimdirBlobs(store.blobs());
         byte[] body = {1, 2, 3};
         String hash = PimdirHash.of(body);
@@ -185,18 +185,60 @@ public class PimdirDbTest {
         assertTrue(path.getParentFile().mkdirs());
         java.nio.file.Files.write(path.toPath(), new byte[] {9, 9});
 
-        blobs.put(hash, body);
-        assertArrayEquals(
-                "a name held keeps what holds it", new byte[] {9, 9},
-                java.nio.file.Files.readAllBytes(path.toPath()));
-
         assertFalse("verified before it is served", blobs.verified(hash));
         assertFalse(blobs.has(hash));
         assertEquals(1, blobs.quarantined().size());
         assertTrue(blobs.quarantined().get(0).startsWith(hash + "."));
 
+        java.nio.file.Files.write(path.toPath(), new byte[] {9, 9});
+        assertNull(blobs.get(hash));
+        assertEquals(2, blobs.quarantined().size());
+    }
+
+    /**
+     * A write finding its name held keeps the file there only once it checks
+     * against the name (STORAGE §5): other bytes, a part a crashed copy left
+     * and a link are moved into quarantine/ (§7), never unlinked, and the body
+     * is filed under its name, by a write and by an adoption alike. Pimdir
+     * 3d6a04e's rule: the write used to keep whatever held the name, so the
+     * body was stored nowhere and every read of it found it missing.
+     */
+    @Test
+    public void aWriteMeetingAFailingFileUnderItsNameFilesItAgain() throws IOException {
+        PimdirBlobs blobs = new PimdirBlobs(store.blobs());
+        byte[] body = {1, 2, 3};
+        String hash = PimdirHash.of(body);
+        java.nio.file.Path path = blobs.pathOf(hash).toPath();
+        assertTrue(path.toFile().getParentFile().mkdirs());
+
+        java.nio.file.Files.write(path, new byte[] {9, 9});
         blobs.put(hash, body);
+        assertArrayEquals(body, java.nio.file.Files.readAllBytes(path));
+        assertEquals(1, blobs.quarantined().size());
+
+        java.nio.file.Files.delete(path);
+        java.nio.file.Files.write(path, new byte[] {1, 2});
+        File source = new File(store.blobs().getParentFile(), "download.part");
+        java.nio.file.Files.write(source.toPath(), body);
+        blobs.adopt(hash, source);
+        assertArrayEquals(body, java.nio.file.Files.readAllBytes(path));
+        assertFalse(source.exists());
+        assertEquals(2, blobs.quarantined().size());
+
+        java.nio.file.Files.delete(path);
+        File elsewhere = new File(store.blobs().getParentFile(), "elsewhere");
+        java.nio.file.Files.write(elsewhere.toPath(), body);
+        java.nio.file.Files.createSymbolicLink(path, elsewhere.toPath());
+        blobs.put(hash, body);
+        assertTrue("a file of its own", java.nio.file.Files.isRegularFile(
+                path, java.nio.file.LinkOption.NOFOLLOW_LINKS));
         assertArrayEquals(body, blobs.get(hash));
+        assertEquals(3, blobs.quarantined().size());
+        for (String quarantined : blobs.quarantined()) {
+            assertTrue(quarantined, quarantined.startsWith(hash + "."));
+        }
+        assertEquals(0, path.toFile().getParentFile().listFiles(
+                (dir, name) -> name.startsWith(".")).length);
     }
 
     /**
@@ -227,23 +269,30 @@ public class PimdirDbTest {
 
     /**
      * The no-replace rename (STORAGE §5): a free name takes the source, a
-     * name held keeps what holds it and leaves the source where it was.
+     * name held keeps what holds it and leaves the source where it was, and
+     * says whether what holds it checks against the name.
      */
     @Test
     public void aRenameNeverReplacesAName() throws IOException {
-        File dir = new File(store.blobs(), "ab");
+        String hash = PimdirHash.of(new byte[] {1});
+        File dir = new File(store.blobs(), hash.substring(0, 2));
         assertTrue(dir.mkdirs());
         File temp = new File(dir, ".x.tmp");
-        File name = new File(dir, "x");
+        File name = new File(dir, hash);
         java.nio.file.Files.write(temp.toPath(), new byte[] {1});
 
-        assertTrue(PimdirSql.renameNoReplace(temp, name));
+        assertEquals(PimdirSql.Filed.MOVED, PimdirSql.renameNoReplace(temp, name));
         assertFalse(temp.exists());
         assertArrayEquals(new byte[] {1}, java.nio.file.Files.readAllBytes(name.toPath()));
 
         java.nio.file.Files.write(temp.toPath(), new byte[] {2});
-        assertFalse("held", PimdirSql.renameNoReplace(temp, name));
+        assertEquals(PimdirSql.Filed.HELD, PimdirSql.renameNoReplace(temp, name));
         assertArrayEquals(new byte[] {1}, java.nio.file.Files.readAllBytes(name.toPath()));
+        assertArrayEquals(new byte[] {2}, java.nio.file.Files.readAllBytes(temp.toPath()));
+
+        java.nio.file.Files.write(name.toPath(), new byte[] {9});
+        assertEquals(PimdirSql.Filed.FAILING, PimdirSql.renameNoReplace(temp, name));
+        assertArrayEquals(new byte[] {9}, java.nio.file.Files.readAllBytes(name.toPath()));
         assertArrayEquals(new byte[] {2}, java.nio.file.Files.readAllBytes(temp.toPath()));
     }
 
@@ -300,6 +349,34 @@ public class PimdirDbTest {
     public void openingAFreshStoreOpensNoReaderBeforeItsSchema() {
         // NOTE: setUp created this test's store, and nothing read it since.
         assertEquals("no reader", 0, ShadowHostSqliteConnection.openedBeside(db.getPath()));
+    }
+
+    /**
+     * An existing store opens in write-ahead logging from the start: the
+     * platform sets it no other journal mode, the mode being set when the
+     * store is created and never on an existing one (STORAGE §8), and the
+     * file stays in WAL. Found on a OnePlus 5, Android 15, 2026-11-01: the
+     * store opened in the platform's default mode, logging turned on after,
+     * so every open ran "PRAGMA journal_mode=TRUNCATE" on the WAL store, which
+     * failed "because the database is locked" while the index held it.
+     */
+    @Test
+    public void anExistingStoreOpensInWriteAheadLoggingAlone() {
+        String path = db.getPath();
+        store.close();
+        ShadowHostSqliteConnection.reset();
+
+        store = new PimdirDb(RuntimeEnvironment.getApplication());
+        db = store.getWritableDatabase();
+        store.getReadableDatabase();
+
+        for (String mode : ShadowHostSqliteConnection.journalModesSet(path)) {
+            assertEquals("a journal mode set on the existing store", "WAL", mode);
+        }
+        try (Cursor cursor = db.rawQuery("PRAGMA journal_mode", null)) {
+            assertTrue(cursor.moveToFirst());
+            assertEquals("wal", cursor.getString(0));
+        }
     }
 
     /**

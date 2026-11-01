@@ -375,6 +375,18 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
                     .into_iter()
                     .map(|create| (PimdirHandle(create.handle), create.supersedes.into()))
                     .collect(),
+                // NOTE: an item conflict is the storage's to state: a
+                // placement projecting `Conflict` with no binding conflict
+                // and no entry here reads as one nobody has read, which no
+                // resolution names (SYNC §7).
+                conflicted: loaded
+                    .conflicted
+                    .into_iter()
+                    .map(|item| {
+                        let object = item.object.filter(|hash| !hash.is_empty());
+                        (PimdirHandle(item.handle), object.map(PimdirHash))
+                    })
+                    .collect(),
             })
         }
         PimdirYield::WantsLookupObject(_) => {
@@ -527,14 +539,18 @@ mod tests {
         placement::PimdirHandle,
         remote::{PimdirEnumerate, PimdirFetchedBody, PimdirListing, PimdirTier},
     };
-    use serde_json::{Value, to_value};
+    use serde_json::{Value, from_str, to_value};
 
     use io_pimdir::{
         coroutine::{PimdirCoroutine, PimdirCoroutineState},
         sync::{PimdirSync, PimdirSyncOptions},
     };
 
-    use crate::offline::{enumerate_json, parse_arg, wire::WriteOpJson, yield_json};
+    use crate::offline::{
+        enumerate_json, parse_arg,
+        wire::{MutationJson, WriteOpJson},
+        yield_json,
+    };
 
     /// A file of the pimdir spec io-pimdir vendors (spec/), from the git
     /// checkout cargo made of the pinned revision (Cargo.toml's
@@ -837,76 +853,118 @@ mod tests {
         );
     }
 
-    /// A person's edit of a placement an item conflict projects crosses
-    /// with io-pimdir's `Settle` before its upsert, which the Java owner
-    /// hands to the hub to settle the item's conflict (SYNC §7); an
-    /// overruling edit, a rule's, crosses without one, and so does an edit
-    /// of a placement in no conflict.
-    #[test]
-    fn a_persons_edit_crosses_with_its_settle() {
-        use io_pimdir::{
-            load::PimdirLoaded,
-            mutate::{PimdirMutate, PimdirMutation},
-            placement::{
-                PimdirBase, PimdirFlags, PimdirLevel, PimdirLinkId, PimdirPlacement, PimdirStatus,
-            },
-        };
+    /// The edit `mutation` (its wire JSON) of a placement whose load reply
+    /// is `placement` and `conflicted` (Java's JSON), answering the ops it
+    /// crosses with, or the refusal's text.
+    fn edit_over(
+        mutation: &str,
+        placement: Value,
+        conflicted: Value,
+    ) -> Result<Vec<String>, String> {
+        use io_pimdir::mutate::{PimdirMutate, PimdirMutation};
 
-        let ops = |status, overrule| {
-            let edit = PimdirMutation::Edit {
-                handle: PimdirHandle("a.vcf".into()),
-                object: PimdirObject {
-                    hash: PimdirHash("b2".into()),
-                    size: 2,
-                },
-                body: b"b2".to_vec(),
-                summary: None,
-                sort_key: None,
-                if_match: None,
-                overrule,
-            };
-            let mut mutate = PimdirMutate::new("acct/book", edit);
-            let _ = mutate.resume(None);
-            let loaded = PimdirLoaded {
-                placements: vec![PimdirPlacement {
-                    collection: "acct/book".into(),
-                    handle: PimdirHandle("a.vcf".into()),
-                    link_id: Some(PimdirLinkId("uid-a".into())),
-                    object: Some(PimdirHash("b1".into())),
-                    level: PimdirLevel::Full,
-                    summary: None,
-                    sort_key: Default::default(),
-                    flags: PimdirFlags::default(),
-                    status,
-                    conflict_revision: None,
-                    conflict_object: None,
-                    base: Some(PimdirBase {
-                        flags: PimdirFlags::default(),
-                        revision: Some("e1".into()),
-                        object: Some(PimdirHash("b1".into())),
-                    }),
-                    origin: None,
-                }],
-                ..Default::default()
-            };
-            let PimdirCoroutineState::Yielded(yielded) =
-                mutate.resume(Some(PimdirArg::Load(loaded)))
-            else {
-                panic!("a write");
-            };
-            let envelope: Value = serde_json::from_str(&yield_json(&yielded)).unwrap();
-            envelope["writes"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|op| op["op"].as_str().unwrap().to_string())
-                .collect::<Vec<_>>()
+        let mutation: MutationJson = from_str(mutation).unwrap();
+        let mut mutate = PimdirMutate::new("acct/book", PimdirMutation::try_from(mutation)?);
+        let PimdirCoroutineState::Yielded(load) = mutate.resume(None) else {
+            panic!("a load");
         };
-
-        for status in [PimdirStatus::Conflict, PimdirStatus::Tombstone] {
-            assert_eq!(ops(status, false), ["storeObject", "settle", "upsert"]);
-            assert_eq!(ops(status, true), ["storeObject", "overrule", "upsert"]);
+        let reply = serde_json::json!({"placements": [placement], "conflicted": conflicted});
+        let loaded = parse_arg(&load, &reply.to_string()).unwrap();
+        match mutate.resume(Some(loaded)) {
+            PimdirCoroutineState::Yielded(yielded) => {
+                let envelope: Value = from_str(&yield_json(&yielded)).unwrap();
+                Ok(envelope["writes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|op| op["op"].as_str().unwrap().to_string())
+                    .collect())
+            }
+            PimdirCoroutineState::Complete(Err(err)) => Err(err.to_string()),
+            PimdirCoroutineState::Complete(Ok(_)) => panic!("an edit writes"),
         }
-        assert_eq!(ops(PimdirStatus::Clean, false), ["storeObject", "upsert"]);
+    }
+
+    /// A card's placement on the load reply's wire, its status and its
+    /// binding's conflict as stated.
+    fn card(status: &str, conflict: Option<(&str, &str)>) -> Value {
+        let mut placement = serde_json::json!({
+            "collection": "acct/book", "handle": "a.vcf", "linkId": "uid-a",
+            "object": "b1", "level": "full", "sortKey": "", "status": status,
+            "base": {"revision": "e1", "object": "b1"},
+        });
+        if let Some((revision, object)) = conflict {
+            placement["conflictRevision"] = revision.into();
+            placement["conflictObject"] = object.into();
+        }
+        placement
+    }
+
+    /// The item conflict the Java load states (`conflicted`) reaches the
+    /// engine: an ordinary edit over it is refused, staging nothing, and a
+    /// resolution naming its diverging body crosses with io-pimdir's
+    /// `Settle` before its upsert, which the Java owner hands to the hub
+    /// (SYNC §7); an overruling edit, a rule's, crosses with its overrule.
+    #[test]
+    fn the_loaded_item_conflict_reaches_the_edit() {
+        let ordinary =
+            r#"{"op": "edit", "handle": "a.vcf", "hash": "b2", "size": 2, "body": "b2"}"#;
+        let resolution = r#"{"op": "edit", "handle": "a.vcf", "hash": "b2", "size": 2,
+            "body": "b2", "resolves": ["b9"]}"#;
+        let overruling = r#"{"op": "edit", "handle": "a.vcf", "hash": "b2", "size": 2,
+            "body": "b2", "overrule": true}"#;
+        let item = serde_json::json!([{"handle": "a.vcf", "object": "b9"}]);
+
+        for status in ["conflict", "tombstone"] {
+            let refused = edit_over(ordinary, card(status, None), item.clone()).unwrap_err();
+            assert!(refused.contains("b9"), "{refused}");
+            assert_eq!(
+                edit_over(resolution, card(status, None), item.clone()).unwrap(),
+                ["storeObject", "settle", "upsert"],
+            );
+        }
+        assert_eq!(
+            edit_over(overruling, card("conflict", None), item.clone()).unwrap(),
+            ["storeObject", "overrule", "upsert"],
+        );
+
+        // NOTE: a projected conflict the load does not state is one nobody
+        // has read, which no resolution names.
+        let unread = edit_over(resolution, card("conflict", None), Value::Array(vec![]));
+        assert!(unread.unwrap_err().contains("an unread body"));
+        // NOTE: an item in no conflict takes an ordinary edit, and refuses a
+        // resolution of nothing.
+        let none = Value::Array(vec![]);
+        assert_eq!(
+            edit_over(ordinary, card("clean", None), none.clone()).unwrap(),
+            ["storeObject", "upsert"],
+        );
+        assert!(edit_over(resolution, card("clean", None), none).is_err());
+    }
+
+    /// A binding's own conflict takes a resolution naming its diverging
+    /// body, the base adopting it, and refuses an ordinary edit; one whose
+    /// item is conflicted too takes only a resolution naming both.
+    #[test]
+    fn a_binding_conflict_takes_only_a_resolution_naming_it() {
+        let edit = |resolves: &str| {
+            format!(
+                r#"{{"op": "edit", "handle": "a.vcf", "hash": "b2", "size": 2, "body": "b2"{resolves}}}"#
+            )
+        };
+        let binding = || card("conflict", Some(("e2", "b7")));
+        let none = Value::Array(vec![]);
+        let item = serde_json::json!([{"handle": "a.vcf", "object": "b9"}]);
+
+        assert!(edit_over(&edit(""), binding(), none.clone()).is_err());
+        assert_eq!(
+            edit_over(&edit(r#", "resolves": ["b7"]"#), binding(), none.clone()).unwrap(),
+            ["storeObject", "upsert"],
+        );
+        assert!(edit_over(&edit(r#", "resolves": ["b7"]"#), binding(), item.clone()).is_err());
+        assert_eq!(
+            edit_over(&edit(r#", "resolves": ["b7", "b9"]"#), binding(), item).unwrap(),
+            ["storeObject", "settle", "upsert"],
+        );
     }
 }

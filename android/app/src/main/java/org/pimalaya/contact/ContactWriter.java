@@ -91,7 +91,8 @@ final class ContactWriter {
     /**
      * The fan-out save: the model onto every card's own document, each staged.
      *
-     * <p>Editing a conflicted replica resolves it.
+     * <p>An ordinary edit each: a conflicted replica refuses it, staging
+     * nothing, its conflict settled by the conflict form alone (SYNC §7).
      */
     private void saveFanOut(ContactFields model) throws JSONException {
         ContactStager engine = new ContactStager(parts.pimdir(), parts.clients());
@@ -118,8 +119,8 @@ final class ContactWriter {
      * The conflict save: the picks apply onto the captured three-way merge.
      *
      * <p>Remote's other changes and unmanaged data survive. Staged on the one
-     * conflicted replica, it resolves it; the push is guarded on the observed
-     * remote revision.
+     * conflicted replica, naming the diverging body the form showed, it
+     * resolves it; the push is guarded on the observed remote revision.
      */
     private void saveConflictResolution(ContactFields model) throws JSONException {
         Entry replica = editor.edit().replicas.get(0);
@@ -128,7 +129,8 @@ final class ContactWriter {
                 .resolve(
                         replica.book.url(),
                         PimdirStorage.rowHandle(replica.card.uri(), replica.card.id()),
-                        resolved);
+                        resolved,
+                        editor.edit().resolves);
     }
 
     /** The merge save: the model onto the survivor, deletes for the others. */

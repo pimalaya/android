@@ -70,6 +70,23 @@ public final class PimdirStorage {
     }
 
     /**
+     * The diverging bodies a conflict of {@link #loadConflicts} or {@link
+     * #loadConflict} offers, which a resolution merged over it states
+     * ({@link Stager#mutateResolve}); null for none.
+     */
+    public static List<String> resolvesOf(JSONObject conflict) throws JSONException {
+        JSONArray named = conflict == null ? null : conflict.optJSONArray("resolves");
+        if (named == null) {
+            return null;
+        }
+        List<String> resolves = new ArrayList<>(named.length());
+        for (int index = 0; index < named.length(); index++) {
+            resolves.add(named.getString(index));
+        }
+        return resolves;
+    }
+
+    /**
      * The stored collection behind an engine collection id.
      *
      * <p>The engine names the server and phone spokes as two collections; the
@@ -159,6 +176,7 @@ public final class PimdirStorage {
             return reply;
         }
 
+        JSONArray conflicted = new JSONArray();
         try (Cursor cursor = PimdirDb.query(db, scoped(scope, stored, source))) {
             while (cursor.moveToNext()) {
                 // NOTE: one placement per item the source binds, and one
@@ -175,8 +193,24 @@ public final class PimdirStorage {
                 if (cursor.isNull(5) && cursor.getInt(13) == 1) {
                     continue;
                 }
-                placements.put(placementOf(collection, cursor));
+                JSONObject placement = placementOf(collection, cursor);
+                placements.put(placement);
+                // NOTE: the item's own conflict, which an edit meets beside
+                // its binding's (SYNC §7): a placement projecting a conflict
+                // the load does not state reads as one nobody has read, which
+                // no resolution settles.
+                if (!cursor.isNull(14) && cursor.getInt(14) == 1) {
+                    JSONObject item = new JSONObject();
+                    item.put("handle", placement.getString("handle"));
+                    if (!cursor.isNull(19)) {
+                        item.put("object", cursor.getString(19));
+                    }
+                    conflicted.put(item);
+                }
             }
+        }
+        if (conflicted.length() > 0) {
+            reply.put("conflicted", conflicted);
         }
         held(db, stored, placements, reply);
         superseded(db, stored, source, placements, reply);
@@ -1474,6 +1508,8 @@ public final class PimdirStorage {
      * local body (a create collision), so remote changes merge in cleanly.
      * With no binding conflict, the server's binding reads the item's own
      * ({@link #itemConflicts}): its body local, the diverging one remote.
+     * {@code resolves} names the diverging body shown as remote, what the
+     * form's resolution states (SYNC §7, {@link Stager#mutateResolve}).
      */
     public JSONObject loadConflict(String engineCollection, String handle) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -1497,6 +1533,7 @@ public final class PimdirStorage {
             if (!cursor.isNull(1)) {
                 bodies.put("base", cursor.isNull(2) ? local : bodyOf(cursor.getString(2)));
                 bodies.put("remote", bodyOf(cursor.getString(1)));
+                bodies.put("resolves", new JSONArray().put(cursor.getString(1)));
                 return bodies;
             }
             // NOTE: else the item's own conflict, offered on the server's
@@ -1507,6 +1544,7 @@ public final class PimdirStorage {
             }
             bodies.put("base", ancestorOf(db, collection, linkId, object, cursor.getString(4)));
             bodies.put("remote", bodyOf(cursor.getString(4)));
+            bodies.put("resolves", new JSONArray().put(cursor.getString(4)));
             return bodies;
         }
     }
@@ -1608,7 +1646,9 @@ public final class PimdirStorage {
      * <p>Local, base and remote bodies plus the remote revision marked. A row
      * awaiting its remote body is left out until hydrate ({@link
      * #handlesBelowFull}) lands it. The server's list ends with the items two
-     * sources diverged on ({@link #itemConflicts}).
+     * sources diverged on ({@link #itemConflicts}). Each names in {@code
+     * resolves} the diverging body it offers as remote, what a resolution
+     * merged over it states ({@link Stager#mutateResolve}, SYNC §7).
      */
     public List<JSONObject> loadConflicts(String engineCollection) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -1635,6 +1675,7 @@ public final class PimdirStorage {
                     conflict.put("conflictRevision", cursor.getString(5));
                 }
                 conflict.put("remoteVcard", bodyOf(cursor.getString(6)));
+                conflict.put("resolves", new JSONArray().put(cursor.getString(6)));
                 conflicts.add(conflict);
             }
         }
@@ -1653,7 +1694,10 @@ public final class PimdirStorage {
      * <p>Every binding of a conflicted item projects the conflict, so it is
      * offered once, on the server's binding, and a resolution staged there
      * settles it for every source (SYNC §7). A binding's own conflict with
-     * its body is offered first: settling it settles the item too.
+     * its body is offered first, and its resolution settles the item's too
+     * only where the two diverging bodies are one: a resolution names the
+     * bodies it was shown, and the engine refuses one leaving a conflict it
+     * meets unnamed.
      */
     private void itemConflicts(SQLiteDatabase db, String collection, String source,
             List<JSONObject> conflicts) throws JSONException {
@@ -1673,6 +1717,7 @@ public final class PimdirStorage {
                 conflict.put("vcard", bodyOf(object));
                 conflict.put("baseVcard", ancestorOf(db, collection, linkId, object, diverging));
                 conflict.put("remoteVcard", bodyOf(diverging));
+                conflict.put("resolves", new JSONArray().put(diverging));
                 conflicts.add(conflict);
             }
         }

@@ -42,4 +42,10 @@ public final class EditSession {
      * stage onto the one conflicted replica.
      */
     public boolean resolvingConflict;
+
+    /**
+     * The diverging bodies the conflict form shows, which its save names as
+     * the conflicts it settles (SYNC §7); null outside a conflict.
+     */
+    public java.util.List<String> resolves;
 }

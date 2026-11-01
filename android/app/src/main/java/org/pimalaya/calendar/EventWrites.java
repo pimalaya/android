@@ -92,7 +92,13 @@ final class EventWrites {
                         null,
                         "");
             }
-            engine.mutateEdit(into, handle, withAlarms(split.master(), save.alarms()), null, "");
+            engine.mutateResolve(
+                    into,
+                    handle,
+                    withAlarms(split.master(), save.alarms()),
+                    null,
+                    "",
+                    settling == null ? null : settling.resolves);
         } else {
             String written =
                     settling != null && !rewritten
@@ -108,7 +114,13 @@ final class EventWrites {
                         null,
                         "");
             } else {
-                engine.mutateEdit(into, handle, written, null, "");
+                engine.mutateResolve(
+                        into,
+                        handle,
+                        written,
+                        null,
+                        "",
+                        settling == null ? null : settling.resolves);
             }
         }
         if (settling != null) {
@@ -122,7 +134,7 @@ final class EventWrites {
      */
     static void settle(CalendarStager on, EventStore.StoredConflict conflict, String ical)
             throws JSONException {
-        on.mutateEdit(conflict.collection, conflict.handle, ical, null, "");
+        on.mutateResolve(conflict.collection, conflict.handle, ical, null, "", conflict.resolves);
         settleLeft(on, conflict);
     }
 
@@ -142,7 +154,8 @@ final class EventWrites {
             }
             EventMerge merge = CalendarClient.mergeEvent(left.base, left.local, left.remote);
             if (merge.resolved()) {
-                on.mutateEdit(left.collection, left.handle, merge.ical(), null, "");
+                on.mutateResolve(
+                        left.collection, left.handle, merge.ical(), null, "", left.resolves);
             }
         }
     }
@@ -208,8 +221,8 @@ final class EventWrites {
         } else if (left == null) {
             engine.mutateRemove(collection.id, target.handle);
         } else if (settling != null) {
-            engine.mutateEdit(
-                    settling.collection, settling.handle, left, null, "");
+            engine.mutateResolve(
+                    settling.collection, settling.handle, left, null, "", settling.resolves);
         } else {
             engine.mutateEdit(collection.id, target.handle, left, null, "");
         }

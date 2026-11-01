@@ -124,9 +124,10 @@ public final class PimdirContacts {
     /**
      * Stages a local create or edit as a pimdir mutation; the next sync pushes.
      *
-     * <p>An edit leaves the base alone. On a conflicted card saving is the
-     * resolution: the base adopts the remote state observed at conflict time,
-     * so the push is conditioned on what it was merged against.
+     * <p>An edit leaves the base alone. An ordinary edit, it is refused over a
+     * conflict, staging nothing (SYNC §7): a conflicted card is settled by its
+     * conflict form ({@link ContactStager#resolve}), whose base adopts the
+     * remote state observed at conflict time.
      */
     public void save(String collection, Card card) {
         CardIndex index = indexOf(card.vcard());

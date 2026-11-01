@@ -3,7 +3,7 @@ cairn: delta
 change: the-shape-follows-storage-draft-08
 ---
 
-Folds into spec/offline-store.md: what steps 2a and 2b change there, but for "An item conflict is settled by a person's choice", which folds into spec/conflicts.md. Not folded yet, the device check coming first.
+Folds into spec/offline-store.md: what steps 2a and 2b change there, but for "An item conflict is settled by a person's choice" and "A resolution names the conflicts it settles", which fold into spec/conflicts.md. Not folded yet, the device check coming first.
 
 ## ADDED Requirements
 
@@ -16,15 +16,20 @@ The app SHALL create its store at storage-draft-08 (`store_meta.format_version`,
 - THEN it opens on the reinstall screen, and nothing in the store is written
 
 ### Requirement: The store's writer opens first
-Opening the store SHALL configure its writing connection before write-ahead logging gives the pool its readers, so no reader is opened, nor caches the schema, before the store's tables exist. The writer SHALL erase what it deletes (`secure_delete`) and trust no function the schema names (`trusted_schema` off).
+Opening the store SHALL configure its writing connection before write-ahead logging gives the pool its readers, so no reader is opened, nor caches the schema, before the store's tables exist. The writer SHALL erase what it deletes (`secure_delete`) and trust no function the schema names (`trusted_schema` off). The journal mode SHALL be set once, when the store is created (STORAGE §8): an existing store SHALL open in write-ahead logging from its first statement, the platform setting it no other mode.
 
 #### Scenario: A first launch
 - GIVEN no store on the device
 - WHEN the app starts and lists its collections
 - THEN the store is created on its writer alone, and no statement fails for a table it lacks
 
+#### Scenario: A later launch
+- GIVEN a store the app created, in write-ahead logging
+- WHEN the app starts, the search index attaching the store
+- THEN no other journal mode is asked of it, nothing logs "database is locked", and the file stays in write-ahead logging
+
 ### Requirement: A body is named by its content and checked before use
-The blob store SHALL file a body under its BLAKE3 name, one shard level deep (`objects/<hash[0:2]>/<hash>`), checking the name before any path is built, and SHALL write it by renaming a temporary with `RENAME_NOREPLACE`, never by a hard link, which Android's SELinux policy denies an app on its own files: a name already held keeps what holds it. It SHALL follow no link under objects/, and SHALL check a body against its name before serving, parsing, pushing or copying it, moving one that fails into quarantine/.
+The blob store SHALL file a body under its BLAKE3 name, one shard level deep (`objects/<hash[0:2]>/<hash>`), checking the name before any path is built, and SHALL write it by renaming a temporary with `RENAME_NOREPLACE`, never by a hard link, which Android's SELinux policy denies an app on its own files: a name already held keeps what holds it. It SHALL follow no link under objects/, and SHALL check a body against its name before serving, parsing, pushing or copying it, moving one that fails into quarantine/. A write finding its name held, by the rename or the exclusive create refusing it or before writing at all, SHALL keep the file there only once it checks against the name (STORAGE §5): a file failing it, a link or a part a crashed copy left among them, is moved into quarantine/, the app's renames and moves serialised so no move takes a file another of its writers is still filing, and the body is filed again.
 
 #### Scenario: A message body downloaded on a device
 - GIVEN Android 15 refusing `link` to the app
@@ -35,6 +40,11 @@ The blob store SHALL file a body under its BLAKE3 name, one shard level deep (`o
 - GIVEN a body filed under its name
 - WHEN another writer files the same name
 - THEN the first file stays and the temporary is deleted
+
+#### Scenario: A damaged file under a body's name
+- GIVEN a file under a body's name holding other bytes, a part a crashed copy left
+- WHEN a sync or a download writes that body
+- THEN the file is moved into quarantine/, never unlinked, and the body is stored under its name
 
 ### Requirement: A queued action is read strictly
 Every row the app appends to the queue SHALL match its payload schema (STORAGE §15.3, payloads/), checked before anything is written. A message to send SHALL be queued as Annex B.2's `submit`: `source`, `from`, `rcpts` and `subject` alone, the message the row's body; it SHALL be anchored on the collection its sent copy belongs to, the account's sent mailbox, or on the account's outbox when the account marks none; what the outbox lists (the `Message-ID`, the subject and the date) SHALL be derived from the message, never added to the payload. The drain SHALL read each row by its schema before handing anything over: a malformed row is parked whole, naming what is malformed, and a row stating a later payload version is skipped, left pending and untouched. A submission SHALL go out with the envelope its payload states.
@@ -76,7 +86,7 @@ The store SHALL merge a source's upsert of a mutable kind into the shared item b
 - THEN the card keeps the phone's body, records the server's and reads as conflicted, and nothing is pushed over either
 
 ### Requirement: An item conflict is settled by a person's choice
-An item two sources diverged on SHALL be offered, once, as the conflicts of its collection's server binding are: merged three ways by the sync pass first, the item's body the local side, its diverging body the remote one, and the body the disagreeing source last agreed with the item (its `shared_object`, else its base) the ancestor, none when no binding names one; a clean merge staged as the resolution, a field both sides set apart left to the resolution form, the contact or the entry carrying the conflicted mark meanwhile. A person's resolution, staged on that binding, SHALL settle the item whatever body it keeps (SYNC §7): the item takes the body, its diverging one released and kept nowhere, and each source owes the body where its base differs. A binding SHALL be conflicted by its own divergence alone, the remote revision it records, never by the status its item's conflict projects.
+An item two sources diverged on SHALL be offered, once, as the conflicts of its collection's server binding are: merged three ways by the sync pass first, the item's body the local side, its diverging body the remote one, and the body the disagreeing source last agreed with the item (its `shared_object`, else its base) the ancestor, none when no binding names one; a clean merge staged as the resolution, a field both sides set apart left to the resolution form, the contact or the entry carrying the conflicted mark meanwhile. A person's resolution, staged on that binding and naming the diverging body it was shown, SHALL settle the item whatever body it keeps (SYNC §7): the item takes the body, its diverging one released and kept nowhere, and each source owes the body where its base differs. A binding SHALL be conflicted by its own divergence alone, the remote revision it records, never by the status its item's conflict projects.
 
 #### Scenario: Keeping the phone's card
 - GIVEN a card the phone and the server changed, the phone's kept and the server's recorded
@@ -87,6 +97,19 @@ An item two sources diverged on SHALL be offered, once, as the conflicts of its 
 - GIVEN a card whose server conflict waits for the form, and the phone changing the card meanwhile
 - WHEN the form is saved over the card the phone moved
 - THEN the item's conflict this records merges with nothing to ask and is settled by the same save, and the card does not read as conflicted
+
+### Requirement: A resolution names the conflicts it settles
+A conflict, a binding's or its item's, SHALL be settled only by a resolution naming its diverging body (SYNC §7, STORAGE §15.3): the resolution form and the sync passes' three-way merge state the diverging body they read (the remote side they offered, `resolves`), and an edit SHALL be refused, staging nothing, when it meets a conflict whose diverging body it does not name, states a resolution and meets none, or meets a conflict whose diverging body nobody has read. Every other edit of the app (a contact's or an entry's page, a task's, an import, a merge of duplicates) states none, and a conflict refuses it with a message naming the diverging body. A store load SHALL state the item conflict of each placement it hands the engine, with the item's diverging body, so a conflict is never read as one nobody read. A merge a pass cannot stage, the item conflicted over another body than the one it read, stays for the form rather than failing the pass. The app queues no edit (its queue carries `submit` alone, its drain skipping every other action), so no queued update parks.
+
+#### Scenario: Saving a conflicted contact from its ordinary page
+- GIVEN a contact the phone and the server changed, its server version recorded and not yet settled
+- WHEN its ordinary page is saved, or its conflict form is saved after a sync replaced the server version it showed
+- THEN the save fails naming the server version, nothing is staged, and the contact stays conflicted
+
+#### Scenario: Saving the conflict form
+- GIVEN the same contact open in its conflict form
+- WHEN the form is saved, whatever values it keeps
+- THEN the contact is settled as before, and the version the form showed is released
 
 ### Requirement: A round finding most of a collection gone asks first
 A round whose listing names no member while the store binds some, or finds more than half of at least 20 bound members absent (SYNC §5, §8), SHALL park rather than remove them, and the app SHALL say so once the pass ends, naming each collection and how many of its items the server no longer lists, offering to remove them too or to keep them. Removing them SHALL run the next sync of those collections accepting the absences; keeping them SHALL leave the round parked, decided again by the next pass.

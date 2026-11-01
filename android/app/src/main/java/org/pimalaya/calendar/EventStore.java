@@ -484,19 +484,28 @@ public final class EventStore {
         /** The body the source holds, recorded when the conflict was. */
         final String remote;
 
+        /**
+         * The diverging body {@code remote} is, by name: what a resolution
+         * merged over it states (SYNC §7, {@link
+         * org.pimalaya.pimdir.Stager#mutateResolve}); null for none.
+         */
+        final List<String> resolves;
+
         StoredConflict(
                 String collection,
                 String handle,
                 String linkId,
                 String base,
                 String local,
-                String remote) {
+                String remote,
+                List<String> resolves) {
             this.collection = collection;
             this.handle = handle;
             this.linkId = linkId;
             this.base = base;
             this.local = local;
             this.remote = remote;
+            this.resolves = resolves;
         }
     }
 
@@ -542,7 +551,8 @@ public final class EventStore {
                                 conflict.getString("id"),
                                 conflict.optString("baseVcard"),
                                 local,
-                                conflict.getString("remoteVcard")));
+                                conflict.getString("remoteVcard"),
+                                PimdirStorage.resolvesOf(conflict)));
             }
         } catch (JSONException error) {
             throw new IllegalStateException(error);

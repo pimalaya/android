@@ -1,5 +1,6 @@
 package org.pimalaya.contact;
 
+import android.util.Log;
 import java.util.List;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -7,8 +8,10 @@ import org.json.JSONObject;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.PimalayaException;
 import org.pimalaya.pimdir.PhonePass;
 import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
 
 /**
@@ -82,7 +85,16 @@ public final class ContactPhonePass extends PhonePass {
         if (!remote.isNull("revision")) {
             offline.setConflictRevision(collection, handle, remote.getString("revision"));
         }
-        ContactStager.edit(this, collection, handle, merged);
+        // NOTE: a resolution of the conflict this row offered, naming its
+        // diverging body (SYNC §7); the merge read the raw contact, which
+        // holds that body or a later one. One the engine refuses (the item
+        // conflicted over another body too) stays for the form.
+        try {
+            ContactStager.resolve(
+                    this, collection, handle, merged, PimdirStorage.resolvesOf(conflict));
+        } catch (PimalayaException refused) {
+            Log.w("pimalaya", "phone triage refused: " + refused.getMessage());
+        }
     }
 
     @Override

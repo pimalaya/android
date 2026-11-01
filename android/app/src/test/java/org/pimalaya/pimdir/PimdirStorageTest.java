@@ -1471,7 +1471,9 @@ public class PimdirStorageTest {
     private void resolvesTo(String body) throws Exception {
         diverged();
         String server = "acct/Contacts";
-        new Stager(store, Clients.real()) {}.mutateEdit(server, "c.vcf", body, null, "");
+        List<String> shown = PimdirStorage.resolvesOf(storage.loadConflict(server, "c.vcf"));
+        assertEquals("the form names the body it shows", List.of(h("dd03")), shown);
+        new Stager(store, Clients.real()) {}.mutateResolve(server, "c.vcf", body, null, "", shown);
 
         assertEquals(0, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
         assertNull(stringOf("SELECT conflict_object FROM items WHERE link_id = 'uid-c'"));
@@ -1484,6 +1486,62 @@ public class PimdirStorageTest {
                 statusIn(PimdirStorage.phoneCollection(server), "raw-1"));
         assertTrue("nothing left to resolve", storage.loadConflicts(server).isEmpty());
         assertRefcountsHold();
+    }
+
+    /**
+     * An ordinary edit over an item conflict is refused, staging nothing, and
+     * so is a resolution naming another body than the diverging one (SYNC §7,
+     * pimdir 3d6a04e): neither was decided over the body it would discard.
+     * Before, any edit of a conflicted card settled it, the server's body
+     * released unseen. The refusal names the diverging body.
+     */
+    @Test
+    public void anEditNotNamingTheItemsDivergingBodyIsRefused() throws Exception {
+        diverged();
+        String server = "acct/Contacts";
+        Stager stager = new Stager(store, Clients.real()) {};
+
+        try {
+            stager.mutateEdit(server, "c.vcf", "EDITED", null, "");
+            throw new AssertionError("an ordinary edit settled the conflict");
+        } catch (PimalayaException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains(h("dd03")));
+        }
+        try {
+            stager.mutateResolve(server, "c.vcf", "EDITED", null, "", List.of(h("dd01")));
+            throw new AssertionError("a resolution of another body settled the conflict");
+        } catch (PimalayaException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains(h("dd01")));
+        }
+
+        assertEquals(1, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
+        assertEquals(h("dd03"),
+                stringOf("SELECT conflict_object FROM items WHERE link_id = 'uid-c'"));
+        assertEquals(h("dd02"), stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+        assertEquals(0, scalar("SELECT count(*) FROM objects WHERE hash = '"
+                + PimdirHash.of("EDITED") + "'"));
+        assertEquals(1, storage.loadConflicts(server).size());
+        assertRefcountsHold();
+    }
+
+    /**
+     * A load states each placement whose item is conflicted with the item's
+     * diverging body (`PimdirLoaded::conflicted`), what an edit meets beside
+     * its binding's conflict: left out, the engine reads the conflict as one
+     * nobody read and refuses every resolution of it.
+     */
+    @Test
+    public void aLoadStatesTheItemConflictsItsPlacementsMeet() throws Exception {
+        diverged();
+        for (String collection : List.of(
+                "acct/Contacts", PimdirStorage.phoneCollection("acct/Contacts"))) {
+            JSONArray conflicted =
+                    storage.loadCollection(collection, null).getJSONArray("conflicted");
+            assertEquals(collection, 1, conflicted.length());
+            assertEquals(h("dd03"), conflicted.getJSONObject(0).getString("object"));
+            assertEquals(statusIn(collection,
+                            conflicted.getJSONObject(0).getString("handle")), "conflict");
+        }
     }
 
     /**
@@ -1513,7 +1571,8 @@ public class PimdirStorageTest {
                 sourced(phone, "raw-1", h("dd02"), "v2")));
 
         Stager stager = new Stager(store, Clients.real()) {};
-        stager.mutateEdit(server, "c.vcf", "MERGED", null, "");
+        stager.mutateResolve(server, "c.vcf", "MERGED", null, "",
+                PimdirStorage.resolvesOf(storage.loadConflict(server, "c.vcf")));
 
         assertEquals(1, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
         List<JSONObject> conflicts = storage.loadConflicts(server);
@@ -1521,8 +1580,11 @@ public class PimdirStorageTest {
         assertEquals("PHONE", conflicts.get(0).getString("vcard"));
         assertEquals("BASE", conflicts.get(0).getString("baseVcard"));
         assertEquals("MERGED", conflicts.get(0).getString("remoteVcard"));
+        assertEquals(List.of(PimdirHash.of("MERGED")),
+                PimdirStorage.resolvesOf(conflicts.get(0)));
 
-        stager.mutateEdit(server, "c.vcf", "MERGED", null, "");
+        stager.mutateResolve(server, "c.vcf", "MERGED", null, "",
+                PimdirStorage.resolvesOf(conflicts.get(0)));
         assertEquals(0, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
         assertEquals(PimdirHash.of("MERGED"),
                 stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
@@ -1557,8 +1619,9 @@ public class PimdirStorageTest {
         storage.applyWrites(batch(storeObject("dd02", card("Jo", "+33100")),
                 sourced(phone, "raw-1", h("dd02"), "v2")));
 
+        List<String> shown = PimdirStorage.resolvesOf(storage.loadConflict(server, "c.vcf"));
         new org.pimalaya.contact.ContactStager(store, Clients.real())
-                .resolve(server, "c.vcf", card("Joe", "+33100"));
+                .resolve(server, "c.vcf", card("Joe", "+33100"), shown);
 
         assertEquals(0, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
         assertEquals(PimdirHash.of(card("Joe", "+33100")),

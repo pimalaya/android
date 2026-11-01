@@ -710,6 +710,11 @@ pub enum MutationJson {
         /// person (SYNC §7): the bodies it does not adopt are kept.
         #[serde(default)]
         overrule: bool,
+        /// The diverging bodies a person's resolution was decided over, the
+        /// `conflict_object` of each conflict its form or merge read (SYNC
+        /// §7). Absent for an ordinary edit, which a conflict refuses.
+        #[serde(default)]
+        resolves: Option<Vec<String>>,
     },
     Add {
         link_id: String,
@@ -757,6 +762,7 @@ impl TryFrom<MutationJson> for PimdirMutation {
                 sort_key,
                 if_match,
                 overrule,
+                resolves,
             } => Self::Edit {
                 handle: PimdirHandle(handle),
                 object: PimdirObject {
@@ -768,6 +774,7 @@ impl TryFrom<MutationJson> for PimdirMutation {
                 sort_key: sort_key.map(Into::into),
                 if_match: if_match.filter(|hash| !hash.is_empty()).map(PimdirHash),
                 overrule,
+                resolves: resolves.map(|names| names.into_iter().map(PimdirHash).collect()),
             },
             MutationJson::Add {
                 link_id,
@@ -823,6 +830,20 @@ pub struct LoadedJson {
     /// (`list_superseded_bindings`, SYNC §3).
     #[serde(default)]
     pub superseded: Vec<SupersedingJson>,
+    /// The loaded placements whose item is conflicted (`items.conflicted`,
+    /// SYNC §9), each with the item's diverging body, absent while nobody
+    /// has read it: what an `Edit` meets beside its binding's conflict.
+    #[serde(default)]
+    pub conflicted: Vec<ConflictedJson>,
+}
+
+/// A loaded placement whose item is conflicted, and the item's diverging
+/// body (`items.conflict_object`), absent while nobody has read it.
+#[derive(Deserialize)]
+pub struct ConflictedJson {
+    pub handle: String,
+    #[serde(default)]
+    pub object: Option<String>,
 }
 
 /// A scope `[since, until)` on the mail `Date`, an absent bound open.

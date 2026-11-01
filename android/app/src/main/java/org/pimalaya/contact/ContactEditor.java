@@ -164,15 +164,19 @@ public final class ContactEditor {
         String handle =
                 PimdirStorage.rowHandle(replica.card.uri(), replica.card.id());
         JSONObject bodies;
+        java.util.List<String> resolves;
         ConflictForm resolution;
         try {
             bodies = new PimdirStorage(parts.pimdir()).loadConflict(replica.book.url(), handle);
             if (bodies == null) {
                 // NOTE: flagged but its remote is not captured yet (the
-                // capturing sync has not run); edit it plainly.
+                // capturing sync has not run); it opens plainly, and its save
+                // is refused, naming the unread body, until the hydrate lands
+                // it: no resolution settles a body nobody read (SYNC §7).
                 openMerged(group.replicas);
                 return;
             }
+            resolves = PimdirStorage.resolvesOf(bodies);
             resolution =
                     ContactClient.mergeConflictForm(
                             bodies.optString("base"),
@@ -188,7 +192,11 @@ public final class ContactEditor {
             // the vanishing conflict flag reads as a bug.
             try {
                 new ContactStager(parts.pimdir(), parts.clients())
-                        .resolve(replica.book.url(), handle, resolution.vcard());
+                        .resolve(
+                                replica.book.url(),
+                                handle,
+                                resolution.vcard(),
+                                resolves);
             } catch (Exception error) {
                 host.showError(error, R.string.save_failed);
                 return;
@@ -205,6 +213,7 @@ public final class ContactEditor {
         edit.replicas = new ArrayList<>(java.util.Collections.singletonList(replica));
         edit.resolvingConflict = true;
         edit.vcard = resolution.vcard();
+        edit.resolves = resolves;
         edit.title = replica.displayName();
 
         form.load(resolution.model(), resolution.alternatives(), resolution.changed());

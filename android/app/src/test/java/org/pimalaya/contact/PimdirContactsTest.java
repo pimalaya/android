@@ -14,6 +14,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.client.Card;
+import org.pimalaya.client.Clients;
+import org.pimalaya.client.PimalayaException;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
 import org.pimalaya.pimdir.PimdirStorage;
@@ -212,19 +214,54 @@ public class PimdirContactsTest {
                 contacts.collectionsOf("u6"));
     }
 
+    /**
+     * A card saved as an ordinary edit (an import, a merge of duplicates) over
+     * its binding's conflict is refused, staging nothing (SYNC §7): it was not
+     * decided over the server's body, which settling would discard. Before
+     * io-pimdir fd0c060 such a save resolved the conflict.
+     */
     @Test
-    public void savingAConflictedCardResolvesItAgainstTheWholeObservedState() {
+    public void savingAConflictedCardIsRefused() throws Exception {
+        String diverging = conflicted();
+        String held = objectOf(BOOK, "u7");
+
+        try {
+            contacts.save(BOOK, new Card("u7", null, null, vcard("u7", "Gil edited")));
+            throw new AssertionError("an ordinary save settled the conflict");
+        } catch (PimalayaException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains(diverging));
+        }
+
+        assertEquals(held, objectOf(BOOK, "u7"));
+        assertEquals(1, scalar("SELECT conflicted FROM bindings WHERE link_id = 'u7'"));
+        assertEquals(diverging,
+                stringOf("SELECT conflict_object FROM bindings WHERE link_id = 'u7'"));
+        assertTrue(contacts.list(BOOK).get(0).conflicted);
+    }
+
+    /** The card u7 bound to c7.vcf, its binding conflicted over a body. */
+    private String conflicted() {
         contacts.save(BOOK, new Card("u7", null, null, vcard("u7", "Gil")));
         bind(BOOK, "u7", "c7.vcf", "etag-old");
-        String base = objectOf(BOOK, "u7");
         String diverging = storeBody("REMOTE");
         db.execSQL(
                 "UPDATE bindings SET conflicted = 1, conflict_revision = 'etag-remote',"
                         + " conflict_object = ? WHERE link_id = 'u7'",
                 new Object[] {diverging});
         assertTrue(contacts.list(BOOK).get(0).conflicted);
+        return diverging;
+    }
 
-        contacts.save(BOOK, new Card("u7", null, null, vcard("u7", "Gil resolved")));
+    @Test
+    public void resolvingAConflictedCardRebasesOnTheWholeObservedState() throws Exception {
+        String diverging = conflicted();
+        String base = objectOf(BOOK, "u7");
+        List<String> shown = PimdirStorage.resolvesOf(
+                new PimdirStorage(pimdir).loadConflict(BOOK, "c7.vcf"));
+        assertEquals("the form names the body it shows", List.of(diverging), shown);
+
+        new ContactStager(pimdir, Clients.real())
+                .resolve(BOOK, "c7.vcf", vcard("u7", "Gil resolved"), shown);
 
         // NOTE: the push is conditioned on the state the resolution merged
         // against, not the one the conflict was first noticed at.

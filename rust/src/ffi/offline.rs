@@ -458,8 +458,9 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirMerge<'local>(
 /// `Native.pimdirRename`: renames `from` to `to` unless a name holds `to`,
 /// never replacing it (STORAGE §5, [`blobs::rename_noreplace_on`]),
 /// through `renameat2` only where `renameat2` says the platform allows it
-/// (API 30 and later); answers `{"held": bool}`, `held` when the name was
-/// kept and `from` left where it was, or `{"error"}`.
+/// (API 30 and later); answers `{"filed"}`: `moved`, `held` when the name
+/// was kept, its file hashing to it, and `failing` when the file holding it
+/// fails it (STORAGE §5), `from` left where it was in both; or `{"error"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_pimdirRename<'local>(
     mut env: EnvUnowned<'local>,
@@ -473,7 +474,14 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirRename<'local>(
         let to = read_string(env, &to);
         let filed = blobs::rename_noreplace_on(Path::new(&from), Path::new(&to), renameat2);
         let json = match filed {
-            Ok(filed) => serde_json::json!({ "held": filed == Filed::Held }).to_string(),
+            Ok(filed) => {
+                let filed = match filed {
+                    Filed::Moved => "moved",
+                    Filed::Held => "held",
+                    Filed::Failing => "failing",
+                };
+                serde_json::json!({ "filed": filed }).to_string()
+            }
             Err(err) => error_json(format!("Could not rename {from} to {to}: {err}")),
         };
         Ok(env.new_string(json)?.into())

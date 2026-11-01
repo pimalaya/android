@@ -24,6 +24,9 @@ import org.json.JSONObject;
  * @param summary the derived summary, opaque (the pimdir persistence
  *     format), read-only by contract
  * @param sortKey the derived sort key
+ * @param resolves the diverging bodies a resolution was decided over, for an
+ *     edit settling a conflict (SYNC §7); null for an ordinary edit, which a
+ *     conflict refuses, and for every other op
  */
 public record Mutation(
         Op op,
@@ -36,7 +39,8 @@ public record Mutation(
         String body,
         String bodyBase64,
         JSONObject summary,
-        String sortKey) {
+        String sortKey,
+        java.util.List<String> resolves) {
     /** The operation of a mutation, as the wire tags it. */
     public enum Op {
         /** A flag set replacing the placement's markers. */
@@ -67,30 +71,43 @@ public record Mutation(
     /** A flag set on one placement. */
     public static Mutation setFlags(String handle, Flags flags) {
         return new Mutation(Op.SET_FLAGS, handle, null, null, flags, null, null, null, null, null,
-                null);
+                null, null);
     }
 
     /** A removal of one placement. */
     public static Mutation remove(String handle) {
         return new Mutation(Op.REMOVE, handle, null, null, null, null, null, null, null, null,
-                null);
+                null, null);
     }
 
     /** A move of one placement into {@code target}. */
     public static Mutation move(String handle, String target) {
         return new Mutation(Op.MOVE, handle, null, target, null, null, null, null, null, null,
-                null);
+                null, null);
     }
 
     /** A copy of one placement into {@code target}. */
     public static Mutation copy(String handle, String target) {
         return new Mutation(Op.COPY, handle, null, target, null, null, null, null, null, null,
-                null);
+                null, null);
     }
 
-    /** A content edit on one placement; a null {@code sortKey} keeps it. */
+    /**
+     * An ordinary content edit on one placement; a null {@code sortKey} keeps
+     * it. A conflict, the item's or the binding's, refuses it (SYNC §7).
+     */
     public static Mutation edit(
             String handle, String hash, String body, JSONObject summary, String sortKey) {
+        return edit(handle, hash, body, summary, sortKey, null);
+    }
+
+    /**
+     * A content edit on one placement, a person's resolution when {@code
+     * resolves} names the diverging bodies its form or merge read (SYNC §7):
+     * it settles the conflicts it meets only when it names each one's.
+     */
+    public static Mutation edit(String handle, String hash, String body, JSONObject summary,
+            String sortKey, java.util.List<String> resolves) {
         return new Mutation(
                 Op.EDIT,
                 handle,
@@ -102,7 +119,8 @@ public record Mutation(
                 body,
                 null,
                 summary,
-                sortKey);
+                sortKey,
+                resolves == null ? null : java.util.List.copyOf(resolves));
     }
 
     /** A locally authored item, its body text. */
@@ -119,7 +137,8 @@ public record Mutation(
                 body,
                 null,
                 summary,
-                sortKey);
+                sortKey,
+                null);
     }
 
     /**
@@ -140,7 +159,8 @@ public record Mutation(
                 null,
                 Base64.getEncoder().encodeToString(body),
                 summary,
-                sortKey);
+                sortKey,
+                null);
     }
 
     JSONObject toJson() {
@@ -159,6 +179,11 @@ public record Mutation(
             // NOTE: an edit changing what the key derives from has to say so,
             // or the item keeps the position its old key gave it.
             mutation.put("sortKey", sortKey);
+            // NOTE: an absent key for an ordinary edit, never null nor an
+            // empty array, which the bridge reads as a resolution of nothing.
+            if (resolves != null) {
+                mutation.put("resolves", new org.json.JSONArray(resolves));
+            }
             return mutation;
         } catch (JSONException error) {
             throw new PimalayaException("Unwritable mutation: " + error.getMessage());

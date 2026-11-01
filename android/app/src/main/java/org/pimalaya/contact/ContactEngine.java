@@ -32,6 +32,7 @@ import org.pimalaya.client.ConflictForm;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.NewCard;
 import org.pimalaya.client.OfflineClient;
+import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.PushAction;
 import org.pimalaya.client.PushChange;
 import org.pimalaya.client.PushOp;
@@ -299,7 +300,20 @@ public final class ContactEngine extends PimdirEngine {
             return false;
         }
 
-        ContactStager.edit(this, url, conflict.getString("handle"), resolution.vcard());
+        // NOTE: a resolution naming the diverging body the merge read (SYNC
+        // §7); one the engine refuses, a conflict it meets standing over
+        // another body, stays for the form rather than failing the pass.
+        try {
+            ContactStager.resolve(
+                    this,
+                    url,
+                    conflict.getString("handle"),
+                    resolution.vcard(),
+                    PimdirStorage.resolvesOf(conflict));
+        } catch (PimalayaException refused) {
+            Log.w("pimalaya", "contact triage refused: " + refused.getMessage());
+            return false;
+        }
         return true;
     }
 

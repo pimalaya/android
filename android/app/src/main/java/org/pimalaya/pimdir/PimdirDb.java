@@ -76,6 +76,16 @@ public final class PimdirDb extends SQLiteOpenHelper {
      */
     public PimdirDb(Context context) {
         super(context, databaseFile(context).getAbsolutePath(), null, PimdirSql.version());
+        // NOTE: a store this app created is in write-ahead logging since its
+        // first open (onOpen), and the journal mode is never set again on an
+        // existing store (STORAGE §8): opened without the flag, the platform
+        // sets its default mode first (TRUNCATE on a device), flipping the
+        // file at every open or failing while another handle holds it. So an
+        // existing store opens with logging on from the start; a fresh one
+        // keeps onOpen's path, the helper's version read finding no reader
+        // before onCreate made the tables.
+        File file = databaseFile(context);
+        setWriteAheadLoggingEnabled(file.isFile() && file.length() > 0);
         this.blobs = new File(storeDir(context), "objects");
         this.context = context.getApplicationContext() == null
                 ? context
@@ -329,7 +339,9 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * Turns write-ahead logging on once the store has its tables.
+     * Turns write-ahead logging on once a fresh store has its tables, the one
+     * time its journal mode is set (STORAGE §8); an existing store opened
+     * with it on already ({@link #PimdirDb}), which this leaves as it is.
      *
      * <p>Not in {@link #onConfigure}: logging gives the pool its readers, and
      * the helper reads the version (a read-only statement, so on a reader)

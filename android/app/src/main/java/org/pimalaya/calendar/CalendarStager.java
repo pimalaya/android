@@ -24,22 +24,24 @@ public final class CalendarStager extends Stager {
     /**
      * Stages an edit, the summary and sort key its body derives when the
      * caller states none (spec/offline-store.md): a staged to-do is in
-     * {@code task_summary} as it is on the phone.
+     * {@code task_summary} as it is on the phone. An ordinary edit ({@link
+     * #mutateEdit}) comes here too, stating no {@code resolves}.
      */
     @Override
-    public void mutateEdit(
-            String collection, String handle, String body, JSONObject summary, String sortKey)
+    public void mutateResolve(String collection, String handle, String body,
+            JSONObject summary, String sortKey, java.util.List<String> resolves)
             throws JSONException {
         Derived derived = summary == null ? CalendarSummaries.of(body) : null;
-        super.mutateEdit(
+        super.mutateResolve(
                 collection,
                 handle,
                 body,
                 derived == null ? summary : derived.summary(),
-                derived == null ? sortKey : derived.sortKey());
+                derived == null ? sortKey : derived.sortKey(),
+                resolves);
     }
 
-    /** Stages a create, as {@link #mutateEdit} derives its summary. */
+    /** Stages a create, as {@link #mutateResolve} derives its summary. */
     @Override
     public void mutateAdd(
             String collection,

@@ -254,10 +254,29 @@ public abstract class Stager implements OfflineDriver {
         staged(target);
     }
 
-    /** Stages a content edit; editing a conflicted placement resolves it. */
+    /**
+     * Stages an ordinary content edit, which a conflict refuses (SYNC §7): a
+     * conflicted placement is settled by {@link #mutateResolve} alone.
+     */
     public void mutateEdit(String collection, String handle, String body, JSONObject summary,
             String sortKey) throws JSONException {
-        mutate(collection, Mutation.edit(handle, PimdirHash.of(body), body, summary, sortKey));
+        mutateResolve(collection, handle, body, summary, sortKey, null);
+    }
+
+    /**
+     * Stages a content edit settling the conflicts it meets, a person's
+     * resolution (SYNC §7): {@code resolves} names the diverging bodies the
+     * form or the merge read ({@link PimdirStorage#loadConflicts}'s {@code
+     * resolves}), and the engine refuses it, staging nothing, unless it names
+     * the diverging body of each conflict the edit meets, or when it meets
+     * none. Null stages an ordinary edit.
+     */
+    public void mutateResolve(String collection, String handle, String body,
+            JSONObject summary, String sortKey, java.util.List<String> resolves)
+            throws JSONException {
+        mutate(
+                collection,
+                Mutation.edit(handle, PimdirHash.of(body), body, summary, sortKey, resolves));
     }
 
     /** Stages a local item the remote never saw; the next sync appends it. */

@@ -150,10 +150,24 @@ public final class PimdirSql {
         return Replies.object(Native.pimdirMerge(input.toString()));
     }
 
+    /** What a no-replace rename did ({@link #renameNoReplace}). */
+    public enum Filed {
+        /** The source now holds the name. */
+        MOVED,
+        /** The name was held by a file hashing to it, kept; the source left. */
+        HELD,
+        /**
+         * The name was held by a file failing it, a link or a part included,
+         * which holds no body; the source left, for the owner to move that
+         * file into quarantine/ and rename again (STORAGE §5, §7).
+         */
+        FAILING
+    }
+
     /**
      * Renames {@code from} to {@code to} unless a name holds {@code to}, never
-     * replacing it (STORAGE §5); answers false when the name was kept and
-     * {@code from} left where it was.
+     * replacing it (STORAGE §5), {@code to} named by its body's hash; a name
+     * held is verified before it is kept.
      *
      * <p>A rename rather than a hard link: Android's SELinux policy denies
      * {@code link} on an app's own data files. Where the kernel or the file
@@ -163,9 +177,9 @@ public final class PimdirSql {
      * {@code renameat2}, and a blocked call kills the process.
      *
      * @throws java.io.IOException when the rename fails otherwise (another
-     *     file system, a missing source)
+     *     file system, a missing source, a name that is no body's)
      */
-    public static boolean renameNoReplace(java.io.File from, java.io.File to)
+    public static Filed renameNoReplace(java.io.File from, java.io.File to)
             throws java.io.IOException {
         JSONObject reply;
         try {
@@ -180,7 +194,16 @@ public final class PimdirSql {
         if (reply.has("error")) {
             throw new java.io.IOException(reply.optString("error"));
         }
-        return !reply.optBoolean("held");
+        switch (reply.optString("filed")) {
+            case "moved":
+                return Filed.MOVED;
+            case "held":
+                return Filed.HELD;
+            case "failing":
+                return Filed.FAILING;
+            default:
+                throw new java.io.IOException("Unreadable rename reply: " + reply);
+        }
     }
 
     /** Every statement, by name; unmodifiable. */

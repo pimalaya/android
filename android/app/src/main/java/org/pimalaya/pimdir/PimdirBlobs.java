@@ -28,10 +28,24 @@ import java.util.UUID;
  * {@code RENAME_NOREPLACE}, a name held keeping what holds it, never by a hard
  * link, which Android's SELinux policy denies an app on its own files. No link
  * under objects/ is followed. A body is checked against its name before it is
- * served, parsed, pushed or copied ({@link #get}, {@link #verified}); one
- * failing it is moved into quarantine/ (§7), never unlinked.
+ * served, parsed, pushed or copied ({@link #get}, {@link #verified}), and a
+ * name a write finds held before it is kept (§5); one failing it is moved into
+ * quarantine/ (§7), never unlinked, and the write files its bytes again.
  */
 public final class PimdirBlobs {
+    /**
+     * The process's renames onto a name and its quarantine moves, one at a
+     * time (§7: serialised against the owner's own writers): a move never
+     * takes a file another writer of this process is still filing, which the
+     * exclusive create and copy holds as a part under the name until its copy
+     * is synced, and a name held is verified, moved and filed again as one.
+     * The app is the store's one process, its owner.
+     */
+    private static final Object FILING = new Object();
+
+    /** How many times one write moves a failing file aside and files again. */
+    private static final int FILINGS_MAX = 3;
+
     private final File root;
 
     /** The blob directory under {@code root}, its quarantine beside it. */
@@ -73,12 +87,14 @@ public final class PimdirBlobs {
     /**
      * Files a body under the hash the engine computed for it.
      *
-     * <p>Storing one already present is a no-op: the name is the content, so
-     * the bytes cannot differ, and a name held is never replaced (§5).
+     * <p>Storing one already present is a no-op once the file under the name
+     * checks against it, and a name held is never replaced (§5): a file
+     * failing it, a part a crashed copy left or a link, is moved into
+     * quarantine/ and the body filed again.
      */
     public void put(String hash, byte[] body) throws IOException {
         File target = pathOf(hash);
-        if (has(hash)) {
+        if (intact(hash)) {
             return;
         }
         File temp = temporary(target);
@@ -87,7 +103,7 @@ public final class PimdirBlobs {
             out.flush();
             out.getFD().sync();
         }
-        commit(temp, target);
+        commit(hash, temp, target);
     }
 
     /**
@@ -97,7 +113,7 @@ public final class PimdirBlobs {
      */
     void put(String hash, File source) throws IOException {
         File target = pathOf(hash);
-        if (has(hash)) {
+        if (intact(hash)) {
             return;
         }
         File temp = temporary(target);
@@ -110,7 +126,7 @@ public final class PimdirBlobs {
             out.flush();
             out.getFD().sync();
         }
-        commit(temp, target);
+        commit(hash, temp, target);
     }
 
     /**
@@ -122,7 +138,7 @@ public final class PimdirBlobs {
     public void adopt(String hash, File source) throws IOException {
         try {
             File target = pathOf(hash);
-            if (has(hash)) {
+            if (intact(hash)) {
                 return;
             }
             try (java.io.RandomAccessFile synced = new java.io.RandomAccessFile(source, "rw")) {
@@ -131,16 +147,29 @@ public final class PimdirBlobs {
             shard(target);
             try {
                 // NOTE: a name another writer filed meanwhile holds these
-                // very bytes, and is kept; the source goes either way.
-                if (PimdirSql.renameNoReplace(source, target)) {
-                    sync(target.getParentFile());
-                }
+                // very bytes once it checks, and is kept; the source goes
+                // either way.
+                file(hash, source, target);
             } catch (IOException unrenamable) {
                 put(hash, source);
             }
         } finally {
             source.delete();
         }
+    }
+
+    /**
+     * Whether the body is stored and its file checks against its name; a
+     * file under the name failing it (a link, a part a crashed copy left,
+     * other bytes) is moved into quarantine/ first, so a write skipping a
+     * name it finds held keeps it only once it checks (§5).
+     */
+    private boolean intact(String hash) throws IOException {
+        if (has(hash) && hash.equals(PimdirHash.of(pathOf(hash)))) {
+            return true;
+        }
+        quarantine(hash);
+        return false;
     }
 
     /**
@@ -187,11 +216,28 @@ public final class PimdirBlobs {
     }
 
     /**
-     * Moves a body failing its name into quarantine/, under its name, a period
-     * and a suffix unique to the move (§7). Nothing reads it as a body again,
-     * and only the user empties it.
+     * Moves a file failing its name into quarantine/, under its name, a period
+     * and a suffix unique to the move (§7), once it fails again under {@link
+     * #FILING}: a link or anything but a regular file holds no body. Nothing
+     * reads it as a body again, and only the user empties it.
      */
     void quarantine(String hash) throws IOException {
+        File held = pathOf(hash);
+        synchronized (FILING) {
+            if (!Files.exists(held.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+                return;
+            }
+            // NOTE: verified again under the lock: a writer of this process
+            // may have set a failing file aside and filed the body since.
+            if (has(hash) && hash.equals(PimdirHash.of(held))) {
+                return;
+            }
+            moveAside(hash);
+        }
+    }
+
+    /** Moves whatever holds {@code hash}'s name into quarantine/ (§7). */
+    private void moveAside(String hash) throws IOException {
         Path source = pathOf(hash).toPath();
         if (!Files.exists(source, LinkOption.NOFOLLOW_LINKS)) {
             return;
@@ -243,17 +289,47 @@ public final class PimdirBlobs {
     }
 
     /**
-     * Renames a written temporary to its name (§5), never replacing it: a name
-     * held keeps what holds it, the temporary deleted.
+     * Renames a written temporary to its name ({@link #file}), the temporary
+     * deleted after.
      */
-    private static void commit(File temp, File target) throws IOException {
+    private void commit(String hash, File temp, File target) throws IOException {
         try {
-            // NOTE: a name held was filed by another writer: the same bytes.
-            if (PimdirSql.renameNoReplace(temp, target)) {
-                sync(target.getParentFile());
-            }
+            file(hash, temp, target);
         } finally {
             temp.delete();
+        }
+    }
+
+    /**
+     * Renames {@code source} to its name (§5), never replacing it: a name held
+     * by a file checking against it is kept, {@code source} left; one held by
+     * a file failing it is moved into quarantine/ and the rename made again,
+     * all under {@link #FILING}, the owner's moves serialised against its own
+     * writers (§7).
+     *
+     * @throws IOException when the rename fails, or the name stays held by a
+     *     failing file after {@link #FILINGS_MAX} moves
+     */
+    private void file(String hash, File source, File target) throws IOException {
+        synchronized (FILING) {
+            for (int filing = 1; ; filing++) {
+                switch (PimdirSql.renameNoReplace(source, target)) {
+                    case MOVED:
+                        sync(target.getParentFile());
+                        return;
+                    case HELD:
+                        return;
+                    case FAILING:
+                        if (filing == FILINGS_MAX) {
+                            throw new IOException(
+                                    "The name " + hash + " stays held by a file failing it");
+                        }
+                        // NOTE: verified by the rename under this lock, so
+                        // moved without reading it again.
+                        moveAside(hash);
+                        break;
+                }
+            }
         }
     }
 

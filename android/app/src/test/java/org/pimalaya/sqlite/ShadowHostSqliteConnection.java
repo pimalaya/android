@@ -60,10 +60,38 @@ public class ShadowHostSqliteConnection {
         return opened;
     }
 
+    /**
+     * The journal mode every statement setting one asked, with the path of
+     * its connection, in order since the test began.
+     */
+    private static final List<String[]> JOURNAL_MODES = new ArrayList<>();
+
+    /** How a statement setting the journal mode reads, the mode its group. */
+    private static final java.util.regex.Pattern JOURNAL_MODE =
+            java.util.regex.Pattern.compile(
+                    "(?is)^\\s*PRAGMA\\s+(?:\\w+\\.)?journal_mode\\s*=\\s*'?(\\w+)'?.*");
+
+    /**
+     * Every journal mode a statement on a connection to {@code path} set
+     * since the test began (or since {@link #reset}), upper-cased, in order:
+     * the platform's own {@code PRAGMA journal_mode=…} as it configures a
+     * connection, the store's and the helper's.
+     */
+    public static synchronized List<String> journalModesSet(String path) {
+        List<String> modes = new ArrayList<>();
+        for (String[] set : JOURNAL_MODES) {
+            if (set[0].equals(path)) {
+                modes.add(set[1]);
+            }
+        }
+        return modes;
+    }
+
     @Resetter
     public static synchronized void reset() {
         OPEN.clear();
         BESIDE.clear();
+        JOURNAL_MODES.clear();
     }
 
     private static int sqliteFlags(int openFlags) {
@@ -138,6 +166,17 @@ public class ShadowHostSqliteConnection {
 
     @Implementation
     protected static long nativePrepareStatement(long connection, String sql) {
+        java.util.regex.Matcher mode = JOURNAL_MODE.matcher(sql);
+        if (mode.matches()) {
+            synchronized (ShadowHostSqliteConnection.class) {
+                String path = OPEN.get(connection);
+                JOURNAL_MODES.add(
+                        new String[] {
+                            path == null ? "" : path,
+                            mode.group(1).toUpperCase(java.util.Locale.ROOT)
+                        });
+            }
+        }
         return HostSqlite.nativePrepareStatement(connection, sql);
     }
 

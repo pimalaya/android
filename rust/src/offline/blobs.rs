@@ -11,6 +11,11 @@
 //! this export. Where the kernel or the file system lacks that rename, the
 //! name is created exclusively and the bytes copied into it ([`claimed`]):
 //! never `rename(2)`, which replaces.
+//!
+//! A name found held is verified before it is kept (STORAGE §5): a file
+//! failing it, a part a crashed copy left or a link among them, answers
+//! [`Filed::Failing`], for the owner to move into quarantine/ and file
+//! again.
 
 use std::{
     fs::{self, File, Metadata, OpenOptions},
@@ -19,6 +24,8 @@ use std::{
     path::Path,
 };
 
+use io_pimdir::{hash::PimdirHasher, object::PimdirHash};
+
 /// What a no-replace rename did.
 #[derive(Debug, Eq, PartialEq)]
 pub enum Filed {
@@ -26,6 +33,12 @@ pub enum Filed {
     Moved,
     /// The name was already held, and kept: the source is where it was.
     Held,
+    /// The name was held by a file failing it, which holds no body: the
+    /// source is where it was, the owner moving that file into quarantine/
+    /// before it files again (STORAGE §5, §7). Only [`rename_noreplace_on`]
+    /// verifies; the moves beneath it answer [`Filed::Held`] for a name
+    /// held whatever holds it.
+    Failing,
 }
 
 /// How many times [`claimed`] files again a name moved away while it
@@ -46,10 +59,61 @@ pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<Filed> {
 /// and the app's seccomp filter, generated from bionic's own system calls,
 /// need not allow it: a blocked call kills the process with `SIGSYS` rather
 /// than failing, so the fallback could never run.
+///
+/// A name held is verified, on either path ([`checked`]): kept as
+/// [`Filed::Held`] only when its file hashes to the name, else
+/// [`Filed::Failing`].
 pub fn rename_noreplace_on(from: &Path, to: &Path, renameat2_allowed: bool) -> io::Result<Filed> {
-    match renameat2_allowed {
-        true => rename_noreplace(from, to),
-        false => claimed(from, to),
+    let filed = match renameat2_allowed {
+        true => rename_noreplace(from, to)?,
+        false => claimed(from, to)?,
+    };
+    checked(filed, to)
+}
+
+/// `filed` once a name held is verified (STORAGE §5): [`Filed::Held`]
+/// when the file under `to` hashes to the name `to` spells, read whole
+/// through a descriptor that follows no link; [`Filed::Failing`] for a
+/// link, anything but a regular file, other bytes, or a name gone since
+/// (moved into quarantine/ meanwhile), which the caller files again.
+fn checked(filed: Filed, to: &Path) -> io::Result<Filed> {
+    if filed != Filed::Held {
+        return Ok(filed);
+    }
+    let name = to.file_name().and_then(|name| name.to_str()).unwrap_or("");
+    let name = PimdirHash::from(name);
+    if !name.is_name() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} is no body's name", to.display()),
+        ));
+    }
+    let mut held = match OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(to)
+    {
+        Ok(held) => held,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Filed::Failing),
+        Err(err) if err.raw_os_error() == Some(libc::ELOOP) => return Ok(Filed::Failing),
+        Err(err) => return Err(err),
+    };
+    if !held.metadata()?.is_file() {
+        return Ok(Filed::Failing);
+    }
+    let mut hasher = PimdirHasher::new();
+    let mut buffer = vec![0; 64 * 1024];
+    loop {
+        match held.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => hasher.update(&buffer[..read]),
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+            Err(err) => return Err(err),
+        }
+    }
+    match hasher.finish() == name {
+        true => Ok(Filed::Held),
+        false => Ok(Filed::Failing),
     }
 }
 
@@ -331,6 +395,49 @@ mod tests {
             assert_eq!(file(&from, &to, unsupported).unwrap(), Filed::Held);
             assert_eq!(fs::read(&to).unwrap(), body);
             assert_eq!(fs::read(&from).unwrap(), b"new");
+        }
+    }
+
+    /// A name held is kept only once its file hashes to it (STORAGE §5), on
+    /// the rename and on the exclusive create alike: other bytes, a part a
+    /// crashed copy left and a link answer `Failing`, leaving the file and the
+    /// source where they were for the owner to move the one into quarantine/
+    /// and file the other again.
+    #[test]
+    fn a_name_held_is_kept_only_once_it_checks() {
+        let body = b"the body";
+        let name = io_pimdir::hash::hash(body).0;
+        for renameat2 in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let (from, to) = (dir.path().join(".tmp"), dir.path().join(&name));
+            fs::write(&from, body).unwrap();
+
+            fs::write(&to, body).unwrap();
+            assert_eq!(
+                rename_noreplace_on(&from, &to, renameat2).unwrap(),
+                Filed::Held
+            );
+
+            for held in [&b"other bytes"[..], &body[..4]] {
+                fs::write(&to, held).unwrap();
+                let filed = rename_noreplace_on(&from, &to, renameat2).unwrap();
+                assert_eq!(filed, Filed::Failing, "{renameat2}: {held:?}");
+                assert_eq!(fs::read(&to).unwrap(), held, "kept for the quarantine");
+                assert_eq!(fs::read(&from).unwrap(), body, "the source left");
+            }
+
+            fs::remove_file(&to).unwrap();
+            fs::write(dir.path().join("elsewhere"), body).unwrap();
+            std::os::unix::fs::symlink(dir.path().join("elsewhere"), &to).unwrap();
+            let filed = rename_noreplace_on(&from, &to, renameat2).unwrap();
+            assert_eq!(filed, Filed::Failing, "{renameat2}: a link holds no body");
+
+            fs::remove_file(&to).unwrap();
+            assert_eq!(
+                rename_noreplace_on(&from, &to, renameat2).unwrap(),
+                Filed::Moved
+            );
+            assert_eq!(fs::read(&to).unwrap(), body);
         }
     }
 }
