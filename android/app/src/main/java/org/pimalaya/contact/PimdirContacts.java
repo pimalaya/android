@@ -13,6 +13,7 @@ import org.pimalaya.client.Flags;
 import org.pimalaya.client.PimdirSql;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirIndexDb;
 import org.pimalaya.pimdir.PimdirItems;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -47,52 +48,160 @@ public final class PimdirContacts {
         this.stager = new ContactStager(store, Clients.real());
     }
 
-    /** One displayable replica: the card plus its summary. */
-    public static final class Indexed {
-        /** The card. */
-        public final Card card;
+    /**
+     * The normalized content hashes computed so far, by the store's hash of
+     * the body: a body is content-addressed, so an entry never goes stale,
+     * and a reload parses only the bodies it never compared.
+     */
+    private static final Map<String, String> HASHES =
+            java.util.Collections.synchronizedMap(
+                    new java.util.LinkedHashMap<String, String>(16, 0.75f, true) {
+                        @Override
+                        protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+                            return size() > 10_000;
+                        }
+                    });
 
-        /** Display name (FN), empty when the card has none. */
+    /**
+     * One displayable replica: what its row shows, read from the store's
+     * summaries (STORAGE Annex A.2, A.6), its body read only when asked.
+     */
+    public static final class Indexed {
+        /** Its link id. */
+        public final String id;
+
+        /** How its server addresses it, null until a sync binds it. */
+        final String uri;
+
+        /** The server's validator, null when unknown. */
+        final String etag;
+
+        /** The store's hash of its body. */
+        final String object;
+
+        /** The store account holding it, as a search hit names it. */
+        final String account;
+
+        /** Its seq, as a search hit names it. */
+        final long seq;
+
+        /**
+         * Display name: its {@code FN}, else its first email, else its
+         * organization; empty when the card has none.
+         */
         public final String name;
 
-        /** First email address, empty when the card has none. */
+        /** First email address, canonical (Annex A.6), empty when none. */
         final String email;
 
-        /** First phone number, empty when the card has none. */
-        final String phone;
-
-        /** Fallback info line (organization, website, ...), maybe empty. */
+        /** Its organization, the row's fallback line, maybe empty. */
         final String info;
 
         /** vCard UID, the automatic link key; empty when absent. */
         final String uid;
 
-        /** Normalized content hash, the divergence marker. */
-        final String hash;
+        /** Its {@code KIND} lowercased, {@code individual} when unstated. */
+        final String kind;
 
         /**
          * Both sides edited and a remote body is captured: the user settles.
          */
         final boolean conflicted;
 
-        Indexed(Card card, CardIndex index, boolean conflicted) {
-            this.card = card;
-            this.name = index.name();
-            this.email = index.email();
-            this.phone = index.phone();
-            this.info = index.info();
-            this.uid = index.uid();
-            this.hash = index.hash();
+        /** Reads its body, the first time it is asked for. */
+        private final java.util.function.Supplier<String> body;
+
+        private Card card;
+
+        /** Its normalized content hash, once known. */
+        private String hash;
+
+        Indexed(
+                java.util.function.Supplier<String> body,
+                String id,
+                String uri,
+                String etag,
+                String object,
+                String account,
+                long seq,
+                String fn,
+                String email,
+                String org,
+                String uid,
+                String kind,
+                boolean conflicted) {
+            this.body = body;
+            this.id = id;
+            this.uri = uri;
+            this.etag = etag;
+            this.object = object;
+            this.account = account;
+            this.seq = seq;
+            this.email = email;
+            this.info = org;
+            this.name = !fn.trim().isEmpty() ? fn.trim() : !email.isEmpty() ? email : org;
+            this.uid = uid;
+            this.kind = kind.isEmpty() ? "individual" : kind;
             this.conflicted = conflicted;
+        }
+
+        /**
+         * A replica held in memory rather than read from the store: its row
+         * the card's own index, its body the card's text.
+         */
+        Indexed(Card card, CardIndex index, boolean conflicted) {
+            this(
+                    card::vcard,
+                    card.id(),
+                    card.uri(),
+                    card.etag(),
+                    index.hash(),
+                    "",
+                    0,
+                    index.name(),
+                    index.email(),
+                    index.info(),
+                    index.uid(),
+                    "",
+                    conflicted);
+            this.card = card;
+            this.hash = index.hash();
+        }
+
+        /**
+         * The card, its body read off the blob directory on first use: what
+         * opening, merging or exporting it reads, never its row.
+         */
+        public synchronized Card card() {
+            if (card == null) {
+                card = new Card(id, uri, etag, body.get());
+            }
+            return card;
+        }
+
+        /**
+         * The normalized content hash replicas compare by, parsed from the
+         * body the first time a body is asked for it.
+         */
+        synchronized String hash() {
+            if (hash == null) {
+                hash = HASHES.get(object);
+            }
+            if (hash == null) {
+                hash = indexOf(card().vcard()).hash();
+                HASHES.put(object, hash);
+            }
+            return hash;
         }
     }
 
     /**
      * One address book's live cards with what a row renders, in store order.
      *
-     * <p>Rows derive from the body: Annex A's summary lacks the first phone,
-     * the info line and the content hash. Bodiless items (enumerated, not yet
-     * hydrated) are skipped rather than shown as a broken nameless row.
+     * <p>Rows are the store's summaries (STORAGE Annex A.2), the first email
+     * its first {@code email} address (A.6): no body is read. Bodiless items
+     * (enumerated, not yet hydrated) are skipped rather than shown as a
+     * broken nameless row.
      */
     public List<Indexed> list(String collection) {
         SQLiteDatabase db = items.readable();
@@ -103,21 +212,80 @@ public final class PimdirContacts {
                         PimdirSql.values("source", SERVER, "collection", collection))) {
             List<Indexed> cards = new ArrayList<>(cursor.getCount());
             while (cursor.moveToNext()) {
-                Card card =
-                        new Card(
-                                cursor.getString(0),
-                                cursor.isNull(4) ? null : cursor.getString(4),
-                                cursor.isNull(5) ? null : cursor.getString(5),
-                                items.body(cursor.getString(1)));
                 // NOTE: the server binding's own conflict, or the item's two
                 // sources left (SYNC §9), which the server's binding offers.
                 boolean conflicted =
                         (cursor.getInt(2) == 1 && !cursor.isNull(3))
                                 || (!cursor.isNull(4) && cursor.getInt(6) == 1
                                         && !cursor.isNull(7));
-                cards.add(new Indexed(card, indexOf(card.vcard()), conflicted));
+                String object = cursor.getString(1);
+                cards.add(
+                        new Indexed(
+                                () -> items.body(object),
+                                cursor.getString(0),
+                                cursor.isNull(4) ? null : cursor.getString(4),
+                                cursor.isNull(5) ? null : cursor.getString(5),
+                                object,
+                                text(cursor, 9),
+                                cursor.getLong(8),
+                                text(cursor, 11),
+                                text(cursor, 14),
+                                text(cursor, 13),
+                                text(cursor, 10),
+                                text(cursor, 12),
+                                conflicted));
             }
             return cards;
+        }
+    }
+
+    /** A column's text, empty for a NULL. */
+    private static String text(Cursor cursor, int column) {
+        return cursor.isNull(column) ? "" : cursor.getString(column);
+    }
+
+    /**
+     * What the search index records of every card (pimdir SEARCH §6), by
+     * collection and seq; null with no index, or one refused.
+     */
+    public Map<String, CardFacts.Indexed> facts() {
+        PimdirIndexDb index = store.index();
+        if (index == null) {
+            return null;
+        }
+        try {
+            return CardFacts.of(index.cardFacts());
+        } catch (RuntimeException failed) {
+            Log.w("pimalaya", "search index unanswered", failed);
+            return null;
+        }
+    }
+
+    /**
+     * The cards a query finds in the search index (pimdir SEARCH §8), by
+     * account and seq; null with no index, one refused, or a query the
+     * language refuses.
+     */
+    public java.util.Set<String> found(String words) {
+        PimdirIndexDb index = store.index();
+        if (index == null || words.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            org.json.JSONObject answer = index.hits("kind:contact (" + words.trim() + ")", "name");
+            org.json.JSONArray hits = answer == null ? null : answer.optJSONArray("hits");
+            if (hits == null) {
+                return null;
+            }
+            java.util.Set<String> found = new java.util.HashSet<>();
+            for (int position = 0; position < hits.length(); position++) {
+                org.json.JSONObject hit = hits.getJSONObject(position);
+                found.add(hit.optString("account") + "\n" + hit.getLong("seq"));
+            }
+            return found;
+        } catch (JSONException | RuntimeException failed) {
+            Log.w("pimalaya", "search index unanswered", failed);
+            return null;
         }
     }
 

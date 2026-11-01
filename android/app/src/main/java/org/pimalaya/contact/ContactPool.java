@@ -58,7 +58,7 @@ public final class ContactPool {
         for (Entry entry : entries) {
             replicas.add(
                     new PoolReplica(
-                            replicaRef(entry, accounts), entry.uid, entry.name, entry.card.id()));
+                            replicaRef(entry, accounts), entry.uid, entry.name, entry.id));
         }
         ReplicaPool pool =
                 new ReplicaPool(
@@ -70,9 +70,33 @@ public final class ContactPool {
             for (int index : row.replicas()) {
                 group.replicas.add(entries.get(index));
             }
+            group.diverged = diverged(group);
             groups.add(group);
         }
         return groups;
+    }
+
+    /**
+     * Whether the linked replicas' normalized contents differ.
+     *
+     * <p>Equal bodies agree without a parse; bodies that differ are parsed
+     * once each, their hash kept by the body's ({@link Entry#hash}).
+     */
+    private static boolean diverged(Group group) {
+        Set<String> bodies = new HashSet<>();
+        for (Entry entry : group.replicas) {
+            bodies.add(entry.object());
+        }
+        if (bodies.size() < 2) {
+            return false;
+        }
+        String hash = group.primary().hash();
+        for (Entry entry : group.replicas) {
+            if (!hash.equals(entry.hash())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The replica's link-layer reference, over the live account cache. */
@@ -107,11 +131,11 @@ public final class ContactPool {
         }
         String key =
                 account == null
-                        ? CardStore.key(entry.book.url(), entry.card.id())
+                        ? CardStore.key(entry.book.url(), entry.id)
                         : cardKey(
                                 account.server(PimDomain.CONTACTS),
                                 entry.book.url(),
-                                entry.card.id());
+                                entry.id);
         return CardStore.replicaRef(entry.accountEmail, key);
     }
 }

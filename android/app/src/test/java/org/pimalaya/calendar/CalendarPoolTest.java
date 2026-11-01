@@ -305,7 +305,7 @@ public class CalendarPoolTest {
         Map<String, String> bodies = new HashMap<>();
         for (EventStore.StoredEvent event : events.loadEvents()) {
             if (mine.contains(event.collectionId)) {
-                bodies.put(event.id, event.ical);
+                bodies.put(event.id, event.ical());
             }
         }
         return bodies;

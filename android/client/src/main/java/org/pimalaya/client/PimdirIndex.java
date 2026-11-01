@@ -50,12 +50,26 @@ public final class PimdirIndex {
 
     /**
      * One run of the refresh (SEARCH §4), at most {@code batch} rows of the
-     * store's feed, inside the caller's transaction: {@code {cursor,
+     * store's feed, inside the caller's transaction, floating times and
+     * dates read in {@code zone}, an IANA name (SEARCH §7): {@code {cursor,
      * exhausted, folded, indexed, removed}}.
      */
     public static JSONObject refresh(
-            Steps index, String blobs, long now, int batch, boolean missing) {
-        return Replies.object(Native.pimdirIndexRefresh(index, blobs, now, batch, missing));
+            Steps index, String blobs, long now, int batch, boolean missing, String zone) {
+        return Replies.object(
+                Native.pimdirIndexRefresh(index, blobs, now, batch, missing, zone));
+    }
+
+    /**
+     * The occurrences of {@code [start, end)}, RFC 3339 instants in UTC, of
+     * every live calendar item (SEARCH §7), each with the row it draws read
+     * from the store's summaries and {@code source}'s binding: {@code
+     * {occurrences: [{collection, seq, start, end, linkId, object, handle?,
+     * revision?, component?, summary, location, allDay}], horizon?: {start,
+     * end}, horizonLeft, cut, floatingZone}}.
+     */
+    public static JSONObject agenda(Steps index, String start, String end, String source) {
+        return Replies.object(Native.pimdirIndexAgenda(index, start, end, source));
     }
 
     /**
@@ -65,6 +79,16 @@ public final class PimdirIndex {
      */
     public static JSONObject hits(Steps index, String query, String order, long now) {
         return Replies.object(Native.pimdirIndexHits(index, query, order, now));
+    }
+
+    /**
+     * What the index recorded of every card's body (SEARCH §6): {@code
+     * {cards: [{collection, seq, has?, categories?}]}}, {@code has} naming
+     * {@code TEL}, {@code ADR}, {@code BDAY} and {@code PHOTO} as the body
+     * holds them, the categories folded.
+     */
+    public static JSONObject cardFacts(Steps index) {
+        return Replies.object(Native.pimdirIndexCardFacts(index));
     }
 
     /**

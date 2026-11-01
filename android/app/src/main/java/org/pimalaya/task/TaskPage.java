@@ -199,7 +199,8 @@ public final class TaskPage {
         target = stored.calendar;
         targets = List.of();
         back = from;
-        Task task = stored.task;
+        // NOTE: the page reads the body, as the list row does not.
+        Task task = stored.full();
         summary = task.summary();
         description = task.description();
         status = statusOf(task);
@@ -764,7 +765,7 @@ public final class TaskPage {
             create();
             return;
         }
-        Task task = opened.task;
+        Task task = opened.full();
         TaskEdit edit = TaskEdit.at(TaskWrites.now());
         if (!summary.equals(task.summary()) || !description.equals(task.description())) {
             edit = edit.withText(summary, description);

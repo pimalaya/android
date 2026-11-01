@@ -123,7 +123,7 @@ public class EventStoreTest {
         assertEquals(collection, events.get(0).collectionId);
         assertEquals("ev-1", events.get(0).id);
         assertEquals("byte for byte, so the expansion sees what the server sent",
-                ICAL, events.get(0).ical);
+                ICAL, events.get(0).ical());
         assertEquals("the validator the next write is guarded by", "etag-1", events.get(0).etag);
         assertEquals("bound, so the handle is the resource name", "ev-1", events.get(0).handle);
     }

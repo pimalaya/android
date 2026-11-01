@@ -620,7 +620,7 @@ public final class EventView {
             return null;
         }
         try {
-            return new ArrayList<>(CalendarClient.readAlarms(event.ical));
+            return new ArrayList<>(CalendarClient.readAlarms(event.ical()));
         } catch (Exception error) {
             Log.w("pimalaya", "event alarms unreadable: " + event.id, error);
             return null;
@@ -928,7 +928,7 @@ public final class EventView {
      */
     private void switchCalendar(EventStore.StoredCalendar picked) {
         calendar = picked;
-        event = new EventStore.StoredEvent(picked.id, event.id, event.handle, event.ical, "");
+        event = new EventStore.StoredEvent(picked.id, event.id, event.handle, event.ical(), "");
         if (alarmsOf(event) == null) {
             alarms = null;
             openedAlarms = null;
@@ -2165,7 +2165,7 @@ public final class EventView {
     private EventDetail detailOf(EventStore.StoredEvent event) {
         try {
             return CalendarClient.readEvent(
-                    event.ical, series() ? occurrence.recurrenceId().time() : null);
+                    event.ical(), series() ? occurrence.recurrenceId().time() : null);
         } catch (Exception error) {
             Log.w("pimalaya", "event read failed: " + event.id, error);
             return null;

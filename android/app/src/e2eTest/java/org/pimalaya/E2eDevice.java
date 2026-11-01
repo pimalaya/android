@@ -291,7 +291,7 @@ final class E2eDevice {
     List<EventStore.StoredEvent> events(String collection, String text) {
         List<EventStore.StoredEvent> found = new ArrayList<>();
         for (EventStore.StoredEvent event : events.loadEvents()) {
-            if (event.collectionId.equals(collection) && event.ical.contains(text)) {
+            if (event.collectionId.equals(collection) && event.ical().contains(text)) {
                 found.add(event);
             }
         }

@@ -93,11 +93,11 @@ public class E2eTaskTest extends E2eCase {
         writes.edit(
                 taskOf(store, uid),
                 TaskEdit.at(TaskWrites.now()).withList(Task.NEXT).withCategories("@errands"));
-        String before = taskOf(store, uid).event.ical;
+        String before = taskOf(store, uid).event.ical();
         writes.edit(
                 taskOf(store, uid),
                 TaskEdit.at(TaskWrites.now()).withList(Task.NEXT).withCategories("@errands"));
-        assertEquals("an edit the task holds stages nothing", before, taskOf(store, uid).event.ical);
+        assertEquals("an edit the task holds stages nothing", before, taskOf(store, uid).event.ical());
         sync();
         settles(
                 "the server holds the next action",

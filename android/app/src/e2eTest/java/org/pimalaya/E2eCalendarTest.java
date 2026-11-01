@@ -75,7 +75,7 @@ public class E2eCalendarTest extends E2eCase {
         EventStore.StoredEvent created = phone.events(calendar.id, subject("created")).get(0);
         String edited =
                 CalendarClient.writeEvent(
-                        created.ical,
+                        created.ical(),
                         EventEdit.of(
                                 Map.of(EventEdit.Field.SUMMARY, subject("edited")),
                                 Map.of(),

@@ -267,8 +267,11 @@ public final class EventStore {
          */
         public final String handle;
 
-        /** The iCalendar text, as the source sent it. */
-        public final String ical;
+        /** Reads its iCalendar text, the first time it is asked for. */
+        private final java.util.function.Supplier<String> body;
+
+        /** The iCalendar text once read, null before. */
+        private String ical;
 
         /** The server's validator, empty when it sent none. */
         final String etag;
@@ -287,13 +290,61 @@ public final class EventStore {
                 String ical,
                 String etag,
                 boolean conflicted) {
+            this(collectionId, id, handle, () -> ical, etag, conflicted);
+            this.ical = ical;
+        }
+
+        /**
+         * An object whose body is read only when asked for: what a list built
+         * from the store's summaries and its index holds.
+         */
+        StoredEvent(
+                String collectionId,
+                String id,
+                String handle,
+                java.util.function.Supplier<String> body,
+                String etag,
+                boolean conflicted) {
             this.collectionId = collectionId;
             this.id = id;
             this.handle = handle;
-            this.ical = ical;
+            this.body = body;
             this.etag = etag;
             this.conflicted = conflicted;
         }
+
+        /** The iCalendar text, as the source sent it, read on first use. */
+        public synchronized String ical() {
+            if (ical == null) {
+                ical = body.get();
+            }
+            return ical;
+        }
+    }
+
+    /**
+     * One stored object whose body is read only when asked for, by the
+     * store's hash of it: an agenda row drawn from the index.
+     */
+    StoredEvent bodiless(
+            String collectionId,
+            String id,
+            String handle,
+            String object,
+            String etag,
+            boolean conflicted) {
+        return new StoredEvent(
+                collectionId,
+                id,
+                PimdirStorage.rowHandle(handle, id),
+                () -> items.body(object),
+                etag == null ? "" : etag,
+                conflicted);
+    }
+
+    /** The store's search index, null when none was started. */
+    org.pimalaya.pimdir.PimdirIndexDb index() {
+        return store.index();
     }
 
     /** The links endpoint of an agenda row's object. */
@@ -307,20 +358,20 @@ public final class EventStore {
     }
 
     /**
-     * Every stored to-do, conflicted ones marked: the items holding a
-     * {@code task_summary} row (cairn/changes/gtd-hardening).
+     * Every stored to-do read from the store's summaries, conflicted ones
+     * marked: the items holding a {@code task_summary} row
+     * (cairn/changes/gtd-hardening, cairn/changes/lists-from-the-index).
      *
-     * <p>Found through the canonical {@code list_tasks_page_asc}, so only
-     * their bodies are read; a calendar item holding no summary row of any
+     * <p>No body is read: each object reads its own when asked ({@link
+     * StoredEvent#ical}). A calendar item holding no summary row of any
      * calendar kind, as a store written before summaries holds, has one
      * derived first ({@link #derive}). Off the main thread.
      */
-    public List<StoredEvent> loadTasks() {
-        Set<String> tasks = new HashSet<>();
+    public TaskRows loadTasks() {
         Map<String, String> missing = new HashMap<>();
         for (PimdirCollections.Stored calendar : collections.list(PimdirSummary.CALENDAR)) {
             Map<String, String> unsummarized = new HashMap<>();
-            page(calendar.id, "LIST_TASKS_PAGE_ASC", tasks, unsummarized);
+            page(calendar.id, "LIST_TASKS_PAGE_ASC", new HashSet<>(), unsummarized);
             Set<String> others = new HashSet<>();
             page(calendar.id, "LIST_EVENTS_PAGE_ASC", others, new HashMap<>());
             page(calendar.id, "LIST_JOURNALS_PAGE_ASC", others, new HashMap<>());
@@ -328,9 +379,61 @@ public final class EventStore {
             missing.putAll(unsummarized);
         }
         if (!missing.isEmpty()) {
-            tasks.addAll(derive(missing));
+            derive(missing);
         }
-        return loadEvents(tasks::contains);
+
+        Set<String> conflicted = conflicted();
+        SQLiteDatabase db = items.readable();
+        Map<String, Object> scope =
+                PimdirSql.values("source", PimdirStorage.SERVER, "kind", PimdirSummary.CALENDAR);
+        Map<String, StoredEvent> events = new java.util.LinkedHashMap<>();
+        JSONObject rows;
+        try (Cursor cursor = PimdirDb.query(db, "LIST_TASK_ROWS", scope)) {
+            rows = PimdirDb.table(cursor);
+            cursor.moveToPosition(-1);
+            while (cursor.moveToNext()) {
+                String collection = cursor.getString(0);
+                String id = cursor.getString(1);
+                String object = cursor.getString(2);
+                String key = collection + "\n" + id;
+                events.put(
+                        key,
+                        new StoredEvent(
+                                collection,
+                                id,
+                                PimdirStorage.rowHandle(
+                                        cursor.isNull(4) ? null : cursor.getString(4), id),
+                                () -> items.body(object),
+                                cursor.isNull(3) ? "" : cursor.getString(3),
+                                conflicted.contains(key)));
+            }
+        }
+        JSONObject categories;
+        try (Cursor cursor =
+                PimdirDb.query(
+                        db,
+                        "LIST_TASK_CATEGORIES",
+                        PimdirSql.values("kind", PimdirSummary.CALENDAR))) {
+            categories = PimdirDb.table(cursor);
+        }
+        return new TaskRows(events, rows, categories);
+    }
+
+    /**
+     * The to-dos of the store as their summaries hold them: each object by
+     * {@code collection\nlink_id}, and the rows and categories the bridge
+     * reads them from ({@code CalendarClient.tasksOf}).
+     */
+    public static final class TaskRows {
+        public final Map<String, StoredEvent> events;
+        public final JSONObject rows;
+        public final JSONObject categories;
+
+        TaskRows(Map<String, StoredEvent> events, JSONObject rows, JSONObject categories) {
+            this.events = events;
+            this.rows = rows;
+            this.categories = categories;
+        }
     }
 
     /**
@@ -443,7 +546,7 @@ public final class EventStore {
      *
      * <p>As their collection and link id, which the agenda marks.
      */
-    private Set<String> conflicted() {
+    Set<String> conflicted() {
         Set<String> conflicted = new HashSet<>();
         for (PimdirCollections.Stored stored : collections.list(PimdirSummary.CALENDAR)) {
             for (String source : sourcesOf(stored.id)) {

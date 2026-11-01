@@ -7,6 +7,8 @@
 //! to-do carrying none is a next action, which is what a task another
 //! client created is.
 
+use std::collections::BTreeMap;
+
 use ical::{
     component::{IcalComponent, IcalComponentKind},
     param::IcalParam,
@@ -14,6 +16,7 @@ use ical::{
     value::{IcalValue, binary::IcalBinary},
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::{
     calendar::{
@@ -330,9 +333,194 @@ fn kinds<'c>(
         .filter(move |prop| matches!(&prop.name, IcalPropName::Kind(found) if *found == kind))
 }
 
+/// A statement's rows as Java hands them over: the column names, then each
+/// row's values in that order.
+#[derive(Deserialize)]
+pub struct Table {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<Value>>,
+}
+
+impl Table {
+    /// The rows, each a map of its column names to its values.
+    fn named(&self) -> impl Iterator<Item = Named<'_>> {
+        self.rows.iter().map(|row| Named {
+            columns: &self.columns,
+            row,
+        })
+    }
+}
+
+/// One row of a [`Table`], read by column name.
+struct Named<'a> {
+    columns: &'a [String],
+    row: &'a [Value],
+}
+
+impl Named<'_> {
+    /// A column's text, [`None`] for a NULL or an absent column.
+    fn text(&self, name: &str) -> Option<&str> {
+        let at = self.columns.iter().position(|column| column == name)?;
+        self.row.get(at)?.as_str()
+    }
+
+    /// A column's integer, [`None`] for a NULL or an absent column.
+    fn int(&self, name: &str) -> Option<i64> {
+        let at = self.columns.iter().position(|column| column == name)?;
+        self.row.get(at)?.as_i64()
+    }
+
+    /// The `collection\nlink_id` key a list keys an item by.
+    fn key(&self) -> String {
+        let collection = self.text("collection").unwrap_or_default();
+        let link_id = self.text("link_id").unwrap_or_default();
+        format!("{collection}\n{link_id}")
+    }
+}
+
+/// The to-dos a store's summaries hold, read the GTD way without their
+/// bodies (cairn/changes/lists-from-the-index): `rows` the app's
+/// `list_task_rows`, the task_summary row and the first `contact` address
+/// of each (pimdir STORAGE Annex A.4, A.6), `categories` its
+/// `list_task_categories`, each to-do's in document order. Keyed
+/// `collection\nlink_id`, in the rows' order.
+///
+/// What a summary does not hold is left empty: the `DESCRIPTION`, and a
+/// time's offset in the object's own `VTIMEZONE`. A page reads them off the
+/// body ([`task`]).
+pub fn tasks_of(rows: &str, categories: &str) -> Result<Vec<TaskRow>, BridgeError> {
+    let rows: Table = serde_json::from_str(rows).map_err(|err| err.to_string())?;
+    let categories: Table = serde_json::from_str(categories).map_err(|err| err.to_string())?;
+
+    let mut listed: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for category in categories.named() {
+        let value = category.text("value").unwrap_or_default().trim();
+        if value.is_empty() {
+            continue;
+        }
+        let values = listed.entry(category.key()).or_default();
+        if !values.iter().any(|known| known == value) {
+            values.push(value.to_string());
+        }
+    }
+
+    let tasks = rows
+        .named()
+        .map(|row| {
+            let key = row.key();
+            let mut states = Vec::new();
+            let mut categories = Vec::new();
+            for value in listed.remove(&key).unwrap_or_default() {
+                match state_of(&value) {
+                    Some(state) => states.push(state),
+                    None => categories.push(value),
+                }
+            }
+            let states: Vec<String> = STATES
+                .iter()
+                .filter(|state| states.contains(*state))
+                .map(|state| state.to_string())
+                .collect();
+            let list = states
+                .first()
+                .map(|state| state.to_ascii_uppercase())
+                .unwrap_or_else(|| NEXT.to_string());
+            let time = |value: &str, tzid: &str| {
+                EventTime::of_summary(row.text(value).unwrap_or_default(), row.text(tzid))
+            };
+            let contact = TaskContact {
+                name: row.text("contact_name").unwrap_or_default().to_string(),
+                address: row.text("contact_address").unwrap_or_default().to_string(),
+            };
+            let task = Task {
+                uid: row.text("uid").unwrap_or_default().to_string(),
+                summary: row.text("summary").unwrap_or_default().to_string(),
+                description: String::new(),
+                status: row.text("status").unwrap_or_default().to_ascii_uppercase(),
+                list,
+                states,
+                categories,
+                parent: row
+                    .text("parent")
+                    .map(str::trim)
+                    .filter(|parent| !parent.is_empty())
+                    .map(str::to_string),
+                priority: row
+                    .int("priority")
+                    .filter(|priority| (0..=9).contains(priority))
+                    .unwrap_or(0) as u8,
+                start: time("dtstart", "dtstart_tzid"),
+                due: time("due", "due_tzid"),
+                completed: EventTime::of_summary(row.text("completed").unwrap_or_default(), None),
+                contact: (!contact.name.is_empty() || !contact.address.is_empty())
+                    .then_some(contact),
+                source: row
+                    .text("mid")
+                    .filter(|mid| !mid.is_empty())
+                    .map(str::to_string),
+                created: row.text("created").map(stamp).unwrap_or_default(),
+            };
+            TaskRow { key, task }
+        })
+        .collect();
+    Ok(tasks)
+}
+
+/// An RFC 3339 UTC instant, as a summary's `created` holds one, written as
+/// the iCalendar UTC stamp `CREATED` is (`20261030T120000Z`); another
+/// value kept as it is.
+fn stamp(instant: &str) -> String {
+    let digits: String = instant.chars().filter(char::is_ascii_digit).collect();
+    match (instant.len(), digits.len()) {
+        (20, 14) if instant.ends_with('Z') => {
+            format!("{}T{}Z", &digits[..8], &digits[8..])
+        }
+        _ => instant.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::calendar::{edit::write, task::*, tests::object};
+    use crate::calendar::{edit::write, task::*, tests::object, zone::EventTimeKind};
+
+    /// A to-do read off its summary row reads as its body would, but for
+    /// what no summary holds: its state and categories from its category
+    /// rows, its capture time as `CREATED` spells one, a date due as a date.
+    #[test]
+    fn a_todo_reads_off_its_summary_row() {
+        let rows = r#"{"columns": ["collection", "link_id", "uid", "summary", "dtstart",
+            "dtstart_tzid", "due", "due_tzid", "status", "priority", "mid", "created",
+            "contact_name", "contact_address"],
+            "rows": [["c", "a", "a@x", "Call", null, null, "20261102", null,
+            "needs-action", 12, "m@x", "2026-10-30T12:00:00Z", "Léa", "lea@x"]]}"#;
+        let categories = r#"{"columns": ["collection", "link_id", "value"],
+            "rows": [["c", "a", "Home"], ["c", "a", "Waiting"], ["c", "b", "inbox"]]}"#;
+
+        let rows = tasks_of(rows, categories).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].key, "c\na");
+        let task = &rows[0].task;
+        assert_eq!(task.summary, "Call");
+        assert_eq!(task.status, "NEEDS-ACTION");
+        assert_eq!(task.list, "WAITING");
+        assert_eq!(task.states, ["waiting"]);
+        assert_eq!(task.categories, ["Home"]);
+        assert_eq!(task.priority, 0, "out of range reads as undefined");
+        assert_eq!(task.created, "20261030T120000Z");
+        assert_eq!(task.source.as_deref(), Some("m@x"));
+        let due = task.due.as_ref().unwrap();
+        assert_eq!(
+            (due.time.as_str(), due.kind),
+            ("20261102", EventTimeKind::Date)
+        );
+        assert!(task.start.is_none());
+        assert!(task.description.is_empty());
+        let contact = task.contact.as_ref().unwrap();
+        assert_eq!(
+            (contact.name.as_str(), contact.address.as_str()),
+            ("Léa", "lea@x")
+        );
+    }
 
     #[test]
     fn a_todo_without_a_state_is_a_next_action() {

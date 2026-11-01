@@ -118,7 +118,7 @@ public class PimdirContactsTest {
         assertEquals("u1@example.org", listed.get(0).email);
         assertEquals("u1", listed.get(0).uid);
         assertEquals("the body round-trips through the blob directory",
-                vcard("u1", "Jane Doe"), listed.get(0).card.vcard());
+                vcard("u1", "Jane Doe"), listed.get(0).card().vcard());
     }
 
     @Test
@@ -368,6 +368,57 @@ public class PimdirContactsTest {
         // NOTE: an empty summary would read as known-nameless; the hydrate
         // pass writes it.
         assertEquals(0, contacts.repairSummaries());
+    }
+
+    @Test
+    public void aCardListsFromItsSummaryWithItsBodyUnread() {
+        contacts.save(BOOK, new Card("u14", null, null, vcard("u14", "Mia")));
+
+        // NOTE: the bodies gone from the blob directory: a row read off a
+        // body would be nameless, one read off the summary is whole.
+        deleteAll(pimdir.blobs());
+
+        PimdirContacts.Indexed listed = contacts.list(BOOK).get(0);
+        assertEquals("Mia", listed.name);
+        assertEquals("u14@example.org", listed.email);
+        assertEquals("u14", listed.uid);
+        assertEquals("individual", listed.kind);
+        assertEquals("the body is read only when asked", "", listed.card().vcard());
+    }
+
+    @Test
+    public void theIndexAnswersWhatACardHoldsAndItsWords() {
+        String card =
+                "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:u15\r\nFN:Noé Petit\r\nTEL:+33 1 23\r\n"
+                        + "BDAY:19900102\r\nCATEGORIES:Friends,Climbing\r\n"
+                        + "NOTE:met at the crag\r\nEND:VCARD\r\n";
+        contacts.save(BOOK, new Card("u15", null, null, card));
+        contacts.save(BOOK, new Card("u16", null, null, vcard("u16", "Olga")));
+        assertEquals("no index, no answer", null, contacts.facts());
+
+        pimdir.startIndex().refresh();
+
+        java.util.Map<String, CardFacts.Indexed> facts = contacts.facts();
+        PimdirContacts.Indexed noe = contacts.list(BOOK).get(0);
+        assertEquals("Noé Petit", noe.name);
+        CardFacts.Indexed held = facts.get(BOOK + "\n" + noe.seq);
+        assertEquals(java.util.Set.of("TEL", "BDAY"), held.has);
+        assertEquals(List.of("climbing", "friends"), held.categories);
+        PimdirContacts.Indexed olga = contacts.list(BOOK).get(1);
+        assertTrue(facts.get(BOOK + "\n" + olga.seq).has.isEmpty());
+
+        java.util.Set<String> found = contacts.found("crag");
+        assertEquals(java.util.Set.of(noe.account + "\n" + noe.seq), found);
+    }
+
+    private static void deleteAll(java.io.File dir) {
+        java.io.File[] files = dir.listFiles();
+        for (java.io.File file : files == null ? new java.io.File[0] : files) {
+            if (file.isDirectory()) {
+                deleteAll(file);
+            }
+            file.delete();
+        }
     }
 
     private String stringOf(String sql) {

@@ -13,6 +13,9 @@ public final class Group {
     /** The replicas behind the row. */
     public final List<Entry> replicas = new ArrayList<>();
 
+    /** Whether the linked replicas' normalized contents differ. */
+    boolean diverged;
+
     Group(String key) {
         this.key = key;
     }

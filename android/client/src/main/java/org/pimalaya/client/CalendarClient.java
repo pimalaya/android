@@ -113,6 +113,24 @@ public class CalendarClient {
     }
 
     /**
+     * The to-dos a store's summaries hold, read without their bodies
+     * (pimdir STORAGE Annex A.4): {@code rows} and {@code categories} the
+     * {@code {columns, rows}} tables of the app's {@code list_task_rows} and
+     * {@code list_task_categories}. Keyed {@code collection\nlink_id}, in
+     * the rows' order; a task's description is empty. Pure computation.
+     */
+    public static Map<String, Task> tasksOf(JSONObject rows, JSONObject categories) {
+        JSONArray reply =
+                Replies.array(Native.tasksOf(rows.toString(), categories.toString()));
+        Map<String, Task> tasks = new LinkedHashMap<>();
+        for (int index = 0; index < reply.length(); index++) {
+            JSONObject row = Json.object(reply, index);
+            tasks.put(row.optString("key"), Task.from(row.optJSONObject("task")));
+        }
+        return tasks;
+    }
+
+    /**
      * Reads the to-dos among objects, keyed by the caller.
      *
      * <p>One call for a whole list; an object holding no VTODO, or one that

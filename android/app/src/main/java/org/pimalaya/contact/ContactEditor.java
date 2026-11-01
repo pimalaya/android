@@ -162,7 +162,7 @@ public final class ContactEditor {
         }
 
         String handle =
-                PimdirStorage.rowHandle(replica.card.uri(), replica.card.id());
+                PimdirStorage.rowHandle(replica.card().uri(), replica.id);
         JSONObject bodies;
         java.util.List<String> resolves;
         ConflictForm resolution;
@@ -209,7 +209,7 @@ public final class ContactEditor {
         edit = new EditSession();
         edit.book = replica.book;
         edit.accountEmail = replica.accountEmail;
-        edit.card = replica.card;
+        edit.card = replica.card();
         edit.replicas = new ArrayList<>(java.util.Collections.singletonList(replica));
         edit.resolvingConflict = true;
         edit.vcard = resolution.vcard();
@@ -327,7 +327,7 @@ public final class ContactEditor {
         list.exitSelection();
 
         for (Entry entry : ContactMerge.doomed(replicas, survivor, parts.pool()::replicaRef)) {
-            parts.contacts().stageDelete(entry.book.url(), entry.card.id());
+            parts.contacts().stageDelete(entry.book.url(), entry.id);
         }
 
         host.toast(host.getString(R.string.merge_done));
@@ -365,7 +365,7 @@ public final class ContactEditor {
         edit = new EditSession();
         edit.book = primary.book;
         edit.accountEmail = primary.accountEmail;
-        edit.card = primary.card;
+        edit.card = primary.card();
         edit.replicas = new ArrayList<>(replicas);
 
         List<String> docs = ContactMerge.documents(replicas);
@@ -375,8 +375,8 @@ public final class ContactEditor {
         List<String> changed = null;
         try {
             if (docs.size() == 1) {
-                edit.vcard = primary.card.vcard();
-                model = ContactClient.projectCard(primary.card.vcard());
+                edit.vcard = primary.card().vcard();
+                model = ContactClient.projectCard(primary.card().vcard());
             } else {
                 CardsMerge merged = ContactClient.mergeCards(docs);
                 edit.vcard = merged.vcard();

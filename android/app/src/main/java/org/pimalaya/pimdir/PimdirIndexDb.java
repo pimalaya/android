@@ -140,6 +140,11 @@ public final class PimdirIndexDb implements PimdirIndex.Steps {
 
     /** Opens index.db, creating it, the store attached as {@code store}. */
     private SQLiteDatabase connect() {
+        // NOTE: the store's helper creates pimdir.db on its first open, and
+        // the index may be asked before anything else opened it, as a fresh
+        // install's first refresh is: an attach of a store with no schema
+        // yet reads no table (no such table: store.store_meta).
+        store.getWritableDatabase();
         SQLiteDatabase opened =
                 SQLiteDatabase.openDatabase(
                         file.getAbsolutePath(),
@@ -181,21 +186,57 @@ public final class PimdirIndexDb implements PimdirIndex.Steps {
      * null for an index refused.
      */
     public JSONObject refresh() {
+        long folded = 0;
+        JSONObject report;
         synchronized (store.locks().index) {
             String blobs = store.blobs().getAbsolutePath();
             long now = System.currentTimeMillis() / 1000;
+            // NOTE: floating times and dates read where the device is, so an
+            // agenda draws them at the wall time they state (SEARCH §7); a
+            // zone other than the one the index records re-expands them.
+            String zone = java.util.TimeZone.getDefault().getID();
             boolean first = true;
-            JSONObject report;
             do {
                 boolean missing = first;
-                report = run(handle -> PimdirIndex.refresh(this, blobs, now, BATCH, missing));
+                report =
+                        run(
+                                handle ->
+                                        PimdirIndex.refresh(
+                                                this, blobs, now, BATCH, missing, zone));
                 if (report == null) {
                     return null;
                 }
+                folded += report.optLong("folded");
                 first = false;
             } while (!report.optBoolean("exhausted", true));
-            return report;
         }
+        Runnable listener = this.folded;
+        if (folded > 0 && listener != null) {
+            listener.run();
+        }
+        return report;
+    }
+
+    /** Told after a refresh folded anything, on the refresh's thread. */
+    private volatile Runnable folded;
+
+    /**
+     * Runs {@code listener} after each refresh that folded a row of the
+     * store's feed, on the refresh's thread: what a list drawn from the
+     * index reloads on. One listener, null for none.
+     */
+    public void onFolded(Runnable listener) {
+        this.folded = listener;
+    }
+
+    /**
+     * The occurrences of {@code [start, end)}, RFC 3339 instants in UTC, of
+     * every live calendar item (SEARCH §7), with the row each draws and what
+     * the window could not see: {@code {occurrences, horizon?, horizonLeft,
+     * cut, floatingZone}}, or null for an index refused.
+     */
+    public JSONObject agenda(String start, String end) {
+        return run(handle -> PimdirIndex.agenda(this, start, end, PimdirStorage.SERVER));
     }
 
     /**
@@ -206,6 +247,14 @@ public final class PimdirIndexDb implements PimdirIndex.Steps {
     public JSONObject hits(String query, String order) {
         long now = System.currentTimeMillis() / 1000;
         return run(handle -> PimdirIndex.hits(this, query, order, now));
+    }
+
+    /**
+     * What the index recorded of every card's body (SEARCH §6): {@code
+     * {cards}}, or null for an index refused.
+     */
+    public JSONObject cardFacts() {
+        return run(handle -> PimdirIndex.cardFacts(this));
     }
 
     /**

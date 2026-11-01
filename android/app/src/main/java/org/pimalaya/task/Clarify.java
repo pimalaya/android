@@ -118,9 +118,9 @@ public final class Clarify {
                         answer.title.isEmpty()
                                 ? host.getString(R.string.event_untitled)
                                 : answer.title,
-                        item.task.description().isEmpty()
+                        item.full().description().isEmpty()
                                 ? host.getString(R.string.clarify_rephrase)
-                                : item.task.description(),
+                                : item.full().description(),
                         null,
                         this::rephrase));
         if (item.task.source() != null) {

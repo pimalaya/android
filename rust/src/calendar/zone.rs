@@ -88,6 +88,24 @@ impl EventTime {
         Self::of_prop(&line.decode(IcalVersion::V2_0))
     }
 
+    /// A time as a store's summary keeps it (pimdir STORAGE Annex A.3):
+    /// the value verbatim and its `TZID`, [`None`] for an empty value.
+    ///
+    /// No offset: the object's own `VTIMEZONE` is its body's, unread.
+    pub fn of_summary(value: &str, tzid: Option<&str>) -> Option<Self> {
+        if value.is_empty() {
+            return None;
+        }
+        let mut time = Self::of_raw(value);
+        if let Some(tzid) = tzid.filter(|tzid| !tzid.is_empty())
+            && time.kind == EventTimeKind::Floating
+        {
+            time.kind = EventTimeKind::Zoned;
+            time.tzid = tzid.to_string();
+        }
+        Some(time)
+    }
+
     /// A value as written, before its `TZID` is known: a date, a UTC
     /// time or a floating one.
     fn of_raw(raw: &str) -> Self {

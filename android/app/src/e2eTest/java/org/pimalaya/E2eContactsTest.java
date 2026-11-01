@@ -59,7 +59,7 @@ public class E2eContactsTest extends E2eCase {
         phone.contacts().save(url, new Card(uid, null, null, vcard(uid, subject("created"))));
         List<PimdirContacts.Indexed> staged = phone.cards(url, subject("created"));
         assertEquals("shown at once", 1, staged.size());
-        assertTrue("pending", phone.owes(url, staged.get(0).card.id()));
+        assertTrue("pending", phone.owes(url, staged.get(0).card().id()));
 
         sync(phone);
         settles(
@@ -69,7 +69,7 @@ public class E2eContactsTest extends E2eCase {
                     return titles.contains(subject("created")) ? null : "titles " + titles;
                 });
 
-        Card created = phone.cards(url, subject("created")).get(0).card;
+        Card created = phone.cards(url, subject("created")).get(0).card();
         String edited =
                 created.vcard().replace(subject("created"), subject("edited"));
         phone.contacts().save(url, new Card(created.id(), created.uri(), created.etag(), edited));
@@ -98,7 +98,7 @@ public class E2eContactsTest extends E2eCase {
                             : "not yet";
                 });
 
-        Card toDelete = phone.cards(url, subject("edited")).get(0).card;
+        Card toDelete = phone.cards(url, subject("edited")).get(0).card();
         phone.contacts().stageDelete(url, toDelete.id());
         assertTrue("gone at once", phone.cards(url, subject("edited")).isEmpty());
         settles(
@@ -131,7 +131,7 @@ public class E2eContactsTest extends E2eCase {
                     sync(phone);
                     return phone.cards(url, subject("elsewhere")).size() == 1 ? null : "not yet";
                 });
-        Card seeded = phone.cards(url, subject("elsewhere")).get(0).card;
+        Card seeded = phone.cards(url, subject("elsewhere")).get(0).card();
         phone.contacts().stageDelete(url, seeded.id());
         assertTrue("gone at once", phone.cards(url, subject("elsewhere")).isEmpty());
         settles(
@@ -161,7 +161,7 @@ public class E2eContactsTest extends E2eCase {
                     sync(phone);
                     return items.titles(name, tag).contains(subject("created")) ? null : "not yet";
                 });
-        Card created = phone.cards(url, subject("created")).get(0).card;
+        Card created = phone.cards(url, subject("created")).get(0).card();
         phone.contacts().stageDelete(url, created.id());
         assertTrue("gone at once", phone.cards(url, subject("created")).isEmpty());
         settles(
@@ -188,7 +188,7 @@ public class E2eContactsTest extends E2eCase {
     private String names(E2eDevice device, String url) {
         List<String> names = new java.util.ArrayList<>();
         for (PimdirContacts.Indexed indexed : device.cards(url, tag)) {
-            names.add(indexed.name + (device.owes(url, indexed.card.id()) ? " (staged)" : ""));
+            names.add(indexed.name + (device.owes(url, indexed.card().id()) ? " (staged)" : ""));
         }
         return names.toString();
     }

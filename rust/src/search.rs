@@ -12,6 +12,7 @@
 pub mod compile;
 pub mod find;
 pub mod held;
+pub mod lists;
 pub mod refresh;
 pub mod shape;
 pub mod sql;

@@ -65,7 +65,7 @@ final class EventWrites {
         EventStore.StoredConflict settling = save.settling();
         Map<Integer, EventSide> chosen = save.picks();
 
-        String source = target.ical;
+        String source = target.ical();
         String into = collection.id;
         String handle = target.handle;
         if (settling != null) {
@@ -206,7 +206,7 @@ final class EventWrites {
         if (scope != EventScope.ALL) {
             String source =
                     settling == null
-                            ? target.ical
+                            ? target.ical()
                             : CalendarClient.resolveEvent(
                                     new EventSides(
                                             settling.base, settling.local, settling.remote),

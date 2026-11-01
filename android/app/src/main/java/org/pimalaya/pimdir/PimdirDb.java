@@ -441,6 +441,41 @@ public final class PimdirDb extends SQLiteOpenHelper {
      * affinity: {@code '1'} never equals {@code 1}, so the unread chip would
      * match nothing. A statement reading lists goes through {@link #read}.
      */
+    /**
+     * A cursor's rows as the bridge reads a table: {@code {columns: [name,
+     * ...], rows: [[value, ...], ...]}}, each value as its own type, so the
+     * bridge maps a statement's columns by name and Java names none.
+     */
+    public static org.json.JSONObject table(Cursor cursor) {
+        try {
+            org.json.JSONArray rows = new org.json.JSONArray();
+            while (cursor.moveToNext()) {
+                org.json.JSONArray row = new org.json.JSONArray();
+                for (int column = 0; column < cursor.getColumnCount(); column++) {
+                    switch (cursor.getType(column)) {
+                        case Cursor.FIELD_TYPE_INTEGER:
+                            row.put(cursor.getLong(column));
+                            break;
+                        case Cursor.FIELD_TYPE_FLOAT:
+                            row.put(cursor.getDouble(column));
+                            break;
+                        case Cursor.FIELD_TYPE_STRING:
+                            row.put(cursor.getString(column));
+                            break;
+                        default:
+                            row.put(org.json.JSONObject.NULL);
+                    }
+                }
+                rows.put(row);
+            }
+            return new org.json.JSONObject()
+                    .put("columns", new org.json.JSONArray(cursor.getColumnNames()))
+                    .put("rows", rows);
+        } catch (org.json.JSONException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
     public static Cursor typed(SQLiteDatabase db, String sql, Object[] args) {
         return db.rawQueryWithFactory(
                 (database, driver, table, query) -> {

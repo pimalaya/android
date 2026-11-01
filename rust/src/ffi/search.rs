@@ -23,7 +23,9 @@ use crate::{
     search::{
         compile::Sort,
         find::{self, Answer, Hit, Refusal},
-        held, refresh,
+        held,
+        lists::{self, CardFacts},
+        refresh,
         refresh::RunReport,
         shape,
         sql::HostSql,
@@ -100,8 +102,9 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirIndexInit<'local>(
 /// `Native.pimdirIndexRefresh`: one run of the refresh (SEARCH §4), inside
 /// the caller's transaction: at most `batch` rows of the store's feed
 /// folded, the bodies read off `blobs`, the horizon around `now` (Unix
-/// seconds), `missing` folding first what an earlier pass could not read.
-/// Answers `{"cursor", "exhausted", "folded", "indexed", "removed"}`.
+/// seconds), `missing` folding first what an earlier pass could not read,
+/// floating times and dates read in `zone`, an IANA name (`UTC` when
+/// empty). Answers `{"cursor", "exhausted", "folded", "indexed", "removed"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_pimdirIndexRefresh<'local>(
     mut env: EnvUnowned<'local>,
@@ -111,9 +114,16 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirIndexRefresh<'local
     now: jlong,
     batch: jint,
     missing: jboolean,
+    zone: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let blobs = read_string(env, &blobs);
+        let zone = read_string(env, &zone);
+        let zone = if zone.is_empty() {
+            "UTC"
+        } else {
+            zone.as_str()
+        };
         let mut sql = HostSql(JniHost::offline(env, &index));
         let ran = refresh::run(
             &mut sql,
@@ -121,6 +131,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirIndexRefresh<'local
             now,
             batch.max(1) as usize,
             missing,
+            zone,
         )
         .map(RunReport::from);
         Ok(env.new_string(reply(ran))?.into())
@@ -225,6 +236,56 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirIndexSearch<'local>
         )
         .map(Answered::from);
         Ok(env.new_string(reply(found))?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+#[derive(Serialize)]
+struct CardsJson {
+    cards: Vec<CardFacts>,
+}
+
+/// `Native.pimdirIndexCardFacts`: what the index recorded of every card's
+/// body (SEARCH §6), inside the caller's transaction: `{"cards":
+/// [{"collection", "seq", "has"?, "categories"?}]}`, `has` naming `TEL`,
+/// `ADR`, `BDAY` and `PHOTO` as the body holds them.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_pimdirIndexCardFacts<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    index: JObject<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let mut sql = HostSql(JniHost::offline(env, &index));
+        let cards = lists::card_facts(&mut sql).map(|cards| CardsJson { cards });
+        Ok(env.new_string(reply(cards))?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.pimdirIndexAgenda`: the occurrences of `[start, end)`, RFC 3339
+/// instants in UTC, of every live calendar item (SEARCH §7), each with the
+/// row it draws read from the store's summaries and `source`'s binding,
+/// inside the caller's transaction: `{"occurrences": [{"collection",
+/// "seq", "start", "end", "linkId", "object", "handle"?, "revision"?,
+/// "component"?, "summary", "location", "allDay"}], "horizon"?: {"start",
+/// "end"}, "horizonLeft", "cut", "floatingZone"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_pimdirIndexAgenda<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    index: JObject<'local>,
+    start: JString<'local>,
+    end: JString<'local>,
+    source: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let start = read_string(env, &start);
+        let end = read_string(env, &end);
+        let source = read_string(env, &source);
+        let mut sql = HostSql(JniHost::offline(env, &index));
+        let agenda = lists::agenda(&mut sql, &start, &end, &source);
+        Ok(env.new_string(reply(agenda))?.into())
     })
     .resolve::<ErrorReply>()
 }

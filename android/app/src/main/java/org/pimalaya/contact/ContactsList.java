@@ -99,8 +99,23 @@ public final class ContactsList {
 
     private final Set<String> selectedKeys = new java.util.HashSet<>();
 
-    /** Lower-cased raw-vCard filter; empty shows all. */
+    /** Lower-cased search words; empty shows all. */
     private String searchQuery = "";
+
+    /**
+     * The cards the search index finds the words in (pimdir SEARCH §8), by
+     * account and seq; null when it answered nothing.
+     */
+    private Set<String> searchHits;
+
+    /** Counts the searches asked, so only the last one's hits land. */
+    private int searchAsked;
+
+    /**
+     * What the index recorded of each card (pimdir SEARCH §6), by collection
+     * and seq, or the same read off each body when the index answers none.
+     */
+    private Map<String, CardFacts.Indexed> facts = new java.util.HashMap<>();
 
     /** The contacts screen; {@code pull} runs the pull-to-refresh sync. */
     public ContactsList(Host host, ContactParts parts, ContactEditor editor, Runnable pull) {
@@ -127,7 +142,7 @@ public final class ContactsList {
 
         host.findViewById(R.id.contacts_birthdays)
                 .setOnClickListener(
-                        view -> new Birthdays(host).show(new ArrayList<>(sortedContacts)));
+                        view -> new Birthdays(host).show(withBirthdays()));
         host.findViewById(R.id.contacts_duplicates)
                 .setOnClickListener(
                         view ->
@@ -145,7 +160,7 @@ public final class ContactsList {
                 R.string.contacts_search,
                 query -> {
                     searchQuery = query;
-                    render();
+                    search();
                 });
         filter = new ListFilter(host, "contacts", BOOKS, KINDS, CATEGORIES, HAS);
         panel = new FilterPanel(host, header, this::render);
@@ -200,10 +215,17 @@ public final class ContactsList {
                 () -> {
                     List<Entry> entries = parts.pool().loadEntries();
                     List<Group> groups = parts.pool().group(entries, snapshot);
+                    // NOTE: what the Has filter and the categories test is
+                    // the index's; a store whose index answers none reads
+                    // it off the bodies, as the list did before.
+                    Map<String, CardFacts.Indexed> read = parts.contacts().facts();
+                    Map<String, CardFacts.Indexed> known =
+                            read != null ? read : CardFacts.fromBodies(entries);
                     host.postAlive(
                             () -> {
                                 contacts = entries;
                                 groupedContacts = groups;
+                                facts = known;
                                 render();
                             });
                 });
@@ -222,7 +244,7 @@ public final class ContactsList {
     public Group groupOf(String linkId) {
         for (Group group : groupedContacts) {
             for (Entry entry : group.replicas) {
-                if (entry.card.id().equals(linkId)) {
+                if (entry.id.equals(linkId)) {
                     return group;
                 }
             }
@@ -249,36 +271,107 @@ public final class ContactsList {
      * Whether a card passes Kind, Categories and Has: its kind ticked, any of
      * its categories (lowercased, or None) ticked, any property ticked, each
      * passing with none ticked.
+     *
+     * <p>Its email and organization are its summary's, what else it holds
+     * and its categories the index's ({@link #facts}): no body is read.
      */
-    private static boolean described(ListFilter.State kept, String vcard) {
+    private boolean described(ListFilter.State kept, Entry entry) {
+        CardFacts.Indexed known = facts.get(entry.key());
         Set<String> has = kept.set(HAS);
         if (!has.isEmpty()) {
             boolean any = false;
             for (String property : has) {
-                any |= CardFacts.has(vcard, property);
+                if ("EMAIL".equals(property)) {
+                    any |= !entry.email.isEmpty();
+                } else if ("ORG".equals(property)) {
+                    any |= !entry.info.isEmpty();
+                } else {
+                    any |= known != null && known.has.contains(property);
+                }
             }
             if (!any) {
                 return false;
             }
         }
         Set<String> kinds = kept.set(KINDS);
-        if (!kinds.isEmpty() && !kinds.contains(CardFacts.kind(vcard))) {
+        if (!kinds.isEmpty() && !kinds.contains(entry.kind)) {
             return false;
         }
         Set<String> on = kept.set(CATEGORIES);
         if (on.isEmpty()) {
             return true;
         }
-        List<String> categories = CardFacts.categories(vcard);
+        List<String> categories = known == null ? List.of() : known.categories;
         if (categories.isEmpty()) {
             return on.contains(NO_CATEGORY);
         }
         for (String category : categories) {
-            if (on.contains(category.toLowerCase(java.util.Locale.ROOT))) {
+            if (on.contains(category)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Whether a card is what the search words find: its name, email or
+     * organization holding them, or the search index finding them anywhere
+     * in it (pimdir SEARCH §8).
+     */
+    private boolean searched(Entry entry) {
+        if (searchQuery.isEmpty()) {
+            return true;
+        }
+        String words = searchQuery.toLowerCase(java.util.Locale.ROOT);
+        for (String shown : new String[] {entry.name, entry.email, entry.info}) {
+            if (shown.toLowerCase(java.util.Locale.ROOT).contains(words)) {
+                return true;
+            }
+        }
+        return searchHits != null && searchHits.contains(entry.hit());
+    }
+
+    /**
+     * Asks the search index for the words off the main thread, then renders;
+     * the name, email and organization match renders at once.
+     */
+    private void search() {
+        int asked = ++searchAsked;
+        String words = searchQuery;
+        searchHits = null;
+        render();
+        if (words.isEmpty()) {
+            return;
+        }
+        host.io.execute(
+                () -> {
+                    Set<String> found = parts.contacts().found(words);
+                    host.postAlive(
+                            () -> {
+                                if (asked == searchAsked && found != null) {
+                                    searchHits = found;
+                                    render();
+                                }
+                            });
+                });
+    }
+
+    /**
+     * The rows on screen whose cards hold a birthday, as the index records it:
+     * the only bodies the birthday peek reads.
+     */
+    private List<Group> withBirthdays() {
+        List<Group> found = new ArrayList<>();
+        for (Group group : sortedContacts) {
+            for (Entry entry : group.replicas) {
+                CardFacts.Indexed known = facts.get(entry.key());
+                if (known != null && known.has.contains("BDAY")) {
+                    found.add(group);
+                    break;
+                }
+            }
+        }
+        return found;
     }
 
     /**
@@ -310,12 +403,13 @@ public final class ContactsList {
         // NOTE: None first, for the cards carrying no category.
         Map<String, String> names = new LinkedHashMap<>();
         names.put(NO_CATEGORY, host.getString(R.string.filter_none));
-        for (Group group : groupedContacts) {
-            for (Entry entry : group.replicas) {
-                for (String category : CardFacts.categories(entry.card.vcard())) {
-                    names.putIfAbsent(category.toLowerCase(java.util.Locale.ROOT), category);
-                }
-            }
+        // NOTE: the index records a category folded, so it is offered so.
+        java.util.TreeSet<String> recorded = new java.util.TreeSet<>();
+        for (CardFacts.Indexed known : facts.values()) {
+            recorded.addAll(known.categories);
+        }
+        for (String category : recorded) {
+            names.putIfAbsent(category, category);
         }
         panel.checks(
                 "categories",
@@ -348,11 +442,10 @@ public final class ContactsList {
             for (Entry entry : group.replicas) {
                 if (!synced.accepts(entry.accountEmail, entry.book.url())
                         || !kept.set(BOOKS).isEmpty() && !kept.set(BOOKS).contains(entry.book.url())
-                        || !described(kept, entry.card.vcard())) {
+                        || !described(kept, entry)) {
                     continue;
                 }
-                if (searchQuery.isEmpty()
-                        || entry.card.vcard().toLowerCase(java.util.Locale.ROOT).contains(searchQuery)) {
+                if (searched(entry)) {
                     matches = true;
                     break;
                 }
@@ -410,7 +503,8 @@ public final class ContactsList {
 
             TextView avatar = row.findViewById(R.id.contact_avatar);
             avatar.setText(Avatar.letter(name));
-            avatar.setBackground(Avatar.circle(host, entry.card != null ? entry.card.vcard() : name));
+            // NOTE: seeded by the body's hash, as it was by the body's text.
+            avatar.setBackground(Avatar.circle(host, entry.object()));
             boolean checked = selectedKeys.contains(group.key);
             avatar.setVisibility(checked ? View.INVISIBLE : View.VISIBLE);
             android.widget.ImageView check = row.findViewById(R.id.contact_check);
@@ -420,13 +514,9 @@ public final class ContactsList {
 
             ((TextView) row.findViewById(R.id.contact_name)).setText(name);
 
-            String subtitle = entry.phone;
-            if (subtitle == null || subtitle.isEmpty()) {
-                subtitle = entry.email;
-            }
-            if (subtitle == null || subtitle.isEmpty()) {
-                subtitle = entry.info;
-            }
+            // NOTE: what the summary holds (pimdir STORAGE Annex A.2, A.6):
+            // the first email, else the organization.
+            String subtitle = entry.email.isEmpty() ? entry.info : entry.email;
             bindLine(row.findViewById(R.id.contact_subtitle), subtitle);
 
             int cards = parts.pool().distinctRefs(group.replicas).size();
@@ -443,7 +533,7 @@ public final class ContactsList {
                     android.content.res.ColorStateList.valueOf(
                             host.ui.resolveColor(android.R.attr.colorError)));
             danger.setVisibility(
-                    group.conflicted() || diverged(group) ? View.VISIBLE : View.GONE);
+                    group.conflicted() || group.diverged ? View.VISIBLE : View.GONE);
 
             // NOTE: a contact only in the hidden local book (attached to no
             // addressbook) shows muted.
@@ -656,7 +746,7 @@ public final class ContactsList {
         for (Group group : sortedContacts) {
             if (selectedKeys.contains(group.key)) {
                 for (Entry entry : group.replicas) {
-                    parts.contacts().stageDelete(entry.book.url(), entry.card.id());
+                    parts.contacts().stageDelete(entry.book.url(), entry.id);
                 }
             }
         }
@@ -673,17 +763,6 @@ public final class ContactsList {
             view.setText(value);
             view.setVisibility(View.VISIBLE);
         }
-    }
-
-    /** True when the linked replicas' normalized contents differ. */
-    private static boolean diverged(Group group) {
-        String hash = group.primary().hash;
-        for (Entry entry : group.replicas) {
-            if (!hash.equals(entry.hash)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /** The import/export button's menu: the two directions it covers. */

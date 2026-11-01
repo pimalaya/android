@@ -25,3 +25,7 @@ Verified on 2026-11-01: `gradle :app:assembleDebug :app:testDebugUnitTest :clien
 ## Device check (2026-11-01)
 
 OnePlus 5, Android 15, installed over the step 2b build holding the Fastmail test account's store, no reinstall. The store logged `store on sqlite 3.44.3` (the platform's, requery's being 3.49), opened unchanged (no reinstall screen; 20 messages, 7 cards, 4 events; `integrity_check` clean). On the platform SQLite: a mail sync, a mail sent to the account itself (queued, drained, one copy in INBOX and one in Sent), a contact edited and pushed over CardDAV; no `SQLiteException` nor `no such table`, refcounts without drift, the foreign key check clean. Not run: an API 26 emulator (SQLite 3.18 on a device), still owed.
+
+## API 26 run (2026-11-01)
+
+An API 26 emulator (Android 8.0, google_apis x86_64, built in a scratch nix shell from nixpkgs androidenv, not the flake): a fresh install of 4cba857 logged `store on sqlite 3.18.2`, created its store, and saved a contact to the local address book through the 3.18 statements, its body filed by the exclusive create and copy (renameat2 being gated to API 30), the store in WAL with integrity and foreign key checks clean. It found the index reading the store before its schema on a fresh install, fixed at step 5.

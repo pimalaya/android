@@ -89,14 +89,16 @@ public class TaskWritesTest {
         Task task = tasks.get(0).task;
         assertEquals(Task.INBOX, task.list());
         assertEquals("Call the plumber", task.summary());
-        assertEquals("About the boiler", task.description());
+        // NOTE: the description is the body's, which the page reads; the
+        // list holds the summary alone.
+        assertEquals("About the boiler", tasks.get(0).full().description());
         assertEquals("abc@example.org", task.source());
         // NOTE: a capture is placed on no day until it is clarified, so the
         // agenda does not show it.
         assertNull(task.start());
         assertNull(task.due());
-        assertTrue(tasks.get(0).event.ical.contains("CATEGORIES:inbox\r\n"));
-        assertFalse(tasks.get(0).event.ical.contains("X-PIMALAYA-GTD"));
+        assertTrue(tasks.get(0).event.ical().contains("CATEGORIES:inbox\r\n"));
+        assertFalse(tasks.get(0).event.ical().contains("X-PIMALAYA-GTD"));
     }
 
     @Test
@@ -107,8 +109,8 @@ public class TaskWritesTest {
 
         assertTrue(added.task.in(Task.NEXT));
         assertEquals("abc@example.org", added.task.source());
-        assertFalse(added.event.ical.contains("CATEGORIES"));
-        assertTrue(added.event.ical.contains("\r\nCREATED:"));
+        assertFalse(added.event.ical().contains("CATEGORIES"));
+        assertTrue(added.event.ical().contains("\r\nCREATED:"));
     }
 
     @Test
@@ -121,7 +123,7 @@ public class TaskWritesTest {
         assertEquals(List.of("Work", "calls"), added.task.categories());
         // NOTE: the categories a line, the state a line of its own after it,
         // where pimdir GUIDE §17 places a new state.
-        assertTrue(added.event.ical.contains("CATEGORIES:Work,calls\r\nCATEGORIES:waiting\r\n"));
+        assertTrue(added.event.ical().contains("CATEGORIES:Work,calls\r\nCATEGORIES:waiting\r\n"));
     }
 
     @Test
@@ -135,9 +137,9 @@ public class TaskWritesTest {
 
         TaskStore.Stored reopened = store.load(context).get(0);
         assertTrue(TaskOrder.lists(null, Task.WAITING, reopened.task));
-        assertTrue(reopened.event.ical.contains("\r\nSTATUS:NEEDS-ACTION\r\n"));
-        assertFalse(reopened.event.ical.contains("\r\nCOMPLETED:"));
-        assertFalse(reopened.event.ical.contains("PERCENT-COMPLETE"));
+        assertTrue(reopened.event.ical().contains("\r\nSTATUS:NEEDS-ACTION\r\n"));
+        assertFalse(reopened.event.ical().contains("\r\nCOMPLETED:"));
+        assertFalse(reopened.event.ical().contains("PERCENT-COMPLETE"));
     }
 
     @Test
@@ -151,7 +153,7 @@ public class TaskWritesTest {
 
         assertTrue(TaskOrder.lists(TaskOrder.PROGRESS, Task.NEXT, started.task));
         assertTrue(TaskOrder.lists(null, Task.NEXT, started.task));
-        assertTrue(started.event.ical.contains("\r\nSTATUS:IN-PROCESS\r\n"));
+        assertTrue(started.event.ical().contains("\r\nSTATUS:IN-PROCESS\r\n"));
     }
 
     @Test
@@ -193,7 +195,7 @@ public class TaskWritesTest {
         assertTrue(next.task.in(Task.NEXT));
         // NOTE: a next action is an open to-do with none of the states, so
         // another client's tasks read as next actions too.
-        assertFalse(next.event.ical.toLowerCase(java.util.Locale.ROOT).contains("inbox"));
+        assertFalse(next.event.ical().toLowerCase(java.util.Locale.ROOT).contains("inbox"));
     }
 
     @Test
@@ -217,7 +219,7 @@ public class TaskWritesTest {
         TaskStore.Stored next = store.load(context).get(0);
 
         assertTrue(next.task.in(Task.NEXT));
-        assertTrue(next.event.ical.contains("CATEGORIES:@home\r\nX-OTHER:keep\r\n"));
+        assertTrue(next.event.ical().contains("CATEGORIES:@home\r\nX-OTHER:keep\r\n"));
     }
 
     @Test
@@ -314,6 +316,47 @@ public class TaskWritesTest {
     }
 
     @Test
+    public void aTaskListsFromItsSummaryWithItsBodyUnread() throws Exception {
+        writes.capture(calendar, "Call the plumber", "About the boiler", "abc@example.org");
+        TaskStore.Stored captured = store.load(context).get(0);
+        writes.edit(
+                captured,
+                TaskEdit.at(TaskWrites.now())
+                        .withList(Task.WAITING)
+                        .withCategories("Home")
+                        .withContact("Léa Martin", "lea@example.net"));
+        long at = TaskStore.capturedAt(store.load(context).get(0).task);
+
+        // NOTE: the bodies gone from the blob directory: a list read off the
+        // bodies would hold nothing, one read off the summaries is whole.
+        deleteAll(parts.pimdir().blobs());
+
+        List<TaskStore.Stored> tasks = store.load(context);
+        assertEquals(1, tasks.size());
+        Task task = tasks.get(0).task;
+        assertEquals("Call the plumber", task.summary());
+        assertEquals(Task.WAITING, task.list());
+        assertEquals(List.of("waiting"), task.states());
+        assertEquals(List.of("Home"), task.categories());
+        assertEquals("Léa Martin", task.contactName());
+        assertEquals("lea@example.net", task.contactAddress());
+        assertEquals("abc@example.org", task.source());
+        assertEquals("the capture time, from the summary", at, TaskStore.capturedAt(task));
+        assertTrue(at > 0);
+        assertEquals("a summary holds no description", "", task.description());
+    }
+
+    private static void deleteAll(java.io.File dir) {
+        java.io.File[] files = dir.listFiles();
+        for (java.io.File file : files == null ? new java.io.File[0] : files) {
+            if (file.isDirectory()) {
+                deleteAll(file);
+            }
+            file.delete();
+        }
+    }
+
+    @Test
     public void aCaptureCarriesItsSummaryAndWhenItWasCaptured() throws Exception {
         writes.capture(calendar, "Call the plumber", null, null);
 
@@ -323,7 +366,7 @@ public class TaskWritesTest {
         // it as a task (task_summary), and CREATED says when (GUIDE §17).
         assertEquals("inbox", one("SELECT group_concat(value) FROM task_category"));
         assertEquals("Call the plumber", one("SELECT summary FROM task_summary"));
-        assertTrue(captured.event.ical.contains("CREATED:"));
+        assertTrue(captured.event.ical().contains("CREATED:"));
         assertEquals(captured.task.created().length(), 16);
     }
 
@@ -339,7 +382,7 @@ public class TaskWritesTest {
                         .withText("Call the plumber", null));
 
         // NOTE: no stamp moves either (pimdir GUIDE §17): nothing to push.
-        assertEquals(captured.event.ical, store.load(context).get(0).event.ical);
+        assertEquals(captured.event.ical(), store.load(context).get(0).event.ical());
     }
 
     @Test

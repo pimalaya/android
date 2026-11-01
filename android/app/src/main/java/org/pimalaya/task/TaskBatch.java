@@ -307,7 +307,7 @@ final class TaskBatch {
                                             writes.create(
                                                     target,
                                                     copyOf(
-                                                            stored.task,
+                                                            stored.full(),
                                                             copies.get(stored.task.parent())))));
                 });
     }

@@ -468,6 +468,33 @@ pub extern "system" fn Java_org_pimalaya_client_Native_readTasks<'local>(
     .resolve::<ErrorReply>()
 }
 
+/// `Native.tasksOf`: the to-dos a store's summaries hold, the GTD way,
+/// read without their bodies.
+///
+/// Takes the `{columns, rows}` tables of `list_task_rows` and
+/// `list_task_categories` and returns `[{key, task}]`, keyed
+/// `collection\nlink_id`, a task's `description` empty; pure.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_tasksOf<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    rows: JString<'local>,
+    categories: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let rows = read_string(env, &rows);
+        let categories = read_string(env, &categories);
+
+        let json = match task::tasks_of(&rows, &categories) {
+            Ok(rows) => to_string(&rows).unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
 /// `Native.mergeEvent`: three-way merges a conflicted calendar object.
 ///
 /// The body staged here and its source's against their base (empty when

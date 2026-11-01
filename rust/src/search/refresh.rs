@@ -69,18 +69,21 @@ impl From<PimdirIndexRefreshOutput> for RunReport {
 }
 
 /// One run: at most `batch` feed rows folded, its horizon around `now`
-/// (Unix seconds), the bodies read from `blobs`; `missing` folds the
-/// placements an earlier pass could not read first, as a pass's first run
-/// does.
+/// (Unix seconds), the bodies read from `blobs`, floating times and dates
+/// read in `zone`, an IANA name (SEARCH §7), the device's, so an agenda
+/// draws them at the wall time they state; `missing` folds the placements
+/// an earlier pass could not read first, as a pass's first run does.
 pub fn run(
     sql: &mut impl IndexSql,
     blobs: &Path,
     now: i64,
     batch: usize,
     missing: bool,
+    zone: &str,
 ) -> Result<PimdirIndexRefreshOutput, BridgeError> {
     let mut coroutine = PimdirIndexRefresh::new(now, batch);
     coroutine.missing = missing;
+    coroutine.floating_zone = zone.to_string();
     let mut arg = None;
     loop {
         match coroutine.resume(arg.take()) {

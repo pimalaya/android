@@ -20,7 +20,6 @@ import org.pimalaya.pimdir.PimdirItems;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -30,10 +29,11 @@ import java.util.Set;
  * (cairn/changes/gtd-by-categories).
  *
  * <p>No store of its own: a task is a VTODO the calendar sync already keeps,
- * found by its {@code task_summary} row ({@link EventStore#loadTasks}), its
- * state, categories, parent, contact and capture time read off the object at
- * load time ({@link CalendarClient#readTasks}): the row lacks the contact and
- * {@code CREATED}, and a body is what an edit patches anyway.
+ * listed from its {@code task_summary} row, its categories and its {@code
+ * contact} address ({@link EventStore#loadTasks}, pimdir STORAGE Annex A.4),
+ * read the GTD way by {@link CalendarClient#tasksOf}: no body is read for the
+ * list. A page reads its body ({@link Stored#full}), its description and what
+ * an edit patches.
  */
 public final class TaskStore {
     /** The calendar the last capture went to, in the Tasks preferences. */
@@ -50,19 +50,36 @@ public final class TaskStore {
     public static final class Stored {
         public final EventStore.StoredEvent event;
         public final EventStore.StoredCalendar calendar;
+        /** The to-do as its summary holds it, its description empty. */
         public final Task task;
+
+        /** The to-do read off its body, once asked for. */
+        private Task full;
 
         Stored(EventStore.StoredEvent event, EventStore.StoredCalendar calendar, Task task) {
             this.event = event;
             this.calendar = calendar;
             this.task = task;
         }
+
+        /**
+         * The to-do read off its body, with what its summary does not hold
+         * (its {@code DESCRIPTION}); the summary's when the body reads as
+         * none.
+         */
+        public synchronized Task full() {
+            if (full == null) {
+                Stored read = read(event, calendar);
+                full = read == null ? task : read.task;
+            }
+            return full;
+        }
     }
 
     /**
      * Every to-do of the calendars the filter shows, open and closed.
      *
-     * <p>Off the main thread: it reads every to-do's body.
+     * <p>Off the main thread: it reads the store's summaries, no body.
      */
     public List<Stored> load(Context context) {
         MergedFilter filter = MergedFilter.of(context, PimDomain.CALENDAR);
@@ -71,23 +88,18 @@ public final class TaskStore {
             byCollection.put(calendar.id, calendar);
         }
 
-        Map<String, EventStore.StoredEvent> byKey = new LinkedHashMap<>();
-        Map<String, String> objects = new LinkedHashMap<>();
-        for (EventStore.StoredEvent event : parts.events().loadTasks()) {
-            EventStore.StoredCalendar calendar = byCollection.get(event.collectionId);
-            if (calendar == null || !filter.accepts(calendar.accountEmail, calendar.id)) {
-                continue;
-            }
-            String key = event.collectionId + "\n" + event.id;
-            byKey.put(key, event);
-            objects.put(key, event.ical);
-        }
-
         List<Stored> tasks = new ArrayList<>();
         try {
-            for (Map.Entry<String, Task> read : CalendarClient.readTasks(objects).entrySet()) {
-                EventStore.StoredEvent event = byKey.get(read.getKey());
-                tasks.add(new Stored(event, byCollection.get(event.collectionId), read.getValue()));
+            EventStore.TaskRows rows = parts.events().loadTasks();
+            for (Map.Entry<String, Task> read :
+                    CalendarClient.tasksOf(rows.rows, rows.categories).entrySet()) {
+                EventStore.StoredEvent event = rows.events.get(read.getKey());
+                EventStore.StoredCalendar calendar =
+                        event == null ? null : byCollection.get(event.collectionId);
+                if (calendar == null || !filter.accepts(calendar.accountEmail, calendar.id)) {
+                    continue;
+                }
+                tasks.add(new Stored(event, calendar, read.getValue()));
             }
         } catch (Exception error) {
             Log.w("pimalaya", "task listing failed", error);
@@ -102,7 +114,7 @@ public final class TaskStore {
      */
     public static Stored read(EventStore.StoredEvent event, EventStore.StoredCalendar calendar) {
         try {
-            Task task = CalendarClient.readTasks(Map.of("", event.ical)).get("");
+            Task task = CalendarClient.readTasks(Map.of("", event.ical())).get("");
             return task == null ? null : new Stored(event, calendar, task);
         } catch (Exception error) {
             Log.w("pimalaya", "task read failed: " + event.id, error);

@@ -44,7 +44,7 @@ final class Birthdays {
                             try {
                                 String projected =
                                         Objects.toString(
-                                                ContactClient.projectCard(entry.card.vcard())
+                                                ContactClient.projectCard(entry.card().vcard())
                                                         .birthday(),
                                                 "");
                                 if (projected.matches("\\d{4}-\\d{2}-\\d{2}")) {

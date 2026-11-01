@@ -31,6 +31,11 @@ The app SHALL keep a search index, index.db beside the store, in a shape of its 
 - WHEN a sync writes a page to the store
 - THEN the write goes through, the run holding no lock on the store
 
+#### Scenario: A fresh install
+- GIVEN no store on the device
+- WHEN the app first starts and the index refreshes
+- THEN the store is created before the index reads it, and index.db holds its `index_meta` after that first start
+
 #### Scenario: An index another program built
 - GIVEN an index.db whose `index_meta.shape` is `canonical`
 - WHEN the app opens its index

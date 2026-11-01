@@ -172,7 +172,7 @@ public final class VcfTransfer {
     private String buildVcf(List<Group> groups) {
         List<String> vcards = new ArrayList<>(groups.size());
         for (Group group : groups) {
-            vcards.add(group.primary().card.vcard());
+            vcards.add(group.primary().card().vcard());
         }
         return Vcf.join(vcards);
     }

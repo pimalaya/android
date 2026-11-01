@@ -35,7 +35,7 @@ use crate::{
         find::{self, Answer, Hit},
         floor::{FLOOR, Floor},
         held::{self, Held},
-        refresh,
+        lists, refresh,
         shape::{self, APP, DROPPED, SHAPE},
         sql::{IndexSql, int, query, text},
     },
@@ -98,6 +98,11 @@ fn served(name: &str) -> String {
 /// Builds the index if empty and folds the whole feed, a run a
 /// transaction, at `now`; answers the runs.
 fn refreshed(floor: &mut Floor, dir: &Path, now: i64, batch: usize) -> usize {
+    refreshed_in(floor, dir, now, batch, "UTC")
+}
+
+/// [`refreshed`], floating times and dates read in `zone`.
+fn refreshed_in(floor: &mut Floor, dir: &Path, now: i64, batch: usize, zone: &str) -> usize {
     match held::held(floor).unwrap() {
         Held::Empty => {
             floor.exec(&served("BEGIN_RUN"));
@@ -112,7 +117,7 @@ fn refreshed(floor: &mut Floor, dir: &Path, now: i64, batch: usize) -> usize {
     let mut runs = 0;
     loop {
         floor.exec(&served("BEGIN_RUN"));
-        let output = refresh::run(floor, &blobs, now, batch, runs == 0).unwrap();
+        let output = refresh::run(floor, &blobs, now, batch, runs == 0, zone).unwrap();
         floor.exec(&served("COMMIT_RUN"));
         runs += 1;
         if output.exhausted {
@@ -901,4 +906,120 @@ fn index_weight_per_message() {
         size / count as u64,
         content / count as i64,
     );
+}
+
+/// Files a calendar object into `Calendar` as source `local`.
+fn file_entry(dir: &Path, handle: &str, body: &str) {
+    let mut owner = PimdirStore::open(dir).unwrap().for_source("local");
+    owner
+        .ensure_collection("Calendar", "text/calendar")
+        .unwrap();
+    let body = body.replace('\n', "\r\n").into_bytes();
+    let derived = summary::derive("text/calendar", &body).unwrap();
+    let hash = owner.hash(&body);
+    owner
+        .write(vec![
+            PimdirWriteOp::StoreObject {
+                object: PimdirObject {
+                    hash: hash.clone(),
+                    size: body.len(),
+                },
+                body: Some(body),
+            },
+            PimdirWriteOp::UpsertPlacement(placement(
+                "Calendar",
+                handle,
+                derived.link_id.as_str(),
+                Some(hash),
+                derived.summary.unwrap(),
+                derived.sort_key.as_str(),
+                PimdirFlags::Known(BTreeSet::new()),
+            )),
+        ])
+        .unwrap();
+}
+
+/// The agenda reads a window of calendar time off the occurrence table,
+/// each row from its item's summary: a weekly series' occurrence in the
+/// window, a floating time read in the device's zone, a date kept on its
+/// day, a series a bound cut counted, a window past the horizon said, and
+/// an item deleted since the refresh left out.
+#[test]
+fn the_agenda_reads_occurrences_with_their_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    file_entry(
+        dir.path(),
+        "standup.ics",
+        "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//x//x\nBEGIN:VEVENT\nUID:standup\n\
+         DTSTAMP:20260101T000000Z\nDTSTART:20260105T090000\nDTEND:20260105T091500\n\
+         RRULE:FREQ=WEEKLY\nSUMMARY:Stand-up\nLOCATION:Room 2\nEND:VEVENT\nEND:VCALENDAR\n",
+    );
+    file_entry(
+        dir.path(),
+        "holiday.ics",
+        "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//x//x\nBEGIN:VEVENT\nUID:holiday\n\
+         DTSTAMP:20260101T000000Z\nDTSTART;VALUE=DATE:20261103\nSUMMARY:Holiday\n\
+         END:VEVENT\nEND:VCALENDAR\n",
+    );
+    file_entry(
+        dir.path(),
+        "tick.ics",
+        "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//x//x\nBEGIN:VEVENT\nUID:tick\n\
+         DTSTAMP:20260101T000000Z\nDTSTART:20251101T000000Z\nRRULE:FREQ=MINUTELY;INTERVAL=30\n\
+         SUMMARY:Tick\nEND:VEVENT\nEND:VCALENDAR\n",
+    );
+
+    let mut floor = index(dir.path());
+    // NOTE: 2026-11-01T00:00:00Z.
+    let now = 1_793_491_200;
+    refreshed_in(&mut floor, dir.path(), now, 100, "Europe/Paris");
+
+    let week = lists::agenda(
+        &mut floor,
+        "2026-11-02T00:00:00Z",
+        "2026-11-09T00:00:00Z",
+        "local",
+    )
+    .unwrap();
+    assert_eq!(week.floating_zone, "Europe/Paris");
+    assert!(!week.horizon_left);
+    assert_eq!(week.cut, 1, "the half-hourly series, cut at its 10,001st");
+    let rows: Vec<_> = week
+        .occurrences
+        .iter()
+        .map(|row| (row.summary.as_str(), row.start.as_str(), row.all_day))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("Stand-up", "2026-11-02T08:00:00Z", false),
+            ("Holiday", "2026-11-02T23:00:00Z", true),
+        ]
+    );
+    let standup = &week.occurrences[0];
+    assert_eq!(standup.component.as_deref(), Some("VEVENT"));
+    assert_eq!(standup.location, "Room 2");
+    assert_eq!(standup.end, "2026-11-02T08:15:00Z");
+    assert_eq!(standup.handle.as_deref(), Some("standup.ics"));
+
+    let later = lists::agenda(
+        &mut floor,
+        "2029-01-01T00:00:00Z",
+        "2029-01-08T00:00:00Z",
+        "local",
+    )
+    .unwrap();
+    assert!(later.horizon_left, "two years on is past the horizon");
+    assert!(later.occurrences.is_empty());
+
+    // NOTE: an item deleted since the index folded it leaves at once.
+    floor.exec("UPDATE store.items SET deleted = 1 WHERE link_id = 'standup'");
+    let week = lists::agenda(
+        &mut floor,
+        "2026-11-02T00:00:00Z",
+        "2026-11-09T00:00:00Z",
+        "local",
+    )
+    .unwrap();
+    assert_eq!(week.occurrences.len(), 1);
 }

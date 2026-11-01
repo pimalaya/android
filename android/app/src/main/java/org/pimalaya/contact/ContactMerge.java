@@ -29,7 +29,7 @@ final class ContactMerge {
     static boolean identical(List<Entry> replicas) {
         Set<String> hashes = new HashSet<>();
         for (Entry entry : replicas) {
-            hashes.add(entry.hash);
+            hashes.add(entry.hash());
         }
         return hashes.size() == 1;
     }
@@ -60,8 +60,8 @@ final class ContactMerge {
         List<String> docs = new ArrayList<>();
         Set<String> hashes = new HashSet<>();
         for (Entry entry : replicas) {
-            if (hashes.add(entry.hash)) {
-                docs.add(entry.card.vcard());
+            if (hashes.add(entry.hash())) {
+                docs.add(entry.card().vcard());
             }
         }
         return docs;

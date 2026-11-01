@@ -43,9 +43,11 @@ import java.util.function.BiPredicate;
 /**
  * The calendar screen: one agenda over every account, a card per day.
  *
- * <p>Rows are occurrences, expanded by the bridge at load time: the shown week
- * moves, the object does not. Expansion is civil (RFC 5545), a row placed at
- * its instant in the device's zone ({@link Zones}).
+ * <p>Rows are occurrences, read from the search index's occurrence table over
+ * the window shown (pimdir SEARCH §7), each row's title and kind from its
+ * item's summary: no body is read until a row opens. A row is placed at its
+ * instant in the device's zone ({@link Zones}). With no index, or one
+ * refused, the bridge expands every object instead, as it did before.
  */
 public final class CalendarList {
     /** Seconds in a day, the threshold a length is told in days past. */
@@ -167,14 +169,22 @@ public final class CalendarList {
         /** The instant it starts at, which orders and places the row. */
         final long start;
 
+        /**
+         * Whether the index placed it, its occurrence then its instants and
+         * its master's summary alone: the one it opens is read off the body.
+         */
+        final boolean indexed;
+
         Row(
                 Occurrence occurrence,
                 EventStore.StoredEvent event,
-                EventStore.StoredCalendar calendar) {
+                EventStore.StoredCalendar calendar,
+                boolean indexed) {
             this.occurrence = occurrence;
             this.event = event;
             this.calendar = calendar;
             this.start = Zones.instant(occurrence.start());
+            this.indexed = indexed;
         }
     }
 
@@ -213,7 +223,7 @@ public final class CalendarList {
                     boolean todo =
                             "VTODO".equals(row.occurrence.component()) && !row.event.conflicted;
                     if (!todo || todoOpened == null || !todoOpened.test(row.event, row.calendar)) {
-                        eventView.open(row.occurrence, row.event, row.calendar);
+                        eventView.open(opened(row), row.event, row.calendar);
                     }
                 });
 
@@ -228,11 +238,12 @@ public final class CalendarList {
     }
 
     /**
-     * Rebuilds the agenda: objects expanded into the week, then filtered.
+     * Rebuilds the agenda: the window's occurrences read off the search
+     * index, then filtered.
      *
-     * <p>Off the main thread, the last reload winning: thousands of expansions
-     * would freeze it. An expansion is kept while week and object stay, so a
-     * reload after a sync expands only what changed.
+     * <p>Off the main thread, the last reload winning. With no index the
+     * objects are expanded instead, an expansion kept while window and object
+     * stay, so a reload after a sync expands only what changed.
      */
     public void reload() {
         // NOTE: the shown week alone, since the agenda never lists past it
@@ -264,39 +275,23 @@ public final class CalendarList {
         }
         MergedFilter filter = MergedFilter.of(host, PimDomain.CALENDAR);
         int asked = ++generation;
-        long requested = System.nanoTime();
 
         reads.execute(
                 () -> {
-                    long started = System.nanoTime();
                     Map<String, Map<String, String>> found = new LinkedHashMap<>();
-                    List<Row> read = rowsOf(from, until, filter, found);
-                    long readAt = System.nanoTime();
+                    Coverage seen = new Coverage();
+                    List<Row> read = rowsOf(from, until, filter, found, seen);
                     host.postAlive(
                             () -> {
                                 if (asked != generation) {
                                     return;
                                 }
-                                long posted = System.nanoTime();
                                 loaded = true;
                                 rows.clear();
                                 rows.addAll(read);
                                 offered = found;
+                                coverage = seen;
                                 render();
-                                long drawn = System.nanoTime();
-                                Log.d(
-                                        "pimalaya",
-                                        "agenda drawn "
-                                                + millis(requested, drawn)
-                                                + " ms after asked: queued "
-                                                + millis(requested, started)
-                                                + " ms, read "
-                                                + millis(started, readAt)
-                                                + " ms, posted "
-                                                + millis(readAt, posted)
-                                                + " ms, rendered "
-                                                + millis(posted, drawn)
-                                                + " ms");
                             });
                 });
     }
@@ -334,8 +329,21 @@ public final class CalendarList {
         }
     }
 
+    /** What the last window read could not see (pimdir SEARCH §7, §8.2). */
+    private static final class Coverage {
+        /** Whether the window leaves the horizon the index holds. */
+        boolean horizonLeft;
+
+        /** How many series a bound cut before the window's end. */
+        long cut;
+    }
+
+    /** What the shown window could not see, as last read. */
+    private Coverage coverage = new Coverage();
+
     /**
-     * The agenda's rows in {@code [from, until)}, earliest first.
+     * The agenda's rows in {@code [from, until)}, earliest first: the index's
+     * occurrences, else every object expanded when there is no index.
      *
      * <p>On {@link #reads}.
      */
@@ -343,27 +351,153 @@ public final class CalendarList {
             String from,
             String until,
             MergedFilter filter,
-            Map<String, Map<String, String>> found) {
-        long started = System.nanoTime();
-        if (!from.equals(expandedFrom)) {
-            expanded.clear();
-            expandedFrom = from;
-        }
+            Map<String, Map<String, String>> found,
+            Coverage seen) {
         Map<String, EventStore.StoredCalendar> byCollection = new HashMap<>();
-        List<EventStore.StoredCalendar> calendars = store.loadCalendars();
-        long calendarsRead = System.nanoTime();
-        List<EventStore.StoredEvent> events = store.loadEvents();
-        long eventsRead = System.nanoTime();
-        long expanding = 0;
-        int fresh = 0;
-        int cached = 0;
-        for (EventStore.StoredCalendar calendar : calendars) {
+        for (EventStore.StoredCalendar calendar : store.loadCalendars()) {
             byCollection.put(calendar.id, calendar);
             if (filter.accepts(calendar.accountEmail, calendar.id)) {
                 found.computeIfAbsent(calendar.accountEmail, key -> new LinkedHashMap<>())
                         .put(calendar.id, calendar.name);
             }
         }
+
+        org.pimalaya.pimdir.PimdirIndexDb index = store.index();
+        org.json.JSONObject agenda = null;
+        try {
+            agenda = index == null ? null : index.agenda(instantOf(from), instantOf(until));
+        } catch (RuntimeException failed) {
+            Log.w("pimalaya", "search index unanswered", failed);
+        }
+        if (agenda == null) {
+            return expandedRows(from, until, filter, byCollection);
+        }
+
+        Set<String> conflicted = store.conflicted();
+        seen.horizonLeft = agenda.optBoolean("horizonLeft");
+        seen.cut = agenda.optLong("cut");
+        ZoneId floating = zoneOf(agenda.optString("floatingZone"));
+        org.json.JSONArray occurrences = agenda.optJSONArray("occurrences");
+        List<Row> read = new ArrayList<>();
+        Map<String, EventStore.StoredEvent> events = new HashMap<>();
+        for (int at = 0; occurrences != null && at < occurrences.length(); at++) {
+            org.json.JSONObject occurrence = occurrences.optJSONObject(at);
+            String collection = occurrence.optString("collection");
+            EventStore.StoredCalendar calendar = byCollection.get(collection);
+            if (calendar == null || !filter.accepts(calendar.accountEmail, calendar.id)) {
+                continue;
+            }
+            String id = occurrence.optString("linkId");
+            String key = collection + "\n" + id;
+            EventStore.StoredEvent event =
+                    events.computeIfAbsent(
+                            key,
+                            any ->
+                                    store.bodiless(
+                                            collection,
+                                            id,
+                                            occurrence.isNull("handle")
+                                                    ? null
+                                                    : occurrence.optString("handle", null),
+                                            occurrence.optString("object"),
+                                            occurrence.optString("revision", ""),
+                                            conflicted.contains(key)));
+            read.add(new Row(occurrenceOf(occurrence, floating), event, calendar, true));
+        }
+        return read;
+    }
+
+    /**
+     * One occurrence as the index wrote it (pimdir SEARCH §7): its instants
+     * in UTC, a date's read in the zone the index read it in, so an all-day
+     * entry keeps its day; its title, place and kind its master's.
+     */
+    static Occurrence occurrenceOf(org.json.JSONObject occurrence, ZoneId floating) {
+        boolean allDay = occurrence.optBoolean("allDay");
+        String component = occurrence.optString("component", "VEVENT");
+        return new Occurrence(
+                component.isEmpty() ? "VEVENT" : component,
+                timeOf(occurrence.optString("start"), allDay, floating),
+                timeOf(occurrence.optString("end"), allDay, floating),
+                null,
+                occurrence.optString("summary"),
+                occurrence.optString("location"),
+                allDay);
+    }
+
+    /** An RFC 3339 instant as a time: its day in {@code floating}, or in UTC. */
+    private static EventTime timeOf(String instant, boolean date, ZoneId floating) {
+        Instant moment = Instant.parse(instant);
+        if (date) {
+            return new EventTime(
+                    Zones.stamp(moment.atZone(floating).toLocalDateTime(), true),
+                    org.pimalaya.client.EventTimeKind.DATE,
+                    "",
+                    null);
+        }
+        return new EventTime(
+                Zones.stamp(moment.atZone(java.time.ZoneOffset.UTC).toLocalDateTime(), false),
+                org.pimalaya.client.EventTimeKind.UTC,
+                "",
+                null);
+    }
+
+    /** The zone the index names, UTC when it names none the device knows. */
+    private static ZoneId zoneOf(String name) {
+        try {
+            return name.isEmpty() ? java.time.ZoneOffset.UTC : ZoneId.of(name);
+        } catch (java.time.DateTimeException unknown) {
+            return java.time.ZoneOffset.UTC;
+        }
+    }
+
+    /** Midnight opening a civil {@code YYYYMMDD} day here, as RFC 3339 in UTC. */
+    static String instantOf(String day) {
+        return Instant.ofEpochMilli(stampOf(day))
+                .truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+                .toString();
+    }
+
+    /**
+     * The occurrence a row opens: the one its body expands to at the row's
+     * instant, with its own title and {@code RECURRENCE-ID}, for a row the
+     * index placed; the row's own when the body expands to none there.
+     */
+    private Occurrence opened(Row row) {
+        if (!row.indexed) {
+            return row.occurrence;
+        }
+        String day = dayOf(row);
+        try {
+            for (Occurrence expanded :
+                    CalendarClient.expandEvent(
+                            row.event.ical(), plusDays(day, -1), plusDays(day, 2))) {
+                if (Zones.instant(expanded.start()) == row.start) {
+                    return expanded;
+                }
+            }
+        } catch (Exception error) {
+            Log.w("pimalaya", "event expand failed: " + row.event.id, error);
+        }
+        return row.occurrence;
+    }
+
+    /**
+     * The agenda's rows in {@code [from, until)}, every object expanded by
+     * the bridge, earliest first: the store's index absent or refused.
+     *
+     * <p>On {@link #reads}.
+     */
+    private List<Row> expandedRows(
+            String from,
+            String until,
+            MergedFilter filter,
+            Map<String, EventStore.StoredCalendar> byCollection) {
+        if (!from.equals(expandedFrom)) {
+            expanded.clear();
+            expandedFrom = from;
+        }
+        List<EventStore.StoredEvent> events = store.loadEvents();
 
         List<Row> read = new ArrayList<>();
         Map<String, Expanded> kept = new HashMap<>();
@@ -377,64 +511,29 @@ public final class CalendarList {
             }
             String key = event.collectionId + "\n" + event.id;
             Expanded known = expanded.get(key);
-            if (known == null || !known.ical.equals(event.ical)) {
-                long asked = System.nanoTime();
+            if (known == null || !known.ical.equals(event.ical())) {
                 try {
                     known =
                             new Expanded(
-                                    event.ical,
-                                    CalendarClient.expandEvent(event.ical, from, until));
+                                    event.ical(),
+                                    CalendarClient.expandEvent(event.ical(), from, until));
                 } catch (Exception error) {
                     // NOTE: one unparseable object must not empty the whole
                     // agenda, so it is dropped with a log and the rest render.
                     Log.w("pimalaya", "event expand failed: " + event.id, error);
                     continue;
-                } finally {
-                    expanding += System.nanoTime() - asked;
                 }
-                fresh++;
-            } else {
-                cached++;
             }
             kept.put(key, known);
             for (Occurrence occurrence : known.occurrences) {
-                read.add(new Row(occurrence, event, calendar));
+                read.add(new Row(occurrence, event, calendar, false));
             }
         }
         expanded.clear();
         expanded.putAll(kept);
 
         read.sort((left, right) -> Long.compare(left.start, right.start));
-        long done = System.nanoTime();
-        Log.d(
-                "pimalaya",
-                "agenda read "
-                        + from
-                        + ".."
-                        + until
-                        + ": "
-                        + events.size()
-                        + " entries ("
-                        + fresh
-                        + " expanded, "
-                        + cached
-                        + " cached), "
-                        + read.size()
-                        + " rows; calendars "
-                        + millis(started, calendarsRead)
-                        + " ms, entries "
-                        + millis(calendarsRead, eventsRead)
-                        + " ms, expanding "
-                        + expanding / 1_000_000
-                        + " ms, the rest "
-                        + (millis(eventsRead, done) - expanding / 1_000_000)
-                        + " ms");
         return read;
-    }
-
-    /** The whole milliseconds between two {@link System#nanoTime} reads. */
-    private static long millis(long from, long to) {
-        return (to - from) / 1_000_000;
     }
 
     /**
@@ -708,12 +807,24 @@ public final class CalendarList {
                 },
                 key -> monthOf(stampOf(key + "01")));
         adapter.notifyDataSetChanged();
-        header.meta(
+        String meta =
                 host.getResources()
                         .getQuantityString(
                                 pastSide ? R.plurals.calendar_meta_past : R.plurals.calendar_meta,
                                 shown.size(),
-                                shown.size()));
+                                shown.size());
+        // NOTE: what the index could not see says so (pimdir SEARCH §7):
+        // occurrences outside its horizon, or past a series' cut.
+        if (coverage.horizonLeft) {
+            meta = host.getString(R.string.calendar_horizon_left, meta);
+        }
+        if (coverage.cut > 0) {
+            meta =
+                    host.getResources()
+                            .getQuantityString(
+                                    R.plurals.calendar_cut, (int) coverage.cut, meta, coverage.cut);
+        }
+        header.meta(meta);
         if (listing) {
             header.noWeek();
         } else {

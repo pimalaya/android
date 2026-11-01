@@ -280,6 +280,22 @@ public class MainActivity extends Host
         CalendarParts calendarParts = new CalendarParts(pimdir, clients, events);
         eventView = new EventView(this, calendarParts, linked);
         calendarList = new CalendarList(this, calendarParts, eventView, this::syncCalendars);
+        // NOTE: the agenda and the contacts' filter read the search index,
+        // which a refresh fills after the store moves: the one shown reloads
+        // once it folded what moved.
+        if (pimdir.index() != null) {
+            pimdir.index()
+                    .onFolded(
+                            () ->
+                                    postAlive(
+                                            () -> {
+                                                if (screen == Panels.CALENDAR) {
+                                                    calendarList.reload();
+                                                } else if (screen == Panels.CONTACTS) {
+                                                    contactsList.reload();
+                                                }
+                                            }));
+        }
         // NOTE: the task screens open a source mail in the reader, built
         // below, so they read its field late.
         tasksList = new TasksList(this, calendarParts);
@@ -835,6 +851,9 @@ public class MainActivity extends Host
             return;
         }
         App.of(this).state.onBackgroundEnd = null;
+        if (pimdir.index() != null) {
+            pimdir.index().onFolded(null);
+        }
         io.shutdownNow();
         interactive.shutdownNow();
         // NOTE: shutdownNow interrupts, but a blocking accept() only

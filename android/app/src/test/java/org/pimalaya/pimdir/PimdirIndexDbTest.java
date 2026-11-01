@@ -2,6 +2,7 @@ package org.pimalaya.pimdir;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import android.database.Cursor;
@@ -28,7 +29,6 @@ public class PimdirIndexDbTest {
     @Before
     public void setUp() {
         store = new PimdirDb(RuntimeEnvironment.getApplication());
-        store.getWritableDatabase();
         index = new PimdirIndexDb(store);
     }
 
@@ -50,6 +50,21 @@ public class PimdirIndexDbTest {
         assertEquals(
                 "pimalaya-android",
                 index.run(handle -> scalar(handle, "SELECT shape FROM index_meta")));
+    }
+
+    @Test
+    public void aFreshStoreIsCreatedBeforeItsIndexReadsIt() {
+        // NOTE: what App.pimdir does on a fresh install: the helper has not
+        // opened pimdir.db yet, so the store has no schema when the index's
+        // first refresh attaches it (on the API 26 emulator, 2026-11-01: no
+        // such table: store.store_meta).
+        PimdirIndexDb first = store.startIndex();
+        org.json.JSONObject report = first.refresh();
+        assertNotNull("the index answered", report);
+        assertTrue(report.optBoolean("exhausted"));
+        assertEquals(
+                "pimalaya-android",
+                first.run(handle -> scalar(handle, "SELECT shape FROM index_meta")));
     }
 
     @Test

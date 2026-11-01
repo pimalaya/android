@@ -203,8 +203,8 @@ public class EventWritesTest {
                         "add " + calendar.id + " s-2.ics",
                         "edit " + calendar.id + " " + target.handle),
                 client.staged);
-        assertTrue(stored("s-2.ics").ical.contains("UID:s-2\r\n"));
-        assertTrue(stored("s.ics").ical.contains("UNTIL="));
+        assertTrue(stored("s-2.ics").ical().contains("UID:s-2\r\n"));
+        assertTrue(stored("s.ics").ical().contains("UNTIL="));
     }
 
     @Test
@@ -227,7 +227,7 @@ public class EventWritesTest {
                         Map.of(), null));
 
         assertEquals(List.of("add " + calendar.id + " " + id), client.staged);
-        assertTrue(stored(id).ical.contains("SUMMARY:Lunch\r\n"));
+        assertTrue(stored(id).ical().contains("SUMMARY:Lunch\r\n"));
     }
 
     @Test
@@ -252,7 +252,7 @@ public class EventWritesTest {
                                 EventAlarm.before(
                                         EventAlarm.DISPLAY, 15, "Dentist", "", List.of()))));
 
-        String ical = stored(id).ical;
+        String ical = stored(id).ical();
         assertTrue(ical.contains("BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\n"));
     }
 
@@ -282,7 +282,7 @@ public class EventWritesTest {
                         EventScope.ALL, edited, "", target, calendar, true, true, null,
                         Map.of(), kept));
 
-        String ical = stored(id).ical;
+        String ical = stored(id).ical();
         assertFalse(ical.contains("TRIGGER:-PT10M"));
         assertTrue(ical.contains("ACTION:EMAIL\r\nTRIGGER:-PT1H\r\n"));
     }
@@ -322,7 +322,7 @@ public class EventWritesTest {
                 new EventWrites.Delete(EventScope.THIS, edit, target, calendar, null, Map.of()));
 
         assertEquals(List.of("edit " + calendar.id + " " + target.handle), client.staged);
-        assertTrue(stored("s.ics").ical.contains("EXDATE"));
+        assertTrue(stored("s.ics").ical().contains("EXDATE"));
     }
 
     @Test

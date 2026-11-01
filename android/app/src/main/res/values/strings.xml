@@ -360,6 +360,11 @@
         <item quantity="one">%1$d past entry</item>
         <item quantity="other">%1$d past entries</item>
     </plurals>
+    <string name="calendar_horizon_left">%1$s, outside the years the index holds</string>
+    <plurals name="calendar_cut">
+        <item quantity="one">%1$s, %2$d series not shown in full</item>
+        <item quantity="other">%1$s, %2$d series not shown in full</item>
+    </plurals>
     <string name="mail_search">Search mail</string>
     <string name="date_unknown">Undated</string>
     <!-- The list's footer taking the next step of each shown account (MailStep). -->

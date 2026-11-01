@@ -104,13 +104,13 @@ final class ContactWriter {
                 continue;
             }
 
-            String vcard = ContactClient.applyCard(entry.card.vcard(), model);
-            if (editor.cardIndex(vcard).hash().equals(entry.hash)) {
+            String vcard = ContactClient.applyCard(entry.card().vcard(), model);
+            if (editor.cardIndex(vcard).hash().equals(entry.hash())) {
                 continue;
             }
             engine.edit(
                     entry.book.url(),
-                    PimdirStorage.rowHandle(entry.card.uri(), entry.card.id()),
+                    PimdirStorage.rowHandle(entry.card().uri(), entry.id),
                     vcard);
         }
     }
@@ -128,7 +128,7 @@ final class ContactWriter {
         new ContactStager(parts.pimdir(), parts.clients())
                 .resolve(
                         replica.book.url(),
-                        PimdirStorage.rowHandle(replica.card.uri(), replica.card.id()),
+                        PimdirStorage.rowHandle(replica.card().uri(), replica.id),
                         resolved,
                         editor.edit().resolves);
     }
@@ -138,12 +138,12 @@ final class ContactWriter {
         Entry survivor = editor.edit().mergeSurvivor;
         editor.edit().mergeSurvivor = null;
 
-        String vcard = ContactClient.applyCard(survivor.card.vcard(), model);
-        if (!editor.cardIndex(vcard).hash().equals(survivor.hash)) {
+        String vcard = ContactClient.applyCard(survivor.card().vcard(), model);
+        if (!editor.cardIndex(vcard).hash().equals(survivor.hash())) {
             new ContactStager(parts.pimdir(), parts.clients())
                     .edit(
                             survivor.book.url(),
-                            PimdirStorage.rowHandle(survivor.card.uri(), survivor.card.id()),
+                            PimdirStorage.rowHandle(survivor.card().uri(), survivor.id),
                             vcard);
         }
 
@@ -158,7 +158,7 @@ final class ContactWriter {
             if (owner == null) {
                 continue;
             }
-            parts.contacts().stageDelete(entry.book.url(), entry.card.id());
+            parts.contacts().stageDelete(entry.book.url(), entry.id);
         }
 
         host.toast(host.getString(R.string.merge_done));
@@ -207,7 +207,7 @@ final class ContactWriter {
             for (Entry entry : editor.edit().replicas) {
                 if (entry.accountEmail.equals(target.accountEmail)) {
                     parts.contacts().stageMembership(
-                            entry.book.url(), target.book.url(), entry.card.id(), true);
+                            entry.book.url(), target.book.url(), entry.id, true);
                     return;
                 }
             }
@@ -239,11 +239,11 @@ final class ContactWriter {
         // Both are the same staged delete, on the placement rather than on the
         // card: what differs is only whether another placement survives it.
         if (accountLevel(owner)
-                && parts.contacts().collectionsOf(replica.card.id()).size() > 1) {
+                && parts.contacts().collectionsOf(replica.id).size() > 1) {
             parts.contacts().stageMembership(
-                    replica.book.url(), target.book.url(), replica.card.id(), false);
+                    replica.book.url(), target.book.url(), replica.id, false);
         } else {
-            parts.contacts().stageDelete(replica.book.url(), replica.card.id());
+            parts.contacts().stageDelete(replica.book.url(), replica.id);
         }
     }
 

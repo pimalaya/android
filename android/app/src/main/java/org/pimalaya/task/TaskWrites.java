@@ -114,8 +114,8 @@ public final class TaskWrites {
      * (pimdir GUIDE §17): the bridge hands its bytes back as they were.
      */
     public void edit(TaskStore.Stored stored, TaskEdit edit) throws JSONException {
-        String written = CalendarClient.writeTask(stored.event.ical, edit);
-        if (written.equals(stored.event.ical)) {
+        String written = CalendarClient.writeTask(stored.event.ical(), edit);
+        if (written.equals(stored.event.ical())) {
             return;
         }
         stager().mutateEdit(stored.event.collectionId, stored.event.handle, written, null, "");
@@ -134,7 +134,7 @@ public final class TaskWrites {
     public void moveTo(TaskStore.Stored stored, EventStore.StoredCalendar target, TaskEdit edit)
             throws JSONException {
         refuseUnlessTasks(target);
-        String written = CalendarClient.writeTask(stored.event.ical, edit);
+        String written = CalendarClient.writeTask(stored.event.ical(), edit);
         String linkId = stored.event.id;
         CalendarStager stager = stager();
         stager.offline.atomically(

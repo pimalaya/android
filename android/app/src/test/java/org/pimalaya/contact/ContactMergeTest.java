@@ -56,7 +56,7 @@ public class ContactMergeTest {
                 ContactMerge.doomed(
                         List.of(survivor, survivorElsewhere, shared, sharedElsewhere, lone),
                         survivor,
-                        entry -> entry.card.id()));
+                        entry -> entry.id));
     }
 
     @Test

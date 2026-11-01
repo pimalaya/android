@@ -172,7 +172,7 @@ public class ContactEngineDavCreateTest {
     private Card held(String name) {
         for (PimdirContacts.Indexed indexed : contacts().list(BOOK)) {
             if (indexed.name.equals(name)) {
-                return indexed.card;
+                return indexed.card();
             }
         }
         throw new AssertionError("no " + name + " in " + names());

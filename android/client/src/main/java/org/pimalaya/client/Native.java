@@ -504,6 +504,14 @@ final class Native {
     static native String readTasks(String objects);
 
     /**
+     * The to-dos a store's summaries hold, from the {@code {columns, rows}}
+     * tables of {@code list_task_rows} and {@code list_task_categories}.
+     *
+     * <p>Returns {@code [{key, task}]}, keyed {@code collection\nlink_id}.
+     */
+    static native String tasksOf(String rows, String categories);
+
+    /**
      * Splits a series at the occurrence an edit names.
      *
      * <p>Returns {@code {master, series}}, series null when the occurrence
@@ -802,7 +810,19 @@ final class Native {
      * folded, indexed, removed}}.
      */
     static native String pimdirIndexRefresh(
-            PimdirIndex.Steps index, String blobs, long now, int batch, boolean missing);
+            PimdirIndex.Steps index,
+            String blobs,
+            long now,
+            int batch,
+            boolean missing,
+            String zone);
+
+    /** The occurrences of a window of calendar time: {@code {occurrences, ...}}. */
+    static native String pimdirIndexAgenda(
+            PimdirIndex.Steps index, String start, String end, String source);
+
+    /** What the index recorded of every card: {@code {cards}}. */
+    static native String pimdirIndexCardFacts(PimdirIndex.Steps index);
 
     /** Every hit of a query: {@code {hits}} or {@code {refused}}. */
     static native String pimdirIndexHits(

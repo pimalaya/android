@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: lists-from-the-index
-status: draft
+status: active
 created: 2026-10-30
 ---
 
@@ -57,3 +57,17 @@ The user asked to wait (2026-10-30): pimdir and io-pimdir hold uncommitted work 
 ## Out of scope
 
 - The calendar's first-paint placeholder (the empty state showing until the first load lands), a separate small fix.
+
+## Built at platform-sqlite step 5 (2026-11-01)
+
+The two-SQLites question is settled by cairn/changes/platform-sqlite (one SQLite, the index written by Java, io-pimdir's refresh I/O-free), and the rev moved with it: the lists moved on the index step 4 built. What was taken where the text above leaves room, each the option it states or the nearest to the status quo:
+
+- **The contact row's second line** is the first email, else the organization: Annex A.2 and A.6 "as they stand" hold no phone, so the phone the row showed first is gone (spec/offline-store.md "The three lists share one row" said "the phone or else the email"). A phone on the row would need a summary column, which this proposal ruled out; to settle with the user at the device check.
+- **The contacts' Has filter and categories** read the index's `object` flags and `object_category` rows for every card at each reload (the same rows `has:` and `category:` seek), one read, the panel offering the categories folded as the index records them. The search is the name, email and organization match beside a `kind:contact` query of SEARCH §8, as the mail search keeps its sender and subject match beside the index's hits.
+- **The divergence mark** of a merged row compares the cards' bodies only when they differ byte for byte, the normalized hash kept per body hash for the process: no summary holds the normalized content.
+- **The grouping kept between reloads** stays open, as the text says; it is recomputed at each reload, now from summary columns (uid, fn, link id), which costs no body.
+- **The Tasks description** is not a summary column: the list holds none, and the page, the clarify flow and a copy read the body (`TaskStore.Stored.full`).
+- **The floating zone** the index reads floating times and dates in is the device's (io-pimdir's `PimdirIndexRefresh::floating_zone`, `TimeZone.getDefault()`), so the index re-expands every calendar item once when this build first refreshes, and again after a change of zone; the agenda reads an all-day occurrence's day in the zone `index_meta` records.
+- **The agenda's coverage** is said on the header's count line: outside the horizon, or a number of series cut before the window's end.
+- **With no index or one refused**, the agenda expands every body as before, and the contacts' facts are read off the bodies: a refused index (another shape, a later version) leaves the lists whole, slower.
+- **To check before building**, answered: the cdylib's size moved at step 4 (+0.6 MB with `search`); FTS5 is moot (FTS4, and Java opens index.db for the bridge alone); a `DURATION` without `DTEND` is spanned by the occurrence table, and an event spanning into the window from before it is read on the overlap rule (SEARCH §8.1); the agenda still draws a row on the day it starts, so such an event is not drawn on the window's days, as before.

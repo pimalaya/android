@@ -80,6 +80,11 @@
         <item quantity="one">%1$d entrée passée</item>
         <item quantity="other">%1$d entrées passées</item>
     </plurals>
+    <string name="calendar_horizon_left">%1$s, hors des années que l\'index couvre</string>
+    <plurals name="calendar_cut">
+        <item quantity="one">%1$s, %2$d série incomplète</item>
+        <item quantity="other">%1$s, %2$d séries incomplètes</item>
+    </plurals>
     <string name="mail_search">Rechercher dans les e-mails</string>
     <string name="date_unknown">Sans date</string>
     <string name="mail_more_load">Charger plus</string>

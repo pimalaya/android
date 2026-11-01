@@ -5,7 +5,7 @@ import android.util.Log;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -44,17 +44,19 @@ final class DuplicateReview {
      * Scans for duplicates off the main thread, reviewing the first open group.
      */
     void find(List<Entry> replicas) {
-        Map<String, Entry> byRef = new HashMap<>();
-        List<RefCard> cards = new ArrayList<>();
+        Map<String, Entry> byRef = new LinkedHashMap<>();
         for (Entry entry : replicas) {
-            String ref = parts.pool().replicaRef(entry);
-            if (byRef.putIfAbsent(ref, entry) == null) {
-                cards.add(new RefCard(ref, entry.card.vcard()));
-            }
+            byRef.putIfAbsent(parts.pool().replicaRef(entry), entry);
         }
 
         host.io.execute(
                 () -> {
+                    // NOTE: the bodies are read here, off the main thread:
+                    // the list holds none.
+                    List<RefCard> cards = new ArrayList<>();
+                    for (Map.Entry<String, Entry> held : byRef.entrySet()) {
+                        cards.add(new RefCard(held.getKey(), held.getValue().card().vcard()));
+                    }
                     List<Entry> first = null;
                     Exception failure = null;
                     try {
@@ -209,10 +211,10 @@ final class DuplicateReview {
                 if (!staged.add(parts.pool().replicaRef(entry)) || uid.equals(entry.uid)) {
                     continue;
                 }
-                String vcard = ContactClient.setCardUid(entry.card.vcard(), uid);
+                String vcard = ContactClient.setCardUid(entry.card().vcard(), uid);
                 parts.contacts().save(
                         entry.book.url(),
-                        new Card(entry.card.id(), entry.card.uri(), entry.card.etag(), vcard));
+                        new Card(entry.id, entry.card().uri(), entry.card().etag(), vcard));
             }
         } catch (Exception error) {
             host.showError(error, R.string.save_failed);
