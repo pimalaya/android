@@ -30,12 +30,16 @@ public abstract class Stager implements OfflineDriver {
     /** The rounds the store's syncs parked ({@link PimdirDb#parked}). */
     private final ParkedRounds parked;
 
+    /** The store, whose search index follows each write batch. */
+    private final PimdirDb pimdir;
+
     /** A stager over {@code pimdir}, the bridge through {@code clients}. */
     protected Stager(PimdirDb pimdir, Clients clients) {
         this.offline = new PimdirStorage(pimdir);
         this.clients = clients;
         this.locks = pimdir.locks();
         this.parked = pimdir.parked();
+        this.pimdir = pimdir;
     }
 
     @Override
@@ -173,6 +177,12 @@ public abstract class Stager implements OfflineDriver {
                         page.store += System.nanoTime() - began;
                     }
                     reply = PimdirStorage.written(effects).toString();
+                    // NOTE: the index follows each write batch (SEARCH §4), a
+                    // refresh queued while one runs coalescing into one more.
+                    PimdirIndexDb index = pimdir.index();
+                    if (index != null) {
+                        index.refreshSoon();
+                    }
                     if (page.pages > 0) {
                         Log.d("pimalaya", "page " + page);
                         clock.add(page);

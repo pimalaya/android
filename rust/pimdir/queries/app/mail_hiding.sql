@@ -2,7 +2,7 @@
 -- slots name left out, each pair at one position (the sent copies a waiting
 -- submission's outbox row stands for), at most :hiding_limit rows (-1 all),
 -- the order restated, a subquery's own being no promise.
--- Wraps: LIST_MAIL_PAGE_FILTERED, SEARCH_MAIL.
+-- Wraps: LIST_MAIL_PAGE_FILTERED, SEARCH_MAIL, SEARCH_MAIL_INDEXED.
 SELECT collection, seq, link_id, flags, object_hash, sort_key, level,
        message_id, subject, sender, sender_name, date, size, attachment
 FROM (:inner)

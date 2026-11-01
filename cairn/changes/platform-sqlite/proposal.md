@@ -61,6 +61,7 @@ What the platform gives, checked 2026-10-31: SQLite 3.18 on API 26 up to 3.50 on
 - No conversion of test-build stores: start-up blocked, reinstall.
 - No relevance order for now: `Date` and `Name`, bm25 from `matchinfo` in Rust set aside (FTS4 has no built-in rank, SQL cannot decode `matchinfo` below API 30, so a page would mean ranking every hit over JNI).
 
-## Open
+## Decided at step 4 (2026-11-01)
 
-- FTS4 cannot delete from a contentless table. Contentless with a live-row table: a removed object's row stays in the FTS index, filtered out by a join on the live rows, and the index is rebuilt (it is derived) once dead rows pass a share of the whole; small, at the cost of the filter and the rebuilds. Ordinary: FTS4 stores a copy of every text it indexes and deletes normally; simple, at the cost of index.db growing by every extracted text it holds. Measured at step 4 after a large first sync, then decided.
+- **Ordinary FTS4** (the user, 2026-11-01): both full-text tables store a copy of the text they index and delete by docid, FTS4 having no delete on a contentless table. Contentless with a live-row table was set aside. Measured on the host 3.18.2: a thousand synthetic messages of about 2.1 KB of body text each (words of a 5,000-word vocabulary) weigh 9.0 KB of index.db per message, the stored copy about 2.2 KB of it (cairn/log/2026-11-01-platform-sqlite-step-4.md); a device measure after a large first sync is owed.
+- **A run is a deferred transaction the bridge opens** (`SAVEPOINT`), never one of the platform's: below API 35 the platform begins only immediate or exclusive transactions, and those take the write lock of every attached database, so a refresh run, or a search, would hold the store's writer off for its length (checked on the 3.18.2 build: an immediate transaction on index.db with the store attached makes a store write fail `database is locked`).

@@ -40,7 +40,7 @@ io-jmap = { version = "0.6", default-features = false, features = ["ical", "vcar
 io-msgraph = { version = "0.6", default-features = false, features = ["ical", "vcard"] }
 io-oauth = { version = "0.3", default-features = false }
 io-pim-discovery = { version = "0.9", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
-io-pimdir = { version = "0.8", default-features = false }
+io-pimdir = { version = "0.8", default-features = false, features = ["search"] }
 io-smtp = { version = "0.5", default-features = false }
 io-webdav = { version = "0.5", default-features = false }
 jiff = { version = "0.2", default-features = false, features = ["std"] }
@@ -63,7 +63,7 @@ vcard-rs = { version = "0.5", default-features = false, features = ["parser", "j
 io-jmap = { git = "https://github.com/pimalaya/io-jmap", rev = "3d25e2ba5194a494028a04d60a23bfb61b16f5aa" }
 io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "2ae26370aefa671c16316dbad98107634436bce6" }
 # NOTE: unreleased fixes, to be replaced by released versions.
-ical-rs = { git = "https://github.com/pimalaya/ical", rev = "caa14225152a7aff6d8c86cef1f95e800dd77d20" }
+ical-rs = { git = "https://github.com/pimalaya/ical", rev = "99b92736a6a076c72936fac29c9b85a5168e4c2f" }
 io-http = { git = "https://github.com/pimalaya/io-http", rev = "e1815307771c1ec65a86b77256d46c33241d3038" }
 io-imap = { git = "https://github.com/pimalaya/io-imap", rev = "b1ab38ea9f24578b46dda56aa009600571b6b9ef" }
 io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "09d2d1c5cf8c157cf9b558a715e42af77fc284e9" }

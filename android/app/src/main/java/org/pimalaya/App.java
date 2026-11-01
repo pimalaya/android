@@ -66,6 +66,7 @@ public final class App extends Application
                 throw new IllegalStateException("The pimdir store is refused: " + refusal);
             }
             pimdir = new PimdirDb(this);
+            pimdir.startIndex().refreshSoon();
         }
         return pimdir;
     }

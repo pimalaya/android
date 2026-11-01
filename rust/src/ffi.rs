@@ -14,6 +14,7 @@ mod contact;
 mod host;
 mod mail;
 mod offline;
+mod search;
 
 use std::{
     any::Any,

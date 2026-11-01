@@ -142,6 +142,17 @@ public final class ListHeader {
                 });
     }
 
+    /**
+     * Says on the search field why its query is refused, as the field's
+     * error; null clears it.
+     */
+    public void searchError(String error) {
+        EditText input = view.findViewById(R.id.header_search_input);
+        if (!java.util.Objects.equals(String.valueOf(input.getError()), String.valueOf(error))) {
+            input.setError(error);
+        }
+    }
+
     /** Empties the search field (its watcher settles the query). */
     public void clearSearch() {
         ((EditText) view.findViewById(R.id.header_search_input)).setText("");

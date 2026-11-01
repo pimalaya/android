@@ -82,3 +82,4 @@ mod ffi;
 mod logger;
 mod mail;
 mod offline;
+mod search;

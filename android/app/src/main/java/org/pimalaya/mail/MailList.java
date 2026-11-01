@@ -395,6 +395,7 @@ public final class MailList {
                                     return;
                                 }
                                 currentQuery = listed;
+                                header.searchError(listed.refusal);
                                 layout = next;
                                 offered = found;
                                 drawFilters();

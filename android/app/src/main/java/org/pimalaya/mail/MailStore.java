@@ -18,6 +18,7 @@ import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirIndexDb;
 import org.pimalaya.pimdir.PimdirItems;
 import org.pimalaya.pimdir.PimdirQueue;
 import org.pimalaya.pimdir.PimdirStorage;
@@ -540,6 +541,16 @@ public final class MailStore {
         final String pattern;
 
         /**
+         * The seqs the search index answers the words with (SEARCH §8), null
+         * when nothing is searched or the index answers nothing: the sender
+         * and subject {@link #pattern} matches are kept beside them.
+         */
+        final List<Long> hits;
+
+        /** Why the index refused the words (SEARCH §8.4), null when it did not. */
+        final String refusal;
+
+        /**
          * How far down the list reaches on the sort key, null for all.
          *
          * <p>Its floor ({@link #floorOf}) or a window; canonical statements
@@ -563,11 +574,19 @@ public final class MailStore {
         /** A query over {@code collections}, chips null when off. */
         public Query(List<String> collections, Integer seen, Integer attachment, String pattern,
                 List<String[]> hidden) {
+            this(collections, seen, attachment, pattern, null, null, hidden);
+        }
+
+        /** A query searching {@code pattern} and the index's {@code hits}. */
+        Query(List<String> collections, Integer seen, Integer attachment, String pattern,
+                List<Long> hits, String refusal, List<String[]> hidden) {
             this.collections = new JSONArray(collections).toString();
             this.size = collections.size();
             this.seen = seen;
             this.attachment = attachment;
             this.pattern = pattern;
+            this.hits = hits;
+            this.refusal = refusal;
             this.since = null;
             this.held = new HashSet<>(collections);
             this.hidden = hidden.isEmpty() ? null : new ArrayList<>(hidden);
@@ -590,6 +609,8 @@ public final class MailStore {
             this.seen = seen;
             this.attachment = query.attachment;
             this.pattern = query.pattern;
+            this.hits = query.hits;
+            this.refusal = query.refusal;
             this.since = since;
             this.hidden = query.hidden;
             this.hiding = query.hiding;
@@ -609,7 +630,7 @@ public final class MailStore {
                     kept.add(collection);
                 }
             }
-            return new Query(kept, seen, attachment, pattern, List.of()).since(since);
+            return new Query(kept, seen, attachment, pattern, hits, refusal, List.of()).since(since);
         }
 
         /** The canonical statement's values, with a page's cursor and size. */
@@ -619,6 +640,7 @@ public final class MailStore {
             values.put("seen", seen);
             values.put("attachment", attachment);
             values.put("pattern", pattern);
+            values.put("hits", hits);
             values.put("since", since);
             values.put("after_key", after == null ? null : after.sortKey);
             values.put("after_seq", after == null ? null : after.seq);
@@ -669,11 +691,38 @@ public final class MailStore {
             }
         }
         String trimmed = words == null ? "" : words.trim();
+        if (trimmed.isEmpty()) {
+            return new Query(ids, seen, attachmentsOnly ? 1 : null, null, hidden);
+        }
+        // NOTE: the index answers the words as a query of SEARCH §8, bodies
+        // included; the sender and subject match stays beside it, so a word
+        // inside another, a query the index refuses, or mail not indexed yet
+        // still finds what it found before.
+        List<Long> hits = null;
+        String refusal = null;
+        PimdirIndexDb index = store.index();
+        JSONObject answer = null;
+        try {
+            answer = index == null ? null : index.hits(trimmed, "date");
+        } catch (RuntimeException failed) {
+            Log.w("pimalaya", "search index unanswered", failed);
+        }
+        if (answer != null && answer.has("refused")) {
+            refusal = answer.optJSONObject("refused").optString("message");
+        } else if (answer != null) {
+            JSONArray found = answer.optJSONArray("hits");
+            hits = new ArrayList<>();
+            for (int at = 0; found != null && at < found.length(); at++) {
+                hits.add(found.optJSONObject(at).optLong("seq"));
+            }
+        }
         return new Query(
                 ids,
                 seen,
                 attachmentsOnly ? 1 : null,
-                trimmed.isEmpty() ? null : PimdirDb.likePattern(trimmed),
+                PimdirDb.likePattern(trimmed),
+                hits,
+                refusal,
                 hidden);
     }
 
@@ -839,7 +888,7 @@ public final class MailStore {
         if (query.size == 0 || limit <= 0) {
             return new ArrayList<>();
         }
-        String statement = query.pattern == null ? "LIST_MAIL_PAGE_FILTERED" : "SEARCH_MAIL";
+        String statement = statement(query);
         PimdirSql.Bound bound;
         if (after != null || offset <= 0) {
             // NOTE: read past the page by the rows it hides, so the page
@@ -863,7 +912,7 @@ public final class MailStore {
         if (query.size == 0 || limit <= 0) {
             return new ArrayList<>();
         }
-        String statement = query.pattern == null ? "LIST_MAIL_PAGE_FILTERED" : "SEARCH_MAIL";
+        String statement = statement(query);
         Map<String, Object> values = query.values(null, skip + limit + query.hiding);
         if (key != null) {
             values.put("after_key", key);
@@ -1028,10 +1077,21 @@ public final class MailStore {
     }
 
     /**
+     * The read a query pages: every message, the sender and subject search,
+     * or that search with the index's hits beside it (SEARCH §8).
+     */
+    private static String statement(Query query) {
+        if (query.pattern == null) {
+            return "LIST_MAIL_PAGE_FILTERED";
+        }
+        return query.hits == null ? "SEARCH_MAIL" : "SEARCH_MAIL_INDEXED";
+    }
+
+    /**
      * Every row a query lets through, newest first, down to its floor.
      */
     private static PimdirSql.Bound listed(Query query) {
-        String statement = query.pattern == null ? "LIST_MAIL_PAGE_FILTERED" : "SEARCH_MAIL";
+        String statement = statement(query);
         return hiding(PimdirSql.bind(statement, query.values(null, -1)), query, -1);
     }
 

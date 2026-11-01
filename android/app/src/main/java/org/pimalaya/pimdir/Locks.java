@@ -15,6 +15,15 @@ public final class Locks {
     public final Object store = new Object();
 
     /**
+     * The search index's one writer ({@code PimdirIndexDb}): a refresh holds
+     * it, so no two fold the store's feed at once (SEARCH §3).
+     */
+    public final Object index = new Object();
+
+    /** Told each time a sync gives the sync lock back, null for nobody. */
+    private volatile Runnable released;
+
+    /**
      * One reentrant lock per synced collection, by kind and id.
      *
      * <p>The app, the background worker and the sync service may pass the same
@@ -47,8 +56,20 @@ public final class Locks {
         return sync.tryAcquire();
     }
 
-    /** Gives the sync lock back. */
+    /** Gives the sync lock back, then tells {@link #onRelease}'s listener. */
     public void releaseSync() {
         sync.release();
+        Runnable listener = released;
+        if (listener != null) {
+            listener.run();
+        }
+    }
+
+    /**
+     * Tells {@code listener} each time a sync ends, its pass written: what
+     * refreshes the search index after each pass (SEARCH §4).
+     */
+    public void onRelease(Runnable listener) {
+        released = listener;
     }
 }

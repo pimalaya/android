@@ -233,6 +233,28 @@ public final class PimdirDb extends SQLiteOpenHelper {
         return locks;
     }
 
+    /** The search index, null until {@link #startIndex}. */
+    private volatile PimdirIndexDb index;
+
+    /**
+     * Starts the store's search index (SEARCH §4), refreshed at the end of
+     * each sync and after each write batch of the engine. The app's process
+     * starts it once, then asks a refresh at start; a store a test opens
+     * keeps none.
+     */
+    public synchronized PimdirIndexDb startIndex() {
+        if (index == null) {
+            index = new PimdirIndexDb(this);
+            locks.onRelease(index::refreshSoon);
+        }
+        return index;
+    }
+
+    /** The search index, or null when none was started. */
+    public PimdirIndexDb index() {
+        return index;
+    }
+
     /** The rounds this store's syncs parked, process-wide. */
     public ParkedRounds parked() {
         return parked;

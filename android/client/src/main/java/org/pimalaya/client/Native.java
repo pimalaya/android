@@ -786,6 +786,39 @@ final class Native {
     static native String offlineMutate(OfflineDriver driver, String collection, String mutation);
 
     /**
+     * A statement of the index Java runs itself, its parameters numbered:
+     * {@code ATTACH_STORE}, {@code BEGIN_RUN}, {@code COMMIT_RUN}.
+     */
+    static native String pimdirIndexStatement(String name);
+
+    /** What index.db holds (SEARCH §2): {@code {held, reason?, detail?}}. */
+    static native String pimdirIndexHeld(PimdirIndex.Steps index);
+
+    /** Builds an empty index.db's schema and {@code index_meta}. */
+    static native String pimdirIndexInit(PimdirIndex.Steps index);
+
+    /**
+     * One run of the index refresh (SEARCH §4): {@code {cursor, exhausted,
+     * folded, indexed, removed}}.
+     */
+    static native String pimdirIndexRefresh(
+            PimdirIndex.Steps index, String blobs, long now, int batch, boolean missing);
+
+    /** Every hit of a query: {@code {hits}} or {@code {refused}}. */
+    static native String pimdirIndexHits(
+            PimdirIndex.Steps index, String query, String order, long now);
+
+    /** One page of a query's hits described: {@code {hits, more}} or {@code {refused}}. */
+    static native String pimdirIndexSearch(
+            PimdirIndex.Steps index,
+            String blobs,
+            String query,
+            String order,
+            int limit,
+            int offset,
+            long now);
+
+    /**
      * Whether a 412-rejected push may retry unguarded (CardDAV If-Match).
      *
      * <p>Takes {@link RetryFacts}, returns {@code {"retry": bool}}.

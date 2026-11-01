@@ -26,3 +26,10 @@
 -keep class * implements org.pimalaya.client.OfflineDriver {
     java.lang.String serve(java.lang.String);
 }
+
+# PimdirIndex.Steps.serve is upcalled by the native search index on every
+# round of SQL it sends index.db's owner, the same way.
+-keep interface org.pimalaya.client.PimdirIndex$Steps { *; }
+-keep class * implements org.pimalaya.client.PimdirIndex$Steps {
+    java.lang.String serve(java.lang.String);
+}

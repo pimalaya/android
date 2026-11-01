@@ -6,6 +6,10 @@
 //! by profile as io-pimdir's spec/ sorts them; queries/app/ holds the
 //! statements of the app's own, which no profile names. A file's statements
 //! run in order under its one name, in one transaction.
+//!
+//! The search index has a shape of its own on the same terms (SEARCH §2):
+//! migrations/search/ its schema, queries/search/ the canonical search
+//! statements rewritten, queries/index/ the app's own index statements.
 
 use std::{
     env, fs,
@@ -29,6 +33,27 @@ fn main() {
                 path.display()
             );
         }
+    }
+    out += "];\n\n";
+
+    out += "/// Every statement of the index's shape: its name, the directory it is\n";
+    out += "/// filed under and its text.\n";
+    out += "pub const INDEX: &[(&str, &str, &str)] = &[\n";
+    for profile in ["search", "index"] {
+        for path in files(&queries.join(profile)) {
+            let name = path.file_stem().unwrap().to_str().unwrap().to_uppercase();
+            out += &format!(
+                "    ({name:?}, {profile:?}, include_str!({:?})),\n",
+                path.display()
+            );
+        }
+    }
+    out += "];\n\n";
+
+    out += "/// The index's migrations in order, the shape's own text.\n";
+    out += "pub const INDEX_MIGRATIONS: &[&str] = &[\n";
+    for path in files(&root.join("pimdir/migrations/search")) {
+        out += &format!("    include_str!({:?}),\n", path.display());
     }
     out += "];\n";
 
