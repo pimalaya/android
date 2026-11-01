@@ -156,7 +156,11 @@ public final class PimdirSql {
      * {@code from} left where it was.
      *
      * <p>A rename rather than a hard link: Android's SELinux policy denies
-     * {@code link} on an app's own data files.
+     * {@code link} on an app's own data files. Where the kernel or the file
+     * system refuses a no-replace rename, the bytes are copied into the name
+     * created exclusively, never renamed over it. Before API 30 that copy is
+     * the only move: the app's seccomp filter there need not allow
+     * {@code renameat2}, and a blocked call kills the process.
      *
      * @throws java.io.IOException when the rename fails otherwise (another
      *     file system, a missing source)
@@ -166,7 +170,10 @@ public final class PimdirSql {
         JSONObject reply;
         try {
             reply = new JSONObject(
-                    Native.pimdirRename(from.getAbsolutePath(), to.getAbsolutePath()));
+                    Native.pimdirRename(
+                            from.getAbsolutePath(),
+                            to.getAbsolutePath(),
+                            android.os.Build.VERSION.SDK_INT >= 30));
         } catch (JSONException error) {
             throw new java.io.IOException("Unreadable rename reply: " + error.getMessage());
         }

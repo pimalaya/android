@@ -2088,7 +2088,7 @@ public final class PimdirStorage {
      * flag and diverging body, null for a new item) and every binding it
      * holds, the one a drop of this batch released standing in for a source
      * holding none. {@code settled} says a person's edit settles the item's
-     * conflict (SYNC §7), the bridge's {@code settle} op before it.
+     * conflict (SYNC §7), io-pimdir's {@code settle} op before it.
      */
     private JSONObject merge(SQLiteDatabase db, String collection, String source,
             String linkId, JSONObject placement, String[] held, boolean overruled,

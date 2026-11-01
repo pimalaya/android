@@ -3,17 +3,14 @@
 //! The cross-source content merge (SYNC §9) the Java owner runs on every
 //! upsert of a mutable kind, decided by io-pimdir's own hub rather than
 //! restated: the item and every binding it holds are rebuilt as a
-//! one-item [`PimdirHub`], the upsert absorbed, and what the hub settled
-//! read back (the body the item keeps, its conflict, the binding's
-//! `shared_object`).
+//! one-item [`PimdirHub`], the upsert absorbed after the `Overrule` or
+//! `Settle` of its handle the batch stated, as io-pimdir's own write routes
+//! them, and what the hub settled read back (the body the item keeps, its
+//! conflict, the binding's `shared_object`).
 //!
 //! Only whether the upsert recorded a divergence (`Written.conflicted`)
 //! is read off the three facts here: io-pimdir keeps the hub's record of
 //! it to the crate.
-//!
-//! One rule is the bridge's own: a person's edit of a conflicted item
-//! settles it (SYNC §7), which the hub of io-pimdir bff5737 does only when
-//! the edit is a change one source alone made.
 
 use std::collections::BTreeMap;
 
@@ -51,8 +48,8 @@ pub struct MergeJson {
     /// Whether an `Overrule` of its handle precedes it in the batch.
     #[serde(default)]
     overruling: bool,
-    /// Whether a person's edit settles its item's conflict (SYNC §7), a
-    /// `settle` op of the bridge preceding it in the batch.
+    /// Whether a `Settle` of its handle precedes it in the batch, a
+    /// person's edit settling its item's conflict (SYNC §7).
     #[serde(default)]
     settling: bool,
 }
@@ -124,24 +121,6 @@ pub fn merge(input: MergeJson) -> MergedJson {
         .map(conflict_from_str)
         .unwrap_or_default();
 
-    // NOTE: SYNC §7, which io-pimdir bff5737's hub leaves to the content
-    // rule alone: a person's edit of a conflicted item resolves it, whatever
-    // body it keeps and whichever source it is made through. The item takes
-    // the edit's body, its diverging one released, and the source agrees on
-    // it; every other source then owes it where its base differs.
-    let conflicted = input.item.as_ref().is_some_and(|item| item.conflicted);
-    if input.settling
-        && conflicted
-        && placement.status != PimdirStatus::Tombstone
-        && let Some(object) = &placement.object
-    {
-        return MergedJson {
-            object: Some(object.0.clone()),
-            shared_object: Some(object.0.clone()),
-            ..MergedJson::default()
-        };
-    }
-
     let sources: BTreeMap<PimdirSourceId, PimdirBinding> = input
         .bindings
         .into_iter()
@@ -167,9 +146,15 @@ pub fn merge(input: MergeJson) -> MergedJson {
         .as_ref()
         .is_some_and(|item| diverges(item, &source, &placement, policy));
 
-    let mut ops = Vec::with_capacity(2);
+    let mut ops = Vec::with_capacity(3);
     if input.overruling {
         ops.push(PimdirWriteOp::Overrule {
+            collection: placement.collection.clone(),
+            handle: placement.handle.clone(),
+        });
+    }
+    if input.settling {
+        ops.push(PimdirWriteOp::Settle {
             collection: placement.collection.clone(),
             handle: placement.handle.clone(),
         });
@@ -190,7 +175,9 @@ pub fn merge(input: MergeJson) -> MergedJson {
         conflicted: after.conflicted,
         conflict_object: after.conflict_object.as_ref().map(|hash| hash.0.clone()),
         shared_object: shared_object.map(|hash| hash.0),
-        diverged,
+        // NOTE: a divergence leaves the item conflicted, and a settle the
+        // hub made of the upsert records none whatever the facts read.
+        diverged: diverged && after.conflicted,
         kept_shared: before.is_some() && after.object != incoming,
     }
 }
@@ -423,9 +410,9 @@ mod tests {
     /// A person's edit of a conflicted item settles it whichever body it
     /// keeps and whichever source it is made through (SYNC §7): the item
     /// takes the body, its diverging one released, and the source agrees on
-    /// it. io-pimdir's hub alone left the item conflicted for every pick
-    /// through the server, the source the item moved away from, and for the
-    /// phone's own body through the phone.
+    /// it, the hub reading the `Settle` handed before the upsert. Without
+    /// it, the three facts leave the item conflicted for the phone's own
+    /// body restated through the phone, as a sync's upsert must.
     #[test]
     fn a_persons_edit_settles_the_item_conflict_whatever_it_keeps() {
         for (source, handle, base) in [("server", "a.vcf", "server2"), ("phone", "1", "phone2")] {
@@ -442,6 +429,12 @@ mod tests {
                 );
             }
         }
+
+        let mut restated = item_conflict("phone", "1", "phone2", "phone2");
+        restated.as_object_mut().unwrap().remove("settling");
+        let merged = run(restated);
+        assert!(merged.conflicted, "{merged:?}");
+        assert_eq!(merged.conflict_object.as_deref(), Some("server2"));
     }
 
     /// A person's edit of an item in no conflict is the hub's to fold: one

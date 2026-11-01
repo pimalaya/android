@@ -46,7 +46,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
-- Changed the store to pimdir storage-draft-08, sync-draft-07 (io-pimdir bff5737). **Breaking:** a store an earlier version of the app wrote is not opened, nor read, nor written: the app opens on a screen saying it has to be reinstalled, and a new store syncs back from the servers, whatever was not synced yet lost with the old one. Bodies are named by BLAKE3 and checked against their name before they are shown, pushed or reused, one that fails moved aside rather than served.
+- Changed the store to pimdir storage-draft-08, sync-draft-07 (io-pimdir 09d2d1c). **Breaking:** a store an earlier version of the app wrote is not opened, nor read, nor written: the app opens on a screen saying it has to be reinstalled, and a new store syncs back from the servers, whatever was not synced yet lost with the old one. Bodies are named by BLAKE3 and checked against their name before they are shown, pushed or reused, one that fails moved aside rather than served.
 - Changed a marker push to carry only what changed (read, important, answered), so a marker another client changed meanwhile is no longer set back, and a mail listing narrowed by the download window to say so, so a message with no date, or dated ahead of its arrival, is no longer taken for deleted.
 - Changed a sync whose listing comes back empty to keep what the collection holds rather than empty it, until a later listing names its members.
 - Changed an attachment saved into a folder on the phone to no longer read as downloaded on its message, the folder being the phone's own and not the message's account.
@@ -59,6 +59,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed storing a message body or an attachment on a phone whose storage lacks a rename that keeps a file already there: two parts of the app storing the same body at once could replace the file one of them was reading. The body is now copied into a file created for it alone, and a file already there is always kept.
 - Fixed the calendar showing No event for a moment on opening, before its entries were read.
 - Fixed the connection flow finding no mail server for an address whose domain publishes only its MX records, such as one hosted at Migadu: the provider those records name is asked for its autoconfig, following the alias of its autoconfig host when that host holds no certificate for it, as Thunderbird does. The autoconfig request no longer asks for the address with its domain written twice.
 - Fixed the Contacts app listing a second, empty account for an address whose calendars show on the phone: a contact saved into it never synced and was lost when the account was set up again. Calendar accounts are now of their own type, which contacts apps do not list, and those made by an earlier version move over on the next start. A phone account is no longer removed while it holds a contact created or edited in a contacts app and not yet synced, and deleting an account brings such contacts in first, removing nothing when it cannot.

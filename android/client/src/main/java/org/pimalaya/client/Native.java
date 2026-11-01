@@ -262,7 +262,7 @@ final class Native {
      * <p>Returns {@code {held}}, true when the name was kept and {@code from}
      * left where it was, or {@code {error}}.
      */
-    static native String pimdirRename(String from, String to);
+    static native String pimdirRename(String from, String to, boolean renameat2);
 
     /**
      * One upsert absorbed into the item it names by io-pimdir's hub (SYNC

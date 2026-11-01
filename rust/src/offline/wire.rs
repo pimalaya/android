@@ -436,11 +436,8 @@ pub enum WriteOpJson {
     },
     /// Settles the item conflict of the next upsert of `handle` by a
     /// person's edit (SYNC §7): the item takes the edit's body, its conflict
-    /// cleared and its diverging body released, nothing kept.
-    ///
-    /// The bridge's own op, io-pimdir's mutate stating no such thing: its
-    /// hub settles an item conflict only by a body one source alone changed
-    /// (see [`crate::offline::merge`]).
+    /// cleared and its diverging body released, nothing kept. The owner
+    /// hands it to the hub before the upsert ([`crate::offline::merge`]).
     Settle {
         collection: String,
         handle: String,
@@ -530,6 +527,10 @@ impl From<&PimdirWriteOp> for WriteOpJson {
                 scope: scope.into(),
             },
             PimdirWriteOp::Overrule { collection, handle } => Self::Overrule {
+                collection: collection.as_str().into(),
+                handle: handle.as_str().into(),
+            },
+            PimdirWriteOp::Settle { collection, handle } => Self::Settle {
                 collection: collection.as_str().into(),
                 handle: handle.as_str().into(),
             },
