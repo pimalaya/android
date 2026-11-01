@@ -6,9 +6,9 @@ date: 2026-11-01
 
 # Step 3: the store on the platform's SQLite
 
-The app opens every database it owns, the pimdir store and the contacts database (`CardStore`), on the platform's `android.database.sqlite`; requery's bundled SQLite (cairn/log/2026-10-10-bundled-sqlite.md) is gone. Steps 4 (the index) and 5 (the lists) remain, and the change stays in flight (cairn/changes/platform-sqlite/tasks.md).
+The app opens every database it owns, the pimdir store and the contacts database (`CardStore`), on the platform's `android.database.sqlite`; requery's bundled SQLite (cairn/log/2026-10-10-bundled-sqlite.md) is gone. Steps 4 (the index) and 5 (the lists) remain, and the change stays in flight (cairn/changes/archive/platform-sqlite/tasks.md).
 
-Capabilities moved: offline-store (folded at the change's landing, not yet: cairn/changes/platform-sqlite/delta.md).
+Capabilities moved: offline-store (folded at the change's landing, not yet: cairn/changes/archive/platform-sqlite/delta.md).
 
 - **The swap**: the `io.requery.android.database.sqlite` imports of 15 main classes and 19 test sources back to `android.database.sqlite`; requery out of android/app/build.gradle.kts and its JitPack repository out of android/settings.gradle.kts. It had no keep rule (android/app/proguard-rules.pro, android/client/consumer-rules.pro). The release classpath holds neither requery nor androidx.sqlite nor the Kotlin standard library they brought. The one call requery had and the platform lacks below API 35 was `beginTransactionDeferred`, for a read binding lists through `temp.param` in a transaction of its own: it is `beginTransactionNonExclusive` now, both holding the writer's connection, the only one that writes, for the read's length. No custom SQL function was registered from Java, no `OpenParams` used, no update hook, no extension.
 - **Why requery came in, each reason answered** (2026-10-10): `STRICT`, `RETURNING`, upserts, `UPDATE ... FROM` and `json_each` are out of the statements since step 2b (the floor guard); JSON is out of the canonical schema since storage-draft-07; FTS5 is not used (the index, step 4, is FTS4); no function is registered from Java (the platform's `setCustomScalarFunction` is API 30 and string-only); `PoolProbe` sat in requery's package to read its pool, and the test now counts the connections opened through the test binding (below).

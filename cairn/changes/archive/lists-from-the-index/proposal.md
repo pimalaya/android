@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: lists-from-the-index
-status: active
+status: landed
 created: 2026-10-30
 ---
 
@@ -42,11 +42,11 @@ The user asked to wait (2026-10-30): pimdir and io-pimdir hold uncommitted work 
 
 ## Blocked on the draft-05 port (2026-10-30, night)
 
-`search` exists from io-pimdir 2e4ab95, and moving the pin there is a port of the store rules draft-05 added, which the Java store re-implements by hand: cairn/changes/io-pimdir-draft-05, four steps with device checks, not run unattended.
+`search` exists from io-pimdir 2e4ab95, and moving the pin there is a port of the store rules draft-05 added, which the Java store re-implements by hand: cairn/changes/archive/io-pimdir-draft-05, four steps with device checks, not run unattended.
 
 ## Decide before building
 
-- **Two SQLites, one file.** The bridge builds io-pimdir without `client`, and `search` requires it: the index's refresh would open pimdir.db (attached read-only) through rusqlite's bundled SQLite while the Java store writes it through requery's. Two SQLite copies in one process on one file is the case sqlite.org's "How To Corrupt An SQLite Database File" §2.2 names: closing a descriptor in one copy drops the POSIX locks the other holds. Checked 2026-10-31: rusqlite without `vendored` cannot link requery's libsqlite3x.so instead, which exports 252 `sqlite3_*` functions and lacks ones rusqlite calls on every statement (`sqlite3_bind_parameter_count`, `sqlite3_clear_bindings`, `sqlite3_bind_parameter_index`) and `sqlite3_create_function_v2`; nor the platform's, outside the NDK and refused at load since API 24. Settled by cairn/changes/platform-sqlite: an I/O-free refresh, Java writing index.db on the store's SQLite, this change its step 5.
+- **Two SQLites, one file.** The bridge builds io-pimdir without `client`, and `search` requires it: the index's refresh would open pimdir.db (attached read-only) through rusqlite's bundled SQLite while the Java store writes it through requery's. Two SQLite copies in one process on one file is the case sqlite.org's "How To Corrupt An SQLite Database File" §2.2 names: closing a descriptor in one copy drops the POSIX locks the other holds. Checked 2026-10-31: rusqlite without `vendored` cannot link requery's libsqlite3x.so instead, which exports 252 `sqlite3_*` functions and lacks ones rusqlite calls on every statement (`sqlite3_bind_parameter_count`, `sqlite3_clear_bindings`, `sqlite3_bind_parameter_index`) and `sqlite3_create_function_v2`; nor the platform's, outside the NDK and refused at load since API 24. Settled by cairn/changes/archive/platform-sqlite: an I/O-free refresh, Java writing index.db on the store's SQLite, this change its step 5.
 
 ## To check before building
 
@@ -60,7 +60,7 @@ The user asked to wait (2026-10-30): pimdir and io-pimdir hold uncommitted work 
 
 ## Built at platform-sqlite step 5 (2026-11-01)
 
-The two-SQLites question is settled by cairn/changes/platform-sqlite (one SQLite, the index written by Java, io-pimdir's refresh I/O-free), and the rev moved with it: the lists moved on the index step 4 built. What was taken where the text above leaves room, each the option it states or the nearest to the status quo:
+The two-SQLites question is settled by cairn/changes/archive/platform-sqlite (one SQLite, the index written by Java, io-pimdir's refresh I/O-free), and the rev moved with it: the lists moved on the index step 4 built. What was taken where the text above leaves room, each the option it states or the nearest to the status quo:
 
 - **The contact row's second line** is the first email, else the organization: Annex A.2 and A.6 "as they stand" hold no phone, so the phone the row showed first is gone (spec/offline-store.md "The three lists share one row" said "the phone or else the email"). A phone on the row would need a summary column, which this proposal ruled out; to settle with the user at the device check.
 - **The contacts' Has filter and categories** read the index's `object` flags and `object_category` rows for every card at each reload (the same rows `has:` and `category:` seek), one read, the panel offering the categories folded as the index records them. The search is the name, email and organization match beside a `kind:contact` query of SEARCH §8, as the mail search keeps its sender and subject match beside the index's hits.

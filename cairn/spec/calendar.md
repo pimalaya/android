@@ -6,11 +6,11 @@ status: current
 
 # Calendar
 
-A calendar is a collection of kind `text/calendar` and an entry is one item in it, stored as the iCalendar text the server sent and never rewritten: what an entry renders as depends on the window being shown, so the recurrence expansion happens at render time and the summary beside it is what an agenda row reads.
+A calendar is a collection of kind `text/calendar` and an entry is one item in it, stored as the iCalendar text the server sent and never rewritten: what an entry renders as depends on the window being shown, so the recurrence expansion is the search index's, which writes each entry's occurrences when it folds the entry, and the summary beside it is what an agenda row reads.
 
 Four backends answer: a CalDAV context root, the draft-ietf-jmap-calendars verbs behind the `jmap://` marker, Microsoft Graph behind the `msgraph://` one, or the Google Calendar API behind `google://`. The JMAP, Graph and Google payloads are converted at the client boundary, JSCalendar by ical-rs and Graph and Google events by io-msgraph and io-gcal, so the store keeps one shape.
 
-Every calendar runs io-pimdir's sync, and asks what changed. The enumerate is an RFC 6578 `sync-collection` REPORT from the cursor the last pass stored, answering resource names and ETags; the fetch is a `calendar-multiget` (RFC 4791 section 7.9) of the entries the merge asked about. A quiet calendar costs one report and no body. A reconcile is followed by an upgrade, which is not optional: a sync that finds the remote content changed drops the body on purpose, and an agenda reads its entries by their body.
+Every calendar runs io-pimdir's sync, and asks what changed. The enumerate is an RFC 6578 `sync-collection` REPORT from the cursor the last pass stored, answering resource names and ETags; the fetch is a `calendar-multiget` (RFC 4791 section 7.9) of the entries the merge asked about. A quiet calendar costs one report and no body. A reconcile is followed by an upgrade, which is not optional: a sync that finds the remote content changed drops the body on purpose, and the index expands an entry, as the agenda opens one, from its body.
 
 Graph and Google have no multiget: a Graph pass reads the entries it names by `$batch`, 20 requests to a call, and a Google pass takes them from the complete listing it made anyway, as a JMAP one does. An account's calendars run side by side, each on its own connection, the store keeping one writer.
 
@@ -222,12 +222,12 @@ A Graph event create SHALL carry a `transactionId`, the hex of the first 16 byte
 - THEN it names the same transaction, and Graph keeps one event
 
 ### Requirement: The agenda builds off the main thread
-The agenda SHALL read and expand its entries on a thread of its own and draw the result on the main thread, the last reload asked winning. An entry's expansion SHALL be kept while the window shown (the week, or the list's) and its object stay the same.
+The agenda SHALL read its window on a thread of its own and draw the result on the main thread, the last reload asked winning. With no index, an entry's expansion SHALL be kept while the window shown (the week, or the list's) and its object stay the same.
 
 #### Scenario: Coming back to the app
 - GIVEN 10k stored entries
 - WHEN the app returns to the foreground
-- THEN the screen stays responsive while the agenda rebuilds, and only entries a sync changed are expanded again
+- THEN the screen stays responsive while the agenda rebuilds, and no body is read
 
 ### Requirement: The agenda says it is empty only once read
 The agenda SHALL show its empty state only once its first reload has landed, a render before it drawing no row and no empty state.
@@ -236,14 +236,6 @@ The agenda SHALL show its empty state only once its first reload has landed, a r
 - GIVEN a calendar holding entries this week
 - WHEN the tab opens and its entries are still being read
 - THEN no empty state shows before the rows
-
-### Requirement: The agenda's build is timed
-Each agenda reload SHALL log its window, how many entries it read, how many it expanded and how many it took from the kept expansions, the rows it made, the time spent reading the calendars, reading the entries, expanding and on the rest, then how long after it was asked it was drawn, split into its wait, its read, its handover to the main thread and its render.
-
-#### Scenario: A cold open
-- GIVEN the app just started
-- WHEN the calendar tab opens
-- THEN the log names every entry as expanded, none kept, and the milliseconds of each part
 
 ### Requirement: Calendar accounts stay out of contacts apps
 The Android accounts holding the phone's calendars SHALL be of a type of their own, bound to the calendar adapter alone, so no contacts app lists them. Calendar accounts of the books' type left by an earlier build SHALL be migrated: their calendars' phone pass first, then the account removed and recreated under the calendar type.
@@ -320,3 +312,31 @@ The entry page SHALL show, in this order, Calendar (the dropdown while a new ent
 - GIVEN an event
 - WHEN its start's date picker opens
 - THEN it offers no Clear
+
+### Requirement: The agenda reads the index's occurrences
+The agenda SHALL list the occurrences the search index wrote of every live entry over the window shown (the week, or the list's), through its `occurrence` table on `occurrences_between`'s rule (pimdir SEARCH §7), each row's title, place, kind and all-day mark read from its entry's summary (STORAGE Annex A.3 to A.5), and SHALL read an entry's body only to open it, the occurrence it opens expanded from that body at the row's instant. An entry deleted since the index folded it SHALL not be listed. The index SHALL read floating times and dates in the device's zone, so a floating time shows at the wall time it states, and the agenda SHALL place an all-day occurrence on its day in the zone the index records (`index_meta.floating_zone`); a change of the device's zone SHALL refresh the index, which reads them again. A window reaching outside the index's horizon, or past a series' cut (10,000 occurrences, 1,000,000 periods of a rule), SHALL say so in the list's header. The agenda SHALL reload once a refresh of the index folded anything. With no index, or one refused, the agenda SHALL expand every entry instead, as before.
+
+#### Scenario: A thousand entries
+- GIVEN a calendar of a thousand entries, three of them this week
+- WHEN the agenda shows this week
+- THEN it lists the three from the index and reads no body
+
+#### Scenario: A floating stand-up
+- GIVEN a weekly entry at 09:00 with no zone, the device in New York
+- WHEN the agenda shows next week
+- THEN the stand-up starts at 09:00 on Monday
+
+#### Scenario: Three years on
+- GIVEN the week card moved three years ahead
+- WHEN the agenda shows that week
+- THEN its header says the week is outside the years the index holds
+
+#### Scenario: A secondly series from 1970
+- GIVEN an event `RRULE:FREQ=SECONDLY` starting in 1970
+- WHEN the agenda shows this week
+- THEN it places nothing of it, and its header says one series is not shown in full
+
+#### Scenario: An entry deleted
+- GIVEN an entry of this week
+- WHEN it is deleted from its page
+- THEN it leaves the agenda before the index has folded the delete

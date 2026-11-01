@@ -3,7 +3,7 @@ cairn: delta
 change: platform-sqlite
 ---
 
-Folds into `spec/offline-store.md`, and into `spec/mail.md` where marked (step 4, the search index).
+Folds into spec/offline-store.md, and into spec/mail.md where marked (step 4, the search index). Folded at landing (2026-11-01). Amended at landing: the MODIFIED mail list's "The trash opened" scenario had taken "Widening again"'s outcome, which contradicts the requirement (nothing syncs by itself); it keeps the spec's outcome.
 
 ## ADDED Requirements
 
@@ -91,7 +91,7 @@ The mail list SHALL list every stored message of every mailbox the filter lets t
 #### Scenario: The trash opened
 - GIVEN a Gmail account whose trash was never listed
 - WHEN the Trash chip is chosen
-- THEN the older messages are listed again, a chunk at a time
+- THEN nothing syncs, and the list shows what the phone holds in it
 
 ## REMOVED Requirements
 

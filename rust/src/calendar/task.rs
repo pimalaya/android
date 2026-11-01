@@ -379,7 +379,7 @@ impl Named<'_> {
 }
 
 /// The to-dos a store's summaries hold, read the GTD way without their
-/// bodies (cairn/changes/lists-from-the-index): `rows` the app's
+/// bodies (cairn/changes/archive/lists-from-the-index): `rows` the app's
 /// `list_task_rows`, the task_summary row and the first `contact` address
 /// of each (pimdir STORAGE Annex A.4, A.6), `categories` its
 /// `list_task_categories`, each to-do's in document order. Keyed

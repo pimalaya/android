@@ -1,15 +1,19 @@
 ---
 cairn: change
 id: io-pimdir-draft-05
-status: active
+status: abandoned
 created: 2026-10-30
 ---
 
 # Follow io-pimdir 2e4ab95: pimdir storage-, sync- and search-draft-05
 
+## Closed (2026-11-01)
+
+Abandoned, superseded by cairn/changes/archive/the-shape-follows-storage-draft-08 (landed 2026-11-01). The port was folded into cairn/changes/archive/platform-sqlite step 2 on 2026-10-31, then built at storage-draft-08 as that change's steps 2a and 2b: `shared_object`, `Overrule`, `WantsVerify`, `Written`, `if_match`, the flag deltas and `esc:` landed there. Not `landed`, because two of its steps did not: the STORAGE §6 reconciliation was dropped (draft-08's drafts are exact, a store of another draft refused at start-up for a reinstall) and the pin never stood at 2e4ab95. Its delta is not folded on its own: "The agreed body stays on the phone" is the folded "A binding keeps what it agreed with the item" (spec/offline-store.md), "A body a policy did not adopt is kept" was carried into the later change's delta and folded into spec/conflicts.md, and "A flag change pushes what changed" was already spec/mail.md's "A message's markers can be written" (the difference against the set the source last agreed on).
+
 ## Why
 
-The app pins io-pimdir at 8907303; 2e4ab95 (pushed, still 0.8.0) follows pimdir's draft-05 and is the base the search index (cairn/changes/lists-from-the-index) needs. Tried on 2026-10-30 and put back: the bump is not a pin move. The app runs io-pimdir without `client`, its owner being the Java port (`PimdirStorage`, `PimdirDb`) over the canonical SQL, so every store rule draft-05 added to io-pimdir's own `client` store has to be ported by hand, several of them about not losing data in a sync.
+The app pins io-pimdir at 8907303; 2e4ab95 (pushed, still 0.8.0) follows pimdir's draft-05 and is the base the search index (cairn/changes/archive/lists-from-the-index) needs. Tried on 2026-10-30 and put back: the bump is not a pin move. The app runs io-pimdir without `client`, its owner being the Java port (`PimdirStorage`, `PimdirDb`) over the canonical SQL, so every store rule draft-05 added to io-pimdir's own `client` store has to be ported by hand, several of them about not losing data in a sync.
 
 ## What the bump breaks
 

@@ -3,7 +3,7 @@ cairn: delta
 change: the-shape-follows-storage-draft-08
 ---
 
-Folds into spec/offline-store.md: what steps 2a and 2b change there, but for "An item conflict is settled by a person's choice" and "A resolution names the conflicts it settles", which fold into spec/conflicts.md. Not folded yet, the device check coming first.
+Folds into spec/offline-store.md: what steps 2a and 2b change there, but for "An item conflict is settled by a person's choice" and "A resolution names the conflicts it settles", which fold into spec/conflicts.md. Folded at landing (2026-11-01), with platform-sqlite and lists-from-the-index. Amended at landing so the spec states what landed: "A body a policy did not adopt is kept" carried from io-pimdir-draft-05's delta (built in 2a, that change closed as superseded) into spec/conflicts.md; "A scoped load reads what it names" modified, its lists bound through `temp.param` since draft-08 holds no JSON; `trusted_schema` qualified to the SQLite that has it, and the blob store's write named for Android below 11, as platform-sqlite step 3 and the re-pin to 09d2d1c built them.
 
 ## ADDED Requirements
 
@@ -16,7 +16,7 @@ The app SHALL create its store at storage-draft-08 (`store_meta.format_version`,
 - THEN it opens on the reinstall screen, and nothing in the store is written
 
 ### Requirement: The store's writer opens first
-Opening the store SHALL configure its writing connection before write-ahead logging gives the pool its readers, so no reader is opened, nor caches the schema, before the store's tables exist. The writer SHALL erase what it deletes (`secure_delete`) and trust no function the schema names (`trusted_schema` off). The journal mode SHALL be set once, when the store is created (STORAGE §8): an existing store SHALL open in write-ahead logging from its first statement, the platform setting it no other mode.
+Opening the store SHALL configure its writing connection before write-ahead logging gives the pool its readers, so no reader is opened, nor caches the schema, before the store's tables exist. The writer SHALL erase what it deletes (`secure_delete`) and trust no function the schema names (`trusted_schema` off, where its SQLite has the setting, 3.31 and later). The journal mode SHALL be set once, when the store is created (STORAGE §8): an existing store SHALL open in write-ahead logging from its first statement, the platform setting it no other mode.
 
 #### Scenario: A first launch
 - GIVEN no store on the device
@@ -29,7 +29,7 @@ Opening the store SHALL configure its writing connection before write-ahead logg
 - THEN no other journal mode is asked of it, nothing logs "database is locked", and the file stays in write-ahead logging
 
 ### Requirement: A body is named by its content and checked before use
-The blob store SHALL file a body under its BLAKE3 name, one shard level deep (`objects/<hash[0:2]>/<hash>`), checking the name before any path is built, and SHALL write it by renaming a temporary with `RENAME_NOREPLACE`, never by a hard link, which Android's SELinux policy denies an app on its own files: a name already held keeps what holds it. It SHALL follow no link under objects/, and SHALL check a body against its name before serving, parsing, pushing or copying it, moving one that fails into quarantine/. A write finding its name held, by the rename or the exclusive create refusing it or before writing at all, SHALL keep the file there only once it checks against the name (STORAGE §5): a file failing it, a link or a part a crashed copy left among them, is moved into quarantine/, the app's renames and moves serialised so no move takes a file another of its writers is still filing, and the body is filed again.
+The blob store SHALL file a body under its BLAKE3 name, one shard level deep (`objects/<hash[0:2]>/<hash>`), checking the name before any path is built, and SHALL write it by renaming a temporary with `RENAME_NOREPLACE`, or, below Android 11 (whose system call filter lacks `renameat2`) and where the kernel refuses the flag, by creating the name exclusively and copying the temporary into it, never by a hard link, which Android's SELinux policy denies an app on its own files, nor by a rename that replaces: a name already held keeps what holds it. It SHALL follow no link under objects/, and SHALL check a body against its name before serving, parsing, pushing or copying it, moving one that fails into quarantine/. A write finding its name held, by the rename or the exclusive create refusing it or before writing at all, SHALL keep the file there only once it checks against the name (STORAGE §5): a file failing it, a link or a part a crashed copy left among them, is moved into quarantine/, the app's renames and moves serialised so no move takes a file another of its writers is still filing, and the body is filed again.
 
 #### Scenario: A message body downloaded on a device
 - GIVEN Android 15 refusing `link` to the app
@@ -111,6 +111,14 @@ A conflict, a binding's or its item's, SHALL be settled only by a resolution nam
 - WHEN the form is saved, whatever values it keeps
 - THEN the contact is settled as before, and the version the form showed is released
 
+### Requirement: A body a policy did not adopt is kept
+An edit settling a conflict by a rule (an overrule) SHALL keep each diverging body it does not adopt as a retained item (`dup:<link>#<handle>`, SYNC §7, §9), and SHALL be refused while the conflict holds a body nobody has read.
+
+#### Scenario: Keep the phone's
+- GIVEN a calendar entry in conflict whose server body was never opened
+- WHEN the conflict is settled by a rule keeping the phone's body
+- THEN the write is refused until the server's body is read, and once read it is kept as a retained item
+
 ### Requirement: A round finding most of a collection gone asks first
 A round whose listing names no member while the store binds some, or finds more than half of at least 20 bound members absent (SYNC §5, §8), SHALL park rather than remove them, and the app SHALL say so once the pass ends, naming each collection and how many of its items the server no longer lists, offering to remove them too or to keep them. Removing them SHALL run the next sync of those collections accepting the absences; keeping them SHALL leave the round parked, decided again by the next pass.
 
@@ -165,6 +173,14 @@ A sync that went through SHALL NOT pop up a report: no count of what came in or 
 - GIVEN a contacts pass bringing three cards and leaving one conflict
 - WHEN it ends
 - THEN no toast shows, and the conflicted contact carries its mark in the list
+
+### Requirement: A scoped load reads what it names
+A load scoped to some handles or link ids SHALL read those rows alone, whatever the length of the list: the list SHALL be bound through the `temp.param` table (STORAGE §4.4) on the connection that reads it, never widened back to the whole collection, and a handle scope SHALL seek the source's bindings by handle rather than walk the collection. An unbound row SHALL still be reached under the provisional handle of its link id.
+
+#### Scenario: A listing page of a thousand
+- GIVEN a mailbox of 275k messages
+- WHEN a round's page of 1000 members is loaded by handle
+- THEN 1000 placements come back, read by key, and the page costs what it holds rather than the mailbox
 
 ## REMOVED Requirements
 

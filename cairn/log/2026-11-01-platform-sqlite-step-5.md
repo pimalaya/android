@@ -6,9 +6,9 @@ date: 2026-11-01
 
 # Step 5: the lists on the index
 
-cairn/changes/lists-from-the-index, built on the index step 4 built: the agenda reads the index's occurrence table, Tasks and Contacts the store's summaries, Contacts' Has and categories the index, and no list reads a body to draw. What landed, the measures and the tests are in cairn/log/2026-11-01-lists-from-the-index.md. The `agenda read` and `agenda drawn` timing logs are dropped. The change stays in flight (cairn/changes/platform-sqlite/tasks.md).
+cairn/changes/archive/lists-from-the-index, built on the index step 4 built: the agenda reads the index's occurrence table, Tasks and Contacts the store's summaries, Contacts' Has and categories the index, and no list reads a body to draw. What landed, the measures and the tests are in cairn/log/2026-11-01-lists-from-the-index.md. The `agenda read` and `agenda drawn` timing logs are dropped. The change stays in flight (cairn/changes/archive/platform-sqlite/tasks.md).
 
-Capabilities moved: calendar, tasks and offline-store (cairn/changes/lists-from-the-index/delta.md), offline-store's index requirement (cairn/changes/platform-sqlite/delta.md, the fresh-install scenario); folded at landing, not yet.
+Capabilities moved: calendar, tasks and offline-store (cairn/changes/archive/lists-from-the-index/delta.md), offline-store's index requirement (cairn/changes/archive/platform-sqlite/delta.md, the fresh-install scenario); folded at landing, not yet.
 
 ## The index on a fresh install
 

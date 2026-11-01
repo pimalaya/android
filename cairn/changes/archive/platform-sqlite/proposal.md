@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: platform-sqlite
-status: active
+status: landed
 created: 2026-10-31
 ---
 
@@ -13,8 +13,8 @@ The user, 2026-10-31: the app should run on the platform's `android.database.sql
 
 What it settles:
 
-- **No second SQLite.** requery (cairn/log/2026-10-10-bundled-sqlite.md) goes, about 1.9 MB per ABI. The index needs no rusqlite in the cdylib, because io-pimdir's refresh becomes I/O-free (io-pimdir cairn/changes/an-io-free-indexer) and Java writes index.db on the same SQLite as the store: one copy in the process, the two-SQLites question of cairn/changes/lists-from-the-index gone.
-- **The draft-05 port** (cairn/changes/io-pimdir-draft-05) lands as part of the shape's rewrite rather than as a port of the canonical text.
+- **No second SQLite.** requery (cairn/log/2026-10-10-bundled-sqlite.md) goes, about 1.9 MB per ABI. The index needs no rusqlite in the cdylib, because io-pimdir's refresh becomes I/O-free (io-pimdir cairn/changes/an-io-free-indexer) and Java writes index.db on the same SQLite as the store: one copy in the process, the two-SQLites question of cairn/changes/archive/lists-from-the-index gone.
+- **The draft-05 port** (cairn/changes/archive/io-pimdir-draft-05) lands as part of the shape's rewrite rather than as a port of the canonical text.
 - **The SQL Java writes by hand** (`RETURNING` 11, `json_each` 9, upserts 7, `STRICT` 5 across PimdirDb, PimdirStorage, PimdirItems, PimdirCollections, DeletedItems, MailStore, and PimdirContacts' transcribed reads) moves into the shape's .sql files, as AGENTS.md asks.
 
 What the platform gives, checked 2026-10-31: SQLite 3.18 on API 26 up to 3.50 on 37, the version possibly different on a manufacturer's build ([android.database.sqlite](https://developer.android.com/reference/android/database/sqlite/package-summary)); FTS3 and FTS4 (one module), never FTS5, no JSON extension, the basic FTS query syntax (no `SQLITE_ENABLE_FTS3_PARENTHESIS`), `SQLITE_THREADSAFE=2`, `SQLITE_SECURE_DELETE`, autovacuum on (AOSP external/sqlite, dist/Android.mk at oreo-release, dist/Android.bp on later releases; `SQLITE_DEFAULT_LEGACY_ALTER_TABLE` only from 3.26, 3.18 altering the legacy way anyway); JSON in the core only from 3.38 (API 34); `execSQL` of an `ATTACH` disables WAL on that database (SQLiteDatabase.java); SQL functions registered from Java only from API 30, string arguments only (`setCustomScalarFunction`); no NDK access to the platform library (no stub in the NDK sysroot, private libraries refused since API 24); rusqlite cannot link requery's libsqlite3x.so either (252 exports, `sqlite3_bind_parameter_count`, `sqlite3_clear_bindings`, `sqlite3_bind_parameter_index`, `sqlite3_create_function_v2` among the missing).
@@ -48,10 +48,10 @@ What the platform gives, checked 2026-10-31: SQLite 3.18 on API 26 up to 3.50 on
 ## How, in order, each step on the device before the next
 
 1. **Guard.** The host 3.18.2 build and the prepare test, red against today's text.
-2. **The shape, on requery still.** The shape's text at draft-07, with the draft-05 port's rules folded in (cairn/changes/io-pimdir-draft-05: `shared_object`, `Overrule`, `WantsVerify`, `Written`, `if_match`, flag deltas, `esc:`) and the hand-written SQL moved in. The pin moves to the io-pimdir release following draft-07. No conversion from today's stores: a store whose `store_meta.shape` is not `pimalaya-android`, or which fails to open, blocks start-up on a screen saying the store's version is not compatible and the app must be reinstalled, and nothing in it is read or written. Guard green. Kept apart from step 3 so a failure on the device points at the SQL or at the engine, not both.
+2. **The shape, on requery still.** The shape's text at draft-07, with the draft-05 port's rules folded in (cairn/changes/archive/io-pimdir-draft-05: `shared_object`, `Overrule`, `WantsVerify`, `Written`, `if_match`, flag deltas, `esc:`) and the hand-written SQL moved in. The pin moves to the io-pimdir release following draft-07. No conversion from today's stores: a store whose `store_meta.shape` is not `pimalaya-android`, or which fails to open, blocks start-up on a screen saying the store's version is not compatible and the app must be reinstalled, and nothing in it is read or written. Guard green. Kept apart from step 3 so a failure on the device points at the SQL or at the engine, not both.
 3. **The platform.** `io.requery.android.database.sqlite` imports back to `android.database.sqlite` (15 classes, `CardStore` included), requery out of build.gradle.kts and flake.nix's requery host build replaced by step 1's. A store step 2 wrote opens unchanged, since its text holds nothing 3.18 refuses; an older one, whose `STRICT` schema 3.18 to 3.32 cannot even parse, meets step 2's block.
 4. **The index.** index.db's shape, `PimdirIndexDb`, the refresh after each sync pass, after each local write batch (SEARCH §4) and at start, search compiled in the bridge, ordered by `Date` or `Name`.
-5. **The lists** (cairn/changes/lists-from-the-index): the agenda through the occurrence table, Tasks and Contacts from the summaries. Measured again with the `agenda read` and `agenda drawn` logs, then the timing log dropped.
+5. **The lists** (cairn/changes/archive/lists-from-the-index): the agenda through the occurrence table, Tasks and Contacts from the summaries. Measured again with the `agenda read` and `agenda drawn` logs, then the timing log dropped.
 
 ## Decided with the user (2026-10-31)
 

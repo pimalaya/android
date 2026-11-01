@@ -360,7 +360,8 @@ public final class EventStore {
     /**
      * Every stored to-do read from the store's summaries, conflicted ones
      * marked: the items holding a {@code task_summary} row
-     * (cairn/changes/gtd-hardening, cairn/changes/lists-from-the-index).
+     * (cairn/changes/gtd-hardening,
+     * cairn/changes/archive/lists-from-the-index).
      *
      * <p>No body is read: each object reads its own when asked ({@link
      * StoredEvent#ical}). A calendar item holding no summary row of any

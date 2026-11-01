@@ -38,7 +38,7 @@ Wherever a mailbox is named to the reader (a row, the reader, the filter page, d
 - THEN its row names the mailbox *Envoyés*
 
 ### Requirement: The mail list narrows what it shows
-The mail list SHALL list every stored message of every mailbox the filter lets through, and SHALL offer a search over the sender and the subject, the role chips, an unread chip and an attachments chip, all answered by the store over every stored message. None of these SHALL sync by itself: opening a mailbox, or turning a chip on, shows what the store holds. A pull while a role chip is on SHALL sync that role's mailboxes of the shown accounts alone; otherwise what syncs is what the filter ticks.
+The mail list SHALL list every stored message of every mailbox the filter lets through, and SHALL offer a search over every field of the message, its body included, through the search index, the sender and subject match kept beside it, the role chips, an unread chip and an attachments chip, all answered by the store and its index over every stored message. None of these SHALL sync by itself: opening a mailbox, or turning a chip on, shows what the store holds. A pull while a role chip is on SHALL sync that role's mailboxes of the shown accounts alone; otherwise what syncs is what the filter ticks.
 
 #### Scenario: Unread only
 - GIVEN read and unread mail in two accounts
@@ -1073,3 +1073,15 @@ A long press on Send SHALL offer Send and Send and wait for a reply; the latter 
 - WHEN it is sent with Send and wait for a reply
 - THEN Waiting For holds its subject, waiting on Léa Martin, linked to the sent mail
 
+### Requirement: The mail search reads the index
+The mail list's search SHALL read its words as a query of pimdir SEARCH §8, answered by the index over every field of every stored message, the body's text included, ordered by date or by name (no relevance order), with the sender and subject match it had before kept beside the index's hits; a query the language refuses SHALL say why on the search field, the sender and subject match still answering.
+
+#### Scenario: A word of a body
+- GIVEN a stored message whose body alone holds `roadmap`
+- WHEN the user searches `roadmap`
+- THEN the message is listed
+
+#### Scenario: A refused query
+- GIVEN a message whose subject is `Re: weekly`
+- WHEN the user searches `re: weekly`
+- THEN the search field says the field `re` is not one of the language's, and the message is listed by its subject

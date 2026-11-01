@@ -3,7 +3,7 @@ cairn: delta
 change: lists-from-the-index
 ---
 
-Folds into spec/calendar.md, spec/tasks.md and spec/offline-store.md, each requirement naming its file.
+Folds into spec/calendar.md, spec/tasks.md and spec/offline-store.md, each requirement naming its file. Folded at landing (2026-11-01). Amended at landing: "The three lists share one row" states the user's decision of 2026-11-01 (the second line the email, else the organization, never a phone), with a scenario.
 
 ## ADDED Requirements
 
@@ -77,14 +77,19 @@ The Tasks tab SHALL list its to-dos from the store's summaries alone (STORAGE An
 - THEN `task_summary` holds a row per to-do and the tab lists them all
 
 ### Requirement: The three lists share one row (spec/offline-store.md)
-A contact row and an agenda row SHALL take the mail row's shape: a disc, then three lines, a hairline parting the rows of a card. A contact row SHALL lead with the name, then the first email or else the organization, as the store's summary holds them, then its addressbook and account, naming a card an account holds before one on the device. An agenda row SHALL lead with the entry ended by when it starts, then the kind of entry by name and how long it runs, then its calendar and account.
+A contact row and an agenda row SHALL take the mail row's shape: a disc, then three lines, a hairline parting the rows of a card. A contact row SHALL lead with the name, then the first email or else the organization, as the store's summary holds them, and never a phone, which no summary holds (STORAGE Annex A.2, A.6), then its addressbook and account, naming a card an account holds before one on the device. An agenda row SHALL lead with the entry ended by when it starts, then the kind of entry by name and how long it runs, then its calendar and account.
 
 #### Scenario: A contact on two cards
 - GIVEN a contact held in the on-device book and in an account's addressbook
 - WHEN the contacts list is shown
 - THEN its row names that addressbook and that account
 
+#### Scenario: A card with a phone and no email
+- GIVEN a card holding a phone number and an organization, and no email
+- WHEN the contacts list is shown
+- THEN its row's second line is the organization
+
 ## REMOVED Requirements
 
 ### Requirement: The agenda's build is timed (spec/calendar.md)
-Removed: the agenda read and drawn logs measured the move to the index (cairn/log/2026-11-01-lists-from-the-index.md) and are dropped, as cairn/changes/platform-sqlite step 5 planned.
+Removed: the agenda read and drawn logs measured the move to the index (cairn/log/2026-11-01-lists-from-the-index.md) and are dropped, as cairn/changes/archive/platform-sqlite step 5 planned.

@@ -34,9 +34,10 @@ import java.util.List;
 import java.util.TimeZone;
 
 /**
- * The agenda drawn from the search index (cairn/changes/lists-from-the-index):
- * a window's occurrences off the index's occurrence table, each row from its
- * item's summary, on the platform's classes over SQLite 3.18.2, no body read.
+ * The agenda drawn from the search index
+ * (cairn/changes/archive/lists-from-the-index): a window's occurrences off the
+ * index's occurrence table, each row from its item's summary, on the
+ * platform's classes over SQLite 3.18.2, no body read.
  */
 @RunWith(RobolectricTestRunner.class)
 public class CalendarAgendaTest {

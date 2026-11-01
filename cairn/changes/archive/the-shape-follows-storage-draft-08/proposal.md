@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: the-shape-follows-storage-draft-08
-status: draft
+status: landed
 created: 2026-11-01
 ---
 
@@ -9,7 +9,7 @@ created: 2026-11-01
 
 ## Why
 
-io-pimdir bff5737 (pushed, master, still 0.8.0) follows pimdir d671bbd: storage-draft-08, sync-draft-07, search-draft-08. cairn/changes/platform-sqlite step 2 writes the app's shape "at draft-07" and moves the pin "to the io-pimdir release following draft-07"; that release never shipped on its own, and since no test-build store converts (step 2 blocks start-up on another shape), writing the shape straight at draft-08 costs nothing that draft-07 would have saved. This change retargets step 2 and lists what draft-08 adds to it; platform-sqlite stays the plan, and io-pimdir-draft-05's rules stay folded into it.
+io-pimdir bff5737 (pushed, master, still 0.8.0) follows pimdir d671bbd: storage-draft-08, sync-draft-07, search-draft-08. cairn/changes/archive/platform-sqlite step 2 writes the app's shape "at draft-07" and moves the pin "to the io-pimdir release following draft-07"; that release never shipped on its own, and since no test-build store converts (step 2 blocks start-up on another shape), writing the shape straight at draft-08 costs nothing that draft-07 would have saved. This change retargets step 2 and lists what draft-08 adds to it; platform-sqlite stays the plan, and io-pimdir-draft-05's rules stay folded into it.
 
 Built on 2026-11-01 (rust/, a copy with `io-pimdir = { path = "../io-pimdir" }` at bff5737, `cargo check --all-targets`), 12 errors, nearly all draft-05 and draft-07 items platform-sqlite already owes:
 

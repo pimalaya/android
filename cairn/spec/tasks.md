@@ -213,12 +213,17 @@ The next actions and In progress SHALL list the soonest `DUE` first, as an insta
 - THEN today's comes first
 
 ### Requirement: The Tasks tab reads its to-dos from the summaries
-The Tasks tab SHALL find its to-dos as the items holding a `task_summary` row, through the canonical `list_tasks_page_asc`, and SHALL read the body of those alone; a calendar item the store holds with no summary row SHALL have one derived through io-pimdir, once, before the tab reads.
+The Tasks tab SHALL list its to-dos from the store's summaries alone (STORAGE Annex A.4, A.6): the items holding a `task_summary` row, their state and categories from their `task_category` rows, who a Waiting For item waits on from its first `contact` address, when it was captured from the row's `created`, and SHALL read no body to list them; a task's page, the clarify flow and a copy SHALL read its body, its description included. A calendar item the store holds with no summary row SHALL have one derived through io-pimdir, once, before the tab reads.
 
 #### Scenario: An agenda of events
 - GIVEN a calendar holding a thousand events and one to-do
 - WHEN the Tasks tab loads
-- THEN it reads one body
+- THEN it lists the to-do and reads no body
+
+#### Scenario: A body unread
+- GIVEN a Waiting For to-do whose body is not in the blob directory
+- WHEN the Tasks tab loads
+- THEN it lists the to-do under Waiting, with its contact and how long it has waited
 
 #### Scenario: A store from before summaries
 - GIVEN a store whose calendar items were written with no summary

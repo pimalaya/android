@@ -1,7 +1,7 @@
 //! # Lists
 //!
 //! What the app's lists read off index.db rather than off every body
-//! (cairn/changes/lists-from-the-index): the summaries hold a row, the
+//! (cairn/changes/archive/lists-from-the-index): the summaries hold a row, the
 //! index the questions. The contacts list asks what its Has filter and its
 //! categories test of every card (SEARCH §6), as the index recorded it at
 //! extraction; the agenda draws a window of calendar time from the

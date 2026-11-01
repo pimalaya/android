@@ -8,7 +8,7 @@ status: current
 
 The app keeps one pimdir store for every account and every domain: `collections.kind` carries the media type (`message/rfc822`, `text/vcard`, `text/calendar`) and `collections.account` groups by account, so the merged view's two filter axes are columns rather than three databases. Bodies live in a content-addressed blob directory beside the database, referenced by hash and refcounted.
 
-The schema is io-pimdir's, handed to Java over JNI rather than transcribed, and executed on the SQLite the app bundles (3.49, behind the platform's own binding), since the platform's is too old for the schema below Android 14. The crate is taken without its `client` feature: compiling a second engine into every ABI would work against the app's first design goal.
+The schema is io-pimdir's canonical storage-draft-08 schema, handed to Java over JNI rather than transcribed; the statements run on it are the app's own text, the `pimalaya-android` shape, which SQLite 3.18 runs, so the store lives on the platform's own SQLite from Android 8.0 up and the app bundles none. The search index, index.db beside the store, is a second database on that same SQLite, written by io-pimdir's I/O-free refresh. The crate is taken without its `client` feature: compiling a second engine into every ABI would work against the app's first design goal.
 
 Every collection is reconciled by io-pimdir's sync engine, so every collection carries bindings, staged writes and conflicts. A contacts collection is reconciled against two sources, the server and the phone, which the store holds as one item with one `bindings` row per source; mail and calendar have the one source each and are otherwise the same. Nothing replaces a collection's contents: a refresh reconciles it, which is what lets a write staged before it survive it.
 
@@ -21,40 +21,12 @@ The bridge SHALL run io-pimdir's sync, upgrade and mutate coroutines, and the ap
 - THEN `PimdirSync` derives the push and the driver services its yields
 
 ### Requirement: The store's shape follows the canonical schema
-The store SHALL reconcile its own shape against the canonical pimdir DDL on open: creating every table, index and trigger the schema declares that it lacks, adding every column it lacks, dropping every column the schema no longer declares, and rebuilding an index or a trigger whose text has moved. It SHALL NOT carry a transcribed list of the columns a draft folded in or out, nor of the indexes one reshaped.
+The store SHALL be created by the canonical draft-08 schema alone (0001_init.sql and `init_store_meta`), served over JNI, and SHALL NOT reconcile, widen, narrow nor rebuild a store of another shape: drafts are exact (STORAGE §4.2), and a store whose schema differs from the canonical text is refused as damaged. The statements it runs SHALL be the app's own shape, `pimalaya-android` (STORAGE §4.4: each canonical statement's name, parameters, columns and effect kept, its text free), and the store SHALL record no shape: a store the canonical statement text wrote is the same store and opens.
 
-#### Scenario: A column the draft folded in
-- GIVEN a store created before `bindings.conflict_object` was declared
-- WHEN the app opens it
-- THEN the column is added and the store opens
-
-#### Scenario: A column the draft folded out
-- GIVEN a store carrying `bindings.ambiguous_handles`, which the schema no longer declares
-- WHEN the app opens it
-- THEN the column is dropped, or kept with a log where SQLite refuses to drop it
-
-#### Scenario: A table the draft added
-- GIVEN a store created before the summary tables were declared
-- WHEN the app opens it
-- THEN they are created and the store opens
-
-#### Scenario: An index whose columns moved
-- GIVEN a store holding an index of the canonical name over other columns
-- WHEN the app opens it
-- THEN the index is dropped and recreated from the canonical DDL
-
-#### Scenario: A shape the parse could not read
-- GIVEN a table the canonical DDL yielded no column for
-- WHEN the app reconciles
-- THEN it changes nothing about that table, rather than reading the empty answer as "every column is stale"
-
-### Requirement: A schema version is migrated, not recreated
-The store SHALL reach a newer schema version by running every canonical migration above its own, in order, stamping `store_meta.version` with each version reached, as io-pimdir's own runner does. It SHALL recreate the store only on a downgrade, whose newer shape no migration reads back.
-
-#### Scenario: A store one version behind
-- GIVEN a store at version 1 holding a staged edit and a queued message
-- WHEN an app shipping version 2 opens it
-- THEN migration 2 runs, `store_meta.version` reads 2, and the edit and the message are still there
+#### Scenario: A store whose index moved
+- GIVEN a store holding an index the canonical text does not declare
+- WHEN the app starts
+- THEN the store is refused, not rebuilt
 
 ### Requirement: An item carries the standard's summary
 The store SHALL record what a reader lists an item from in its kind's summary table and the people it names in `item_address`, as pimdir STORAGE Annex A defines them, written through the canonical statements. It SHALL NOT keep a summary convention of its own in the item row, and SHALL derive one through io-pimdir wherever the body is on hand: a calendar object listed from its server or the phone, or staged by the app, SHALL carry the summary and sort key its body derives.
@@ -424,12 +396,17 @@ A long press on a contact SHALL start a selection, its disc turning into a check
 - THEN its disc shows a check and the bar shows the count
 
 ### Requirement: The three lists share one row
-A contact row and an agenda row SHALL take the mail row's shape: a disc, then three lines, a hairline parting the rows of a card. A contact row SHALL lead with the name, then the phone or else the email, then its addressbook and account, naming a card an account holds before one on the device. An agenda row SHALL lead with the entry ended by when it starts, then the kind of entry by name and how long it runs, then its calendar and account.
+A contact row and an agenda row SHALL take the mail row's shape: a disc, then three lines, a hairline parting the rows of a card. A contact row SHALL lead with the name, then the first email or else the organization, as the store's summary holds them, and never a phone, which no summary holds (STORAGE Annex A.2, A.6), then its addressbook and account, naming a card an account holds before one on the device. An agenda row SHALL lead with the entry ended by when it starts, then the kind of entry by name and how long it runs, then its calendar and account.
 
 #### Scenario: A contact on two cards
 - GIVEN a contact held in the on-device book and in an account's addressbook
 - WHEN the contacts list is shown
 - THEN its row names that addressbook and that account
+
+#### Scenario: A card with a phone and no email
+- GIVEN a card holding a phone number and an organization, and no email
+- WHEN the contacts list is shown
+- THEN its row's second line is the organization
 
 ### Requirement: An empty list says so below its header
 A list with nothing to show SHALL centre its empty state in the space its header leaves below it, clear of the search, the chips and the week card.
@@ -466,17 +443,12 @@ The store SHALL keep, per collection and source, the round under way (its scope,
 - THEN the message stays, and only a round over the whole scope or a delta can find it gone
 
 ### Requirement: A load carries each message's date
-A store load SHALL carry each mail placement's `Date` beside its state, which the bridge SHALL hand the engine as a summary holding the date alone and SHALL NOT write back: a write handing it back unchanged SHALL carry no summary, leaving the stored row alone. The engine reads it to tell a placement in a round's scope from one outside it (SYNC section 5).
+A store load SHALL carry each mail placement's `Date`, `Subject` and sender beside its state, which the bridge SHALL hand the engine as a summary holding those alone and SHALL NOT write back: a write handing it back unchanged SHALL carry no summary, leaving the stored row alone. The engine reads the date to tell a placement in a round's scope from one outside it (SYNC section 5), and the three to tell a listed member reusing a create's `Message-ID` from the create it lands (SYNC section 6).
 
-#### Scenario: A band listed in one page
-- GIVEN a mailbox listed down to Tuesday
-- WHEN a widening lists the week before in one page
-- THEN the messages above Tuesday stay, none found absent from a band they are not in
-
-#### Scenario: A marker staged on a listed message
-- GIVEN a message listed with its subject and sender
-- WHEN a marker is staged on it and the next sync pushes it
-- THEN its subject and sender are still stored
+#### Scenario: A sent copy listed by the server
+- GIVEN a message sent from the app, its copy staged in Sent
+- WHEN Sent's listing brings the copy the provider filed
+- THEN the staged copy lands on it and is not pushed a second time
 
 ### Requirement: A local action is visible before any sync
 Every action a user takes on an item (create, edit, flag, delete, send) SHALL be staged as a pimdir mutation, never as a direct row write, and SHALL show in every list it concerns at once, a relocation's target included. The bridge SHALL carry pimdir's `Move` and `Copy` beside `Add`, `Edit`, `SetFlags` and `Remove`, and the sync SHALL carry each staged change out as staged (pimdir SYNC section 4): a `Remove` naming a destination as a server move, one naming none as a server delete, an `Add` with an origin as a server-side copy and one without as an append, never one turned into another. A connector that cannot carry one out, a relocation into another account's collection or any calendar relocation, SHALL reject it. A staged removal SHALL be listed nowhere. A row SHALL carry no mark of whether its change was pushed yet.
@@ -589,20 +561,12 @@ A drawer row SHALL open Deleted items: every item the store holds deleted, acros
 - THEN the retained items and their bodies go for good, and the waiting one stays
 
 ### Requirement: A sync that went through says nothing
-A sync that went through SHALL NOT pop up a report: no count of what came in or went out, no count of messages sent from the outbox, no count of conflicts left, the lists showing what the pass brought and a conflicted row carrying its own mark. A pull turned down because a background run holds the sync SHALL say nothing either, that run's dock already showing. A failure SHALL still open its error dialog.
+A sync that went through SHALL NOT pop up a report: no count of what came in or went out, no count of messages sent from the outbox, no count of conflicts left, the lists showing what the pass brought and a conflicted row carrying its own mark. A pull turned down because a background run holds the sync SHALL say nothing either, that run's dock already showing. A failure SHALL still open its error dialog, and a parked round its question (A round finding most of a collection gone asks first).
 
 #### Scenario: A quiet pass
 - GIVEN a contacts pass bringing three cards and leaving one conflict
 - WHEN it ends
 - THEN no toast shows, and the conflicted contact carries its mark in the list
-
-### Requirement: The store runs on the bundled SQLite
-The app SHALL open every database it owns, the pimdir store included, on the SQLite it bundles, version 3.37 or newer with JSON1, on every Android it supports (API 26 and up), and SHALL NOT open one on the platform's `android.database.sqlite`, whose version follows the device.
-
-#### Scenario: An Android 8 device
-- GIVEN a device whose platform SQLite is 3.18
-- WHEN the app creates the store
-- THEN the `STRICT` tables are created and the `RETURNING` and `json_each` statements run, on the bundled SQLite
 
 ### Requirement: The process holds one store
 Every caller in the process, the activity, the sync adapters, the background job, the phone queue and the time-zone receiver, SHALL share one store (`PimdirDb`) and one card store, so no call leaves a connection pool open behind it.
@@ -634,7 +598,7 @@ A contacts or calendar driver SHALL name a member its source already binds by th
 - THEN the two edits merge onto the same card and the merge is pushed, rather than the card being replaced and the phone's edit dropped
 
 ### Requirement: A scoped load reads what it names
-A load scoped to some handles or link ids SHALL read those rows alone, whatever the length of the list: the list SHALL be bound as one value (a JSON array read through `json_each`), never widened back to the whole collection, and a handle scope SHALL seek the source's bindings by handle rather than walk the collection. An unbound row SHALL still be reached under the provisional handle of its link id.
+A load scoped to some handles or link ids SHALL read those rows alone, whatever the length of the list: the list SHALL be bound through the `temp.param` table (STORAGE §4.4) on the connection that reads it, never widened back to the whole collection, and a handle scope SHALL seek the source's bindings by handle rather than walk the collection. An unbound row SHALL still be reached under the provisional handle of its link id.
 
 #### Scenario: A listing page of a thousand
 - GIVEN a mailbox of 275k messages
@@ -669,3 +633,181 @@ A body moved into the blob store before the write naming it (a downloaded messag
 - GIVEN a write recording a downloaded body whose file is not in the blob store
 - WHEN it is applied
 - THEN it is refused, and the message stays at meta, its body owed
+
+### Requirement: A store of another draft is not opened
+The app SHALL create its store at storage-draft-08 (`store_meta.format_version`, a `store_id` and an `incarnation` by the canonical text, `derivation` 3) and record `sync_version` with the first engine write. It SHALL decide whether an existing store opens by io-pimdir's rules (STORAGE §6) over facts read off the file read-only, and SHALL NOT read, write nor reconcile a store another draft, another program or another sync version wrote: start-up stands aside on a screen saying the app has to be reinstalled, and the background job, the sync adapters and the time-zone receiver do nothing.
+
+#### Scenario: A store an earlier version wrote
+- GIVEN a store created before draft-08
+- WHEN the app starts
+- THEN it opens on the reinstall screen, and nothing in the store is written
+
+### Requirement: The store's writer opens first
+Opening the store SHALL configure its writing connection before write-ahead logging gives the pool its readers, so no reader is opened, nor caches the schema, before the store's tables exist. The writer SHALL erase what it deletes (`secure_delete`) and trust no function the schema names (`trusted_schema` off, where its SQLite has the setting, 3.31 and later). The journal mode SHALL be set once, when the store is created (STORAGE §8): an existing store SHALL open in write-ahead logging from its first statement, the platform setting it no other mode.
+
+#### Scenario: A first launch
+- GIVEN no store on the device
+- WHEN the app starts and lists its collections
+- THEN the store is created on its writer alone, and no statement fails for a table it lacks
+
+#### Scenario: A later launch
+- GIVEN a store the app created, in write-ahead logging
+- WHEN the app starts, the search index attaching the store
+- THEN no other journal mode is asked of it, nothing logs "database is locked", and the file stays in write-ahead logging
+
+### Requirement: A body is named by its content and checked before use
+The blob store SHALL file a body under its BLAKE3 name, one shard level deep (`objects/<hash[0:2]>/<hash>`), checking the name before any path is built, and SHALL write it by renaming a temporary with `RENAME_NOREPLACE`, or, below Android 11 (whose system call filter lacks `renameat2`) and where the kernel refuses the flag, by creating the name exclusively and copying the temporary into it, never by a hard link, which Android's SELinux policy denies an app on its own files, nor by a rename that replaces: a name already held keeps what holds it. It SHALL follow no link under objects/, and SHALL check a body against its name before serving, parsing, pushing or copying it, moving one that fails into quarantine/. A write finding its name held, by the rename or the exclusive create refusing it or before writing at all, SHALL keep the file there only once it checks against the name (STORAGE §5): a file failing it, a link or a part a crashed copy left among them, is moved into quarantine/, the app's renames and moves serialised so no move takes a file another of its writers is still filing, and the body is filed again.
+
+#### Scenario: A message body downloaded on a device
+- GIVEN Android 15 refusing `link` to the app
+- WHEN a sync downloads a message
+- THEN its body is stored and the message reads offline
+
+#### Scenario: Two writers of one body
+- GIVEN a body filed under its name
+- WHEN another writer files the same name
+- THEN the first file stays and the temporary is deleted
+
+#### Scenario: A damaged file under a body's name
+- GIVEN a file under a body's name holding other bytes, a part a crashed copy left
+- WHEN a sync or a download writes that body
+- THEN the file is moved into quarantine/, never unlinked, and the body is stored under its name
+
+### Requirement: A queued action is read strictly
+Every row the app appends to the queue SHALL match its payload schema (STORAGE §15.3, payloads/), checked before anything is written. A message to send SHALL be queued as Annex B.2's `submit`: `source`, `from`, `rcpts` and `subject` alone, the message the row's body; it SHALL be anchored on the collection its sent copy belongs to, the account's sent mailbox, or on the account's outbox when the account marks none; what the outbox lists (the `Message-ID`, the subject and the date) SHALL be derived from the message, never added to the payload. The drain SHALL read each row by its schema before handing anything over: a malformed row is parked whole, naming what is malformed, and a row stating a later payload version is skipped, left pending and untouched. A submission SHALL go out with the envelope its payload states.
+
+#### Scenario: A message queued from an account with a sent mailbox
+- GIVEN an account whose roster marks a sent mailbox
+- WHEN a message is sent from it
+- THEN its row is anchored on that mailbox, the outbox lists it, and the next mail pass of that account hands it over
+
+#### Scenario: A sent mailbox the server drops while a message waits
+- GIVEN a message waiting, anchored on the sent mailbox
+- WHEN a roster no longer lists that mailbox
+- THEN the mailbox stays until the message is settled, and the roster's other changes are written
+
+#### Scenario: A row of the earlier payload
+- GIVEN a queued submission carrying `messageId` and `sortKey` and no `source` nor `rcpts`
+- WHEN the drain runs
+- THEN the row is parked, listed as refused with the member it lacks, and the rows behind it go out
+
+#### Scenario: A later producer's row
+- GIVEN a queued row stating `v: 2`
+- WHEN the drain runs
+- THEN it stays pending, its attempts and error untouched
+
+### Requirement: A binding keeps what it agreed with the item
+Every binding SHALL record in `bindings.shared_object` the body it last agreed with the shared item (STORAGE §5, SYNC §9): moved by an upsert carrying a body the item settled on, never by one carrying none nor one leaving the item conflicted, and pinned as the base is (refcount, recount, collector), so it outlives the item's own body.
+
+#### Scenario: A pull at meta
+- GIVEN a card whose binding agreed on its body
+- WHEN a pull takes the body away
+- THEN the binding still names the body and the body stays stored
+
+### Requirement: Two sources changing one item diverge
+The store SHALL merge a source's upsert of a mutable kind into the shared item by io-pimdir's cross-source rules (SYNC §9): a change one source made flows in, and two sources having changed the item differently diverge, the item keeping its body, recording the incoming one in `items.conflict_object` and standing conflicted for every source, the write reporting the upsert's handle in `Written.conflicted`. A message never diverges.
+
+#### Scenario: A card edited on the phone and on the server
+- GIVEN a card the phone edited and the store took
+- WHEN the server's listing brings its own edit of the card
+- THEN the card keeps the phone's body, records the server's and reads as conflicted, and nothing is pushed over either
+
+### Requirement: A round finding most of a collection gone asks first
+A round whose listing names no member while the store binds some, or finds more than half of at least 20 bound members absent (SYNC §5, §8), SHALL park rather than remove them, and the app SHALL say so once the pass ends, naming each collection and how many of its items the server no longer lists, offering to remove them too or to keep them. Removing them SHALL run the next sync of those collections accepting the absences; keeping them SHALL leave the round parked, decided again by the next pass.
+
+#### Scenario: A calendar the server emptied
+- GIVEN a calendar of 40 entries the server now lists empty
+- WHEN a sync ends
+- THEN the 40 entries are still there and a dialog says the server no longer lists them, offering Remove and Keep
+
+### Requirement: A narrowed round enumerates its collection
+A mail round whose listing a date filter narrowed SHALL say so on every page, and its last page SHALL hand every handle the mailbox holds, read with no date filter: IMAP `UID SEARCH ALL`, JMAP `Email/query` filtered by the mailbox alone, Graph the folder's message ids, Gmail the label's ids with no query. A member the narrowed listing did not name SHALL be retired only when this enumeration does not name it either.
+
+#### Scenario: An undated message under the download window
+- GIVEN a Gmail label holding a message received before the round's `after:`
+- WHEN the round's last page lands
+- THEN the message stays, the label's ids naming it
+
+### Requirement: The store's statements run on Android 8's SQLite
+Every statement the app runs on the store SHALL prepare and run on SQLite 3.18 as Android 8.0 builds it (no `RETURNING`, upsert, `UPDATE ... FROM`, `STRICT` nor JSON), the store tests running on that build. A statement 3.18 lacks a construct for SHALL be the canonical one's effect in several statements run in order under its one name, in one transaction, never one at a time by its caller. No SQL SHALL be written in Java.
+
+#### Scenario: A summary written twice
+- GIVEN a message whose summary the store does not hold
+- WHEN a listing writes it, then a later one restates it with no invitation
+- THEN the row is inserted, then updated, keeping the invitation the first write stated
+
+#### Scenario: A store the previous build wrote
+- GIVEN a store created by io-pimdir's canonical statement text at storage-draft-08
+- WHEN this build starts
+- THEN the store opens, and its rows are read and written by the app's statements
+
+### Requirement: The store's SQL holds to the oldest platform SQLite
+Every statement and migration the app runs SHALL prepare on SQLite 3.18 built as Android 8 builds it, with no JSON and no FTS5.
+
+#### Scenario: A newer syntax slips in
+- GIVEN a statement using `RETURNING`
+- WHEN the unit tests run
+- THEN the floor test fails, naming the statement
+
+### Requirement: The index shares the store's SQLite
+The app SHALL write and query index.db on the same SQLite as the store, and SHALL link no SQLite into its native library.
+
+#### Scenario: A search during a sync
+- GIVEN a sync writing the store and the index refreshing after it
+- WHEN the user searches
+- THEN one SQLite in the process holds both files, and the search answers once the refresh's current chunk commits
+
+### Requirement: The index is the app's own shape over FTS4
+The app SHALL keep a search index, index.db beside the store, in a shape of its own named `pimalaya-android` in `index_meta.shape` (pimdir SEARCH §2): the canonical index on SQLite 3.18, ordinary FTS4 tables in place of FTS5 over text io-pimdir folded, `unicode61` with `remove_diacritics=0` and prefixes of 2 and 3. It SHALL refuse and leave as it is an index of another shape or a later version, and rebuild one of its shape at an earlier version, under another tokenizer or schema, or built from another store. The index SHALL be refreshed by io-pimdir's refresh at start, after each engine write batch and at the end of each sync, a run of at most 200 rows of the store's feed per transaction, each run a deferred transaction that takes no lock of the store.
+
+#### Scenario: A sync writing while the index refreshes
+- GIVEN a refresh run reading the store
+- WHEN a sync writes a page to the store
+- THEN the write goes through, the run holding no lock on the store
+
+#### Scenario: A fresh install
+- GIVEN no store on the device
+- WHEN the app first starts and the index refreshes
+- THEN the store is created before the index reads it, and index.db holds its `index_meta` after that first start
+
+#### Scenario: An index another program built
+- GIVEN an index.db whose `index_meta.shape` is `canonical`
+- WHEN the app opens its index
+- THEN it neither reads, writes nor deletes it, and the mail search answers from the sender and subject alone
+
+### Requirement: The store runs on the platform SQLite
+The app SHALL open every database it owns, the pimdir store and the index included, on the platform's `android.database.sqlite`, the store's statements in the app's own shape (`pimalaya-android`) over the canonical schema, on every Android it supports (API 26 and up).
+
+#### Scenario: An Android 8 device
+- GIVEN a device whose platform SQLite is 3.18
+- WHEN the app creates the store and the index
+- THEN both are created, and every statement runs, on the platform SQLite
+
+### Requirement: The store's writer syncs every commit
+The store's writing connection SHALL run with `synchronous = FULL` (STORAGE §4.1) once write-ahead logging is on, whatever the platform's default under logging, SHALL set `trusted_schema` off where the platform's SQLite has it (3.31 and later), and the store SHALL log the SQLite version it runs on as it opens.
+
+#### Scenario: A build whose default is NORMAL
+- GIVEN a device whose platform syncs write-ahead logs NORMAL by default
+- WHEN the app opens its store
+- THEN the writer syncs at every commit, and the log names the SQLite version
+
+### Requirement: An incompatible store blocks start-up
+The app SHALL refuse to start on a store of another draft or another schema, or one it cannot open, saying the store's version is not compatible and the app must be reinstalled, and SHALL neither read nor write it.
+
+#### Scenario: A store from an earlier test build
+- GIVEN a store written before the app's own shape, with `STRICT` tables
+- WHEN the new build starts
+- THEN it shows the incompatible-version screen, and the store's files are untouched
+
+### Requirement: The contacts list reads the summaries and the index
+The contacts list SHALL read its rows from the store's summaries (STORAGE Annex A.2, A.6): a card's name its `FN`, else its first email, else its organization; its first email; its organization; its kind; and SHALL read no body to list, filter or search. What the Has filter tests beyond an email and an organization (a phone, a postal address, a birthday, a photo) and a card's categories SHALL be what the search index recorded of its body (pimdir SEARCH §6, `object` and `object_category`), the categories offered as the index folds them; with no index, or one refused, they SHALL be read off the bodies as before. The search SHALL keep a card whose name, email or organization holds the words, or which the index finds the words in as a query of SEARCH §8 (`kind:contact`), its notes and phones included. A merged row SHALL be marked diverged by comparing its cards' bodies only when they differ byte for byte, each body's comparison kept for the process. The birthday peek SHALL read the bodies of the cards the index records a birthday of alone.
+
+#### Scenario: A card whose body is unread
+- GIVEN a card whose body is not in the blob directory
+- WHEN the contacts list loads
+- THEN it lists the card under its name and first email
+
+#### Scenario: A note
+- GIVEN a card whose note alone says `met at the crag`
+- WHEN `crag` is searched
+- THEN the card is listed

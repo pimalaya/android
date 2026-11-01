@@ -6,9 +6,9 @@ date: 2026-11-01
 
 # The agenda, Tasks and Contacts list from the summaries and the index
 
-Built as cairn/changes/platform-sqlite step 5, on the index step 4 built. The agenda reads the search index's occurrence table, Tasks and Contacts the store's summaries, and none of the three reads a body to list. The change stays in flight until the device check (cairn/changes/lists-from-the-index/tasks.md); its delta (delta.md) folds at landing.
+Built as cairn/changes/archive/platform-sqlite step 5, on the index step 4 built. The agenda reads the search index's occurrence table, Tasks and Contacts the store's summaries, and none of the three reads a body to list. The change stays in flight until the device check (cairn/changes/archive/lists-from-the-index/tasks.md); its delta (delta.md) folds at landing.
 
-Capabilities moved: calendar, tasks and offline-store (folded at landing, not yet: cairn/changes/lists-from-the-index/delta.md).
+Capabilities moved: calendar, tasks and offline-store (folded at landing, not yet: cairn/changes/archive/lists-from-the-index/delta.md).
 
 ## The agenda (checkpoint c)
 
