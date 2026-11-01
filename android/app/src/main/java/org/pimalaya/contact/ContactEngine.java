@@ -1013,7 +1013,7 @@ public final class ContactEngine extends PimdirEngine {
         // and io-webdav names the resource verbatim now instead of appending
         // .vcf itself, so what goes out is the name this side calls the card
         // by. Sending the handle would file it under a control character.
-        String name = PimdirStorage.nameOf(handle);
+        String name = PimdirStorage.statedOf(handle);
         if (account.info().namesResources()) {
             name += ".vcf";
         }

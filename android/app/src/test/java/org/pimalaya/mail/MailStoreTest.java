@@ -503,7 +503,7 @@ public class MailStoreTest {
         MailStore.Query query = all(false, false, "");
         assertEquals(120, store.count(query));
         long placed = 0;
-        for (MailStore.Day day : store.countByDay(query, "+0 minutes")) {
+        for (MailStore.Day day : store.countByDay(query, 0)) {
             assertTrue("a day header counts no more than its day", day.count <= 2);
             placed += day.count;
         }
@@ -532,7 +532,7 @@ public class MailStoreTest {
         MailStore.Query floored = query.since("2026-02-01T00:00:00Z");
         assertEquals(58, store.count(floored));
         long days = 0;
-        for (MailStore.Day day : store.countByDay(floored, "+0 minutes")) {
+        for (MailStore.Day day : store.countByDay(floored, 0)) {
             days += day.count;
         }
         assertEquals(58, days);
@@ -573,7 +573,7 @@ public class MailStoreTest {
         MailStore.Query found = all(false, false, "invoice");
         assertEquals(1, store.count(found));
         assertEquals("old", store.page(found, null, 0, 50).get(0).id);
-        assertEquals(1, store.countByDay(found, "+0 minutes").size());
+        assertEquals(1, store.countByDay(found, 0).size());
         assertEquals(0, store.count(all(false, false, "100%")));
         assertEquals("%100\\%%", PimdirDb.likePattern("100%"));
     }

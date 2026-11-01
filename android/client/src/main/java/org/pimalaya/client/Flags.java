@@ -62,12 +62,23 @@ public record Flags(List<String> markers) {
     }
 
     /**
-     * The marker set the store's {@code flags} column holds; none if empty.
+     * The marker set a store read answers as its {@code flags} column: the
+     * {@code placement_flag} rows space-joined, in no order (pimdir STORAGE
+     * §13); none if empty.
      *
-     * @throws JSONException when the column is not a JSON array
+     * @throws JSONException never since storage-draft-08, kept for callers
+     *     written against the JSON column
      */
     public static Flags parse(String text) throws JSONException {
-        return read(text == null || text.isEmpty() ? null : new JSONArray(text));
+        List<String> markers = new ArrayList<>();
+        if (text != null) {
+            for (String flag : text.split(" ")) {
+                if (!flag.isEmpty()) {
+                    markers.add(flag);
+                }
+            }
+        }
+        return new Flags(markers);
     }
 
     /**

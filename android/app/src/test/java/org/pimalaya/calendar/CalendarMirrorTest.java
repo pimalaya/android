@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TimeZone;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -487,15 +488,31 @@ public class CalendarMirrorTest {
     @Test
     public void anEventTheServerDeletedLeavesThePhone() {
         projected("ev-1.ics", STANDUP);
+        projected("ev-2.ics", WEEKLY);
 
-        server.members.clear();
+        // NOTE: a listing naming another member: one naming none parks the
+        // round rather than finding every member absent (pimdir SYNC §5).
+        server.members.remove("ev-1.ics");
         server.sync();
         phonePass();
         server.sync();
 
-        assertTrue(events().isEmpty());
-        assertTrue(server.members.isEmpty());
+        assertEquals(1, events().size());
+        assertEquals(Set.of("ev-2.ics"), server.members.keySet());
         assertFalse(stored().containsKey("ev-1.ics"));
+    }
+
+    /** A calendar the server emptied keeps what it held until a run accepts it. */
+    @Test
+    public void anEmptiedCalendarParksRatherThanEmptyingThePhone() {
+        projected("ev-1.ics", STANDUP);
+
+        server.members.clear();
+        server.sync();
+        phonePass();
+
+        assertEquals(1, events().size());
+        assertTrue(stored().containsKey("ev-1.ics"));
     }
 
     @Test

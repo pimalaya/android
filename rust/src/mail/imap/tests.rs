@@ -616,7 +616,8 @@ fn a_search_is_cached_until_the_mailbox_moves() {
             .list_page("INBOX", &request)
             .unwrap();
     }
-    assert_eq!(client.host.sent("UID SEARCH"), 1, "searched once per scope");
+    // NOTE: the scope's search, then the last page's `UID SEARCH ALL`.
+    assert_eq!(client.host.sent("UID SEARCH"), 2, "searched once per scope");
 
     // NOTE: a message arrives: UIDNEXT moves.
     client.host.messages.push(Message {
@@ -628,7 +629,7 @@ fn a_search_is_cached_until_the_mailbox_moves() {
     let page = ImapSession::bind(&mut client, &mut state)
         .list_page("INBOX", &request)
         .unwrap();
-    assert_eq!(client.host.sent("UID SEARCH"), 2, "searched again");
+    assert_eq!(client.host.sent("UID SEARCH"), 4, "searched again");
     assert_eq!(page.items.len(), 21);
 
     // NOTE: a marker moves: HIGHESTMODSEQ moves, and the header fields
@@ -638,8 +639,38 @@ fn a_search_is_cached_until_the_mailbox_moves() {
     ImapSession::bind(&mut client, &mut state)
         .list_page("INBOX", &request)
         .unwrap();
-    assert_eq!(client.host.sent("UID SEARCH"), 3);
+    assert_eq!(client.host.sent("UID SEARCH"), 6);
     assert_eq!(client.host.headers_read.len(), read + 22);
+}
+
+/// A round `SENTSINCE` narrows says so on its pages, and its last page hands
+/// every UID the mailbox holds, an undated message's included, so the
+/// engine finds absent only what that enumeration lacks (pimdir SYNC §4).
+#[test]
+fn a_narrowed_round_hands_every_uid_on_its_last_page() {
+    let mut client = Client::new(Scripted::new(daily(30)));
+    let mut state = state(Vec::new());
+    let narrowed: MailRequest = from_str(&format!(
+        r#"{{"listing":{{"kind":"round"}},"scope":{{"since":"{}"}}}}"#,
+        back(5, 0)
+    ))
+    .unwrap();
+
+    let page = ImapSession::bind(&mut client, &mut state)
+        .list_page("INBOX", &narrowed)
+        .unwrap();
+    assert!(page.last);
+    assert!(page.narrowed);
+    let enumerated = page.enumerated.expect("the mailbox's every UID");
+    assert_eq!(enumerated.len(), 30, "the 25 the scope leaves out too");
+    assert_eq!(client.host.sent("UID SEARCH ALL"), 1);
+
+    let whole: MailRequest = from_str(r#"{"listing":{"kind":"round"}}"#).unwrap();
+    let page = ImapSession::bind(&mut client, &mut state)
+        .list_page("INBOX", &whole)
+        .unwrap();
+    assert!(!page.narrowed, "no date filter");
+    assert_eq!(page.enumerated, None);
 }
 
 #[test]

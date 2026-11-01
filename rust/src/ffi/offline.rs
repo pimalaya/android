@@ -9,9 +9,18 @@
 //! statements cross here rather than being transcribed into Java, where
 //! they would drift from the spec in silence.
 
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    fs::File,
+    io::{self, Read},
+    path::Path,
+};
 
-use io_pimdir::summary::derive;
+use io_pimdir::{
+    hash::{self, PimdirHasher},
+    object::PimdirHash,
+    summary::derive,
+};
 use jni::{
     EnvUnowned,
     errors::Error,
@@ -25,7 +34,7 @@ use crate::{
     contact::sync,
     ffi::{ErrorReply, error_json, host::JniHost, parse_facts, parse_strings, read_string},
     mail::derivable,
-    offline::{Driver, OfflineSync, summary::SummaryJson, wire::sorted},
+    offline::{Driver, OfflineSync, store, summary::SummaryJson, wire::sorted},
 };
 
 /// `Native.offlineSync`: reconciles a collection, answering its sync report.
@@ -66,8 +75,9 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineSync<'local>(
 
 /// `Native.offlineUpgrade`: raises handles to the full detail tier.
 ///
-/// `handles` is a JSON string array. Answers `{"upgraded", "fetched",
-/// "deduped"}`.
+/// `handles` is a JSON string array; `content` whether the collection's sync
+/// pushes bodies, its policy settling a divergence the upgrade reads. Answers
+/// `{"upgraded", "fetched", "deduped", "overruled"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
     mut env: EnvUnowned<'local>,
@@ -75,6 +85,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
     driver: JObject<'local>,
     collection: JString<'local>,
     handles: JString<'local>,
+    content: jboolean,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let collection = read_string(env, &collection);
@@ -83,7 +94,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
         let json = match parse_strings(&handles) {
             Err(err) => error_json(err),
             Ok(handles) => {
-                match Driver::new(JniHost::offline(env, &driver)).upgrade(&collection, handles) {
+                let mut driver = Driver::new(JniHost::offline(env, &driver));
+                match driver.upgrade(&collection, handles, content) {
                     Ok(report) => {
                         to_string(&report).unwrap_or_else(|err| error_json(err.to_string()))
                     }
@@ -100,7 +112,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
 /// `Native.offlineMutate`: stages a local mutation, the remote untouched.
 ///
 /// The mutation is a JSON object, e.g. `{"op": "edit", "handle", "hash",
-/// "size", "body", "summary"}`. Answers `{}`.
+/// "size", "body", "summary"}`. Answers `{"overruled"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_offlineMutate<'local>(
     mut env: EnvUnowned<'local>,
@@ -115,7 +127,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineMutate<'local>(
 
         let json = match Driver::new(JniHost::offline(env, &driver)).mutate(&collection, &mutation)
         {
-            Ok(()) => "{}".to_string(),
+            Ok(report) => to_string(&report).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 
@@ -278,6 +290,123 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirDerive<'local>(
         Ok(env.new_string(json)?.into())
     })
     .resolve::<ErrorReply>()
+}
+
+/// `Native.pimdirHash`: the name the store files a body under (STORAGE
+/// §5), BLAKE3 as 52 characters of lowercase base32. Pure.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_pimdirHash<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    body: JByteArray<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let body = env.convert_byte_array(&body).unwrap_or_default();
+        Ok(env.new_string(hash::hash(&body).0)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.pimdirHashFile`: the name of a file's bytes, read whole a buffer
+/// at a time; answers `{"hash"}`, or `{"error"}` when it cannot be read.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_pimdirHashFile<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    path: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let path = read_string(env, &path);
+        let json = match hash_file(Path::new(&path)) {
+            Ok(hash) => serde_json::json!({ "hash": hash.0 }).to_string(),
+            Err(err) => error_json(format!("Could not hash {path}: {err}")),
+        };
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.pimdirIdentity`: the versions a store is created with and
+/// opened at, `{"formatVersion", "syncVersion", "derivation", "version",
+/// "hashAlgo"}` (STORAGE §4, §6). Pure.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_pimdirIdentity<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let json = to_string(&store::identity()).unwrap_or_else(|err| error_json(err.to_string()));
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.pimdirCheck`: whether the app opens an existing store, from the
+/// facts Java read off it without writing (`StoreFacts`); answers `{}`, or
+/// `{"refused": code, "detail"}` for a store of another draft, a damaged
+/// or a foreign one (STORAGE §6). Pure.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_pimdirCheck<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    facts: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let facts = read_string(env, &facts);
+        let json = match serde_json::from_str::<store::StoreFacts>(&facts) {
+            Err(err) => error_json(format!("Unreadable store facts: {err}")),
+            Ok(facts) => match store::check(&facts) {
+                Ok(()) => "{}".to_string(),
+                Err(refusal) => serde_json::json!({
+                    "refused": refusal.code,
+                    "detail": refusal.detail,
+                })
+                .to_string(),
+            },
+        };
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.pimdirAction`: a queue row read strictly as its payload schema
+/// types it (STORAGE §15.3), its body the one the row pins; answers
+/// `{"targetCollection"?}`, or `{"error"}` for a malformed row, which a
+/// producer never appends and the drain parks whole. `objectHash` is empty
+/// for a row pinning none. Pure.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_pimdirAction<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    kind: JString<'local>,
+    payload: JString<'local>,
+    object_hash: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let kind = read_string(env, &kind);
+        let payload = read_string(env, &payload);
+        let object_hash = read_string(env, &object_hash);
+        let object_hash = Some(object_hash.as_str()).filter(|hash| !hash.is_empty());
+        let json = match store::action(&kind, &payload, object_hash) {
+            Ok(facts) => to_string(&facts).unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(format!("Malformed {kind} payload: {err}")),
+        };
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// The BLAKE3 name of a file's bytes, read a buffer at a time.
+fn hash_file(path: &Path) -> io::Result<PimdirHash> {
+    let mut file = File::open(path)?;
+    let mut hasher = PimdirHasher::new();
+    let mut buffer = vec![0; 64 * 1024];
+    loop {
+        match file.read(&mut buffer)? {
+            0 => return Ok(hasher.finish()),
+            read => hasher.update(&buffer[..read]),
+        }
+    }
 }
 
 /// The reply of `pimdirDerive`.

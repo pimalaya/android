@@ -122,7 +122,11 @@ public class BodyLossRacesTest {
         assertEquals("the body kept", hash, item("object_hash", "m1"));
         assertEquals("1", refcount(hash));
         assertTrue("its file kept", blobs.has(hash));
-        assertEquals("the markers written", seen.toString(), item("flags", "m1"));
+        assertEquals(
+                "the markers written",
+                "\\Seen",
+                text("SELECT group_concat(flag, ' ') FROM placement_flag"
+                        + " WHERE collection = ? AND link_id = ?", inbox, "m1"));
     }
 
     @Test

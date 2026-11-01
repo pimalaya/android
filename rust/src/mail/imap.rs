@@ -491,7 +491,22 @@ impl<'a, H: Host> ImapSession<'a, H> {
         let checkpoint = (cursor.is_none() && !band)
             .then(|| encode_cursor(validity, data.highest_mod_seq.unwrap_or(0)));
 
-        Ok(MailPage::round(items, next, checkpoint))
+        // NOTE: `SENTSINCE` and `SENTBEFORE` miss an undated message and
+        // one whose `Date` runs ahead of its arrival, so the last page of a
+        // narrowed round hands `UID SEARCH ALL` (SYNC §4).
+        let narrowed = scope.since.is_some() || scope.until.is_some();
+        let enumerated = match (narrowed, &next, data.exists.unwrap_or(0)) {
+            (true, None, 0) => Some(Vec::new()),
+            (true, None, _) => Some(
+                self.scoped_uids(mailbox, validity, &Scope::default())?
+                    .iter()
+                    .map(u32::to_string)
+                    .collect(),
+            ),
+            _ => None,
+        };
+
+        Ok(MailPage::round(items, next, checkpoint).narrowed(narrowed, enumerated))
     }
 
     /// Sets `floor` to the `count`th newest `Date` below its ceiling.

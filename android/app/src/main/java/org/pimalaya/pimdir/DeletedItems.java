@@ -195,20 +195,22 @@ public final class DeletedItems {
         }
         Map<String, Object> values = new HashMap<>();
         values.put("collection", collection);
-        values.put("links", links.toString());
+        values.put("links", links);
 
         String[] statements;
         switch (kind) {
             case PimdirSummary.MAIL:
-                statements = new String[] {"LOAD_MAIL_SUMMARIES"};
+                statements = new String[] {"LOAD_MAIL_SUMMARIES_BY_LINK"};
                 break;
             case PimdirSummary.CONTACT:
-                statements = new String[] {"LOAD_CONTACT_SUMMARIES"};
+                statements = new String[] {"LOAD_CONTACT_SUMMARIES_BY_LINK"};
                 break;
             default:
                 statements =
                         new String[] {
-                            "LOAD_EVENT_SUMMARIES", "LOAD_TASK_SUMMARIES", "LOAD_JOURNAL_SUMMARIES"
+                            "LOAD_EVENT_SUMMARIES_BY_LINK",
+                            "LOAD_TASK_SUMMARIES_BY_LINK",
+                            "LOAD_JOURNAL_SUMMARIES_BY_LINK"
                         };
         }
         for (String statement : statements) {
@@ -389,8 +391,7 @@ public final class DeletedItems {
     }
 
     private static Cursor query(SQLiteDatabase db, String name, Map<String, Object> values) {
-        PimdirSql.Bound bound = PimdirSql.bind(name, values);
-        return PimdirDb.typed(db, bound.sql, bound.args);
+        return PimdirDb.query(db, PimdirSql.bind(name, values));
     }
 
     private static void exec(SQLiteDatabase db, String name, Map<String, Object> values) {

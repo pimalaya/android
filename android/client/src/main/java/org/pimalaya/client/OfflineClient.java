@@ -41,12 +41,19 @@ public class OfflineClient {
                                 scopeBound)));
     }
 
-    /** Raises handles to the full tier, bodies deduped by link id. */
-    public UpgradeReport upgrade(OfflineDriver driver, String collection, List<String> handles) {
+    /**
+     * Raises handles to the full tier, bodies deduped by link id.
+     *
+     * <p>{@code content}: whether the collection's sync pushes bodies, as
+     * {@link #sync} does and {@link #syncImmutable} does not; a divergence
+     * the upgrade reads is settled by the same policy (pimdir SYNC §6).
+     */
+    public UpgradeReport upgrade(
+            OfflineDriver driver, String collection, List<String> handles, boolean content) {
         return UpgradeReport.from(
                 Replies.object(
                         Native.offlineUpgrade(
-                                driver, collection, new JSONArray(handles).toString())));
+                                driver, collection, new JSONArray(handles).toString(), content)));
     }
 
     /** Stages a local mutation; storage yields only, the remote untouched. */

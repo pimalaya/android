@@ -80,6 +80,9 @@ public class SyncService extends Service {
                 return;
             }
             Log.d("pimalaya", "phone sync for " + url);
+            if (App.of(context).storeRefused()) {
+                return;
+            }
 
             try {
                 PimdirDb pimdir = App.of(context).pimdir();

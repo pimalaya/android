@@ -9,6 +9,7 @@
 //! phases, not items. Java computes content hashes, the engine only
 //! compares them; summaries are typed rows (STORAGE Annex A, [`summary`]).
 
+pub mod store;
 pub mod summary;
 pub mod wire;
 
@@ -20,7 +21,7 @@ use io_pimdir::{
     change::PimdirWriteOp,
     collection::{PimdirCheckpoint, PimdirCoverage, PimdirCursor, PimdirRound, PimdirScope},
     coroutine::*,
-    load::{PimdirLoadScope, PimdirLoaded},
+    load::{PimdirLoadSelection, PimdirLoaded},
     mutate::{PimdirMutate, PimdirMutation},
     object::{PimdirHash, PimdirObject},
     placement::{PimdirHandle, PimdirLinkId, PimdirPlacement},
@@ -30,7 +31,7 @@ use io_pimdir::{
     },
     summary::{PimdirSummary, mail::PimdirMailSummary},
     sync::{PimdirPushRights, PimdirSync, PimdirSyncOptions},
-    upgrade::PimdirUpgrade,
+    upgrade::{PimdirUpgrade, PimdirUpgradeOptions},
 };
 use serde::Deserialize;
 use serde_json::{from_str, to_value};
@@ -40,9 +41,10 @@ use crate::{
     error::BridgeError,
     mail::unbase64,
     offline::wire::{
-        ChangeJson, ErrorJson, FetchedJson, ListingJson, LoadScopeJson, LoadedJson, LookupJson,
-        MutationJson, PushedJson, ScopeJson, SnapshotJson, SyncReportJson, TierJson,
-        UpgradeReportJson, WriteOpJson, YieldJson, checkpoint_str, cursor_str,
+        ChangeJson, ErrorJson, FetchedJson, ListingJson, LoadSelectionJson, LoadedJson, LookupJson,
+        MutateReportJson, MutationJson, PushedJson, ScopeJson, SnapshotJson, SyncReportJson,
+        TierJson, UpgradeReportJson, VerifiedJson, WriteOpJson, WrittenJson, YieldJson,
+        checkpoint_str, cursor_str,
     },
 };
 
@@ -90,14 +92,9 @@ impl<H: Host> Driver<H> {
             false => PimdirScope::since(sync.since),
         };
         let opts = PimdirSyncOptions {
-            push: true,
-            rights: PimdirPushRights {
-                content: sync.content,
-                ..PimdirPushRights::all()
-            },
             full: sync.full,
             scope,
-            ..Default::default()
+            ..sync_options(sync.content)
         };
         let coroutine = PimdirSync::new(sync.collection, opts).scope_bound(sync.scope_bound);
         let report = self.run(coroutine)?;
@@ -110,38 +107,63 @@ impl<H: Host> Driver<H> {
     ///
     /// Bodies are deduped by link id against the object store. The meta tier
     /// is never asked: a mail listing names its members, other domains name
-    /// theirs from full bodies.
+    /// theirs from full bodies. A divergence whose body it fetches is settled
+    /// by the options the collection's sync runs under (SYNC §6), `content`
+    /// being whether that sync pushes bodies.
     pub fn upgrade(
         &mut self,
         collection: &str,
         handles: Vec<String>,
+        content: bool,
     ) -> Result<UpgradeReportJson, BridgeError> {
         let handles = handles.into_iter().map(PimdirHandle::from).collect();
-        let coroutine = PimdirUpgrade::new(collection, handles, PimdirTier::Full);
+        let options = PimdirUpgradeOptions::from(&sync_options(content));
+        let coroutine = PimdirUpgrade::new(collection, handles, PimdirTier::Full).options(options);
         let report = self.run(coroutine)?;
 
         Ok(UpgradeReportJson::from(&report))
     }
 
     /// Applies a local mutation to `collection`, never touching the remote.
-    pub fn mutate(&mut self, collection: &str, mutation: &str) -> Result<(), BridgeError> {
+    pub fn mutate(
+        &mut self,
+        collection: &str,
+        mutation: &str,
+    ) -> Result<MutateReportJson, BridgeError> {
         let mutation: MutationJson =
             from_str(mutation).map_err(|err| format!("Invalid mutation: {err}"))?;
         let mutation = PimdirMutation::try_from(mutation)?;
-        self.run(PimdirMutate::new(collection, mutation))
+        let report = self.run(PimdirMutate::new(collection, mutation))?;
+
+        Ok(MutateReportJson::from(&report))
     }
 }
 
-/// Date-only summaries a load made up, by collection and handle or link id.
+/// The options every sync of the app runs under, `content` whether it
+/// pushes bodies; an upgrade settles a divergence by the same (SYNC §6).
+fn sync_options(content: bool) -> PimdirSyncOptions {
+    PimdirSyncOptions {
+        push: true,
+        rights: PimdirPushRights {
+            content,
+            ..PimdirPushRights::all()
+        },
+        ..Default::default()
+    }
+}
+
+/// Partial summaries a load made up, by collection and handle or link id.
 ///
-/// A load carries a mail placement's `Date` alone (all the engine reads,
-/// for a round's scope, SYNC §5): a write handing it back unchanged, under
-/// its handle, link id or origin, goes out with none to keep the stored row.
+/// A load carries a mail placement's `Date`, `Subject` and sender alone,
+/// all the engine reads: the date for a round's scope (SYNC §5), the three
+/// to tell a listed member reusing a `Message-ID` from the pending create
+/// it would land (SYNC §6). A write handing one back unchanged, under its
+/// handle, link id or origin, goes out with none to keep the stored row.
 #[derive(Default)]
 struct Dated(BTreeMap<(String, String), PimdirSummary>);
 
 impl Dated {
-    /// Records the date-only summaries a load reply carried.
+    /// Records the partial summaries a load reply carried.
     fn record(&mut self, arg: &PimdirArg) {
         let PimdirArg::Load(loaded) = arg else {
             return;
@@ -151,6 +173,8 @@ impl Dated {
                 && *mail
                     == (PimdirMailSummary {
                         date: mail.date.clone(),
+                        subject: mail.subject.clone(),
+                        sender: mail.sender.clone(),
                         ..Default::default()
                     })
             {
@@ -165,7 +189,7 @@ impl Dated {
         }
     }
 
-    /// The yield with every date-only summary it would write back taken out.
+    /// The yield with every partial summary it would write back taken out.
     fn strip(&self, yielded: PimdirYield) -> PimdirYield {
         let PimdirYield::WantsWrite(ops) = yielded else {
             return yielded;
@@ -246,9 +270,15 @@ impl<H: Host> Driver<H> {
 /// Serializes one engine yield to its JSON envelope.
 fn yield_json(yielded: &PimdirYield) -> String {
     let envelope = match yielded {
-        PimdirYield::WantsLoad { collection, scope } => YieldJson::Load {
+        PimdirYield::WantsLoad {
+            collection,
+            selection,
+        } => YieldJson::Load {
             collection: collection.as_str(),
-            scope: scope_json(scope),
+            selection: selection_json(selection),
+        },
+        PimdirYield::WantsVerify(hashes) => YieldJson::Verify {
+            hashes: hashes.iter().map(PimdirHash::as_str).collect(),
         },
         PimdirYield::WantsLookupObject(links) => YieldJson::Lookup {
             links: links.iter().map(PimdirLinkId::as_str).collect(),
@@ -348,7 +378,21 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
                 .collect();
             PimdirArg::LookupObject(objects)
         }
-        PimdirYield::WantsWrite(_) => PimdirArg::Write,
+        PimdirYield::WantsWrite(_) => {
+            let written: WrittenJson = parse(reply)?;
+            PimdirArg::Written(PimdirWritten {
+                conflicted: written.conflicted.into_iter().map(PimdirHandle).collect(),
+                overruled: written
+                    .overruled
+                    .into_iter()
+                    .map(|kept| (PimdirHandle(kept.handle), PimdirLinkId(kept.link_id)))
+                    .collect(),
+            })
+        }
+        PimdirYield::WantsVerify(_) => {
+            let verified: VerifiedJson = parse(reply)?;
+            PimdirArg::Verified(verified.verified.into_iter().map(PimdirHash).collect())
+        }
         PimdirYield::WantsEnumerate { .. } => {
             let snapshot: SnapshotJson = parse(reply)?;
             PimdirArg::Enumerate(snapshot.into())
@@ -414,16 +458,24 @@ fn parse<'de, T: Deserialize<'de>>(reply: &'de str) -> Result<T, String> {
 
 /// Which placements a load has to return, as the JSON wire states it.
 ///
-/// A floor, not a ceiling: answering more stays correct, which lets Java
-/// widen a list too long for one SQLite statement, while a flag change
-/// still reads one row instead of the whole mailbox.
-fn scope_json(scope: &PimdirLoadScope) -> LoadScopeJson<'_> {
-    match scope {
-        PimdirLoadScope::All => LoadScopeJson::All,
-        PimdirLoadScope::Handles(handles) => LoadScopeJson::Handles {
+/// A floor, not a ceiling: answering more stays correct, while a flag
+/// change still reads one row instead of the whole mailbox.
+fn selection_json(selection: &PimdirLoadSelection) -> LoadSelectionJson<'_> {
+    match selection {
+        PimdirLoadSelection::All => LoadSelectionJson::All,
+        PimdirLoadSelection::LastPage {
+            narrowed,
+            enumerated,
+        } => LoadSelectionJson::LastPage {
+            narrowed: *narrowed,
+            enumerated: enumerated
+                .as_ref()
+                .map(|handles| handles.iter().map(PimdirHandle::as_str).collect()),
+        },
+        PimdirLoadSelection::Handles(handles) => LoadSelectionJson::Handles {
             handles: handles.iter().map(PimdirHandle::as_str).collect(),
         },
-        PimdirLoadScope::Links(links) => LoadScopeJson::Links {
+        PimdirLoadSelection::Links(links) => LoadSelectionJson::Links {
             links: links.iter().map(PimdirLinkId::as_str).collect(),
         },
     }
@@ -475,6 +527,130 @@ mod tests {
     };
 
     use crate::offline::{enumerate_json, parse_arg, wire::WriteOpJson, yield_json};
+
+    /// A file of the pimdir spec io-pimdir vendors (spec/), from the git
+    /// checkout cargo made of the pinned revision (Cargo.toml's
+    /// `[patch.crates-io]`), so its vectors run against the bridge.
+    pub fn io_pimdir_spec(file: &str) -> std::path::PathBuf {
+        let manifest = include_str!("../Cargo.toml");
+        let rev = manifest
+            .lines()
+            .find(|line| line.starts_with("io-pimdir = { git"))
+            .and_then(|line| line.split("rev = \"").nth(1))
+            .map(|rev| &rev[..7])
+            .expect("io-pimdir pinned by git rev");
+        let home = std::env::var("CARGO_HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".cargo")
+            });
+        let checkouts = home.join("git").join("checkouts");
+        std::fs::read_dir(&checkouts)
+            .expect("cargo's git checkouts")
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("io-pimdir-")
+            })
+            .map(|entry| entry.path().join(rev).join("spec").join(file))
+            .find(|path| path.is_file())
+            .unwrap_or_else(|| panic!("io-pimdir {rev} spec/{file} under {}", checkouts.display()))
+    }
+
+    /// A round's last page asks its load with what the page states of its
+    /// listing, for `list_unstamped_bindings`' `:narrowed` and
+    /// `:enumerated` (pimdir SYNC §4, §5).
+    #[test]
+    fn a_last_page_load_carries_the_enumeration() {
+        use io_pimdir::load::PimdirLoadSelection;
+
+        let load = |selection| PimdirYield::WantsLoad {
+            collection: PimdirCollectionId::from("acct/INBOX"),
+            selection,
+        };
+        let narrowed: Value =
+            serde_json::from_str(&yield_json(&load(PimdirLoadSelection::LastPage {
+                narrowed: true,
+                enumerated: Some(vec![PimdirHandle("7".into())]),
+            })))
+            .unwrap();
+        assert_eq!(
+            narrowed["selection"],
+            serde_json::json!({"kind": "lastPage", "narrowed": true, "enumerated": ["7"]})
+        );
+
+        let whole: Value =
+            serde_json::from_str(&yield_json(&load(PimdirLoadSelection::LastPage {
+                narrowed: false,
+                enumerated: None,
+            })))
+            .unwrap();
+        assert_eq!(
+            whole["selection"],
+            serde_json::json!({"kind": "lastPage", "narrowed": false}),
+            "no enumeration key, never a null"
+        );
+    }
+
+    /// The store answers a verification with the bodies it read whole under
+    /// their name, and a write with what its merge recorded (STORAGE §7,
+    /// SYNC §9).
+    #[test]
+    fn verify_and_write_replies_reach_the_engine() {
+        let verify = PimdirYield::WantsVerify(vec![PimdirHash("a".into()), PimdirHash("b".into())]);
+        let envelope: Value = serde_json::from_str(&yield_json(&verify)).unwrap();
+        assert_eq!(envelope["op"], "verify");
+        assert_eq!(envelope["hashes"], serde_json::json!(["a", "b"]));
+        let PimdirArg::Verified(verified) = parse_arg(&verify, r#"{"verified": ["b"]}"#).unwrap()
+        else {
+            panic!("a verification");
+        };
+        assert_eq!(
+            verified.into_iter().collect::<Vec<_>>(),
+            [PimdirHash("b".into())]
+        );
+
+        let write = PimdirYield::WantsWrite(Vec::new());
+        let PimdirArg::Written(written) = parse_arg(
+            &write,
+            r#"{"conflicted": ["7"], "overruled": [{"handle": "7", "linkId": "dup:l#7"}]}"#,
+        )
+        .unwrap() else {
+            panic!("a write");
+        };
+        assert_eq!(written.conflicted, [PimdirHandle("7".into())]);
+        assert_eq!(written.overruled[0].1.as_str(), "dup:l#7");
+        let PimdirArg::Written(nothing) = parse_arg(&write, "{}").unwrap() else {
+            panic!("a write");
+        };
+        assert_eq!(nothing, Default::default());
+    }
+
+    /// A flag push crosses as two deltas, never a whole set (SYNC §4).
+    #[test]
+    fn a_flag_push_carries_deltas() {
+        use std::collections::BTreeSet;
+
+        use io_pimdir::change::{PimdirChange, PimdirChangeKind};
+
+        use crate::offline::wire::ChangeJson;
+
+        let change = PimdirChange::new(
+            &PimdirCollectionId::from("acct/INBOX"),
+            PimdirChangeKind::SetFlags {
+                handle: PimdirHandle("7".into()),
+                add: BTreeSet::from(["\\Seen".to_string()]),
+                remove: BTreeSet::from(["\\Flagged".to_string()]),
+            },
+        );
+        let json = to_value(ChangeJson::from(&change)).unwrap();
+        assert_eq!(json["op"], "setFlags");
+        assert_eq!(json["add"], serde_json::json!(["\\Seen"]));
+        assert_eq!(json["remove"], serde_json::json!(["\\Flagged"]));
+        assert_eq!(json.get("flags"), None);
+    }
 
     #[test]
     fn the_yield_carries_the_listing_and_the_scope() {
@@ -539,6 +715,70 @@ mod tests {
         assert_eq!(stored.get("body"), None, "never a lossy copy beside it");
     }
 
+    /// A pending mail create, as the Java store loads it, lands on its
+    /// arrival listed with the same subject, date and sender rather than
+    /// being pushed again: the engine tells a member reusing a `Message-ID`
+    /// by those three (pimdir SYNC §6), so the load carries all of them.
+    #[test]
+    fn a_pending_create_lands_on_its_arrival_rather_than_being_pushed() {
+        let opts = PimdirSyncOptions {
+            push: true,
+            rights: io_pimdir::sync::PimdirPushRights {
+                content: false,
+                ..io_pimdir::sync::PimdirPushRights::all()
+            },
+            ..Default::default()
+        };
+        let mut sync = PimdirSync::new("acct/Sent", opts);
+        let loaded = r#"{"placements": [{"collection": "acct/Sent",
+            "handle": "\u0001m1@example.com", "linkId": "m1@example.com", "object": "h1",
+            "level": "full", "status": "created", "flags": ["\\Seen"],
+            "sortKey": "2026-10-08T09:00:00Z", "date": "2026-10-08T09:00:00Z",
+            "subject": "Hi", "sender": "jane@example.com"}]}"#;
+        let listed = r#"{"items": [{"handle": "900", "linkId": "m1@example.com",
+            "flags": ["\\Seen"], "sortKey": "2026-10-08T09:00:00Z",
+            "summary": {"mail": {"message_id": "m1@example.com", "subject": "Hi",
+            "sender": "jane@example.com", "date": "2026-10-08T09:00:00Z",
+            "in_reply_to": [], "addresses": []}}}], "complete": false}"#;
+        let mut pushed = Vec::new();
+        let mut written = Vec::new();
+        let mut arg = None;
+
+        loop {
+            let yielded = match sync.resume(arg.take()) {
+                PimdirCoroutineState::Yielded(yielded) => yielded,
+                PimdirCoroutineState::Complete(done) => {
+                    done.unwrap();
+                    break;
+                }
+            };
+            let envelope: Value = serde_json::from_str(&yield_json(&yielded)).unwrap();
+            let reply = match envelope["op"].as_str().unwrap() {
+                "load" => loaded.to_string(),
+                "enumerate" => listed.to_string(),
+                "verify" => serde_json::json!({"verified": envelope["hashes"]}).to_string(),
+                "push" => {
+                    pushed.extend(envelope["changes"].as_array().unwrap().clone());
+                    r#"{"results": []}"#.to_string()
+                }
+                "write" => {
+                    written.extend(envelope["writes"].as_array().unwrap().clone());
+                    "{}".to_string()
+                }
+                _ => "{}".to_string(),
+            };
+            arg = Some(parse_arg(&yielded, &reply).unwrap());
+        }
+
+        assert!(pushed.is_empty(), "landed, not pushed again: {pushed:?}");
+        assert!(
+            written
+                .iter()
+                .any(|op| op["op"] == "upsert" && op["placement"]["handle"] == "900"),
+            "{written:?}"
+        );
+    }
+
     /// A pending create superseding a member of its identity, as the Java
     /// store loads it, is pushed naming that member, so the calendar driver
     /// can deliver it by a move (pimdir SYNC §3, §4).
@@ -569,6 +809,7 @@ mod tests {
             let reply = match envelope["op"].as_str().unwrap() {
                 "load" => loaded.to_string(),
                 "enumerate" => r#"{"items": [], "complete": true}"#.to_string(),
+                "verify" => serde_json::json!({"verified": envelope["hashes"]}).to_string(),
                 "push" => {
                     pushed.extend(envelope["changes"].as_array().unwrap().clone());
                     r#"{"results": [{"handle": "\u0001gate.ics", "accepted": true,

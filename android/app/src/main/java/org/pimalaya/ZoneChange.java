@@ -18,7 +18,8 @@ public class ZoneChange extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         if (!Intent.ACTION_TIMEZONE_CHANGED.equals(intent.getAction())
-                || !PhoneMirror.CALENDAR.granted(context)) {
+                || !PhoneMirror.CALENDAR.granted(context)
+                || App.of(context).storeRefused()) {
             return;
         }
 

@@ -131,7 +131,7 @@ public abstract class Stager implements OfflineDriver {
                         loaded =
                                 offline.loadCollection(
                                         yielded.getString("collection"),
-                                        yielded.optJSONObject("scope"));
+                                        yielded.optJSONObject("selection"));
                         page.store += System.nanoTime() - began;
                     }
                     long read = System.nanoTime();
@@ -144,19 +144,27 @@ public abstract class Stager implements OfflineDriver {
                         reply = lookup(yielded.getJSONArray("links")).toString();
                     }
                     break;
-                case "write":
+                case "verify":
+                    synchronized (locks.store) {
+                        reply = offline.verify(yielded.getJSONArray("hashes")).toString();
+                    }
+                    break;
+                case "write": {
+                    JSONArray effects;
                     synchronized (locks.store) {
                         long began = System.nanoTime();
-                        applied(offline.applyWrites(yielded.getJSONArray("writes")));
+                        effects = offline.applyWrites(yielded.getJSONArray("writes"));
+                        applied(effects);
                         page.store += System.nanoTime() - began;
                     }
-                    reply = "{}";
+                    reply = PimdirStorage.written(effects).toString();
                     if (page.pages > 0) {
                         Log.d("pimalaya", "page " + page);
                         clock.add(page);
                         page = new Clock();
                     }
                     break;
+                }
                 default:
                     reply = remote(op, yielded, parsed);
             }

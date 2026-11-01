@@ -115,11 +115,27 @@ public final class PimdirStorage {
     }
 
     /**
+     * The identity a create is pushed to its server as (STORAGE §9): {@link
+     * #nameOf}, its one leading {@code esc:} stripped, the prefix a stated
+     * {@code UID} beginning with a reserved one is filed under and no server
+     * knows ({@code PimdirLinkId::stated}).
+     */
+    public static String statedOf(String handle) {
+        String name = nameOf(handle);
+        return name.startsWith(ESCAPED) ? name.substring(ESCAPED.length()) : name;
+    }
+
+    /** The prefix a stated identity beginning with a reserved one takes. */
+    private static final String ESCAPED = "esc:";
+
+    /**
      * The collection's placements and sync cursor, replying to a load yield.
      *
      * <p>Retained rows are left out (SPEC.md §11), staged tombstones kept or
-     * the remove never pushes. {@code scope} narrows to the rows touched
-     * ({@link #scopeClause}): a floor, more stays correct.
+     * the remove never pushes. {@code scope}, the engine's selection (STORAGE
+     * §2), narrows to the rows touched ({@link #scopeClause}): a floor, more
+     * stays correct. A round's last page ({@code lastPage}) loads them all
+     * with the bindings the round finds absent.
      */
     public JSONObject loadCollection(String collection, JSONObject scope) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -131,8 +147,8 @@ public final class PimdirStorage {
 
         boolean roundOpen = syncState(db, stored, source, reply);
         String kind = scope == null ? "all" : scope.optString("kind", "all");
-        if (roundOpen && "all".equals(kind)) {
-            reply.put("unstamped", unstamped(db, stored, source));
+        if (roundOpen && "lastPage".equals(kind)) {
+            reply.put("unstamped", unstamped(db, stored, source, scope));
         }
 
         // NOTE: a handle scope naming none asks for the sync state alone,
@@ -149,10 +165,12 @@ public final class PimdirStorage {
 
         try (Cursor cursor =
                 db.rawQuery(
-                        "SELECT i.link_id, i.flags, i.object_hash, i.sort_key, i.level,"
-                                + " b.handle, b.base_flags, b.base_object, b.base_revision,"
+                        "SELECT i.link_id, " + PimdirItems.flagsOf("i") + ", i.object_hash,"
+                                + " i.sort_key, i.level, b.handle, "
+                                + PimdirItems.baseFlagsOf("b") + ", b.base_object, b.base_revision,"
                                 + " b.base_present, b.conflicted, b.conflict_revision,"
-                                + " b.conflict_object, i.deleted, i.conflicted, c.kind, s.date"
+                                + " b.conflict_object, i.deleted, i.conflicted, c.kind, s.date,"
+                                + " s.subject, s.sender"
                                 + " FROM items i"
                                 + " JOIN collections c ON c.id = i.collection"
                                 + " LEFT JOIN bindings b ON b.collection = i.collection"
@@ -200,7 +218,7 @@ public final class PimdirStorage {
                 PimdirSql.bind(
                         "LIST_SUPERSEDED_BINDINGS",
                         Map.of("collection", collection, "source", source));
-        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(db, bound)) {
             while (cursor.moveToNext()) {
                 String from = cursor.getString(1);
                 JSONObject member = new JSONObject();
@@ -242,7 +260,7 @@ public final class PimdirStorage {
         Set<String> superseded = new HashSet<>();
         PimdirSql.Bound bound =
                 PimdirSql.bind("LIST_SUPERSEDED_PENDING", Map.of("collection", collection));
-        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(db, bound)) {
             while (cursor.moveToNext()) {
                 superseded.add(cursor.getString(0));
             }
@@ -362,21 +380,33 @@ public final class PimdirStorage {
      * The open round's unstamped based bindings in its scope (SYNC §5).
      *
      * <p>What its last page finds absent unless listed; undated members count
-     * only on a whole-scope round, a band round leaves them be.
+     * only on a whole-scope round, a band round leaves them be. A round its
+     * listing a date filter narrowed finds absent only a member dated before
+     * it opened, or one the page's unfiltered enumeration lacks ({@code
+     * :narrowed}, {@code :enumerated}, SYNC §4).
      */
-    private static JSONArray unstamped(SQLiteDatabase db, String collection, String source) {
+    private static JSONArray unstamped(
+            SQLiteDatabase db, String collection, String source, JSONObject selection)
+            throws JSONException {
+        JSONArray enumerated = selection.optJSONArray("enumerated");
         Map<String, Object> key = new HashMap<>();
         key.put("collection", collection);
         key.put("source", source);
+        key.put("narrowed", selection.optBoolean("narrowed") ? 1 : 0);
+        key.put("enumerated", enumerated == null ? 0 : 1);
+        key.put("handles", enumerated == null ? new JSONArray() : enumerated);
         PimdirSql.Bound bound = PimdirSql.bind("LIST_UNSTAMPED_BINDINGS", key);
 
-        JSONArray handles = new JSONArray();
-        try (Cursor cursor = db.rawQuery(bound.sql, stringsOf(bound.args))) {
-            while (cursor.moveToNext()) {
-                handles.put(cursor.getString(0));
-            }
-        }
-        return handles;
+        return PimdirDb.read(
+                db,
+                bound,
+                cursor -> {
+                    JSONArray handles = new JSONArray();
+                    while (cursor.moveToNext()) {
+                        handles.put(cursor.getString(0));
+                    }
+                    return handles;
+                });
     }
 
     /**
@@ -477,7 +507,7 @@ public final class PimdirStorage {
         // leaving the field out. Sending an empty array instead would push that
         // absence onto whichever side did know the markers.
         if (!cursor.isNull(1)) {
-            placement.put("flags", arrayOf(cursor.getString(1)));
+            placement.put("flags", new JSONArray(PimdirItems.flagsFrom(cursor.getString(1))));
         }
 
         String status = statusOf(cursor);
@@ -490,6 +520,16 @@ public final class PimdirStorage {
         if (cursor.getColumnCount() > 16 && !cursor.isNull(16)) {
             placement.put("date", cursor.getString(16));
         }
+        // NOTE: and its subject and sender beside it: what the engine tells
+        // a listed message reusing a create's Message-ID by, before it
+        // lands the create on it (SYNC §6). Without them a pending create
+        // never lands on its own arrival and is pushed a second time.
+        if (cursor.getColumnCount() > 18 && !cursor.isNull(17)) {
+            placement.put("subject", cursor.getString(17));
+            if (!cursor.isNull(18)) {
+                placement.put("sender", cursor.getString(18));
+            }
+        }
         if (!cursor.isNull(11)) {
             placement.put("conflictRevision", cursor.getString(11));
         }
@@ -501,7 +541,7 @@ public final class PimdirStorage {
         if (bound && hasBase(cursor)) {
             JSONObject base = new JSONObject();
             if (!cursor.isNull(6)) {
-                base.put("flags", arrayOf(cursor.getString(6)));
+                base.put("flags", new JSONArray(PimdirItems.flagsFrom(cursor.getString(6))));
             }
             if (!cursor.isNull(7)) {
                 base.put("object", cursor.getString(7));
@@ -585,24 +625,8 @@ public final class PimdirStorage {
 
     /** Whether two stored marker sets name the same markers, order aside. */
     private static boolean sameFlags(String one, String other) {
-        try {
-            Set<String> left = new HashSet<>(stringsOf(arrayOf(one)));
-            Set<String> right = new HashSet<>(stringsOf(arrayOf(other)));
-            return left.equals(right);
-        } catch (JSONException error) {
-            // NOTE: an unreadable set cannot disagree, or a push nobody asked
-            // for would follow.
-            return true;
-        }
-    }
-
-    /** The strings of a JSON array, in order. */
-    private static List<String> stringsOf(JSONArray values) throws JSONException {
-        List<String> strings = new ArrayList<>(values.length());
-        for (int index = 0; index < values.length(); index++) {
-            strings.add(values.getString(index));
-        }
-        return strings;
+        return new HashSet<>(PimdirItems.flagsFrom(one))
+                .equals(new HashSet<>(PimdirItems.flagsFrom(other)));
     }
 
     /** The level a bodiless row projects at: never full (SYNC §3). */
@@ -672,7 +696,9 @@ public final class PimdirStorage {
                             account == null
                                     ? new String[] {linkId, PimdirSummary.CONTACT}
                                     : new String[] {linkId, PimdirSummary.CONTACT, account})) {
-                if (cursor.moveToFirst() && blobs.has(cursor.getString(0))) {
+                // NOTE: only a body read whole under its name links (STORAGE
+                // §7); one failing it goes to quarantine and is fetched.
+                if (cursor.moveToFirst() && blobs.verified(cursor.getString(0))) {
                     // NOTE: the size is the witness an immutable link needs
                     // (SYNC §6): the engine records the object unread.
                     JSONObject object = new JSONObject();
@@ -702,6 +728,7 @@ public final class PimdirStorage {
             Map<String, String> released = new HashMap<>();
             JSONArray effects = new JSONArray();
             Set<String> superseded = supersededHandles(writes);
+            syncVersion(db);
 
             for (int index = 0; index < writes.length(); index++) {
                 JSONObject op = writes.getJSONObject(index);
@@ -740,6 +767,9 @@ public final class PimdirStorage {
                         break;
                     case "setCoverage":
                         roundOp(db, "SET_COVERAGE", op, op.optJSONObject("scope"));
+                        break;
+                    case "overrule":
+                        overrule(db, op, effects);
                         break;
                     default:
                         throw new JSONException("Unknown write op " + op.getString("op"));
@@ -780,6 +810,27 @@ public final class PimdirStorage {
             }
             compiled = null;
             PimdirItems.unlinkCollected(store, db, blobs);
+        }
+    }
+
+    /**
+     * Records the engine's SYNC version on the first write of its state
+     * (STORAGE §4.3, {@code set_sync_version}), refusing one another engine
+     * version wrote ({@code sync-version}): its rounds and bases are not this
+     * engine's to read.
+     */
+    private void syncVersion(SQLiteDatabase db) {
+        String engine = PimdirSql.identity().optString("syncVersion");
+        String stored = one(db, "SELECT sync_version FROM store_meta WHERE id = 1");
+        if (stored == null) {
+            Map<String, Object> values = new HashMap<>();
+            values.put("sync_version", engine);
+            PimdirSql.Bound bound = PimdirSql.bind("SET_SYNC_VERSION", values);
+            db.execSQL(bound.sql, bound.args);
+        } else if (!stored.equals(engine)) {
+            throw new PimalayaException(
+                    "sync-version: the store's sync state is " + stored + "'s, not "
+                            + engine + "'s");
         }
     }
 
@@ -841,6 +892,135 @@ public final class PimdirStorage {
         if (deleted) {
             effects.put(effect(collection, handle, "removed"));
         }
+    }
+
+    /**
+     * Settles the conflict the next upsert of a handle resolves by a rule
+     * rather than a person (SYNC §7, §9): the diverging bodies it does not
+     * adopt, the binding's {@code conflict_object} then the item's, are kept
+     * as retained items keyed {@code dup:<link>#<handle>}, each an {@code
+     * overruled} effect. Refused, the batch rolled back, while the conflict
+     * holds a body nobody has read ({@code conflict-unread}).
+     */
+    private void overrule(SQLiteDatabase db, JSONObject op, JSONArray effects)
+            throws JSONException {
+        String engine = op.getString("collection");
+        String collection = collectionOf(engine);
+        String source = sourceOf(engine);
+        String handle = op.getString("handle");
+        String linkId = linkFor(db, collection, source, handle);
+        if (linkId == null) {
+            return;
+        }
+
+        String[] item = new String[5];
+        String[] binding = new String[2];
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT i.conflicted, i.conflict_object, i.object_hash, i.sort_key, "
+                                + PimdirItems.flagsOf("i") + ", b.conflicted, b.conflict_object"
+                                + " FROM items i LEFT JOIN bindings b"
+                                + " ON b.collection = i.collection AND b.link_id = i.link_id"
+                                + " AND b.source = ? WHERE i.collection = ? AND i.link_id = ?",
+                        new String[] {source, collection, linkId})) {
+            if (!cursor.moveToFirst()) {
+                return;
+            }
+            for (int index = 0; index < 5; index++) {
+                item[index] = cursor.isNull(index) ? null : cursor.getString(index);
+            }
+            binding[0] = cursor.isNull(5) ? null : cursor.getString(5);
+            binding[1] = cursor.isNull(6) ? null : cursor.getString(6);
+        }
+        boolean unread =
+                ("1".equals(binding[0]) && binding[1] == null)
+                        || ("1".equals(item[0]) && item[1] == null);
+        if (unread) {
+            throw new PimalayaException(
+                    "conflict-unread: " + collection + "/" + handle
+                            + " holds a diverging body nobody has read");
+        }
+
+        Set<String> kept = new HashSet<>();
+        for (String lost : new String[] {binding[1], item[1]}) {
+            if (lost == null || lost.equals(item[2]) || !kept.add(lost)) {
+                continue;
+            }
+            String key = keepOverruled(db, collection, linkId, handle, source, lost, item[3],
+                    item[4]);
+            JSONObject effect = effect(engine, handle, "overruled");
+            effect.put("linkId", key);
+            effects.put(effect);
+        }
+    }
+
+    /**
+     * Keeps a body a rule did not adopt as a retained item beside the one it
+     * lost to (SYNC §9, STORAGE §11), keyed by the identity minted over the
+     * settling handle, minted again over a held key; answers its key.
+     */
+    private String keepOverruled(SQLiteDatabase db, String collection, String linkId,
+            String handle, String source, String object, String sortKey, String flags) {
+        String key = "dup:" + linkId + "#" + handle;
+        while (one(db, "SELECT 1 FROM items WHERE collection = ? AND link_id = ?",
+                collection, key) != null) {
+            key = "dup:" + key + "#" + handle;
+        }
+        db.execSQL(
+                "INSERT INTO items(collection, link_id, seq, flags_known, object_hash,"
+                        + " sort_key, level, deleted) VALUES(?, ?, ?, ?, ?, ?, 2, 1)",
+                new Object[] {
+                    collection, key, PimdirItems.seqFor(db, collection, key), flags == null ? 0 : 1,
+                    object, sortKey == null ? "" : sortKey
+                });
+        PimdirItems.writeFlags(db, collection, key, PimdirItems.flagsFrom(flags));
+        Map<String, Object> values = new HashMap<>();
+        values.put("collection", collection);
+        values.put("link_id", key);
+        values.put("source", source);
+        PimdirSql.Bound retain = PimdirSql.bind("RETAIN_ITEM", values);
+        db.execSQL(retain.sql, retain.args);
+        adjustRefcount(db, null, object);
+        return key;
+    }
+
+    /**
+     * What a write batch recorded beyond its ops (SYNC §9), the engine's
+     * {@code Written} reply: the bodies kept as retained items, from the
+     * {@code overruled} effects {@link #applyWrites} answered.
+     */
+    public static JSONObject written(JSONArray effects) throws JSONException {
+        JSONArray overruled = new JSONArray();
+        for (int index = 0; index < effects.length(); index++) {
+            JSONObject effect = effects.getJSONObject(index);
+            if ("overruled".equals(effect.optString("kind"))) {
+                overruled.put(
+                        new JSONObject()
+                                .put("handle", effect.getString("handle"))
+                                .put("linkId", effect.getString("linkId")));
+            }
+        }
+        JSONObject written = new JSONObject();
+        if (overruled.length() > 0) {
+            written.put("overruled", overruled);
+        }
+        return written;
+    }
+
+    /**
+     * Which bodies read whole under their name, replying to a verify yield
+     * (STORAGE §7): a missing one is left out, a corrupt one moved into
+     * quarantine/ and left out, so nothing failing its name is pushed.
+     */
+    public JSONObject verify(JSONArray hashes) throws JSONException {
+        JSONArray verified = new JSONArray();
+        for (int index = 0; index < hashes.length(); index++) {
+            String hash = hashes.getString(index);
+            if (blobs.verified(hash)) {
+                verified.put(hash);
+            }
+        }
+        return new JSONObject().put("verified", verified);
     }
 
     /** Whether any source binds the item. */
@@ -928,9 +1108,9 @@ public final class PimdirStorage {
         // NOTE: absent means nobody has read the markers, which the column says
         // as NULL. Storing "[]" for it would turn a never-read set into an
         // authoritative "carries none" and clear whatever the other side knew.
-        String flags = placement.optJSONArray("flags") == null
+        List<String> flags = placement.optJSONArray("flags") == null
                 ? null
-                : placement.getJSONArray("flags").toString();
+                : stringsOf(placement.getJSONArray("flags"));
         // NOTE: a tombstone stays as a marked row until pushed, so the merge
         // keeps deriving the remove and a later edit beats it.
         boolean tombstone = "tombstone".equals(placement.optString("status", "clean"));
@@ -988,13 +1168,13 @@ public final class PimdirStorage {
 
         if (!exists) {
             db.execSQL(
-                    "INSERT INTO items(collection, link_id, seq, flags, object_hash,"
+                    "INSERT INTO items(collection, link_id, seq, flags_known, object_hash,"
                             + " sort_key, level, deleted) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
                     new Object[] {
                         collection,
                         linkId,
-                        nextSeq(db, linkId),
-                        flags,
+                        PimdirItems.seqFor(db, collection, linkId),
+                        flags == null ? 0 : 1,
                         object,
                         sortKey,
                         level,
@@ -1004,12 +1184,11 @@ public final class PimdirStorage {
             // NOTE: a write not restating the key keeps it (SPEC.md §9.3); the
             // reference write replaces all, so blanking would reset ordering.
             db.execSQL(
-                    "UPDATE items SET flags = ?, object_hash = ?, level = ?,"
+                    "UPDATE items SET object_hash = ?, level = ?,"
                             + " sort_key = CASE WHEN ? = '' THEN sort_key ELSE ? END,"
                             + " deleted = ?, retained_at = NULL, retained_by = NULL"
                             + " WHERE collection = ? AND link_id = ?",
                     new Object[] {
-                        flags,
                         object,
                         level,
                         sortKey,
@@ -1019,6 +1198,8 @@ public final class PimdirStorage {
                         linkId
                     });
         }
+        // NOTE: the flags are rows (STORAGE §13), written after their item.
+        PimdirItems.writeFlags(db, collection, linkId, flags);
 
         // NOTE: a write without summary keeps the stored row (flag pushes,
         // pulled deletions). A message created from another (a landed create,
@@ -1055,9 +1236,9 @@ public final class PimdirStorage {
             String handle, JSONObject placement, Set<String> superseded, boolean fresh,
             String kept) throws JSONException {
         JSONObject base = placement.optJSONObject("base");
-        String baseFlags = base == null || base.optJSONArray("flags") == null
+        List<String> baseFlags = base == null || base.optJSONArray("flags") == null
                 ? null
-                : base.getJSONArray("flags").toString();
+                : stringsOf(base.getJSONArray("flags"));
         String baseObject = base == null || base.isNull("object")
                 ? null
                 : base.optString("object", null);
@@ -1094,12 +1275,13 @@ public final class PimdirStorage {
         }
 
         db.execSQL(
-                "INSERT INTO bindings(collection, link_id, source, handle, base_flags,"
+                "INSERT INTO bindings(collection, link_id, source, handle, base_flags_known,"
                         + " base_object, base_revision, base_present, conflicted,"
                         + " conflict_revision, conflict_object)"
                         + " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                         + " ON CONFLICT(collection, link_id, source) DO UPDATE SET"
-                        + " handle = excluded.handle, base_flags = excluded.base_flags,"
+                        + " handle = excluded.handle,"
+                        + " base_flags_known = excluded.base_flags_known,"
                         + " base_object = excluded.base_object,"
                         + " base_revision = excluded.base_revision,"
                         + " base_present = excluded.base_present,"
@@ -1107,9 +1289,11 @@ public final class PimdirStorage {
                         + " conflict_revision = excluded.conflict_revision,"
                         + " conflict_object = excluded.conflict_object",
                 new Object[] {
-                    collection, linkId, source, handle, baseFlags, baseObject, baseRevision,
-                    base == null ? 0 : 1, conflicted ? 1 : 0, conflictRevision, conflictObject
+                    collection, linkId, source, handle, baseFlags == null ? 0 : 1, baseObject,
+                    baseRevision, base == null ? 0 : 1, conflicted ? 1 : 0, conflictRevision,
+                    conflictObject
                 });
+        PimdirItems.writeBaseFlags(db, collection, linkId, source, baseFlags);
         adjustRefcount(db, previousBase, baseObject);
         adjustRefcount(db, previousConflict, conflictObject);
     }
@@ -1194,10 +1378,9 @@ public final class PimdirStorage {
         Map<String, Object> values = new HashMap<>();
         values.put("collection", collectionOf(engine));
         values.put("source", sourceOf(engine));
-        values.put("handles", op.getJSONArray("handles").toString());
+        values.put("handles", op.getJSONArray("handles"));
 
-        PimdirSql.Bound bound = PimdirSql.bind("STAMP_BINDINGS", values);
-        db.execSQL(bound.sql, bound.args);
+        PimdirDb.changed(db, PimdirSql.bind("STAMP_BINDINGS", values));
     }
 
     /** An opaque token field of a write op as the BLOB it is stored as. */
@@ -1249,8 +1432,8 @@ public final class PimdirStorage {
 
         try (Cursor cursor =
                 db.rawQuery(
-                        "SELECT base_flags FROM bindings WHERE collection = ?"
-                                + " AND link_id = ? AND source = ?",
+                        "SELECT " + PimdirItems.baseFlagsOf("b") + " FROM bindings b"
+                                + " WHERE b.collection = ? AND b.link_id = ? AND b.source = ?",
                         new String[] {collection, linkId, source})) {
             if (!cursor.moveToFirst() || cursor.isNull(0)) {
                 return null;
@@ -1917,22 +2100,6 @@ public final class PimdirStorage {
     }
 
 
-    /**
-     * A link's public id, shared by its placements (SPEC.md §9.1).
-     *
-     * <p>Drawn from the store-wide counter the first time one is inserted.
-     */
-    private long nextSeq(SQLiteDatabase db, String linkId) {
-        String held = one(db, "SELECT seq FROM items WHERE link_id = ? LIMIT 1", linkId);
-        if (held != null) {
-            return Long.parseLong(held);
-        }
-        String drawn =
-                one(db, "UPDATE store_meta SET next_seq = next_seq + 1 WHERE id = 1"
-                        + " RETURNING next_seq - 1");
-        return drawn == null ? 1 : Long.parseLong(drawn);
-    }
-
     /** The handle this source already binds the item under, or null. */
     private String handleOf(SQLiteDatabase db, String collection, String linkId, String source) {
         return one(
@@ -2022,9 +2189,13 @@ public final class PimdirStorage {
         return left == null ? right == null : left.equals(right);
     }
 
-    /** A stored JSON array column (markers, handles), empty when NULL. */
-    private static JSONArray arrayOf(String json) throws JSONException {
-        return json == null || json.isEmpty() ? new JSONArray() : new JSONArray(json);
+    /** The strings of a JSON array, in order. */
+    private static List<String> stringsOf(JSONArray values) throws JSONException {
+        List<String> strings = new ArrayList<>(values.length());
+        for (int index = 0; index < values.length(); index++) {
+            strings.add(values.getString(index));
+        }
+        return strings;
     }
 
     /**

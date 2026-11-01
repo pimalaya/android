@@ -42,7 +42,9 @@ public class OfflineClientTest {
     public void aSyncReportMirrorsItsReply() {
         String raw = Native.offlineSync(EMPTY, "c", false, true, "", true);
         assertMirrors(SyncReport.class, raw);
-        assertEquals(new SyncReport(0, 0, 0, 0, 0, 0), new OfflineClient().sync(EMPTY, "c", false));
+        assertEquals(
+                new SyncReport(0, 0, false, 0, 0, 0, 0, 0, 0),
+                new OfflineClient().sync(EMPTY, "c", false));
     }
 
     @Test
@@ -50,19 +52,21 @@ public class OfflineClientTest {
         SyncReport report =
                 SyncReport.from(
                         new JSONObject(
-                                "{\"conflicts\":1,\"pulled\":2,\"pushed\":3,\"refreshed\":4,"
-                                        + "\"rejected\":5,\"waiting\":6}"));
-        assertEquals(new SyncReport(1, 2, 3, 4, 5, 6), report);
+                                "{\"conflicts\":1,\"overruled\":7,\"parked\":true,\"pulled\":2,"
+                                        + "\"pushed\":3,\"refreshed\":4,\"rejected\":5,\"unreadable\":8,"
+                                        + "\"waiting\":6}"));
+        assertEquals(new SyncReport(1, 7, true, 2, 3, 4, 5, 8, 6), report);
     }
 
     @Test
     public void anUpgradeReportMirrorsItsReply() throws Exception {
-        String raw = Native.offlineUpgrade(EMPTY, "c", "[]");
+        String raw = Native.offlineUpgrade(EMPTY, "c", "[]", true);
         assertMirrors(UpgradeReport.class, raw);
         assertEquals(
-                new UpgradeReport(1, 2, 3),
+                new UpgradeReport(1, 2, 4, 3),
                 UpgradeReport.from(
-                        new JSONObject("{\"deduped\":1,\"fetched\":2,\"upgraded\":3}")));
+                        new JSONObject(
+                                "{\"deduped\":1,\"fetched\":2,\"overruled\":4,\"upgraded\":3}")));
     }
 
     @Test

@@ -3,6 +3,11 @@
 
     <string name="app_name" translatable="false">Pimalaya</string>
 
+    <!-- The screen standing for the app when its store is of another draft (StoreRefusedActivity). -->
+    <string name="store_refused_title">Reinstall the app</string>
+    <string name="store_refused_message">This version of the app cannot open the data an earlier version stored on this phone. Nothing in it has been read or changed. Uninstall the app and install it again: it starts with a new store, and your accounts sync back from their servers. Anything not yet synced, such as a message still in the outbox, is lost with the old store.</string>
+    <string name="store_refused_code">Reason: %1$s (%2$s)</string>
+
     <string name="new_account">New account</string>
     <string name="cancel_auth">Cancel</string>
     <string name="welcome_title">Your mail, contacts and calendars, offline.</string>

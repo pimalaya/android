@@ -85,6 +85,7 @@ impl From<&PimdirSummary> for SummaryJson {
                 categories: task.categories.clone(),
                 parent: task.parent.clone(),
                 mid: task.mid.clone(),
+                created: task.created.clone(),
                 addresses,
             }),
             PimdirSummary::Journal(journal) => Self::Journal(JournalJson {
@@ -153,8 +154,10 @@ impl From<SummaryJson> for PimdirSummary {
                 categories: task.categories,
                 parent: task.parent,
                 mid: task.mid,
+                created: task.created,
                 organizer: organizer_of(&task.addresses),
                 attendees: role_of(&task.addresses, PimdirAddressRole::Attendee),
+                contacts: role_of(&task.addresses, PimdirAddressRole::Contact),
             }),
             SummaryJson::Journal(journal) => Self::Journal(PimdirJournalSummary {
                 uid: journal.uid,
@@ -258,13 +261,16 @@ pub struct TaskJson {
     until: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     priority: Option<i64>,
-    /// Always stated: the column is a JSON array, `[]` for none.
+    /// Always stated, `[]` for none: the `task_category` rows, in order.
     #[serde(default)]
     categories: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     parent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mid: Option<String>,
+    /// When it was captured (A.4): `CREATED`, else `DTSTAMP`, as an instant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    created: Option<String>,
     #[serde(default)]
     addresses: Vec<AddressJson>,
 }

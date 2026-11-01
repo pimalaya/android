@@ -1,0 +1,20 @@
+---
+cairn: log
+change: the-shape-follows-storage-draft-08
+date: 2026-11-01
+---
+
+# Step 2a: draft-08 rules on requery, io-pimdir's canonical text
+
+The pin moved to io-pimdir bff5737 (storage-draft-08, sync-draft-07, search-draft-08), and the app keeps running io-pimdir's canonical SQL on requery, served over JNI. Step 2b, the 3.18 shape, is not started. The change stays in flight (cairn/changes/the-shape-follows-storage-draft-08/tasks.md says what is left).
+
+- **The bridge** (rust/): the 12 compile errors ported (PimdirLoadSelection and its `lastPage` selection, `WantsVerify`, `Written`, `Overrule`, `Edit { if_match, overrule }`, `SetFlags { add, remove }`, `PimdirRemoteSnapshot { narrowed, enumerated }`, PimdirMutateReport, the task summary's `created` and `contacts`, BLAKE3). An upgrade settles a divergence by its collection's sync options (`PimdirUpgradeOptions::from`, `Native.offlineUpgrade` taking `content`). The reports carry `overruled`, `parked` and `unreadable`. New pure exports: `pimdirHash` and `pimdirHashFile` (BLAKE3), `pimdirIdentity` (the versions a store is created and opened at), `pimdirCheck` (STORAGE §6's open refusals, decided in offline/store.rs over facts Java reads read-only) and `pimdirAction` (a queue row read strictly by its payload schema, io-pimdir's payloads.json run in `cargo test`).
+- **A pending create lands on its arrival again** (offline-store): the engine at sync-draft-07 tells a listed message reusing a create's `Message-ID` by its subject, date and sender (SYNC §6), and the load handed it the date alone, so a sent copy or a moved message never landed and was pushed a second time. A load now carries the three (`subject` and `sender` beside `date`), never written back.
+- **The Java owner**: PimdirDb creates the store at draft-08 and reconciles nothing (its reconciliation, backfills and role repair deleted); PimdirBlobs files one shard level under BLAKE3 names, checks a name before a path, writes by hard link and never replaces, follows no link, verifies a body before serving or linking it and moves one failing into quarantine/; flags, reply ids and categories are rows; every list parameter goes through `temp.param` on one pinned connection; `verify` and `Written` are answered and the `overrule` op keeps the bodies it does not adopt as `dup:` retained items; `sync_version` is written by the first engine write.
+- **Connectors**: flag pushes are the engine's two deltas on every mail backend; IMAP, JMAP, Graph band pages and Gmail state `narrowed` where the download window filters a round, IMAP handing `UID SEARCH ALL` on its last page; a CalDAV or CardDAV create is pushed under its identity with `esc:` stripped.
+- **Start-up blocked on a store of another draft**: App checks the store once before anything opens it; MainActivity hands over to StoreRefusedActivity (reinstall), and the background job, the sync adapters and the time-zone receiver do nothing.
+- **Behaviour the canonical text and the engine moved**: an empty listing parks its round rather than retiring every member (SYNC §5, §8), so a calendar or book the server emptied keeps its items until a listing names members; an attachment saved into a device folder no longer reads as held on its message (`list_attachments` reads within the message's account, STORAGE §9.2); the calendar mirror's row fingerprint stays the app's own SHA-256, never a store name.
+
+Capabilities moved: offline-store (folded at the change's landing, not yet).
+
+Verified on 2026-11-01: `gradle :app:assembleDebug :app:testDebugUnitTest :client:testDebugUnitTest :app:assembleRelease` green (808 app tests, 14 client); `cargo clippy --all-targets -- -D warnings` clean; `cargo test` 547 passed, the floor guard red as step 1 left it (69 statements, 186 before); cairn/verify.sh conformant; no device attached, the device check owed. The new tests failing first on the old code: the landing test red on a date-only load, the store, blob, narrowed-round, verify, overrule, sync-version and start-up tests against code that had no such API or reconciled instead of refusing.

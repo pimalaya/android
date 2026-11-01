@@ -317,7 +317,10 @@ public class MailStepTest {
         List<String> collections = new ArrayList<>(mailboxes());
         collections.add(sent);
         String date = "2026-10-09T11:00:00Z";
-        String body = "Message-ID: <mine@example.org>\r\nSubject: Hi\r\n\r\nbody\r\n";
+        // NOTE: Gmail's own copy of what it sent: the subject, date and
+        // sender the arrival lists, or it is another message reusing the
+        // Message-ID (pimdir SYNC §6), as the listing below names them.
+        String body = "Message-ID: <mine@example.org>\r\nSubject: Mail s1\r\n\r\nbody\r\n";
         String create = PimdirSummary.bare("mine@example.org");
         new MailStager(pimdir, Clients.real())
                 .mutateAdd(
@@ -326,8 +329,8 @@ public class MailStepTest {
                         body,
                         Flags.of(Flags.Marker.SEEN),
                         PimdirSummary.mail(
-                                "mine@example.org", "Hi", null, EMAIL, "bob@example.org", date,
-                                body.length(), false),
+                                "mine@example.org", "Mail s1", null, "a@example.org",
+                                "bob@example.org", date, body.length(), false),
                         PimdirSummary.mailSortKey(date));
         // NOTE: Gmail stamps a Message-ID of its own on what it sends.
         store.policy().aliasSentCopy("mine@example.org", "theirs@gmail");

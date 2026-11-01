@@ -47,7 +47,7 @@ public class PimdirDbTest {
                 "INSERT INTO collections(id, account, kind, name) VALUES(?, ?, ?, ?)",
                 new Object[] {collection, account, kind, collection});
         db.execSQL(
-                "INSERT INTO items(collection, link_id, seq, level, flags) VALUES(?, ?, ?, 2, '[]')",
+                "INSERT INTO items(collection, link_id, seq, level, flags_known) VALUES(?, ?, ?, 2, 1)",
                 new Object[] {collection, linkId, seq});
         db.execSQL(
                 "INSERT INTO bindings(collection, link_id, source, handle) VALUES(?, ?, 'server', ?)",
@@ -71,7 +71,8 @@ public class PimdirDbTest {
             assertTrue(cursor.getString(0), major > 3 || (major == 3 && minor >= 37));
         }
 
-        // NOTE: STRICT (3.37) enforced, not merely parsed.
+        // NOTE: STRICT (3.37) enforced, not merely parsed: the canonical
+        // temp.param is one (create_param).
         db.execSQL("CREATE TABLE probe(id INTEGER PRIMARY KEY, n INTEGER NOT NULL) STRICT");
         try {
             db.execSQL("INSERT INTO probe(n) VALUES('not a number')");
@@ -86,7 +87,9 @@ public class PimdirDbTest {
             assertEquals(1, cursor.getLong(0));
         }
 
-        // NOTE: UPDATE ... FROM (3.33) over json_each (JSON1).
+        // NOTE: UPDATE ... FROM (3.33) over json_each (JSON1), which the
+        // statements the app still writes by hand use until the 3.18 shape
+        // (cairn/changes/the-shape-follows-storage-draft-08, step 2b).
         db.execSQL(
                 "UPDATE probe SET n = j.value FROM json_each('[41]') AS j WHERE probe.id = 1");
         try (Cursor cursor = db.rawQuery("SELECT n FROM probe WHERE id = 1", null)) {
@@ -181,24 +184,25 @@ public class PimdirDbTest {
     }
 
     @Test
-    public void blobsAreShardedImmutableAndAtomic() throws IOException {
+    public void blobsAreShardedOnceImmutableAndAtomic() throws IOException {
         PimdirBlobs blobs = new PimdirBlobs(store.blobs());
-        String hash = "abcdef0123456789";
+        byte[] card = "BEGIN:VCARD\r\nEND:VCARD\r\n".getBytes(StandardCharsets.UTF_8);
+        String hash = PimdirHash.of(card);
 
         assertFalse(blobs.has(hash));
-        blobs.put(hash, "BEGIN:VCARD\r\nEND:VCARD\r\n".getBytes(StandardCharsets.UTF_8));
+        blobs.put(hash, card);
 
         assertTrue(blobs.has(hash));
         assertEquals("BEGIN:VCARD\r\nEND:VCARD\r\n", blobs.getText(hash));
 
-        // NOTE: sharded two levels, so no directory grows unbounded.
+        // NOTE: one shard level, objects/<hash[0:2]>/<hash> (STORAGE §5).
         File path = blobs.pathOf(hash);
         assertEquals(hash, path.getName());
-        assertEquals("cd", path.getParentFile().getName());
-        assertEquals("ab", path.getParentFile().getParentFile().getName());
+        assertEquals(hash.substring(0, 2), path.getParentFile().getName());
+        assertEquals(store.blobs(), path.getParentFile().getParentFile());
 
         // NOTE: re-filing the same hash is a no-op: the name is the content.
-        blobs.put(hash, "BEGIN:VCARD\r\nEND:VCARD\r\n".getBytes(StandardCharsets.UTF_8));
+        blobs.put(hash, card);
         assertEquals("BEGIN:VCARD\r\nEND:VCARD\r\n", blobs.getText(hash));
 
         assertEquals(0, path.getParentFile().listFiles(
@@ -208,11 +212,39 @@ public class PimdirDbTest {
         assertNull(blobs.getText(hash));
     }
 
+    /**
+     * A write never replaces a file under a name (STORAGE §5), and a body
+     * failing its name is never served: it moves into quarantine/ (§7).
+     */
+    @Test
+    public void aBodyFailingItsNameIsQuarantinedNeverReplacedNorServed() throws IOException {
+        PimdirBlobs blobs = new PimdirBlobs(store.blobs());
+        byte[] body = {1, 2, 3};
+        String hash = PimdirHash.of(body);
+        File path = blobs.pathOf(hash);
+        assertTrue(path.getParentFile().mkdirs());
+        java.nio.file.Files.write(path.toPath(), new byte[] {9, 9});
+
+        blobs.put(hash, body);
+        assertArrayEquals(
+                "a name held keeps what holds it", new byte[] {9, 9},
+                java.nio.file.Files.readAllBytes(path.toPath()));
+
+        assertFalse("verified before it is served", blobs.verified(hash));
+        assertFalse(blobs.has(hash));
+        assertEquals(1, blobs.quarantined().size());
+        assertTrue(blobs.quarantined().get(0).startsWith(hash + "."));
+
+        blobs.put(hash, body);
+        assertArrayEquals(body, blobs.get(hash));
+    }
+
     @Test
     public void aBodyReachingTwoAccountsIsStoredOnce() throws IOException {
         PimdirBlobs blobs = new PimdirBlobs(store.blobs());
-        String hash = "beef0000beef0000";
-        blobs.put(hash, new byte[] {1, 2, 3});
+        byte[] body = {1, 2, 3};
+        String hash = PimdirHash.of(body);
+        blobs.put(hash, body);
 
         seed("work/Contacts", "work", "text/vcard", "uid-alice", 1);
         seed("home/Contacts", "home", "text/vcard", "uid-alice", 1);
@@ -226,178 +258,74 @@ public class PimdirDbTest {
             assertEquals(2, cursor.getInt(0));
             assertEquals(1, cursor.getInt(1));
         }
-        assertArrayEquals(new byte[] {1, 2, 3}, blobs.get(hash));
-    }
-
-    @Test
-    public void aStoreWrittenByAnEarlierDraftIsReconciledOnOpen() {
-        // NOTE: while the spec is a draft, version 1 is edited in place, so
-        // such a store is not detectably out of date and onUpgrade never fires:
-        // the drift would surface as a query error instead. A draft folds a
-        // column both ways, so both directions are checked.
-        db.execSQL("ALTER TABLE bindings DROP COLUMN shared_object");
-        db.execSQL("ALTER TABLE bindings ADD COLUMN ambiguous_handles TEXT");
-        db.execSQL("DROP INDEX items_retained");
-        db.execSQL("CREATE INDEX items_retained ON items(collection, link_id)"
-                + " WHERE retained_at IS NOT NULL");
-        db.execSQL("DROP TABLE contact_summary");
-        // NOTE: a column an index reads, dropped with the index that reads it:
-        // the reconcile has to widen the table before it creates what selects
-        // on it, or the store is refused a column the schema declares and it
-        // does not hold yet.
-        db.execSQL("DROP INDEX collections_by_changed");
-        db.execSQL("ALTER TABLE collections DROP COLUMN changed");
-        db.execSQL("DROP TRIGGER items_count_purge");
-        db.execSQL("CREATE TRIGGER items_count_purge AFTER DELETE ON items"
-                + " BEGIN UPDATE store_meta SET purges = purges WHERE id = 1; END");
-        store.close();
-
-        store = new PimdirDb(RuntimeEnvironment.getApplication());
-        db = store.getWritableDatabase();
-
-        assertTrue("a column the schema declares is added back",
-                hasColumn("bindings", "shared_object"));
-        assertFalse("a column it no longer declares is dropped",
-                hasColumn("bindings", "ambiguous_handles"));
-        // NOTE: an index whose columns moved keeps its name, so CREATE INDEX IF
-        // NOT EXISTS leaves the old plan in place and only a drop can repair
-        // it.
-        assertEquals("seq", indexColumns("items_retained"));
-        // NOTE: a table the draft added is created rather than waited for: a
-        // store written before the summary tables were declared holds no
-        // summary, and every write into one would fail on a table that is not
-        // there.
-        assertTrue("a table the schema declares is created",
-                hasColumn("contact_summary", "fn"));
-        assertTrue("a column an index reads is added before the index is",
-                hasColumn("collections", "changed"));
-        assertEquals("changed", indexColumns("collections_by_changed"));
-        // NOTE: a trigger's body is not a column, so the shape check is its
-        // text.
-        assertTrue("a trigger whose body moved is rebuilt",
-                sqlOf("items_count_purge").contains("purges + 1"));
-    }
-
-    @Test
-    public void aStoreWrittenBeforeReferencesGainsThemOnOpen() {
-        db.execSQL("DROP TRIGGER items_drop_references");
-        db.execSQL("DROP TABLE item_reference");
-        store.close();
-
-        store = new PimdirDb(RuntimeEnvironment.getApplication());
-        db = store.getWritableDatabase();
-
-        assertTrue(hasColumn("item_reference", "role"));
-        assertFalse(sqlOf("item_reference_to").isEmpty());
-        assertFalse(sqlOf("items_drop_references").isEmpty());
-    }
-
-    @Test
-    public void aStoreWrittenBeforeFilesGainsThemOnOpen() {
-        db.execSQL("DROP TRIGGER item_reference_collects_files");
-        db.execSQL("DROP TABLE file_summary");
-        store.close();
-
-        store = new PimdirDb(RuntimeEnvironment.getApplication());
-        db = store.getWritableDatabase();
-
-        assertTrue(hasColumn("file_summary", "part"));
-        assertFalse(sqlOf("item_reference_collects_files").isEmpty());
-    }
-
-    @Test
-    public void aRoundOpenedBeforeTheBandColumnReadsAsAWholeScopeRound() {
-        // NOTE: a store written before rounds recorded their kind (pimdir
-        // 00535c1), with a round open in it: the column is added under the open
-        // round, which then reads as one over its whole scope.
-        db.execSQL("ALTER TABLE sources DROP COLUMN round_band");
-        db.execSQL("INSERT INTO collections(id, account, kind, name)"
-                + " VALUES('acct/INBOX', 'acct', 'message/rfc822', 'INBOX')");
-        db.execSQL("INSERT INTO sources(collection, source, round, round_since, round_started_at)"
-                + " VALUES('acct/INBOX', 'server', 3, '2026-04-01T00:00:00Z',"
-                + " '2026-10-07T08:00:00Z')");
-        store.close();
-
-        store = new PimdirDb(RuntimeEnvironment.getApplication());
-        db = store.getWritableDatabase();
-
-        assertTrue("the round's kind is added", hasColumn("sources", "round_band"));
-        try (Cursor cursor =
-                db.rawQuery("SELECT round, round_band FROM sources WHERE collection = 'acct/INBOX'",
-                        null)) {
-            assertTrue("the open round survives", cursor.moveToFirst());
-            assertEquals(3, cursor.getInt(0));
-            assertEquals(0, cursor.getInt(1));
-        }
-    }
-
-    @Test
-    public void aMergedPageWalksTheGlobalOrderOnAnOlderStore() {
-        // NOTE: a store written before pimdir 22f1f2c holds no global order: a
-        // page over several mailboxes read every item of the set and sorted it.
-        // The reconcile adds the index on open, and the canonical page
-        // statement, whose collection test is kept off items_by_seq, walks it.
-        db.execSQL("DROP INDEX items_by_sort_global");
-        seed("acct/INBOX", "acct", "message/rfc822", "<a@x>", 1);
-        seed("acct/Archive", "acct", "message/rfc822", "<b@x>", 2);
-        store.close();
-
-        store = new PimdirDb(RuntimeEnvironment.getApplication());
-        db = store.getWritableDatabase();
-
-        assertEquals("the global order is added on open", "collection",
-                indexColumns("items_by_sort_global"));
-
-        Map<String, Object> values = new HashMap<>();
-        values.put("collections", "[\"acct/INBOX\",\"acct/Archive\"]");
-        values.put("limit", 50);
-        PimdirSql.Bound page = PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values);
-        StringBuilder plan = new StringBuilder();
-        try (Cursor cursor =
-                PimdirDb.typed(db, "EXPLAIN QUERY PLAN " + page.sql, page.args)) {
-            while (cursor.moveToNext()) {
-                plan.append(cursor.getString(3)).append('\n');
-            }
-        }
-        assertTrue("the page walks the global order:\n" + plan,
-                plan.toString().contains("items_by_sort_global"));
-        assertFalse("the page sorts nothing:\n" + plan,
-                plan.toString().contains("TEMP B-TREE FOR ORDER BY"));
-    }
-
-    /** The statement an object was created with, as sqlite_master keeps it. */
-    private String sqlOf(String name) {
-        try (Cursor cursor =
-                db.rawQuery("SELECT sql FROM sqlite_master WHERE name = ?", new String[] {name})) {
-            return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getString(0) : "";
-        }
-    }
-
-    private boolean hasColumn(String table, String column) {
-        try (Cursor cursor = db.rawQuery("PRAGMA table_info(" + table + ")", null)) {
-            while (cursor.moveToNext()) {
-                if (column.equals(cursor.getString(1))) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        assertArrayEquals(body, blobs.get(hash));
     }
 
     /**
-     * The last column of an index, which is what the reshape moved.
-     *
-     * <p>Through a {@code SELECT}: a bare pragma may run on a pooled
-     * connection whose cached schema predates the reconcile.
+     * A store this app creates names its draft and its identity (STORAGE
+     * §4.2, §4.5), and opens again.
      */
-    private String indexColumns(String index) {
-        String last = null;
-        try (Cursor cursor = db.rawQuery(
-                "SELECT name FROM pragma_index_info(?) ORDER BY seqno", new String[] {index})) {
-            while (cursor.moveToNext()) {
-                last = cursor.getString(0);
-            }
+    @Test
+    public void aFreshStoreNamesItsDraftAndItsIdentity() {
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT format_version, store_id, incarnation, derivation, sync_version,"
+                                + " read_version, produce_version FROM store_meta",
+                        null)) {
+            assertTrue(cursor.moveToFirst());
+            assertEquals("storage-draft-08", cursor.getString(0));
+            assertTrue(cursor.getString(1), cursor.getString(1).matches("[0-9a-f]{32}"));
+            assertEquals(1, cursor.getInt(2));
+            assertEquals(PimdirSql.identity().optLong("derivation"), cursor.getLong(3));
+            assertTrue("written by the first sync write", cursor.isNull(4));
+            assertEquals(1, cursor.getInt(5));
+            assertEquals(1, cursor.getInt(6));
         }
-        return last;
+        store.close();
+        assertNull(PimdirDb.refusal(RuntimeEnvironment.getApplication()));
+    }
+
+    /**
+     * A store an earlier draft wrote (io-pimdir 8907303's store_meta, no
+     * format_version, sha256-128) is refused, never reconciled: its file is
+     * left byte for byte as it was (STORAGE §6).
+     */
+    @Test
+    public void aStoreOfAnEarlierDraftIsRefusedAndLeftAsItWas() throws Exception {
+        store.close();
+        File file = new File(store.blobs().getParentFile(), "pimdir.db");
+        for (String suffix : new String[] {"", "-wal", "-shm"}) {
+            new File(file.getPath() + suffix).delete();
+        }
+        SQLiteDatabase old = SQLiteDatabase.openOrCreateDatabase(file, null);
+        old.execSQL(
+                "CREATE TABLE store_meta (id INTEGER PRIMARY KEY CHECK (id = 1),"
+                        + " format TEXT NOT NULL DEFAULT 'pimdir', version INTEGER NOT NULL,"
+                        + " hash_algo TEXT NOT NULL, created_at TEXT NOT NULL) STRICT");
+        old.execSQL(
+                "INSERT INTO store_meta(id, version, hash_algo, created_at)"
+                        + " VALUES(1, 1, 'sha256-128', '2026-10-01T00:00:00Z')");
+        old.execSQL("CREATE TABLE items (collection TEXT, link_id TEXT, flags TEXT)");
+        old.setVersion(1);
+        old.close();
+        byte[] before = java.nio.file.Files.readAllBytes(file.toPath());
+
+        org.json.JSONObject refusal = PimdirDb.refusal(RuntimeEnvironment.getApplication());
+
+        assertEquals(refusal == null ? null : refusal.toString(), "store-version",
+                refusal == null ? null : refusal.optString("refused"));
+        assertArrayEquals("nothing written", before, java.nio.file.Files.readAllBytes(file.toPath()));
+        assertFalse("no journal opened", new File(file.getPath() + "-wal").exists());
+    }
+
+    /** A store of this draft whose schema text is not the canonical one. */
+    @Test
+    public void aDamagedStoreIsRefused() {
+        db.execSQL("CREATE TABLE extra (x)");
+        store.close();
+
+        org.json.JSONObject refusal = PimdirDb.refusal(RuntimeEnvironment.getApplication());
+
+        assertEquals("store-corrupt", refusal == null ? null : refusal.optString("refused"));
     }
 }

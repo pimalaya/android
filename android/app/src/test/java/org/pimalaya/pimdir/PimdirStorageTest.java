@@ -42,8 +42,32 @@ public class PimdirStorageTest {
                         + " VALUES('acct/Contacts', 'acct', 'text/vcard', 'Contacts')");
     }
 
-    /** A store-object write for a body the engine already hashed. */
-    private JSONObject storeObject(String hash, String body) throws Exception {
+    /** The name each label's body is filed under, as the test stored it. */
+    private final java.util.Map<String, String> names = new java.util.HashMap<>();
+
+    /**
+     * The object name a label stands for: its stored body's (STORAGE §5), or
+     * for a body never stored a well-formed name of its own, the label's
+     * digits spelt in letters base32 lacks no other way.
+     */
+    private String h(String label) {
+        String stored = names.get(label);
+        if (stored != null) {
+            return stored;
+        }
+        String spelt = label.replace('0', 'w').replace('1', 'x').replace('8', 'y').replace('9', 'z');
+        return spelt + "q".repeat(PimdirHash.LENGTH - spelt.length());
+    }
+
+    /** The load of a round's last page, its listing no date filter narrowed. */
+    private static JSONObject lastPage() throws Exception {
+        return new JSONObject().put("kind", "lastPage").put("narrowed", false);
+    }
+
+    /** A store-object write for a body the engine hashed, under {@code label}. */
+    private JSONObject storeObject(String label, String body) throws Exception {
+        String hash = PimdirHash.of(body);
+        names.put(label, hash);
         JSONObject op = new JSONObject();
         op.put("op", "storeObject");
         op.put("hash", hash);
@@ -135,7 +159,7 @@ public class PimdirStorageTest {
     @Test
     public void aWrittenPlacementLoadsBackAsItself() throws Exception {
         storage.applyWrites(
-                batch(storeObject("aa11", "BEGIN:VCARD"), synced("a.vcf", "uid-a", "aa11", "alice")));
+                batch(storeObject("aa11", "BEGIN:VCARD"), synced("a.vcf", "uid-a", h("aa11"), "alice")));
 
         JSONObject loaded = storage.loadCollection("acct/Contacts", null);
         JSONArray placements = loaded.getJSONArray("placements");
@@ -144,7 +168,7 @@ public class PimdirStorageTest {
         JSONObject placement = placements.getJSONObject(0);
         assertEquals("a.vcf", placement.getString("handle"));
         assertEquals("uid-a", placement.getString("linkId"));
-        assertEquals("aa11", placement.getString("object"));
+        assertEquals(h("aa11"), placement.getString("object"));
         assertEquals("alice", placement.getString("sortKey"));
         assertEquals("full", placement.getString("level"));
         assertEquals("clean", placement.getString("status"));
@@ -159,21 +183,22 @@ public class PimdirStorageTest {
      */
     @Test
     public void theStatusIsDerivedFromWhatTheRowOwes() throws Exception {
+        JSONObject storedac13 = storeObject("ac13", "two");
         storage.applyWrites(
-                batch(storeObject("ab12", "one"), synced("s.vcf", "uid-s", "ab12", "sam")));
+                batch(storeObject("ab12", "one"), synced("s.vcf", "uid-s", h("ab12"), "sam")));
         assertEquals("clean", statusOf("s.vcf"));
 
         // NOTE: a staged edit: the body moved and the base kept what was
         // agreed, which is exactly what an `Edit` mutation writes.
-        JSONObject edited = synced("s.vcf", "uid-s", "ac13", "sam").getJSONObject("placement");
-        edited.getJSONObject("base").put("object", "ab12");
+        JSONObject edited = synced("s.vcf", "uid-s", h("ac13"), "sam").getJSONObject("placement");
+        edited.getJSONObject("base").put("object", h("ab12"));
         JSONObject edit = new JSONObject();
         edit.put("op", "upsert");
         edit.put("placement", edited);
-        storage.applyWrites(batch(storeObject("ac13", "two"), edit));
+        storage.applyWrites(batch(storedac13, edit));
         assertEquals("dirty", statusOf("s.vcf"));
 
-        storage.applyWrites(batch(storeObject("ad14", "three"), upsert("n.vcf", "uid-n", "ad14", "nan")));
+        storage.applyWrites(batch(storeObject("ad14", "three"), upsert("n.vcf", "uid-n", h("ad14"), "nan")));
         assertEquals("created", statusOf("n.vcf"));
     }
 
@@ -224,51 +249,51 @@ public class PimdirStorageTest {
     @Test
     public void theBodyLivesInABlobNotInTheDatabase() throws Exception {
         storage.applyWrites(
-                batch(storeObject("bb22", "BEGIN:VCARD\r\nEND:VCARD"), upsert("b.vcf", "uid-b", "bb22", "bob")));
+                batch(storeObject("bb22", "BEGIN:VCARD\r\nEND:VCARD"), upsert("b.vcf", "uid-b", h("bb22"), "bob")));
 
         PimdirBlobs blobs = new PimdirBlobs(store.blobs());
-        assertEquals("BEGIN:VCARD\r\nEND:VCARD", blobs.getText("bb22"));
+        assertEquals("BEGIN:VCARD\r\nEND:VCARD", blobs.getText(h("bb22")));
 
         // NOTE: the row references the body; it does not contain it.
-        assertEquals(1, scalar("SELECT count(*) FROM objects WHERE hash = 'bb22'"));
-        assertEquals(1, scalar("SELECT refcount FROM objects WHERE hash = 'bb22'"));
+        assertEquals(1, scalar("SELECT count(*) FROM objects WHERE hash = '" + h("bb22") + "'"));
+        assertEquals(1, scalar("SELECT refcount FROM objects WHERE hash = '" + h("bb22") + "'"));
     }
 
     @Test
     public void aWriteThatDoesNotRestateTheKeyPreservesIt() throws Exception {
-        storage.applyWrites(batch(storeObject("cc33", "one"), upsert("c.vcf", "uid-c", "cc33", "carol")));
+        storage.applyWrites(batch(storeObject("cc33", "one"), upsert("c.vcf", "uid-c", h("cc33"), "carol")));
 
         // NOTE: the reference write is a replace-all, so an upsert carrying no
         // key must leave the stored one alone (SPEC.md §9.3). Blanking it here
         // would silently reset the ordering of every item a sync touched.
-        storage.applyWrites(batch(storeObject("dd44", "two"), upsert("c.vcf", "uid-c", "dd44", null)));
+        storage.applyWrites(batch(storeObject("dd44", "two"), upsert("c.vcf", "uid-c", h("dd44"), null)));
 
         JSONObject placement =
                 storage.loadCollection("acct/Contacts", null)
                         .getJSONArray("placements")
                         .getJSONObject(0);
         assertEquals("carol", placement.getString("sortKey"));
-        assertEquals("dd44", placement.getString("object"));
+        assertEquals(h("dd44"), placement.getString("object"));
     }
 
     @Test
     public void refcountsMoveByTheDifferenceAndOrphansAreCollected() throws Exception {
-        storage.applyWrites(batch(storeObject("ee55", "one"), upsert("e.vcf", "uid-e", "ee55", "eve")));
-        assertEquals(1, scalar("SELECT refcount FROM objects WHERE hash = 'ee55'"));
+        storage.applyWrites(batch(storeObject("ee55", "one"), upsert("e.vcf", "uid-e", h("ee55"), "eve")));
+        assertEquals(1, scalar("SELECT refcount FROM objects WHERE hash = '" + h("ee55") + "'"));
 
         // NOTE: re-pointing the item at a new body releases the old one, which
         // then has no reference and goes, blob and all.
-        storage.applyWrites(batch(storeObject("ff66", "two"), upsert("e.vcf", "uid-e", "ff66", "eve")));
+        storage.applyWrites(batch(storeObject("ff66", "two"), upsert("e.vcf", "uid-e", h("ff66"), "eve")));
 
         assertEquals("the replaced body is gone", 0,
-                scalar("SELECT count(*) FROM objects WHERE hash = 'ee55'"));
-        assertFalse(new PimdirBlobs(store.blobs()).has("ee55"));
-        assertEquals(1, scalar("SELECT refcount FROM objects WHERE hash = 'ff66'"));
+                scalar("SELECT count(*) FROM objects WHERE hash = '" + h("ee55") + "'"));
+        assertFalse(new PimdirBlobs(store.blobs()).has(h("ee55")));
+        assertEquals(1, scalar("SELECT refcount FROM objects WHERE hash = '" + h("ff66") + "'"));
     }
 
     @Test
     public void aDropRetainsRatherThanDeletes() throws Exception {
-        storage.applyWrites(batch(storeObject("aa77", "body"), upsert("g.vcf", "uid-g", "aa77", "gina")));
+        storage.applyWrites(batch(storeObject("aa77", "body"), upsert("g.vcf", "uid-g", h("aa77"), "gina")));
 
         JSONObject drop = new JSONObject();
         drop.put("op", "drop");
@@ -281,8 +306,8 @@ public class PimdirStorageTest {
         // NOTE: the row survives with its body pinned: for a backup the store
         // is the only holder of what the remote expunged (SPEC.md §11).
         assertEquals(1, scalar("SELECT count(*) FROM items WHERE retained_at IS NOT NULL"));
-        assertEquals(1, scalar("SELECT count(*) FROM objects WHERE hash = 'aa77'"));
-        assertTrue(new PimdirBlobs(store.blobs()).has("aa77"));
+        assertEquals(1, scalar("SELECT count(*) FROM objects WHERE hash = '" + h("aa77") + "'"));
+        assertTrue(new PimdirBlobs(store.blobs()).has(h("aa77")));
 
         // NOTE: and it is invisible to the sync seam, so nothing re-derives it.
         assertEquals(
@@ -303,11 +328,11 @@ public class PimdirStorageTest {
 
     @Test
     public void aDropThenAnUpsertOfOneHandleLeavesItPresent() throws Exception {
-        storage.applyWrites(batch(storeObject("bb88", "body"), upsert("h.vcf", "uid-h", "bb88", "hana")));
+        storage.applyWrites(batch(storeObject("bb88", "body"), upsert("h.vcf", "uid-h", h("bb88"), "hana")));
 
         // NOTE: a batch applies in order (SYNC §10): the upsert after the drop
         // restores what the drop took.
-        storage.applyWrites(batch(drop("h.vcf"), upsert("h.vcf", "uid-h", "bb88", "hana")));
+        storage.applyWrites(batch(drop("h.vcf"), upsert("h.vcf", "uid-h", h("bb88"), "hana")));
 
         JSONArray placements =
                 storage.loadCollection("acct/Contacts", null).getJSONArray("placements");
@@ -318,11 +343,11 @@ public class PimdirStorageTest {
 
     @Test
     public void anUpsertThenADropOfOneHandleLeavesItDropped() throws Exception {
-        storage.applyWrites(batch(storeObject("bb88", "body"), upsert("h.vcf", "uid-h", "bb88", "hana")));
+        storage.applyWrites(batch(storeObject("bb88", "body"), upsert("h.vcf", "uid-h", h("bb88"), "hana")));
 
         // NOTE: the order io-pimdir writes a withdrawn pending create in: the
         // tombstone, then the drop taking its binding.
-        JSONObject tombstone = upsert("h.vcf", "uid-h", "bb88", "hana");
+        JSONObject tombstone = upsert("h.vcf", "uid-h", h("bb88"), "hana");
         tombstone.getJSONObject("placement").put("status", "tombstone");
         storage.applyWrites(batch(tombstone, drop("h.vcf")));
 
@@ -340,20 +365,20 @@ public class PimdirStorageTest {
         storage.applyWrites(
                 batch(
                         storeObject("bb88", "body"),
-                        upsert("h.vcf", "uid-h", "bb88", "hana"),
+                        upsert("h.vcf", "uid-h", h("bb88"), "hana"),
                         drop("h.vcf")));
 
         assertEquals(0, scalar("SELECT count(*) FROM items"));
-        assertEquals(0, scalar("SELECT count(*) FROM objects WHERE hash = 'bb88'"));
+        assertEquals(0, scalar("SELECT count(*) FROM objects WHERE hash = '" + h("bb88") + "'"));
     }
 
     @Test
     public void anUnnamedUpsertAfterADropContinuesTheIdentityItHeld() throws Exception {
-        storage.applyWrites(batch(storeObject("bb88", "body"), upsert("h.vcf", "uid-h", "bb88", "hana")));
+        storage.applyWrites(batch(storeObject("bb88", "body"), upsert("h.vcf", "uid-h", h("bb88"), "hana")));
 
         // NOTE: named against the store the batch began from, as io-pimdir
         // names it.
-        JSONObject unnamed = upsert("h.vcf", "uid-h", "bb88", "hana");
+        JSONObject unnamed = upsert("h.vcf", "uid-h", h("bb88"), "hana");
         unnamed.getJSONObject("placement").remove("linkId");
         storage.applyWrites(batch(drop("h.vcf"), unnamed));
 
@@ -369,9 +394,9 @@ public class PimdirStorageTest {
                 "INSERT INTO collections(id, account, kind, name)"
                         + " VALUES('acct/Other', 'acct', 'text/vcard', 'Other')");
 
-        storage.applyWrites(batch(storeObject("cc99", "body"), upsert("i.vcf", "uid-i", "cc99", "iris")));
+        storage.applyWrites(batch(storeObject("cc99", "body"), upsert("i.vcf", "uid-i", h("cc99"), "iris")));
 
-        JSONObject placement = new JSONObject(upsert("i.vcf", "uid-i", "cc99", "iris")
+        JSONObject placement = new JSONObject(upsert("i.vcf", "uid-i", h("cc99"), "iris")
                 .getJSONObject("placement").toString());
         placement.put("collection", "acct/Other");
         JSONObject op = new JSONObject();
@@ -387,13 +412,13 @@ public class PimdirStorageTest {
         // counts pointers (SPEC.md §5), so two placements is two references to
         // one object row and one blob. Deduplication is the single copy, not a
         // count of one.
-        assertEquals("one object row", 1, scalar("SELECT count(*) FROM objects WHERE hash = 'cc99'"));
-        assertEquals("referenced twice", 2, scalar("SELECT refcount FROM objects WHERE hash = 'cc99'"));
+        assertEquals("one object row", 1, scalar("SELECT count(*) FROM objects WHERE hash = '" + h("cc99") + "'"));
+        assertEquals("referenced twice", 2, scalar("SELECT refcount FROM objects WHERE hash = '" + h("cc99") + "'"));
     }
 
     @Test
     public void contactsNeverDedupeBodiesAcrossReplicas() throws Exception {
-        storage.applyWrites(batch(storeObject("dd00", "body"), upsert("j.vcf", "uid-j", "dd00", "jane")));
+        storage.applyWrites(batch(storeObject("dd00", "body"), upsert("j.vcf", "uid-j", h("dd00"), "jane")));
 
         // NOTE: the engine's dedup assumes a link id names immutable bytes.
         // That holds for a message and not for a card: two replicas sharing a
@@ -427,12 +452,12 @@ public class PimdirStorageTest {
     @Test
     public void theTwoSpokesShareOneItemAndBindSeparately() throws Exception {
         storage.applyWrites(
-                batch(storeObject("ab12", "SERVER"), upsert("k.vcf", "uid-k", "ab12", "kim")));
+                batch(storeObject("ab12", "SERVER"), upsert("k.vcf", "uid-k", h("ab12"), "kim")));
 
         // NOTE: the phone spoke names the same book through its own collection
         // id, and the store answers from the same item with the phone's
         // binding.
-        JSONObject phone = new JSONObject(upsert("raw-7", "uid-k", "ab12", "kim")
+        JSONObject phone = new JSONObject(upsert("raw-7", "uid-k", h("ab12"), "kim")
                 .getJSONObject("placement").toString());
         phone.put("collection", PimdirStorage.phoneCollection("acct/Contacts"));
         JSONObject op = new JSONObject();
@@ -456,7 +481,7 @@ public class PimdirStorageTest {
     public void anUnboundSpokeSeesTheItemUnderItsProvisionalHandle() throws Exception {
         String phone = PimdirStorage.phoneCollection("acct/Contacts");
         storage.applyWrites(
-                batch(storeObject("cd34", "BODY"), upsert("l.vcf", "uid-l", "cd34", "lena")));
+                batch(storeObject("cd34", "BODY"), upsert("l.vcf", "uid-l", h("cd34"), "lena")));
 
         // NOTE: the phone has never projected this card, so it has no binding.
         // The placement still has to reach that spoke, or the projection pass
@@ -475,12 +500,13 @@ public class PimdirStorageTest {
 
     @Test
     public void aRowCarriesWhatAPushIsConditionedOn() throws Exception {
-        JSONObject placement = upsert("m.vcf", "uid-m", "ef56", "mona").getJSONObject("placement");
-        placement.put("base", new JSONObject().put("revision", "etag-9").put("object", "ef56"));
+        JSONObject storedef56 = storeObject("ef56", "BEGIN:VCARD");
+        JSONObject placement = upsert("m.vcf", "uid-m", h("ef56"), "mona").getJSONObject("placement");
+        placement.put("base", new JSONObject().put("revision", "etag-9").put("object", h("ef56")));
         JSONObject op = new JSONObject();
         op.put("op", "upsert");
         op.put("placement", placement);
-        storage.applyWrites(batch(storeObject("ef56", "BEGIN:VCARD"), op));
+        storage.applyWrites(batch(storedef56, op));
 
         JSONObject row = storage.loadRow("acct/Contacts", "m.vcf");
         assertEquals("uid-m", row.getString("id"));
@@ -502,7 +528,7 @@ public class PimdirStorageTest {
         op.put("placement", spine);
 
         storage.applyWrites(batch(op,
-                storeObject("aa01", "FULL"), upsert("o.vcf", "uid-o", "aa01", "olga")));
+                storeObject("aa01", "FULL"), upsert("o.vcf", "uid-o", h("aa01"), "olga")));
 
         assertEquals("only the spine needs a body",
                 List.of("n.vcf"), storage.handlesBelowFull("acct/Contacts"));
@@ -510,7 +536,7 @@ public class PimdirStorageTest {
 
     @Test
     public void aConflictWaitingOnItsRemoteBodyIsHydratedRatherThanOffered() throws Exception {
-        storage.applyWrites(batch(storeObject("bb02", "LOCAL"), conflicted("bb02", null)));
+        storage.applyWrites(batch(storeObject("bb02", "LOCAL"), conflicted(h("bb02"), null)));
 
         // NOTE: flagged but not yet resolvable: the resolution reads three
         // documents and the diverging one has not landed, so the hydrate pass
@@ -525,7 +551,7 @@ public class PimdirStorageTest {
     public void theEngineSuppliedRemoteBodyMakesTheConflictResolvable() throws Exception {
         storage.applyWrites(
                 batch(storeObject("bb02", "LOCAL"), storeObject("bb03", "REMOTE"),
-                        conflicted("bb02", "bb03")));
+                        conflicted(h("bb02"), h("bb03"))));
 
         List<JSONObject> conflicts = storage.loadConflicts("acct/Contacts");
         assertEquals(1, conflicts.size());
@@ -542,18 +568,18 @@ public class PimdirStorageTest {
     public void resolvingReleasesTheDivergingBody() throws Exception {
         storage.applyWrites(
                 batch(storeObject("cc03", "LOCAL"), storeObject("cc04", "REMOTE"),
-                        conflicted("cc03", "cc04")));
+                        conflicted(h("cc03"), h("cc04"))));
 
         assertEquals(1, scalar("SELECT conflicted FROM bindings WHERE link_id = 'uid-p'"));
-        assertEquals(1, scalar("SELECT refcount FROM objects WHERE hash = 'cc04'"));
+        assertEquals(1, scalar("SELECT refcount FROM objects WHERE hash = '" + h("cc04") + "'"));
 
         // NOTE: the next clean upsert is the resolution: the diverging body has
         // no reader left, so it is released rather than pinned forever.
-        storage.applyWrites(batch(upsert("p.vcf", "uid-p", "cc03", "pia")));
+        storage.applyWrites(batch(upsert("p.vcf", "uid-p", h("cc03"), "pia")));
 
         assertEquals(0, scalar("SELECT conflicted FROM bindings WHERE link_id = 'uid-p'"));
         assertEquals("the diverging body has no reader left", 0,
-                scalar("SELECT count(*) FROM objects WHERE hash = 'cc04'"));
+                scalar("SELECT count(*) FROM objects WHERE hash = '" + h("cc04") + "'"));
     }
 
     /**
@@ -580,7 +606,7 @@ public class PimdirStorageTest {
     public void theConflictRevisionIsRefreshedBeforeResolving() throws Exception {
         storage.applyWrites(
                 batch(storeObject("dd04", "LOCAL"), storeObject("dd05", "REMOTE"),
-                        conflicted("dd04", "dd05")));
+                        conflicted(h("dd04"), h("dd05"))));
 
         storage.setConflictRevision("acct/Contacts", "p.vcf", "etag-new");
 
@@ -592,16 +618,16 @@ public class PimdirStorageTest {
     public void theQuietPathSkipsASpokeWithNothingToDo() throws Exception {
         String phone = PimdirStorage.phoneCollection("acct/Contacts");
         storage.applyWrites(
-                batch(storeObject("ee07", "BODY"), upsert("s.vcf", "uid-s", "ee07", "sara")));
+                batch(storeObject("ee07", "BODY"), upsert("s.vcf", "uid-s", h("ee07"), "sara")));
 
         assertTrue(storage.pending(phone));
         assertEquals(1, storage.memberCount(phone));
 
         JSONObject projected =
-                new JSONObject(upsert("raw-9", "uid-s", "ee07", "sara")
+                new JSONObject(upsert("raw-9", "uid-s", h("ee07"), "sara")
                         .getJSONObject("placement").toString());
         projected.put("collection", phone);
-        projected.put("base", new JSONObject().put("object", "ee07"));
+        projected.put("base", new JSONObject().put("object", h("ee07")));
         JSONObject op = new JSONObject();
         op.put("op", "upsert");
         op.put("placement", projected);
@@ -614,40 +640,42 @@ public class PimdirStorageTest {
 
     @Test
     public void aBodyMovingPastTheAgreedBaseIsWork() throws Exception {
+        JSONObject storedff08 = storeObject("ff08", "ONE");
         String phone = PimdirStorage.phoneCollection("acct/Contacts");
         JSONObject projected =
-                new JSONObject(upsert("raw-4", "uid-t", "ff08", "tom")
+                new JSONObject(upsert("raw-4", "uid-t", h("ff08"), "tom")
                         .getJSONObject("placement").toString());
         projected.put("collection", phone);
-        projected.put("base", new JSONObject().put("object", "ff08"));
+        projected.put("base", new JSONObject().put("object", h("ff08")));
         JSONObject op = new JSONObject();
         op.put("op", "upsert");
         op.put("placement", projected);
-        storage.applyWrites(batch(storeObject("ff08", "ONE"), op));
+        storage.applyWrites(batch(storedff08, op));
         assertFalse(storage.pending(phone));
 
         // NOTE: a server round repoints the item at a new body. The phone's
         // base still names the old one, which is the whole signal that the
         // spoke has something to project.
         storage.applyWrites(
-                batch(storeObject("ab09", "TWO"), upsert("t.vcf", "uid-t", "ab09", "tom")));
+                batch(storeObject("ab09", "TWO"), upsert("t.vcf", "uid-t", h("ab09"), "tom")));
 
         assertTrue(storage.pending(phone));
     }
 
     @Test
     public void aRemovalOnOneSourceIsAStagedRemovalOnTheOther() throws Exception {
+        JSONObject storedca11 = storeObject("ca11", "BODY");
         String phone = PimdirStorage.phoneCollection("acct/Contacts");
         JSONObject projected =
-                new JSONObject(upsert("raw-5", "uid-v", "ca11", "val")
+                new JSONObject(upsert("raw-5", "uid-v", h("ca11"), "val")
                         .getJSONObject("placement").toString());
         projected.put("collection", phone);
-        projected.put("base", new JSONObject().put("object", "ca11"));
+        projected.put("base", new JSONObject().put("object", h("ca11")));
         JSONObject op = new JSONObject();
         op.put("op", "upsert");
         op.put("placement", projected);
         storage.applyWrites(
-                batch(storeObject("ca11", "BODY"), upsert("v.vcf", "uid-v", "ca11", "val"), op));
+                batch(storedca11, upsert("v.vcf", "uid-v", h("ca11"), "val"), op));
 
         // NOTE: the phone deletes it: the server still holds it, so it is the
         // server's to remove, not the phone's to be handed back.
@@ -678,7 +706,7 @@ public class PimdirStorageTest {
     @Test
     public void aSupersededDropRetiresNothing() throws Exception {
         storage.applyWrites(
-                batch(storeObject("ba10", "body"), upsert("temp-2", "uid-u", "ba10", "ugo")));
+                batch(storeObject("ba10", "body"), upsert("temp-2", "uid-u", h("ba10"), "ugo")));
 
         // NOTE: a rebuilt spine drops the old handle and upserts the new one.
         // Only a deleted drop retires an item, so reading this one as a removal
@@ -688,7 +716,7 @@ public class PimdirStorageTest {
         drop.put("collection", "acct/Contacts");
         drop.put("handle", "temp-2");
         drop.put("reason", "superseded");
-        JSONArray effects = storage.applyWrites(batch(upsert("u.vcf", "uid-u", "ba10", "ugo"), drop));
+        JSONArray effects = storage.applyWrites(batch(upsert("u.vcf", "uid-u", h("ba10"), "ugo"), drop));
 
         assertEquals("a superseded drop is not a removal", 0, effects.length());
         assertEquals(0, scalar("SELECT count(*) FROM items WHERE retained_at IS NOT NULL"));
@@ -733,7 +761,7 @@ public class PimdirStorageTest {
     @Test
     public void aBoundHandleNeedsNoNameToBeRewritten() throws Exception {
         storage.applyWrites(
-                batch(storeObject("ba20", "body"), synced("q.vcf", "uid-q", "ba20", "quinn")));
+                batch(storeObject("ba20", "body"), synced("q.vcf", "uid-q", h("ba20"), "quinn")));
 
         // NOTE: a flag push or a pulled deletion restates the placement by
         // handle: the binding it holds names it.
@@ -775,11 +803,11 @@ public class PimdirStorageTest {
                 batch(
                         round("openRound", "2026-04-01T00:00:00Z"),
                         storeObject("ca01", "one"),
-                        synced("a.vcf", "uid-a", "ca01", "alice"),
+                        synced("a.vcf", "uid-a", h("ca01"), "alice"),
                         cursor,
                         stamp));
 
-        JSONObject loaded = storage.loadCollection("acct/Contacts", null);
+        JSONObject loaded = storage.loadCollection("acct/Contacts", lastPage());
         JSONObject open = loaded.getJSONObject("round");
         assertEquals("2026-04-01T00:00:00Z", open.getString("since"));
         assertEquals("7:500", open.getString("cursor"));
@@ -791,10 +819,10 @@ public class PimdirStorageTest {
         // NOTE: a member the store held from before the round and the round
         // never listed is what its last page finds absent.
         storage.applyWrites(
-                batch(storeObject("ca02", "two"), synced("b.vcf", "uid-b", "ca02", "bob")));
+                batch(storeObject("ca02", "two"), synced("b.vcf", "uid-b", h("ca02"), "bob")));
         assertEquals(
                 "b.vcf",
-                storage.loadCollection("acct/Contacts", null)
+                storage.loadCollection("acct/Contacts", lastPage())
                         .getJSONArray("unstamped")
                         .getString(0));
 
@@ -809,7 +837,7 @@ public class PimdirStorageTest {
     @Test
     public void aBandRoundFindsNoUndatedMemberAbsent() throws Exception {
         storage.applyWrites(
-                batch(storeObject("ca04", "one"), synced("u.vcf", "uid-u", "ca04", "undated")));
+                batch(storeObject("ca04", "one"), synced("u.vcf", "uid-u", h("ca04"), "undated")));
 
         // NOTE: a band round lists by a date filter that never returns it, so
         // its absence there proves nothing (SYNC §5); the round records its
@@ -817,7 +845,7 @@ public class PimdirStorageTest {
         JSONObject band = round("openRound", "2026-04-01T00:00:00Z");
         band.put("band", true);
         storage.applyWrites(batch(band));
-        JSONObject loaded = storage.loadCollection("acct/Contacts", null);
+        JSONObject loaded = storage.loadCollection("acct/Contacts", lastPage());
         assertTrue(loaded.getJSONObject("round").getBoolean("band"));
         assertEquals(
                 "an undated member is left to a whole-scope round",
@@ -828,15 +856,56 @@ public class PimdirStorageTest {
         assertEquals("a closed round carries no kind", 0, scalar("SELECT round_band FROM sources"));
 
         storage.applyWrites(batch(round("openRound", null)));
-        loaded = storage.loadCollection("acct/Contacts", null);
+        loaded = storage.loadCollection("acct/Contacts", lastPage());
         assertFalse(loaded.getJSONObject("round").getBoolean("band"));
         assertEquals("u.vcf", loaded.getJSONArray("unstamped").getString(0));
+    }
+
+    /**
+     * A round its listing a date filter narrowed finds absent only what its
+     * enumeration lacks, an undated member included (SYNC §4, §5): the load
+     * of its last page binds {@code :narrowed}, {@code :enumerated} and the
+     * enumeration.
+     */
+    @Test
+    public void aNarrowedRoundFindsAbsentOnlyWhatItsEnumerationLacks() throws Exception {
+        storage.applyWrites(
+                batch(
+                        storeObject("ca01", "one"),
+                        synced("u.vcf", "uid-u", h("ca01"), "undated"),
+                        storeObject("ca02", "two"),
+                        synced("v.vcf", "uid-v", h("ca02"), "undated too")));
+        storage.applyWrites(batch(round("openRound", null)));
+
+        JSONObject whole = storage.loadCollection("acct/Contacts", lastPage());
+        assertEquals(2, whole.getJSONArray("unstamped").length());
+
+        JSONObject narrowed =
+                new JSONObject()
+                        .put("kind", "lastPage")
+                        .put("narrowed", true)
+                        .put("enumerated", new JSONArray().put("u.vcf"));
+        JSONArray absent =
+                storage.loadCollection("acct/Contacts", narrowed).getJSONArray("unstamped");
+        assertEquals("v.vcf, which the enumeration lacks", 1, absent.length());
+        assertEquals("v.vcf", absent.getString(0));
+
+        JSONObject unenumerated = new JSONObject().put("kind", "lastPage").put("narrowed", true);
+        assertEquals(
+                "an undated member a filter missed is never found absent",
+                0,
+                storage.loadCollection("acct/Contacts", unenumerated)
+                        .getJSONArray("unstamped")
+                        .length());
+        assertFalse(
+                "a load that is no last page reads no absence",
+                storage.loadCollection("acct/Contacts", null).has("unstamped"));
     }
 
     @Test
     public void aLoadNamingNoHandleReadsTheSyncStateAlone() throws Exception {
         storage.applyWrites(
-                batch(storeObject("ca03", "one"), synced("a.vcf", "uid-a", "ca03", "alice")));
+                batch(storeObject("ca03", "one"), synced("a.vcf", "uid-a", h("ca03"), "alice")));
 
         JSONObject scope = new JSONObject();
         scope.put("kind", "handles");
@@ -851,7 +920,7 @@ public class PimdirStorageTest {
     @Test
     public void aListedMemberIsNamedByWhatTheStoreHolds() throws Exception {
         storage.applyWrites(
-                batch(storeObject("ba24", "body"), synced("h1.vcf", "uid-h1", "ba24", "hana")));
+                batch(storeObject("ba24", "body"), synced("h1.vcf", "uid-h1", h("ba24"), "hana")));
 
         java.util.Map<String, String[]> bound =
                 storage.bound("acct/Contacts", List.of("h1.vcf", "h2.vcf"));
@@ -863,14 +932,14 @@ public class PimdirStorageTest {
     @Test
     public void aHandleNamingAnotherIdentityRetiresTheBindingItHeld() throws Exception {
         storage.applyWrites(
-                batch(storeObject("ba21", "one"), upsert("r.vcf", "uid-r1", "ba21", "rita")));
+                batch(storeObject("ba21", "one"), upsert("r.vcf", "uid-r1", h("ba21"), "rita")));
 
         // NOTE: the resource was replaced in place: the same href, another
         // card. A handle names one item per source, so the binding it held is
         // retired rather than doubled, which the store's unique index would
         // refuse.
         storage.applyWrites(
-                batch(storeObject("ba22", "two"), upsert("r.vcf", "uid-r2", "ba22", "rosa")));
+                batch(storeObject("ba22", "two"), upsert("r.vcf", "uid-r2", h("ba22"), "rosa")));
 
         assertEquals(1, scalar("SELECT count(*) FROM bindings WHERE handle = 'r.vcf'"));
         assertEquals(
@@ -881,7 +950,7 @@ public class PimdirStorageTest {
     @Test
     public void aRekeyedDropRetiresNothingEither() throws Exception {
         storage.applyWrites(
-                batch(storeObject("ba11", "body"), upsert("old-1", "uid-w", "ba11", "wes")));
+                batch(storeObject("ba11", "body"), upsert("old-1", "uid-w", h("ba11"), "wes")));
 
         // NOTE: the third reason a drop carries (SYNC §8): a handle a rebuild
         // renumbered. Only a deleted drop retires an item, so reading this one
@@ -892,7 +961,7 @@ public class PimdirStorageTest {
         drop.put("collection", "acct/Contacts");
         drop.put("handle", "old-1");
         drop.put("reason", "rekeyed");
-        JSONArray effects = storage.applyWrites(batch(upsert("new-1", "uid-w", "ba11", "wes"), drop));
+        JSONArray effects = storage.applyWrites(batch(upsert("new-1", "uid-w", h("ba11"), "wes"), drop));
 
         assertEquals("a rekeyed drop is not a removal", 0, effects.length());
         assertEquals(0, scalar("SELECT count(*) FROM items WHERE retained_at IS NOT NULL"));
@@ -907,7 +976,7 @@ public class PimdirStorageTest {
     @Test
     public void anUpsertWritesTheTypedSummaryAndKeepsItWhenItRestatesNone() throws Exception {
         storage.applyWrites(
-                batch(storeObject("ba12", "body"), upsert("x.vcf", "uid-x", "ba12", "xena")));
+                batch(storeObject("ba12", "body"), upsert("x.vcf", "uid-x", h("ba12"), "xena")));
 
         assertEquals(1, scalar("SELECT count(*) FROM contact_summary WHERE link_id = 'uid-x'"));
         assertEquals(
@@ -919,7 +988,7 @@ public class PimdirStorageTest {
         // NOTE: a flag push carries no summary, and a write that does not
         // restate one keeps it, exactly as the sort key does: blanking it would
         // strip every row a sync touched of what a listing renders.
-        JSONObject placement = upsert("x.vcf", "uid-x", "ba12", "xena").getJSONObject("placement");
+        JSONObject placement = upsert("x.vcf", "uid-x", h("ba12"), "xena").getJSONObject("placement");
         placement.remove("summary");
         JSONObject op = new JSONObject();
         op.put("op", "upsert");
@@ -931,14 +1000,15 @@ public class PimdirStorageTest {
 
     @Test
     public void aLookupAnswersTheSizeBesideTheHash() throws Exception {
+        names.put("ba13", PimdirHash.of("message"));
         db.execSQL(
                 "INSERT INTO collections(id, account, kind, name)"
                         + " VALUES('acct/INBOX', 'acct', 'message/rfc822', 'INBOX')");
-        db.execSQL("INSERT INTO objects(hash, size, refcount) VALUES('ba13', 7, 1)");
+        db.execSQL("INSERT INTO objects(hash, size, refcount) VALUES('" + h("ba13") + "', 7, 1)");
         db.execSQL(
                 "INSERT INTO items(collection, link_id, seq, object_hash, level)"
-                        + " VALUES('acct/INBOX', 'mid-1', 1, 'ba13', 2)");
-        new PimdirBlobs(store.blobs()).put("ba13", "message".getBytes("UTF-8"));
+                        + " VALUES('acct/INBOX', 'mid-1', 1, '" + h("ba13") + "', 2)");
+        new PimdirBlobs(store.blobs()).put(h("ba13"), "message".getBytes("UTF-8"));
 
         JSONObject objects =
                 storage.lookupObjects(new JSONArray().put("mid-1")).getJSONObject("objects");
@@ -946,14 +1016,52 @@ public class PimdirStorageTest {
         // NOTE: the size is the witness an immutable link needs (SYNC §6): the
         // engine records the object it dedups against without ever reading its
         // bytes.
-        assertEquals("ba13", objects.getJSONObject("mid-1").getString("hash"));
+        assertEquals(h("ba13"), objects.getJSONObject("mid-1").getString("hash"));
         assertEquals(7, objects.getJSONObject("mid-1").getInt("size"));
+    }
+
+    /** A body failing its name links nothing (STORAGE §7): it is fetched again. */
+    @Test
+    public void aLookupLeavesOutABodyFailingItsName() throws Exception {
+        db.execSQL(
+                "INSERT INTO collections(id, account, kind, name)"
+                        + " VALUES('acct/INBOX', 'acct', 'message/rfc822', 'INBOX')");
+        String hash = PimdirHash.of("message");
+        db.execSQL("INSERT INTO objects(hash, size, refcount) VALUES(?, 7, 1)", new Object[] {hash});
+        db.execSQL(
+                "INSERT INTO items(collection, link_id, seq, object_hash, level)"
+                        + " VALUES('acct/INBOX', 'mid-1', 1, ?, 2)",
+                new Object[] {hash});
+        new PimdirBlobs(store.blobs()).put(hash, "tampered".getBytes("UTF-8"));
+
+        JSONObject objects =
+                storage.lookupObjects(new JSONArray().put("mid-1")).getJSONObject("objects");
+
+        assertFalse(objects.has("mid-1"));
+        assertEquals(1, new PimdirBlobs(store.blobs()).quarantined().size());
+    }
+
+    /** A verify yield answers only the bodies that read whole under their name. */
+    @Test
+    public void aVerificationLeavesOutAMissingOrCorruptBody() throws Exception {
+        PimdirBlobs blobs = new PimdirBlobs(store.blobs());
+        String good = PimdirHash.of("good");
+        String bad = PimdirHash.of("bad");
+        blobs.put(good, "good".getBytes("UTF-8"));
+        blobs.put(bad, "worse".getBytes("UTF-8"));
+
+        JSONArray verified =
+                storage.verify(new JSONArray().put(good).put(bad).put(PimdirHash.of("gone")))
+                        .getJSONArray("verified");
+
+        assertEquals(1, verified.length());
+        assertEquals(good, verified.getString(0));
     }
 
     @Test
     public void oneIdentityUnderTwoHandlesIsRefusedRatherThanRepointed() throws Exception {
         storage.applyWrites(
-                batch(storeObject("bb11", "body"), upsert("v1.vcf", "uid-v", "bb11", "vera")));
+                batch(storeObject("bb11", "body"), upsert("v1.vcf", "uid-v", h("bb11"), "vera")));
 
         // NOTE: the same identity arrives under a second handle with nothing
         // superseding the first: a double delivery, a retried append, a
@@ -963,7 +1071,7 @@ public class PimdirStorageTest {
         // is an item of its own under a key the engine mints (SPEC.md §9),
         // which is what makes refusing a complete answer.
         try {
-            storage.applyWrites(batch(upsert("v2.vcf", "uid-v", "bb11", "vera")));
+            storage.applyWrites(batch(upsert("v2.vcf", "uid-v", h("bb11"), "vera")));
             throw new AssertionError("the repointing write was applied");
         } catch (PimalayaException refused) {
             assertTrue(refused.getMessage(), refused.getMessage().contains("v1.vcf"));
@@ -979,8 +1087,8 @@ public class PimdirStorageTest {
     @Test
     public void aScopedLoadAnswersTheRowsItWasAskedFor() throws Exception {
         storage.applyWrites(batch(
-                storeObject("cc12", "one"), upsert("w.vcf", "uid-w", "cc12", "wendy"),
-                storeObject("cc13", "two"), upsert("x.vcf", "uid-x", "cc13", "xena")));
+                storeObject("cc12", "one"), upsert("w.vcf", "uid-w", h("cc12"), "wendy"),
+                storeObject("cc13", "two"), upsert("x.vcf", "uid-x", h("cc13"), "xena")));
 
         JSONObject byHandle = new JSONObject()
                 .put("kind", "handles")
@@ -1006,13 +1114,14 @@ public class PimdirStorageTest {
 
     @Test
     public void unreadMarkersStayUnreadAcrossAWrite() throws Exception {
+        JSONObject storedcc14 = storeObject("cc14", "body");
         JSONObject placement =
-                upsert("y.vcf", "uid-y", "cc14", "yuri").getJSONObject("placement");
+                upsert("y.vcf", "uid-y", h("cc14"), "yuri").getJSONObject("placement");
         placement.remove("flags");
         JSONObject op = new JSONObject();
         op.put("op", "upsert");
         op.put("placement", placement);
-        storage.applyWrites(batch(storeObject("cc14", "body"), op));
+        storage.applyWrites(batch(storedcc14, op));
 
         // NOTE: absent means nobody has read the markers, which the column says
         // as NULL. Storing an empty set instead would turn that into an
@@ -1023,7 +1132,7 @@ public class PimdirStorageTest {
                         .getJSONObject(0);
         assertFalse(loaded.has("flags"));
 
-        storage.applyWrites(batch(upsert("y.vcf", "uid-y", "cc14", "yuri")));
+        storage.applyWrites(batch(upsert("y.vcf", "uid-y", h("cc14"), "yuri")));
         loaded = storage.loadCollection("acct/Contacts", null)
                 .getJSONArray("placements")
                 .getJSONObject(0);
@@ -1032,13 +1141,14 @@ public class PimdirStorageTest {
 
     @Test
     public void anAgreedBaseWithNoValuesSurvivesTheRoundTrip() throws Exception {
+        JSONObject storedcc15 = storeObject("cc15", "body");
         JSONObject placement =
-                upsert("z.vcf", "uid-z", "cc15", "zoe").getJSONObject("placement");
+                upsert("z.vcf", "uid-z", h("cc15"), "zoe").getJSONObject("placement");
         placement.put("base", new JSONObject());
         JSONObject op = new JSONObject();
         op.put("op", "upsert");
         op.put("placement", placement);
-        storage.applyWrites(batch(storeObject("cc15", "body"), op));
+        storage.applyWrites(batch(storedcc15, op));
 
         // NOTE: a base of no revision, no body and markers nobody has read is a
         // real agreement its three value columns cannot express: reading
@@ -1054,10 +1164,10 @@ public class PimdirStorageTest {
 
     @Test
     public void aStagedRemovalIsLoadedBackAsTheTombstoneItIs() throws Exception {
-        storage.applyWrites(batch(storeObject("dd16", "body"), upsert("t.vcf", "uid-t", "dd16", "t")));
+        storage.applyWrites(batch(storeObject("dd16", "body"), upsert("t.vcf", "uid-t", h("dd16"), "t")));
 
         JSONObject placement =
-                upsert("t.vcf", "uid-t", "dd16", "t").getJSONObject("placement");
+                upsert("t.vcf", "uid-t", h("dd16"), "t").getJSONObject("placement");
         placement.put("status", "tombstone");
         JSONObject op = new JSONObject();
         op.put("op", "upsert");
@@ -1076,7 +1186,66 @@ public class PimdirStorageTest {
 
         // NOTE: and an edit after it revives the row, which is what makes an
         // edit beat a delete rather than the order of two taps deciding.
-        storage.applyWrites(batch(upsert("t.vcf", "uid-t", "dd16", "t")));
+        storage.applyWrites(batch(upsert("t.vcf", "uid-t", h("dd16"), "t")));
         assertEquals(0, scalar("SELECT deleted FROM items WHERE link_id = ?", "uid-t"));
+    }
+
+    /** The engine's first write records its SYNC version (STORAGE §4.3). */
+    @Test
+    public void theFirstSyncWriteRecordsTheEngineVersion() throws Exception {
+        assertEquals(0, scalar("SELECT count(*) FROM store_meta WHERE sync_version IS NOT NULL"));
+        storage.applyWrites(batch(storeObject("aa01", "body"), upsert("a.vcf", "uid-a", h("aa01"), "a")));
+        assertEquals(
+                1, scalar("SELECT count(*) FROM store_meta WHERE sync_version = 'sync-draft-07'"));
+
+        db.execSQL("UPDATE store_meta SET sync_version = 'sync-draft-06'");
+        try {
+            storage.applyWrites(batch(upsert("b.vcf", "uid-b", null, "b")));
+            throw new AssertionError("another engine's sync state written over");
+        } catch (PimalayaException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().startsWith("sync-version"));
+        }
+        assertEquals(0, scalar("SELECT count(*) FROM items WHERE link_id = 'uid-b'"));
+    }
+
+    /** A create is pushed under the identity its server knows (STORAGE §9). */
+    @Test
+    public void aCreateIsPushedUnderItsStatedIdentity() {
+        assertEquals("hash:x", PimdirStorage.statedOf(PimdirStorage.provisionalOf("esc:hash:x")));
+        assertEquals("esc:x", PimdirStorage.statedOf("esc:esc:x"));
+        assertEquals("uid-a", PimdirStorage.statedOf(PimdirStorage.provisionalOf("uid-a")));
+    }
+
+    /**
+     * An overruling edit keeps the diverging body it does not adopt as a
+     * retained item, keyed over the settling handle (SYNC §7, §9), and is
+     * refused while the conflict holds a body nobody read.
+     */
+    @Test
+    public void anOverruleKeepsTheBodyItDoesNotAdopt() throws Exception {
+        storage.applyWrites(
+                batch(storeObject("dd04", "LOCAL"), storeObject("dd05", "REMOTE"),
+                        conflicted(h("dd04"), h("dd05"))));
+        JSONObject overrule =
+                new JSONObject()
+                        .put("op", "overrule")
+                        .put("collection", "acct/Contacts")
+                        .put("handle", "p.vcf");
+
+        JSONArray effects = storage.applyWrites(batch(overrule, upsert("p.vcf", "uid-p", h("dd04"), "pia")));
+
+        String kept = "dup:uid-p#p.vcf";
+        assertEquals(kept, PimdirStorage.written(effects).getJSONArray("overruled")
+                .getJSONObject(0).getString("linkId"));
+        assertEquals(1, scalar("SELECT count(*) FROM items WHERE link_id = ? AND object_hash = ?"
+                + " AND deleted = 1 AND retained_at IS NOT NULL", kept, h("dd05")));
+
+        storage.applyWrites(batch(conflicted(h("dd04"), null)));
+        try {
+            storage.applyWrites(batch(overrule));
+            throw new AssertionError("an overrule over a body nobody read");
+        } catch (PimalayaException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().startsWith("conflict-unread"));
+        }
     }
 }

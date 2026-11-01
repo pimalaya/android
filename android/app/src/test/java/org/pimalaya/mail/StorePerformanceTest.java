@@ -142,12 +142,14 @@ public class StorePerformanceTest {
     @Test
     public void aHandleScopeReachesAStagedCreateByItsName() throws Exception {
         list(inbox, "h", 3, "2026-10-01T12:00:00Z");
+        String body = "From: a@example.org\r\n\r\nbody\r\n";
+        String hash = PimdirHash.of(body);
         JSONObject staged =
                 new JSONObject()
                         .put("collection", inbox)
                         .put("handle", PimdirStorage.provisionalOf("draft"))
                         .put("linkId", "draft")
-                        .put("object", "aa11")
+                        .put("object", hash)
                         .put("level", "full")
                         .put("status", "clean")
                         .put("flags", new JSONArray());
@@ -156,8 +158,8 @@ public class StorePerformanceTest {
                         .put(
                                 new JSONObject()
                                         .put("op", "storeObject")
-                                        .put("hash", "aa11")
-                                        .put("body", "From: a@example.org\r\n\r\nbody\r\n"))
+                                        .put("hash", hash)
+                                        .put("body", body))
                         .put(new JSONObject().put("op", "upsert").put("placement", staged)));
 
         JSONObject scope =
@@ -178,6 +180,17 @@ public class StorePerformanceTest {
     }
 
 
+    /**
+     * A seeded body's name, the prefix then {@code i}'s digits spelt in base32
+     * letters to 52 characters, so the schema takes it as a name (STORAGE §5).
+     */
+    private static final String NAME =
+            "? || replace(replace(replace(replace(printf('%0*d', 52 - length(?), i),"
+                    + " '0', 'a'), '1', 'b'), '8', 'c'), '9', 'd')";
+
+    /** A body every retained row of a purge pins. */
+    private static final String PINNED = "pinned" + "a".repeat(46);
+
     /** Seeds {@code count} listed messages straight into the tables. */
     private void seed(String collection, int from, int count, String date, String object) {
         String rows =
@@ -185,18 +198,18 @@ public class StorePerformanceTest {
                         + " WHERE i < " + (from + count) + ") ";
         if (object != null) {
             db.execSQL(
-                    rows + "INSERT INTO objects(hash, size, refcount) SELECT ? || i, 10, 1 FROM n",
-                    new Object[] {object});
+                    rows + "INSERT INTO objects(hash, size, refcount) SELECT " + NAME + ", 10, 1 FROM n",
+                    new Object[] {object, object});
         }
         db.execSQL(
-                rows + "INSERT INTO items(collection, link_id, seq, flags, object_hash, sort_key,"
-                        + " level) SELECT ?, 'm' || i, i, '[]', ? || i, ?, ? FROM n",
-                new Object[] {collection, object, date, object == null ? 1 : 2});
+                rows + "INSERT INTO items(collection, link_id, seq, flags_known, object_hash,"
+                        + " sort_key, level) SELECT ?, 'm' || i, i, 1, " + NAME + ", ?, ? FROM n",
+                new Object[] {collection, object, object, date, object == null ? 1 : 2});
         db.execSQL(
-                rows + "INSERT INTO bindings(collection, link_id, source, handle, base_flags,"
-                        + " base_object, base_present) SELECT ?, 'm' || i, 'server', 'h' || i,"
-                        + " '[]', ? || i, 1 FROM n",
-                new Object[] {collection, object});
+                rows + "INSERT INTO bindings(collection, link_id, source, handle,"
+                        + " base_flags_known, base_object, base_present) SELECT ?, 'm' || i,"
+                        + " 'server', 'h' || i, 1, " + NAME + ", 1 FROM n",
+                new Object[] {collection, object, object});
         db.execSQL(
                 rows + "INSERT INTO mail_summary(collection, link_id, subject, date)"
                         + " SELECT ?, 'm' || i, 's', ? FROM n",
@@ -231,12 +244,12 @@ public class StorePerformanceTest {
     @Test
     public void aPurgePastACursorWindowLetsGoOfEveryPin() {
         db.execSQL(
-                "INSERT INTO objects(hash, size, refcount) VALUES('pinned0', 10, " + PAST_A_WINDOW + ")");
+                "INSERT INTO objects(hash, size, refcount) VALUES('" + PINNED + "', 10, " + PAST_A_WINDOW + ")");
         db.execSQL(
                 "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < "
                         + PAST_A_WINDOW + ") INSERT INTO items(collection, link_id, seq,"
                         + " object_hash, level, deleted, retained_at)"
-                        + " SELECT ?, 'r' || i, i, 'pinned0', 2, 1, '2001-01-01T00:00:00Z' FROM n",
+                        + " SELECT ?, 'r' || i, i, '" + PINNED + "', 2, 1, '2001-01-01T00:00:00Z' FROM n",
                 new Object[] {inbox});
 
         DeletedItems deleted = new DeletedItems(pimdir, context);
@@ -261,7 +274,8 @@ public class StorePerformanceTest {
     /** EXPLAIN QUERY PLAN of a bound read, its steps joined. */
     private String plan(PimdirSql.Bound bound) {
         StringBuilder plan = new StringBuilder();
-        try (Cursor cursor = PimdirDb.typed(db, "EXPLAIN QUERY PLAN " + bound.sql, bound.args)) {
+        try (Cursor cursor =
+                PimdirDb.query(db, bound.with("EXPLAIN QUERY PLAN " + bound.sql, bound.args))) {
             while (cursor.moveToNext()) {
                 plan.append(cursor.getString(3)).append('\n');
             }
@@ -277,12 +291,10 @@ public class StorePerformanceTest {
         values.put("after_seq", 7L);
         values.put("after_collection", inbox);
 
+        // NOTE: the canonical statement states its bound on the sort key
+        // itself since storage-draft-08 (keyset-reads-seek-their-bound).
         String canonical = plan(PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values));
-        assertFalse(canonical, canonical.contains("sort_key>? AND sort_key<?"));
-        String bounded =
-                plan(MailStore.below(
-                        PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values), "2026-01-01T00:00:00Z"));
-        assertTrue(bounded, bounded.contains("items_by_sort_global (sort_key>? AND sort_key<?)"));
+        assertTrue(canonical, canonical.contains("items_by_sort (collection=? AND sort_key"));
     }
 
     @Test
@@ -320,15 +332,14 @@ public class StorePerformanceTest {
         // NOTE: a fling lands on a row with no page above it read: from the
         // start of its day on the wall clock the days were counted on.
         for (int minutes : new int[] {0, 120, -300}) {
-            String shift = String.format(java.util.Locale.ROOT, "%+d minutes", minutes);
-            List<MailStore.Day> days = store.countByDay(query, shift);
+            List<MailStore.Day> days = store.countByDay(query, minutes);
             for (int row = 0; row < whole.size(); row += 5) {
                 MailList.Seek seek = MailList.seek(days, minutes, row);
                 List<MailStore.StoredMessage> landed =
                         store.pageBelow(query, seek.key, seek.skip, 3);
                 List<String> expected =
                         ids(whole).subList(row, Math.min(whole.size(), row + 3));
-                assertEquals("row " + row + " at " + shift, expected, ids(landed));
+                assertEquals("row " + row + " at " + minutes, expected, ids(landed));
             }
             assertNull(MailList.seek(days, minutes, whole.size()));
         }
@@ -364,7 +375,7 @@ public class StorePerformanceTest {
         MailStore.Query query = store.query((account, collection) -> true, false, false, "");
         assertEquals(20, store.count(query));
         assertEquals(0, store.count(query.unread()));
-        assertEquals(1, store.countByDay(query, "+0 minutes").size());
+        assertEquals(1, store.countByDay(query, 0).size());
         MailStore.Query chip = store.query((account, collection) -> true, false, true, "");
         assertEquals(0, store.count(chip));
 

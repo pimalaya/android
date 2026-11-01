@@ -65,22 +65,27 @@ public class MutationTest {
         assertEquals(4, client.sent.size());
     }
 
+    /** The name the store files a text body under (BLAKE3, objects.json). */
+    private static String name(String body) {
+        return PimdirSql.hash(body.getBytes(StandardCharsets.UTF_8));
+    }
+
     @Test
     public void edits() throws Exception {
         stager.mutateEdit("c", "h6", "BODY \u00e9", new JSONObject().put("subject", "S"), "k1");
         assertSameJson(
-                "{\"op\":\"edit\",\"handle\":\"h6\",\"hash\":\"s4eze32kzmmfwesdoapqv6fkkq\","
+                "{\"op\":\"edit\",\"handle\":\"h6\",\"hash\":\"" + name("BODY \u00e9") + "\","
                         + "\"size\":7,\"body\":\"BODY \u00e9\",\"summary\":{\"subject\":\"S\"},"
                         + "\"sortKey\":\"k1\"}",
                 last());
         stager.mutateEdit("c", "h7", "BODY", null, "");
         assertSameJson(
-                "{\"op\":\"edit\",\"handle\":\"h7\",\"hash\":\"gdt6ihx2wmnix2vfclverksnte\","
+                "{\"op\":\"edit\",\"handle\":\"h7\",\"hash\":\"" + name("BODY") + "\","
                         + "\"size\":4,\"body\":\"BODY\",\"sortKey\":\"\"}",
                 last());
         stager.mutateEdit("c", "h8", "B", null, null);
         assertSameJson(
-                "{\"op\":\"edit\",\"handle\":\"h8\",\"hash\":\"357hbziccvcpja2lx3tevhrxre\","
+                "{\"op\":\"edit\",\"handle\":\"h8\",\"hash\":\"" + name("B") + "\","
                         + "\"size\":1,\"body\":\"B\"}",
                 last());
     }
@@ -91,18 +96,18 @@ public class MutationTest {
                 "c", "L1", "TEXT", Flags.of(Flags.Marker.SEEN), new JSONObject().put("a", 1), "k");
         assertSameJson(
                 "{\"op\":\"add\",\"linkId\":\"L1\",\"flags\":[\"\\\\Seen\"],"
-                        + "\"hash\":\"4s5cc22t4z25htsfvbme3z46zq\",\"size\":4,\"body\":\"TEXT\","
+                        + "\"hash\":\"" + name("TEXT") + "\",\"size\":4,\"body\":\"TEXT\","
                         + "\"summary\":{\"a\":1},\"sortKey\":\"k\"}",
                 last());
         stager.mutateAdd("c", "L2", "TEXT", (Flags) null, null, null);
         assertSameJson(
-                "{\"op\":\"add\",\"linkId\":\"L2\",\"hash\":\"4s5cc22t4z25htsfvbme3z46zq\","
+                "{\"op\":\"add\",\"linkId\":\"L2\",\"hash\":\"" + name("TEXT") + "\","
                         + "\"size\":4,\"body\":\"TEXT\"}",
                 last());
         stager.mutateAdd("c", "L3", new byte[] {(byte) 0xff, 0, 'a'}, Flags.none(), null, "");
         assertSameJson(
                 "{\"op\":\"add\",\"linkId\":\"L3\",\"flags\":[],"
-                        + "\"hash\":\"7f4jm5nclkdwawynma4hk2hclq\",\"size\":3,"
+                        + "\"hash\":\"" + PimdirSql.hash(new byte[] {(byte) 0xff, 0, 'a'}) + "\",\"size\":3,"
                         + "\"bodyBase64\":\"\\/wBh\",\"sortKey\":\"\"}",
                 last());
         stager.mutateAdd(
@@ -114,7 +119,7 @@ public class MutationTest {
                 "k");
         assertSameJson(
                 "{\"op\":\"add\",\"linkId\":\"L4\",\"flags\":[\"\\\\Seen\",\"a\\/b\"],"
-                        + "\"hash\":\"xu6jar6wqfwdc4xvfxnufp3xy4\",\"size\":3,"
+                        + "\"hash\":\"" + name("x/y") + "\",\"size\":3,"
                         + "\"bodyBase64\":\"eC95\",\"sortKey\":\"k\"}",
                 last());
     }

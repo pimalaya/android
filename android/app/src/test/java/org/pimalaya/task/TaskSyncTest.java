@@ -260,7 +260,10 @@ public class TaskSyncTest {
 
         // NOTE: what CalendarEngine listed with no summary before, the row a
         // reader lists tasks from (task_summary, Annex A.4).
-        assertEquals("[\"waiting\",\"@home\"]", one("SELECT categories FROM task_summary"));
+        assertEquals(
+                "waiting,@home",
+                one("SELECT group_concat(value) FROM (SELECT value FROM task_category"
+                        + " ORDER BY position)"));
         assertEquals("2", one("SELECT priority FROM task_summary"));
         assertEquals("Fix the gate", one("SELECT summary FROM task_summary"));
     }

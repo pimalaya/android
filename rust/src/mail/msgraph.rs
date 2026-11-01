@@ -457,7 +457,9 @@ impl<H: Host> Msgraph<'_, H> {
     /// the ceiling, the next resuming below the oldest `Date` it reached.
     ///
     /// No checkpoint: a band round keeps the source's, and a first chunk
-    /// lands before any delta link exists.
+    /// lands before any delta link exists. Every page is narrowed (SYNC
+    /// §4): the `sentDateTime` filter misses an undated message, and no
+    /// enumeration is handed, a folder's ids costing a request per 1,000.
     fn band_page(
         &mut self,
         folder: &str,
@@ -494,7 +496,7 @@ impl<H: Host> Msgraph<'_, H> {
         }
 
         if !page.more {
-            return Ok(MailPage::round(items, None, None));
+            return Ok(MailPage::round(items, None, None).narrowed(true, None));
         }
         let next = match oldest {
             Some(oldest) if fresh > 0 => {
@@ -519,14 +521,13 @@ impl<H: Host> Msgraph<'_, H> {
             },
             // NOTE: a page of undated messages alone, which no ceiling
             // resumes below; the delta's first pass names the rest.
-            _ => return Ok(MailPage::round(items, None, None)),
+            _ => return Ok(MailPage::round(items, None, None).narrowed(true, None)),
         };
         let cursor = serde_json::to_string(&next).map_err(|err| err.to_string())?;
-        Ok(MailPage::round(
-            items,
-            Some(format!("{BAND_CURSOR}{cursor}")),
-            None,
-        ))
+        Ok(
+            MailPage::round(items, Some(format!("{BAND_CURSOR}{cursor}")), None)
+                .narrowed(true, None),
+        )
     }
 
     /// One page of the unfiltered delta's first pass, as a round page: the

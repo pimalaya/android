@@ -319,7 +319,7 @@ public class DeletedItemsTest {
         assertEquals(seq, scalar("SELECT seq FROM items WHERE link_id = '42'"));
         assertEquals(0, scalar("SELECT deleted FROM items WHERE link_id = '42'"));
         assertNull(string("SELECT retained_at FROM items WHERE link_id = '42'"));
-        String flags = string("SELECT flags FROM items WHERE link_id = '42'");
+        String flags = string("SELECT group_concat(flag, ' ') FROM placement_flag WHERE link_id = '42'");
         assertNotNull(flags);
         assertTrue(flags, flags.contains("Seen"));
         assertFalse("restored, no longer marked deleted", flags.contains("Deleted"));

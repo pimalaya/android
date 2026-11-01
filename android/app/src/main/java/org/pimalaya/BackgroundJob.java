@@ -57,6 +57,11 @@ public class BackgroundJob extends JobService {
 
     private void run() {
         AppState state = App.of(this).state;
+        // NOTE: a store of another draft is neither read nor written (pimdir
+        // STORAGE §6): the screen says to reinstall, and nothing syncs.
+        if (App.of(this).storeRefused()) {
+            return;
+        }
         // NOTE: the app on screen syncs on the user's word, and its lists
         // would not know what a run wrote under them.
         if (state.onScreen || !App.of(this).pimdir().locks().takeSync()) {

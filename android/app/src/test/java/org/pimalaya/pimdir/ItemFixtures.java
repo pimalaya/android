@@ -76,19 +76,20 @@ public final class ItemFixtures {
 
         if (exists) {
             db.execSQL(
-                    "UPDATE items SET object_hash = ?, sort_key = ?, flags = ?,"
+                    "UPDATE items SET object_hash = ?, sort_key = ?,"
                             + " level = ?, deleted = 0, retained_at = NULL, retained_by = NULL"
                             + " WHERE collection = ? AND link_id = ?",
-                    new Object[] {hash, row.sortKey, row.flags, level, collection, row.linkId});
+                    new Object[] {hash, row.sortKey, level, collection, row.linkId});
         } else {
             db.execSQL(
-                    "INSERT INTO items(collection, link_id, seq, flags, object_hash,"
-                            + " sort_key, level) VALUES(?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO items(collection, link_id, seq, object_hash,"
+                            + " sort_key, level) VALUES(?, ?, ?, ?, ?, ?)",
                     new Object[] {
-                        collection, row.linkId, items.seqFor(db, row.linkId), row.flags, hash,
-                        row.sortKey, level
+                        collection, row.linkId, PimdirItems.seqFor(db, collection, row.linkId),
+                        hash, row.sortKey, level
                     });
         }
+        PimdirItems.writeFlags(db, collection, row.linkId, flagsOf(row.flags));
 
         PimdirSummary.write(db, collection, row.linkId, row.summary);
         if (row.revision != null) {
@@ -131,6 +132,23 @@ public final class ItemFixtures {
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
+        }
+    }
+
+    /** A fixture's flags, a JSON array as written, null for unknown. */
+    private static java.util.List<String> flagsOf(String flags) {
+        if (flags == null) {
+            return null;
+        }
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(flags);
+            java.util.List<String> list = new java.util.ArrayList<>();
+            for (int index = 0; index < array.length(); index++) {
+                list.add(array.getString(index));
+            }
+            return list;
+        } catch (org.json.JSONException error) {
+            throw new IllegalArgumentException(flags, error);
         }
     }
 

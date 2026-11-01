@@ -171,7 +171,7 @@ public final class EventStore {
     private boolean refusesTasks(String collection) {
         PimdirSql.Bound bound =
                 PimdirSql.bind("LOAD_CAPABILITIES", Map.of("collection", collection));
-        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
             while (cursor.moveToNext()) {
                 if (X_VTODO.equals(cursor.getString(1)) && "none".equals(cursor.getString(2))) {
                     return true;
@@ -354,7 +354,7 @@ public final class EventStore {
         for (int read = PAGE; read == PAGE; ) {
             read = 0;
             PimdirSql.Bound bound = PimdirSql.bind(statement, values);
-            try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+            try (Cursor cursor = PimdirDb.query(db, bound)) {
                 while (cursor.moveToNext()) {
                     read++;
                     String key = collection + "\n" + cursor.getString(1);

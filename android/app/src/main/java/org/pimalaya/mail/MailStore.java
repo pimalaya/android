@@ -505,25 +505,30 @@ public final class MailStore {
 
     List<String> threadOf(String collection, String linkId) {
         List<String> thread = new ArrayList<>();
+        String messageId;
         try (Cursor cursor =
                 items.readable()
                         .rawQuery(
-                                "SELECT message_id, in_reply_to FROM mail_summary"
+                                "SELECT message_id FROM mail_summary"
                                         + " WHERE collection = ? AND link_id = ?",
                                 new String[] {collection, linkId})) {
             if (!cursor.moveToNext() || cursor.isNull(0)) {
                 return thread;
             }
-            try {
-                JSONArray before = new JSONArray(cursor.getString(1));
-                for (int index = 0; index < before.length(); index++) {
-                    thread.add("<" + before.getString(index) + ">");
-                }
-            } catch (JSONException error) {
-                Log.w("pimalaya", "unreadable in_reply_to: " + linkId, error);
-            }
-            thread.add("<" + cursor.getString(0) + ">");
+            messageId = cursor.getString(0);
         }
+        // NOTE: the reply ids are rows of their own (Annex A.1), in order.
+        try (Cursor cursor =
+                items.readable()
+                        .rawQuery(
+                                "SELECT msg_id FROM mail_in_reply_to"
+                                        + " WHERE collection = ? AND link_id = ? ORDER BY position",
+                                new String[] {collection, linkId})) {
+            while (cursor.moveToNext()) {
+                thread.add("<" + cursor.getString(0) + ">");
+            }
+        }
+        thread.add("<" + messageId + ">");
         return thread;
     }
 
@@ -705,7 +710,7 @@ public final class MailStore {
         PimdirSql.Bound bound = query.pattern == null && query.hidden == null
                 ? unjoined(PimdirSql.bind("COUNT_MAIL", query.values(null, -1)), query.attachment)
                 : around("SELECT count(*) FROM (", listed(query), ")");
-        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
             return cursor.moveToFirst() ? cursor.getLong(0) : 0;
         }
     }
@@ -726,11 +731,11 @@ public final class MailStore {
     /**
      * The query's messages per day, newest day first, undated last.
      *
-     * <p>{@code shift} is the SQLite modifier to the wall clock
-     * ({@code '+120 minutes'}). A search groups {@code search_mail} as a
+     * <p>{@code minutes} is the wall clock's offset from UTC, east positive
+     * (STORAGE {@code count_mail_by_day}). A search groups {@code search_mail} as a
      * subquery by {@code count_mail_by_day}'s day expression.
      */
-    List<Day> countByDay(Query query, String shift) {
+    List<Day> countByDay(Query query, long minutes) {
         List<Day> days = new ArrayList<>();
         if (query.size == 0) {
             return days;
@@ -738,20 +743,20 @@ public final class MailStore {
         PimdirSql.Bound bound;
         if (query.pattern == null && query.hidden == null) {
             Map<String, Object> values = query.values(null, -1);
-            values.put("shift", shift);
+            values.put("shift", minutes);
             bound = unjoined(PimdirSql.bind("COUNT_MAIL_BY_DAY", values), query.attachment);
         } else {
             PimdirSql.Bound search = listed(query);
             Object[] args = new Object[search.args.length + 1];
-            args[0] = shift;
+            args[0] = minutes;
             System.arraycopy(search.args, 0, args, 1, search.args.length);
-            bound = new PimdirSql.Bound(
-                    "SELECT date(nullif(sort_key, ''), coalesce(?, '+0 minutes')) AS day,"
+            bound = search.with(
+                    "SELECT date(nullif(sort_key, ''), coalesce(?, 0) || ' minutes') AS day,"
                             + " count(*) FROM (" + search.sql + ")"
                             + " GROUP BY day ORDER BY day DESC",
                     args);
         }
-        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
             while (cursor.moveToNext()) {
                 days.add(new Day(cursor.isNull(0) ? null : cursor.getString(0), cursor.getLong(1)));
             }
@@ -774,7 +779,7 @@ public final class MailStore {
         values.put("since", query.since);
         PimdirSql.Bound bound = unjoined(PimdirSql.bind("COUNT_UNREAD", values), null);
         long unread = 0;
-        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
             while (cursor.moveToNext()) {
                 unread += cursor.getLong(1);
             }
@@ -814,7 +819,7 @@ public final class MailStore {
         values.put("until", until);
         values.put("held", held);
         PimdirSql.Bound bound = PimdirSql.bind("SUM_MAIL", values);
-        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
             return cursor.moveToFirst()
                     ? new Sum(cursor.getLong(0), cursor.getLong(1), cursor.getLong(2))
                     : new Sum(0, 0, 0);
@@ -837,8 +842,8 @@ public final class MailStore {
         values.put("after_key", floor);
         values.put("after_seq", Long.MIN_VALUE);
         values.put("after_collection", "");
-        PimdirSql.Bound bound = below(PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values), floor);
-        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
+        PimdirSql.Bound bound = PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values);
+        try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
             while (cursor.moveToNext()) {
                 if (!cursor.isNull(5) && !cursor.getString(5).isEmpty()) {
                     dates.add(cursor.getString(5));
@@ -851,7 +856,8 @@ public final class MailStore {
     /**
      * One page newest first: after {@code after}, else at {@code offset}.
      *
-     * <p>The keyset is bounded on the sort key ({@link #below}), so a deep page
+     * <p>The keyset statement seeks its bound on the sort key (STORAGE
+     * keyset-reads-seek-their-bound), so a deep page
      * costs its own rows; an offset costs those it skips, so a fling reads from
      * its day ({@link #pageBelow}).
      */
@@ -866,7 +872,7 @@ public final class MailStore {
             // cut out of it is still a whole one.
             PimdirSql.Bound read =
                     PimdirSql.bind(statement, query.values(after, limit + query.hiding));
-            bound = below(hiding(read, query, limit), after == null ? null : after.sortKey);
+            bound = hiding(read, query, limit);
         } else {
             bound = skipping(listed(query), offset, limit);
         }
@@ -891,7 +897,7 @@ public final class MailStore {
             values.put("after_collection", "");
         }
         PimdirSql.Bound read = hiding(PimdirSql.bind(statement, values), query, skip + limit);
-        return rows(below(skipping(read, skip, limit), key), limit);
+        return rows(skipping(read, skip, limit), limit);
     }
 
     /** A read narrowed to {@code limit} rows past the first {@code skip}. */
@@ -900,14 +906,14 @@ public final class MailStore {
         System.arraycopy(inner.args, 0, args, 0, inner.args.length);
         args[inner.args.length] = limit;
         args[inner.args.length + 1] = skip;
-        return new PimdirSql.Bound("SELECT * FROM (" + inner.sql + ") LIMIT ? OFFSET ?", args);
+        return inner.with("SELECT * FROM (" + inner.sql + ") LIMIT ? OFFSET ?", args);
     }
 
     /** The rows of a page read as a list shows them. */
     private List<StoredMessage> rows(PimdirSql.Bound bound, int limit) {
         List<StoredMessage> messages = new ArrayList<>(limit);
         Map<String, PimdirCollections.Stored> mailboxes = mailboxes();
-        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
             while (cursor.moveToNext()) {
                 StoredMessage message = row(cursor, mailboxes);
                 if (message != null) {
@@ -916,25 +922,6 @@ public final class MailStore {
             }
         }
         return messages;
-    }
-
-    /**
-     * A keyset read with its bound stated on the sort key, so the index serves.
-     *
-     * <p>{@code sort_key <= key} through a CTE named {@code items}, flattened;
-     * else each page walks {@code items_by_sort_global} from the top
-     * (cairn/changes/store-performance). A null key reads it as it is.
-     */
-    static PimdirSql.Bound below(PimdirSql.Bound inner, String key) {
-        if (key == null) {
-            return inner;
-        }
-        Object[] args = new Object[inner.args.length + 1];
-        args[0] = key;
-        System.arraycopy(inner.args, 0, args, 1, inner.args.length);
-        return new PimdirSql.Bound(
-                "WITH items AS (SELECT * FROM main.items WHERE sort_key <= ?) " + inner.sql,
-                args);
     }
 
     /**
@@ -947,7 +934,7 @@ public final class MailStore {
         if (attachment != null) {
             return inner;
         }
-        return new PimdirSql.Bound(
+        return inner.with(
                 "WITH mail_summary(collection, link_id, attachment)"
                         + " AS (SELECT NULL, NULL, NULL WHERE 0) " + inner.sql,
                 inner.args);
@@ -963,7 +950,7 @@ public final class MailStore {
         key.put("collection", collection);
         key.put("link_id", linkId);
         PimdirSql.Bound bound = PimdirSql.bind("GET_MAIL_ROW", key);
-        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
             return cursor.moveToFirst() ? row(cursor, mailboxes()) : null;
         }
     }
@@ -980,16 +967,16 @@ public final class MailStore {
                         cursor.getString(0),
                         mailbox.name,
                         cursor.getString(2),
-                        cursor.isNull(9) ? "" : cursor.getString(9),
-                        cursor.isNull(11) ? "" : cursor.getString(11),
-                        cursor.isNull(10) ? "" : cursor.getString(10)),
+                        cursor.isNull(8) ? "" : cursor.getString(8),
+                        cursor.isNull(10) ? "" : cursor.getString(10),
+                        cursor.isNull(9) ? "" : cursor.getString(9)),
                 new StoredMessage.Listing(
                         mailboxLabel(mailbox),
                         cursor.isNull(5) ? "" : cursor.getString(5),
                         cursor.getLong(1),
                         flags(cursor.isNull(3) ? null : cursor.getString(3)),
-                        cursor.isNull(14) ? null : cursor.getInt(14),
-                        cursor.isNull(13) ? null : cursor.getLong(13),
+                        cursor.isNull(13) ? null : cursor.getInt(13),
+                        cursor.isNull(12) ? null : cursor.getLong(12),
                         !cursor.isNull(4) && cursor.getInt(6) >= PimdirItems.FULL));
     }
 
@@ -1014,12 +1001,9 @@ public final class MailStore {
         values.put("after_collection", null);
         values.put("limit", 500);
         while (true) {
-            PimdirSql.Bound bound =
-                    below(
-                            PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values),
-                            (String) values.get("after_key"));
+            PimdirSql.Bound bound = PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values);
             int read = 0;
-            try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
+            try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
                 while (cursor.moveToNext()) {
                     read++;
                     String sortKey = cursor.isNull(5) ? "" : cursor.getString(5);
@@ -1029,8 +1013,8 @@ public final class MailStore {
                                     cursor.getString(2),
                                     sortKey,
                                     !cursor.isNull(4) && cursor.getInt(6) >= PimdirItems.FULL,
-                                    cursor.isNull(13) ? null : cursor.getLong(13),
-                                    cursor.isNull(14) ? null : cursor.getInt(14)));
+                                    cursor.isNull(12) ? null : cursor.getLong(12),
+                                    cursor.isNull(13) ? null : cursor.getInt(13)));
                     values.put("after_key", sortKey);
                     values.put("after_seq", cursor.getLong(1));
                     values.put("after_collection", cursor.getString(0));
@@ -1097,7 +1081,7 @@ public final class MailStore {
         System.arraycopy(inner.args, 0, args, 0, inner.args.length);
         args[inner.args.length] = query.hidden;
         args[inner.args.length + 1] = limit;
-        return new PimdirSql.Bound(
+        return inner.with(
                 "SELECT * FROM (" + inner.sql + ") WHERE NOT EXISTS (SELECT 1 FROM json_each(?) h"
                         + " WHERE json_extract(h.value, '$[0]') = collection"
                         + " AND json_extract(h.value, '$[1]') = link_id)"
@@ -1107,7 +1091,7 @@ public final class MailStore {
 
     /** A bound statement between a prefix and a suffix. */
     private static PimdirSql.Bound around(String prefix, PimdirSql.Bound inner, String suffix) {
-        return new PimdirSql.Bound(prefix + inner.sql + suffix, inner.args);
+        return inner.with(prefix + inner.sql + suffix, inner.args);
     }
 
     /**
@@ -1118,7 +1102,7 @@ public final class MailStore {
     private static PimdirSql.Bound wrapped(
             String prefix, String statement, String suffix, Query query) {
         PimdirSql.Bound inner = PimdirSql.bind(statement, query.values(null, -1));
-        return new PimdirSql.Bound(prefix + inner.sql + suffix, inner.args);
+        return inner.with(prefix + inner.sql + suffix, inner.args);
     }
 
     /**
@@ -1196,7 +1180,7 @@ public final class MailStore {
         Map<String, Object> values = new HashMap<>();
         values.put("collection", collection);
         PimdirSql.Bound bound = PimdirSql.bind("LIST_COVERAGE", values);
-        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
             while (cursor.moveToNext()) {
                 if (!PimdirStorage.SERVER.equals(cursor.getString(0))) {
                     continue;
@@ -1466,8 +1450,7 @@ public final class MailStore {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            PimdirSql.Bound bases = PimdirSql.bind("RELEASE_BASES_BEFORE", values);
-            db.execSQL(bases.sql, bases.args);
+            PimdirDb.changed(db, PimdirSql.bind("RELEASE_BASES_BEFORE", values));
             released = PimdirDb.changed(db, PimdirSql.bind("RELEASE_BEFORE", values));
             db.execSQL(PimdirSql.split(PimdirSql.of("RECOMPUTE_REFCOUNTS"))[0]);
             items.collectGarbage(db);
@@ -1507,7 +1490,7 @@ public final class MailStore {
                                     + " AND NOT EXISTS (SELECT 1 FROM bindings b"
                                     + " WHERE b.collection = i.collection AND b.link_id = i.link_id"
                                     + " AND (b.conflicted = 1"
-                                    + " OR NOT (b.base_present = 1 OR b.base_flags IS NOT NULL"
+                                    + " OR NOT (b.base_present = 1 OR b.base_flags_known = 1"
                                     + " OR b.base_object IS NOT NULL OR b.base_revision IS NOT NULL)"
                                     + " OR (b.base_object IS NOT NULL"
                                     + " AND b.base_object != i.object_hash)))",
@@ -1566,7 +1549,8 @@ public final class MailStore {
         try (Cursor cursor =
                 items.readable()
                         .rawQuery(
-                                "SELECT flags FROM items WHERE collection = ? AND link_id = ?",
+                                "SELECT " + PimdirItems.flagsOf("i") + " FROM items i"
+                                        + " WHERE i.collection = ? AND i.link_id = ?",
                                 new String[] {collection, id})) {
             if (!cursor.moveToFirst() || cursor.isNull(0)) {
                 return Flags.none();

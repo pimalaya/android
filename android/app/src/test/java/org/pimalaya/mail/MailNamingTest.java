@@ -144,7 +144,8 @@ public class MailNamingTest {
 
     /** A page of {@code items}, a round's when {@code complete}. */
     private static MailPage page(boolean complete, Named... items) {
-        return new MailPage(null, complete, null, false, List.of(items), true, List.of());
+        return new MailPage(
+                null, complete, null, false, null, List.of(items), true, false, List.of());
     }
 
     @Test

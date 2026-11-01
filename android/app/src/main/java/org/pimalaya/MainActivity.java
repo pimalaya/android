@@ -118,6 +118,9 @@ public class MainActivity extends Host
     /** The shared backend clients. */
     private final Clients clients = Clients.real();
 
+    /** Whether the store was refused, the activity standing aside at once. */
+    private boolean refused;
+
     SecureStore store;
     CardStore base;
 
@@ -235,6 +238,15 @@ public class MainActivity extends Host
         AppState state = App.of(this).state;
         reloadedRun = state.backgroundRan;
         super.onCreate(savedInstanceState);
+        // NOTE: a store of another draft is neither read nor written (pimdir
+        // STORAGE §6): the app stands aside for the screen saying to
+        // reinstall it, before anything opens the store.
+        if (App.of(this).storeRefused()) {
+            refused = true;
+            startActivity(new Intent(this, StoreRefusedActivity.class));
+            finish();
+            return;
+        }
         setContentView(R.layout.activity_main);
         drawer = findViewById(R.id.drawer);
         applyEdgeToEdge();
@@ -818,6 +830,10 @@ public class MainActivity extends Host
 
     @Override
     protected void onDestroy() {
+        if (refused) {
+            super.onDestroy();
+            return;
+        }
         App.of(this).state.onBackgroundEnd = null;
         io.shutdownNow();
         interactive.shutdownNow();

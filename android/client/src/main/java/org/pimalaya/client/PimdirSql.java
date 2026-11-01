@@ -9,9 +9,12 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The canonical pimdir SQL, as the pimdir specification defines it.
@@ -58,6 +61,65 @@ public final class PimdirSql {
         return Derived.from(Replies.object(Native.pimdirDerive(kind, body)));
     }
 
+    /**
+     * The name the store files a body under (STORAGE §5): BLAKE3, 52
+     * characters of lowercase base32, computed by io-pimdir.
+     */
+    public static String hash(byte[] body) {
+        return Native.pimdirHash(body);
+    }
+
+    /**
+     * A file's {@link #hash}, read whole a buffer at a time.
+     *
+     * @throws java.io.IOException when the file cannot be read
+     */
+    public static String hashFile(java.io.File file) throws java.io.IOException {
+        JSONObject reply;
+        try {
+            reply = new JSONObject(Native.pimdirHashFile(file.getAbsolutePath()));
+        } catch (JSONException error) {
+            throw new java.io.IOException("Unreadable hash reply: " + error.getMessage());
+        }
+        if (reply.has("error")) {
+            throw new java.io.IOException(reply.optString("error"));
+        }
+        return reply.optString("hash");
+    }
+
+    /**
+     * The versions a store is created with and opened at: {@code
+     * formatVersion}, {@code syncVersion}, {@code derivation}, {@code version}
+     * and {@code hashAlgo} (STORAGE §4, §6).
+     */
+    public static JSONObject identity() {
+        return Replies.object(Native.pimdirIdentity());
+    }
+
+    /**
+     * Why an existing store is not opened (STORAGE §6), or null when it is.
+     *
+     * <p>{@code facts} is what the owner read off the file without writing:
+     * {@code userVersion}, {@code objects} and {@code canonical} (name to
+     * text) and the {@code meta} row. Answers {@code {refused, detail}}.
+     */
+    public static JSONObject refusal(JSONObject facts) {
+        JSONObject reply = Replies.object(Native.pimdirCheck(facts.toString()));
+        return reply.has("refused") ? reply : null;
+    }
+
+    /**
+     * A queue row read strictly as its payload schema types it (STORAGE
+     * §15.3): its {@code targetCollection}, if any.
+     *
+     * @throws PimalayaException naming what is malformed, a row a producer
+     *     never appends and the drain parks whole
+     */
+    public static JSONObject action(String kind, String payload, String objectHash) {
+        return Replies.object(
+                Native.pimdirAction(kind, payload, objectHash == null ? "" : objectHash));
+    }
+
     /** Every statement, by name; unmodifiable. */
     static synchronized Map<String, String> all() {
         if (statements == null) {
@@ -100,19 +162,59 @@ public final class PimdirSql {
         for (int index = 0; index < args.length; index++) {
             args[index] = values.get(rewritten.names[index]);
         }
-        return new Bound(rewritten.sql, args);
+        Map<String, List<Object>> params = new LinkedHashMap<>();
+        for (String slot : rewritten.slots) {
+            params.put(slot, listOf(values.get(slot)));
+        }
+        return new Bound(rewritten.sql, args, params);
     }
 
-    /** A statement rewritten to positional parameters, and each one's name. */
+    /**
+     * A list parameter's values: a {@link java.util.Collection}, a {@link
+     * JSONArray} or the JSON array text earlier callers bound; none for null.
+     */
+    private static List<Object> listOf(Object value) {
+        List<Object> values = new ArrayList<>();
+        if (value == null) {
+            return values;
+        }
+        if (value instanceof java.util.Collection) {
+            values.addAll((java.util.Collection<?>) value);
+            return values;
+        }
+        try {
+            JSONArray array =
+                    value instanceof JSONArray
+                            ? (JSONArray) value
+                            : new JSONArray(value.toString());
+            for (int index = 0; index < array.length(); index++) {
+                values.add(array.get(index));
+            }
+        } catch (JSONException error) {
+            throw new PimalayaException("A list parameter is no JSON array: " + value);
+        }
+        return values;
+    }
+
+    /**
+     * A statement rewritten to positional parameters, each one's name, and
+     * the {@code temp.param} slots it reads its lists from (STORAGE §4.4).
+     */
     private static final class Rewritten {
         final String sql;
         final String[] names;
+        final String[] slots;
 
-        Rewritten(String sql, String[] names) {
+        Rewritten(String sql, String[] names, String[] slots) {
             this.sql = sql;
             this.names = names;
+            this.slots = slots;
         }
     }
+
+    /** A list slot a canonical statement reads, {@code slot = 'links'}. */
+    private static final java.util.regex.Pattern SLOT =
+            java.util.regex.Pattern.compile("slot\\s*=\\s*'([a-z_]+)'");
 
     /** The rewritten statements, by name: a sync binds thousands of times. */
     private static final Map<String, Rewritten> rewrites = new java.util.concurrent.ConcurrentHashMap<>();
@@ -153,7 +255,16 @@ public final class PimdirSql {
             rewritten.append(current);
         }
 
-        Rewritten made = new Rewritten(rewritten.toString(), names.toArray(new String[0]));
+        Set<String> slots = new LinkedHashSet<>();
+        java.util.regex.Matcher slot = SLOT.matcher(sql);
+        while (slot.find()) {
+            slots.add(slot.group(1));
+        }
+        Rewritten made =
+                new Rewritten(
+                        rewritten.toString(),
+                        names.toArray(new String[0]),
+                        slots.toArray(new String[0]));
         rewrites.put(name, made);
         return made;
     }
@@ -166,10 +277,32 @@ public final class PimdirSql {
         /** The values, in the order the statement's parameters occur. */
         public final Object[] args;
 
-        /** A statement and its positional values. */
+        /**
+         * The lists the statement reads from {@code temp.param}, by slot, in
+         * order: bound on the connection that runs it, beforehand
+         * ({@code clear_param}, then {@code bind_param} per value). Empty for
+         * a statement reading none.
+         */
+        public final Map<String, List<Object>> params;
+
+        /** A statement and its positional values, reading no list. */
         public Bound(String sql, Object[] args) {
+            this(sql, args, Collections.emptyMap());
+        }
+
+        /**
+         * Another statement over this one, a wrapper reading it as a
+         * subquery: the lists it reads go with it.
+         */
+        public Bound with(String sql, Object[] args) {
+            return new Bound(sql, args, params);
+        }
+
+        /** A statement, its positional values and the lists it reads. */
+        public Bound(String sql, Object[] args, Map<String, List<Object>> params) {
             this.sql = sql;
             this.args = args;
+            this.params = params;
         }
     }
 

@@ -366,7 +366,7 @@ public final class MailList {
                     }
 
                     int minutes = offsetMinutes();
-                    List<MailStore.Day> days = store.countByDay(listed, shift(minutes));
+                    List<MailStore.Day> days = store.countByDay(listed, minutes);
                     long shownUnread = store.count(listed.unread());
                     Layout next = Layout.of(host, outbox, outboxLabel, undated, days, shownUnread);
                     next.days = days;
@@ -678,15 +678,6 @@ public final class MailList {
         ((TextView) view.findViewById(R.id.mail_window_info))
                 .setText(info(host, wifi, footer.perMailbox));
         return view;
-    }
-
-    /**
-     * The SQLite modifier moving a UTC instant onto the wall clock today.
-     *
-     * <p>So a day header falls where the reader's midnight does.
-     */
-    private static String shift(int minutes) {
-        return String.format(Locale.ROOT, "%+d minutes", minutes);
     }
 
     /** The device's offset from UTC today, in minutes. */

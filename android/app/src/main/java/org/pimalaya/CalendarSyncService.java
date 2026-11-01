@@ -77,6 +77,9 @@ public class CalendarSyncService extends Service {
             if (!PhoneMirror.CALENDAR.granted(context)) {
                 return;
             }
+            if (App.of(context).storeRefused()) {
+                return;
+            }
 
             try {
                 PimdirDb pimdir = App.of(context).pimdir();

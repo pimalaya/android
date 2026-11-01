@@ -179,7 +179,7 @@ public final class TaskStore {
                         "LIST_REPLIED",
                         Map.of("ids", new JSONArray(waiting.keySet()).toString()));
         SQLiteDatabase db = new PimdirItems(parts.pimdir()).readable();
-        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(db, bound)) {
             while (cursor.moveToNext()) {
                 replied.addAll(waiting.getOrDefault(cursor.getString(0), Set.of()));
             }

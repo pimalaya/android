@@ -149,7 +149,7 @@ public final class ItemLinks {
             values.put("kind", self.kind);
             values.put("link_id", self.linkId);
             PimdirSql.Bound bound = PimdirSql.bind(statement, values);
-            try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+            try (Cursor cursor = PimdirDb.query(db, bound)) {
                 while (cursor.moveToNext()) {
                     Endpoint from = new Endpoint(cursor.getString(0), cursor.getString(1));
                     Endpoint to = new Endpoint(cursor.getString(2), cursor.getString(3));
@@ -230,7 +230,7 @@ public final class ItemLinks {
      */
     private static boolean query(SQLiteDatabase db, String name, Map<String, Object> values) {
         PimdirSql.Bound bound = PimdirSql.bind(name, values);
-        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(db, bound)) {
             return cursor.moveToFirst();
         }
     }
@@ -311,7 +311,7 @@ public final class ItemLinks {
 
     private static Cursor read(SQLiteDatabase db, String name, Map<String, Object> values) {
         PimdirSql.Bound bound = PimdirSql.bind(name, values);
-        return PimdirDb.typed(db, bound.sql, bound.args);
+        return PimdirDb.query(db, bound);
     }
 
     private static String text(Cursor cursor, int column) {

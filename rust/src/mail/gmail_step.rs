@@ -500,7 +500,10 @@ impl<H: Host> Gmail<'_, H> {
             .collect();
         let next = page.next.map(|next| format!("{LABEL_CURSOR}{next}"));
         let checkpoint = cursor.is_none().then_some(start);
-        Ok(MailPage::round(items, next, checkpoint))
+        // NOTE: `after:` misses a message received before it, whatever its
+        // `Date` (SYNC §4); no enumeration is handed, a whole label's ids
+        // costing a request per 500 of them.
+        Ok(MailPage::round(items, next, checkpoint).narrowed(since.is_some(), None))
     }
 
     /// One label's delta, projected from the account's history.

@@ -28,7 +28,6 @@ import org.pimalaya.client.PhoneAttendee;
 import org.pimalaya.client.PhoneComponent;
 import org.pimalaya.client.PhoneEvent;
 import org.pimalaya.client.PhoneTime;
-import org.pimalaya.pimdir.PimdirHash;
 
 /**
  * The pure half of the calendar mirror: object views to rows and back.
@@ -1495,7 +1494,9 @@ final class CalendarMapping {
     /**
      * A digest of an object's rows: an edited object's listed revision.
      *
-     * <p>Two reads of the same rows agree; any change of theirs moves it.
+     * <p>Two reads of the same rows agree; any change of theirs moves it. The
+     * app's own, never a store name: SHA-256 cut to 128 bits in base32,
+     * computed here rather than over JNI for every row a pass compares.
      */
     static String fingerprint(List<Row> rows) {
         List<String> parts = new ArrayList<>();
@@ -1513,7 +1514,35 @@ final class CalendarMapping {
             parts.add(part.toString());
         }
         Collections.sort(parts);
-        return PimdirHash.of(String.join("\n", parts));
+        return digest(String.join("\n", parts));
+    }
+
+    /** The first 16 bytes of a text's SHA-256, lowercase base32 unpadded. */
+    private static String digest(String text) {
+        byte[] digest;
+        try {
+            digest =
+                    java.security.MessageDigest.getInstance("SHA-256")
+                            .digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (java.security.NoSuchAlgorithmException error) {
+            throw new IllegalStateException("SHA-256 is not available", error);
+        }
+        String alphabet = "abcdefghijklmnopqrstuvwxyz234567";
+        StringBuilder name = new StringBuilder(26);
+        int buffer = 0;
+        int bits = 0;
+        for (int index = 0; index < 16; index++) {
+            buffer = (buffer << 8) | (digest[index] & 0xff);
+            bits += 8;
+            while (bits >= 5) {
+                bits -= 5;
+                name.append(alphabet.charAt((buffer >> bits) & 0x1f));
+            }
+        }
+        if (bits > 0) {
+            name.append(alphabet.charAt((buffer << (5 - bits)) & 0x1f));
+        }
+        return name.toString();
     }
 
     /** A view's time as an {@link EventTime}, null for none. */

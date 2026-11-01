@@ -530,8 +530,10 @@ public final class MailEngine extends PimdirEngine {
                         opens,
                         null,
                         false,
+                        null,
                         step.named,
                         true,
+                        false,
                         List.of());
         return listed(collection, page, false);
     }
@@ -840,7 +842,7 @@ public final class MailEngine extends PimdirEngine {
             Log.d(
                     "pimalaya",
                     "mail bodies " + collection + " (" + handles.size() + "): "
-                            + clients.offline().upgrade(this, collection, handles));
+                            + clients.offline().upgrade(this, collection, handles, false));
         } finally {
             // NOTE: every write naming them has returned, committed or not:
             // one no row names (the write failed) is an orphan to unlink.
@@ -1267,12 +1269,15 @@ public final class MailEngine extends PimdirEngine {
     private JSONObject pushFlags(
             String collection, String mailbox, String handle, JSONObject change)
             throws JSONException {
-        Flags staged = Flags.read(change.optJSONArray("flags"));
-        Flags base = offline.baseFlags(collection, handle);
+        // NOTE: two deltas the engine derived against what the server listed
+        // (pimdir SYNC §4), each marker written as one: a marker the server
+        // changed since the listing and the push leaves alone survives it.
+        Flags added = Flags.read(change.optJSONArray("add"));
+        Flags removed = Flags.read(change.optJSONArray("remove"));
 
         for (Flags.Marker flag : WRITABLE) {
-            boolean wanted = staged.has(flag);
-            if (base != null && wanted == base.has(flag)) {
+            boolean wanted = added.has(flag);
+            if (!wanted && !removed.has(flag)) {
                 continue;
             }
             try {

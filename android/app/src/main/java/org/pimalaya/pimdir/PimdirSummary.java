@@ -69,14 +69,24 @@ public final class PimdirSummary {
         values.put("collection", collection);
         values.put("link_id", linkId);
         JSONArray addresses = row.optJSONArray("addresses");
+        // NOTE: a message's reply ids and a task's categories are rows of
+        // their own (STORAGE Annex A.1, A.4), written after the row they
+        // hang off.
+        JSONArray lists = null;
+        String list = LISTS.get(kind);
         for (Iterator<String> columns = row.keys(); columns.hasNext(); ) {
             String column = columns.next();
-            if (!"addresses".equals(column)) {
+            if (column.equals(list)) {
+                lists = row.optJSONArray(column);
+            } else if (!"addresses".equals(column)) {
                 values.put(column, value(row.opt(column)));
             }
         }
 
         exec(db, "UPSERT_" + kind.toUpperCase(Locale.ROOT) + "_SUMMARY", values);
+        if (list != null) {
+            writeList(db, kind, collection, linkId, lists);
+        }
         writeAddresses(db, collection, linkId, addresses, fresh);
         String rule = ruleOf(kind);
         if (rule != null) {
@@ -123,17 +133,6 @@ public final class PimdirSummary {
         exec(db, rule, values);
     }
 
-    /** Runs every rule over the whole store, once, for an older store. */
-    static void linkAll(SQLiteDatabase db) {
-        for (String rule :
-                new String[] {
-                    "LINK_SENDERS_OF", "LINK_INVITATIONS_OF", "LINK_MAIL_FROM",
-                    "LINK_INVITATIONS_TO"
-                }) {
-            link(db, rule, null);
-        }
-    }
-
     /**
      * Replaces the item's addresses with the ones its summary names.
      *
@@ -160,6 +159,30 @@ public final class PimdirSummary {
             values.put("address", address.optString("address"));
             values.put("name", value(address.opt("name")));
             exec(db, "INSERT_ADDRESS", values);
+        }
+    }
+
+    /** The list a kind's summary carries as rows of its own, by kind. */
+    private static final Map<String, String> LISTS =
+            Map.of("mail", "in_reply_to", "task", "categories");
+
+    /**
+     * Replaces a message's {@code In-Reply-To} ids ({@code mail_in_reply_to})
+     * or a task's categories ({@code task_category}) with the summary's, in
+     * order; a summary stating none clears them.
+     */
+    private static void writeList(
+            SQLiteDatabase db, String kind, String collection, String linkId, JSONArray values) {
+        boolean mail = "mail".equals(kind);
+        Map<String, Object> scope = new LinkedHashMap<>();
+        scope.put("collection", collection);
+        scope.put("link_id", linkId);
+        exec(db, mail ? "REPLACE_IN_REPLY_TO" : "REPLACE_CATEGORIES", scope);
+        for (int index = 0; values != null && index < values.length(); index++) {
+            Map<String, Object> row = new LinkedHashMap<>(scope);
+            row.put("position", index);
+            row.put(mail ? "msg_id" : "value", values.optString(index));
+            exec(db, mail ? "INSERT_IN_REPLY_TO" : "INSERT_CATEGORY", row);
         }
     }
 

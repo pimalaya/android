@@ -321,7 +321,7 @@ public class TaskWritesTest {
 
         // NOTE: staged with the summary its body derives, so the store lists
         // it as a task (task_summary), and CREATED says when (GUIDE §17).
-        assertEquals("[\"inbox\"]", one("SELECT categories FROM task_summary"));
+        assertEquals("inbox", one("SELECT group_concat(value) FROM task_category"));
         assertEquals("Call the plumber", one("SELECT summary FROM task_summary"));
         assertTrue(captured.event.ical.contains("CREATED:"));
         assertEquals(captured.task.created().length(), 16);

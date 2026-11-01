@@ -169,11 +169,14 @@ impl<H: Host> Jmap<'_, H> {
             .filter_map(|email| named(email, scope))
             .collect();
 
-        Ok(MailPage::round(
-            items,
-            more.then(|| reached.to_string()),
-            checkpoint,
-        ))
+        // NOTE: `after` and `before` miss an undated message and one whose
+        // `Date` runs ahead of its arrival (SYNC §4); no enumeration is
+        // handed, a whole mailbox's ids costing a query per page of it.
+        let narrowed = scope.since.is_some() || scope.until.is_some();
+        Ok(
+            MailPage::round(items, more.then(|| reached.to_string()), checkpoint)
+                .narrowed(narrowed, None),
+        )
     }
 
     /// Takes a mailbox's newest emails below the floor's ceiling until its

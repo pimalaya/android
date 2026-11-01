@@ -5,7 +5,6 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.util.List;
-import org.json.JSONException;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
@@ -59,17 +58,15 @@ public class FlagsTest {
         assertEquals("[]", text(Flags.none()));
     }
 
+    /**
+     * A store read answers a flag set as its rows space-joined, in no order
+     * (pimdir STORAGE §13): no flag holds a space.
+     */
     @Test
-    public void theStoreColumnReadsBackToTheSameBytes() throws Exception {
-        String column = "[\"\\\\Seen\",\"$junk\",\"a\\/b\"]";
-        assertEquals(column, text(Flags.parse(column)));
-        assertEquals(List.of("\\Seen", "$junk", "a/b"), Flags.parse(column).markers());
+    public void theStoreColumnReadsAsItsRows() throws Exception {
+        assertEquals(
+                List.of("\\Seen", "$junk", "a/b"), Flags.parse("\\Seen $junk a/b").markers());
         assertEquals(Flags.none(), Flags.parse(null));
         assertEquals(Flags.none(), Flags.parse(""));
-    }
-
-    @Test(expected = JSONException.class)
-    public void anUnreadableColumnThrows() throws Exception {
-        Flags.parse("{");
     }
 }

@@ -279,7 +279,7 @@ public final class CalendarEngine extends PimdirEngine {
                 // (SYNC §2). The handle is what came back: the name a CalDAV
                 // server filed it by (Google picks it), or the id Graph,
                 // Google or JMAP minted.
-                String name = PimdirStorage.nameOf(handle);
+                String name = PimdirStorage.statedOf(handle);
                 try {
                     EventRef created =
                             clients.calendar().createEvent(

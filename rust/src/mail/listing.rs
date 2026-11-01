@@ -281,10 +281,19 @@ pub struct MailPage {
     /// engine restarts the round rather than this answering as if resumed.
     #[serde(skip_serializing_if = "core::ops::Not::not")]
     pub cursor_rejected: bool,
+    /// Every handle the mailbox holds, read by an enumeration no date filter
+    /// narrowed, on the last page of a narrowed round (SYNC §4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enumerated: Option<Vec<String>>,
     /// The members listed.
     pub items: Vec<Named>,
     /// Whether the page closes its listing.
     pub last: bool,
+    /// Whether a date filter narrowed the round's listing, on every page of
+    /// such a round: its silence then proves only the absence of a member
+    /// dated before the round opened (SYNC §4, §5).
+    #[serde(skip_serializing_if = "core::ops::Not::not")]
+    pub narrowed: bool,
     /// The handles a delta reports gone.
     pub vanished: Vec<String>,
 }
@@ -309,6 +318,14 @@ impl MailPage {
             checkpoint,
             ..Default::default()
         }
+    }
+
+    /// The page of a round its listing a date filter narrowed when
+    /// `narrowed`, carrying `enumerated` on its last page.
+    pub fn narrowed(mut self, narrowed: bool, enumerated: Option<Vec<String>>) -> Self {
+        self.narrowed = narrowed;
+        self.enumerated = enumerated.filter(|_| narrowed && self.last);
+        self
     }
 
     /// A delta: what changed since the checkpoint, and what went.

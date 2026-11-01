@@ -203,10 +203,21 @@ public class FileStoreTest {
                 scalar("SELECT seq FROM items WHERE collection = ? AND link_id = ?", folder,
                         first.linkId));
 
-        FileStore.StoredFile saved = files.attachments(accountId, "m1").get(0);
-        assertEquals(hash, saved.objectHash);
-        assertEquals("the stand-in is still the row listed", "2", saved.part);
-        assertArrayEquals(bytes, bytes(files.saved(saved)));
+        // NOTE: a folder is the device's, another account than the message's,
+        // so its copy no longer makes the stand-in read as held: a file of
+        // another account under the same key never does (pimdir STORAGE
+        // §9.2, list_attachments at storage-draft-08).
+        FileStore.StoredFile standIn = files.attachments(accountId, "m1").get(0);
+        assertNull(standIn.objectHash);
+        assertEquals("the stand-in is still the row listed", "2", standIn.part);
+        try (Cursor cursor =
+                pimdir.getReadableDatabase()
+                        .rawQuery(
+                                "SELECT object_hash FROM items WHERE collection = ? AND link_id = ?",
+                                new String[] {folder, first.linkId})) {
+            assertTrue(cursor.moveToFirst());
+            assertEquals("the copy holds the bytes", hash, cursor.getString(0));
+        }
     }
 
     @Test

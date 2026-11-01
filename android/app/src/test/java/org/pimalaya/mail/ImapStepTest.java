@@ -344,7 +344,7 @@ public class ImapStepTest {
                 "UPDATE bindings SET conflicted = 1 WHERE collection = ? AND link_id = '118'",
                 new Object[] {sent});
         db.execSQL(
-                "UPDATE bindings SET base_present = 0, base_flags = NULL, base_object = NULL,"
+                "UPDATE bindings SET base_present = 0, base_flags_known = 0, base_object = NULL,"
                         + " base_revision = NULL WHERE collection = ? AND link_id = '119'",
                 new Object[] {sent});
         db.execSQL(

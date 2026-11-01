@@ -2,21 +2,19 @@ package org.pimalaya.pimdir;
 
 import android.content.Context;
 import android.database.Cursor;
-import android.database.SQLException;
-import android.util.Log;
 
 import io.requery.android.database.sqlite.SQLiteCursor;
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import io.requery.android.database.sqlite.SQLiteOpenHelper;
 import io.requery.android.database.sqlite.SQLiteProgram;
 import io.requery.android.database.sqlite.SQLiteStatement;
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.pimalaya.client.PimdirSql;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -27,14 +25,19 @@ import java.util.regex.Pattern;
  * The pimdir store's database, on the SQLite the app bundles.
  *
  * <p>Schema from io-pimdir over JNI ({@link PimdirSql}), never transcribed.
- * Bundled SQLite for STRICT tables (3.37, platform only from Android 14). One
- * store for every account and kind.
+ * Bundled SQLite for its JSON1 and the statements the app still writes by
+ * hand. One store for every account and kind, at storage-draft-08: a store
+ * of another draft is refused, never reconciled nor migrated ({@link
+ * #refusal}), and the app reinstalled.
  */
 public final class PimdirDb extends SQLiteOpenHelper {
     /** The store directory under the app's private files. */
     static final String DIRECTORY = "pimdir";
 
     private static final String DATABASE = "pimdir.db";
+
+    /** The table the platform's helper keeps its locale in, not the store's. */
+    private static final String PLATFORM_TABLE = "android_metadata";
 
     private final File blobs;
 
@@ -62,10 +65,14 @@ public final class PimdirDb extends SQLiteOpenHelper {
      */
     private static final String[] SUPERSEDED = {"events.db", "mail.db"};
 
-    /** Opens the app's store, creating or migrating it as needed. */
+    /**
+     * Opens the app's store, creating it as needed.
+     *
+     * <p>A caller that may meet a store of another draft checks {@link
+     * #refusal} first: this one opens whatever is there.
+     */
     public PimdirDb(Context context) {
-        super(context, new File(storeDir(context), DATABASE).getAbsolutePath(), null,
-                PimdirSql.version());
+        super(context, databaseFile(context).getAbsolutePath(), null, PimdirSql.version());
         this.blobs = new File(storeDir(context), "objects");
         this.context = context.getApplicationContext() == null
                 ? context
@@ -83,6 +90,149 @@ public final class PimdirDb extends SQLiteOpenHelper {
         }
         return dir;
     }
+
+    /** The store's database file, which may not exist yet. */
+    private static File databaseFile(Context context) {
+        return new File(new File(context.getFilesDir(), DIRECTORY), DATABASE);
+    }
+
+    /**
+     * Why the store on disk is not opened, or null when it is (STORAGE §6).
+     *
+     * <p>A store another draft or another program wrote, or a damaged one, is
+     * refused by io-pimdir's rules ({@link PimdirSql#refusal}) on facts read
+     * off the file read-only: nothing in it is written, its journal mode
+     * included, and the app has to be reinstalled. Answers {@code {refused,
+     * detail}}; no file, or one declaring nothing, opens.
+     */
+    public static JSONObject refusal(Context context) {
+        File file = databaseFile(context);
+        if (!file.isFile()) {
+            return null;
+        }
+        try {
+            return PimdirSql.refusal(facts(file));
+        } catch (RuntimeException | JSONException unreadable) {
+            // NOTE: a file SQLite cannot even open as a database is no store
+            // this app reads; refusing it keeps it as it is for the user.
+            JSONObject refused = new JSONObject();
+            try {
+                refused.put("refused", "store-foreign");
+                refused.put("detail", String.valueOf(unreadable.getMessage()));
+            } catch (JSONException impossible) {
+                throw new IllegalStateException(impossible);
+            }
+            return refused;
+        }
+    }
+
+    /** What {@link #refusal} decides on, read off {@code file} read-only. */
+    static JSONObject facts(File file) throws JSONException {
+        JSONObject facts = new JSONObject();
+        SQLiteDatabase db =
+                SQLiteDatabase.openDatabase(
+                        file.getAbsolutePath(),
+                        null,
+                        SQLiteDatabase.OPEN_READONLY);
+        try {
+            try (Cursor cursor = db.rawQuery("PRAGMA user_version", null)) {
+                facts.put("userVersion", cursor.moveToFirst() ? cursor.getLong(0) : 0);
+            }
+            facts.put("objects", new JSONObject(objects(db)));
+            JSONObject meta = meta(db);
+            if (meta != null) {
+                facts.put("meta", meta);
+            }
+        } finally {
+            db.close();
+        }
+        facts.put("canonical", new JSONObject(canonicalObjects()));
+        return facts;
+    }
+
+    /**
+     * The {@code store_meta} row's columns the check reads, each left out
+     * where the store lacks it; null without the table or the row.
+     */
+    private static JSONObject meta(SQLiteDatabase db) throws JSONException {
+        Map<String, String> columns = new LinkedHashMap<>();
+        columns.put("format", "format");
+        columns.put("format_version", "formatVersion");
+        columns.put("version", "version");
+        columns.put("hash_algo", "hashAlgo");
+        columns.put("sync_version", "syncVersion");
+
+        StringBuilder select = new StringBuilder();
+        try (Cursor cursor =
+                db.rawQuery("SELECT name FROM pragma_table_info('store_meta')", null)) {
+            while (cursor.moveToNext()) {
+                String column = cursor.getString(0);
+                if (columns.containsKey(column)) {
+                    select.append(select.length() == 0 ? "" : ", ").append(column);
+                }
+            }
+        }
+        if (select.length() == 0) {
+            return null;
+        }
+
+        try (Cursor cursor =
+                db.rawQuery("SELECT " + select + " FROM store_meta WHERE id = 1", null)) {
+            if (!cursor.moveToFirst()) {
+                return null;
+            }
+            JSONObject meta = new JSONObject();
+            for (int index = 0; index < cursor.getColumnCount(); index++) {
+                if (cursor.isNull(index)) {
+                    continue;
+                }
+                String key = columns.get(cursor.getColumnName(index));
+                if ("version".equals(key)) {
+                    meta.put(key, cursor.getLong(index));
+                } else {
+                    meta.put(key, cursor.getString(index));
+                }
+            }
+            return meta;
+        }
+    }
+
+    /**
+     * Every table, index and trigger a database declares, by name, with its
+     * text; SQLite's own and the platform helper's left out.
+     */
+    private static Map<String, String> objects(SQLiteDatabase db) {
+        Map<String, String> objects = new LinkedHashMap<>();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL"
+                                + " AND name NOT LIKE 'sqlite_%' AND name <> ?",
+                        new String[] {PLATFORM_TABLE})) {
+            while (cursor.moveToNext()) {
+                objects.put(cursor.getString(0), cursor.getString(1));
+            }
+        }
+        return objects;
+    }
+
+    /** The objects the canonical migrations declare, on a scratch database. */
+    private static synchronized Map<String, String> canonicalObjects() {
+        if (canonical == null) {
+            SQLiteDatabase scratch = SQLiteDatabase.create(null);
+            try {
+                for (String statement : PimdirSql.schema()) {
+                    scratch.execSQL(statement);
+                }
+                canonical = objects(scratch);
+            } finally {
+                scratch.close();
+            }
+        }
+        return canonical;
+    }
+
+    /** {@link #canonicalObjects}, once per process. */
+    private static Map<String, String> canonical;
 
     /**
      * The application context the store was opened in.
@@ -104,168 +254,79 @@ public final class PimdirDb extends SQLiteOpenHelper {
         return blobs;
     }
 
+    /**
+     * Where a body failing its name is moved (STORAGE §3, §7), beside {@link
+     * #blobs}: never read as a body, never unlinked but by the user.
+     */
+    public File quarantine() {
+        return new File(blobs.getParentFile(), "quarantine");
+    }
+
+    /**
+     * Creates the store: 0001_init.sql and {@code init_store_meta} (STORAGE
+     * §6 step 3), the helper setting {@code user_version} on commit.
+     *
+     * <p>While the format is a draft no migration runs on an existing store,
+     * which {@link #refusal} refuses instead.
+     */
     @Override
     public void onCreate(SQLiteDatabase db) {
-        migrate(db, 0);
+        // NOTE: execSQL compiles one statement per call, and a migration is
+        // one script whose comments contain semicolons and whose triggers
+        // contain statements, so the split has to strip comments and read a
+        // trigger body whole (PimdirSql.split).
+        for (String statement : PimdirSql.schema()) {
+            db.execSQL(statement);
+        }
+        JSONObject identity = PimdirSql.identity();
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("version", identity.optLong("version", 1));
+        meta.put("derivation", identity.optLong("derivation"));
+        PimdirSql.Bound init = PimdirSql.bind("INIT_STORE_META", meta);
+        db.execSQL(init.sql, init.args);
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int from, int to) {
-        migrate(db, from);
+        throw new IllegalStateException(
+                "A pimdir store at version " + from + " is never migrated to " + to
+                        + " while the format is a draft");
     }
 
-    /**
-     * Runs every canonical migration above {@code from}, in order.
-     *
-     * <p>Stamps {@code store_meta} per version (STORAGE §6), as io-pimdir does;
-     * the helper sets {@code user_version} on commit. Migrated, never
-     * recreated: staged edits and the outbox live only here.
-     */
-    private static void migrate(SQLiteDatabase db, int from) {
-        String[] migrations = PimdirSql.migrations();
-
-        for (int index = from; index < migrations.length; index++) {
-            // NOTE: execSQL compiles one statement per call, and a migration
-            // is one script whose comments contain semicolons and whose
-            // triggers contain statements, so the split has to strip comments
-            // and read a trigger body whole (PimdirSql.split).
-            for (String statement : PimdirSql.split(migrations[index])) {
-                db.execSQL(statement);
-            }
-
-            int reached = index + 1;
-            if (reached == 1) {
-                // NOTE: the recorded algorithm has to be the one the app
-                // actually computes (PimdirHash), or every blob in the store is
-                // filed under a name no other pimdir reader can verify.
-                Map<String, Object> meta = new LinkedHashMap<>();
-                meta.put("version", reached);
-                meta.put("hash_algo", PimdirHash.ALGORITHM);
-                PimdirSql.Bound init = PimdirSql.bind("INIT_STORE_META", meta);
-                db.execSQL(init.sql, init.args);
-            } else {
-                db.execSQL(
-                        "UPDATE store_meta SET version = ? WHERE id = 1", new Object[] {reached});
-            }
-        }
+    @Override
+    public void onDowngrade(SQLiteDatabase db, int from, int to) {
+        // NOTE: a store a newer app wrote is refused, never recreated: what
+        // it staged and never pushed lives only there (STORAGE §6).
+        throw new IllegalStateException(
+                "A pimdir store at version " + from + " is newer than this app's " + to);
     }
 
     @Override
     public void onConfigure(SQLiteDatabase db) {
+        // NOTE: a database takes its vacuum mode only while it holds no
+        // table (STORAGE §4.1), so a fresh store's is set before onCreate.
+        if (objects(db).isEmpty()) {
+            pragma(db, "PRAGMA auto_vacuum = INCREMENTAL");
+        }
         // NOTE: SQLite leaves foreign keys off and the schema's cascades
         // (bindings with items, items with collections) rely on them.
         db.setForeignKeyConstraintsEnabled(true);
         db.enableWriteAheadLogging();
+        // NOTE: the durability and erasure STORAGE §4.1 and §11.5 ask of
+        // every connection, and a schema read as one from elsewhere (§18).
+        pragma(db, "PRAGMA synchronous = FULL");
+        pragma(db, "PRAGMA secure_delete = ON");
+        pragma(db, "PRAGMA trusted_schema = OFF");
         // NOTE: a page of mail runs a dozen statements per message, the
         // canonical ones and the store's own, and more than the default 25
         // distinct ones per pass: a cache that small recompiles them by turns.
         db.setMaxSqlCacheSize(SQLiteDatabase.MAX_SQL_CACHE_SIZE);
     }
 
-    @Override
-    public void onOpen(SQLiteDatabase db) {
-        reconcileDraftShape(db, blobs);
-    }
-
-    /**
-     * Reconciles a version-1 store's shape with the canonical schema's.
-     *
-     * <p>A draft folds changes into version 1 (SPEC.md §6) unseen by {@link
-     * #onUpgrade}; reconciled as io-pimdir's client does, from the canonical
-     * DDL.
-     */
-    private static void reconcileDraftShape(SQLiteDatabase db, File blobs) {
-        rebuildCollections(db);
-        Map<String, String> existing = heldObjects(db);
-        Set<String> mail = columnsOf(db, "mail_summary");
-        boolean invitations = !mail.isEmpty() && !mail.contains("invitation");
-
-        // NOTE: tables are widened first: an index or trigger over a column
-        // the store does not hold yet fails to create.
-        for (String statement : PimdirSql.schema()) {
-            if (statement.trim().toUpperCase().startsWith("CREATE TABLE")
-                    && !existing.containsKey(declaredName(statement))) {
-                db.execSQL(statement);
-            }
-        }
-
-        // NOTE: a table a later draft folded out (SYNC §3's probes) goes, the
-        // next listing restating its rows; platform tables are left alone.
-        Map<String, Map<String, String>> canonical = canonicalColumns();
-        for (Map.Entry<String, String> held : existing.entrySet()) {
-            String name = held.getKey();
-            boolean table = held.getValue().trim().toUpperCase().startsWith("CREATE TABLE");
-            if (table && !canonical.containsKey(name) && !name.startsWith("sqlite_")
-                    && !name.startsWith("android_")) {
-                db.execSQL("DROP TABLE IF EXISTS " + name);
-            }
-        }
-
-        for (Map.Entry<String, Map<String, String>> table : canonical.entrySet()) {
-            Set<String> held = columnsOf(db, table.getKey());
-            // NOTE: an empty side means the question cannot be asked rather
-            // than that the answer is "everything": no such table yet, or a
-            // parse that read no column out of the DDL. Dropping against an
-            // empty canonical set would empty the table's shape instead.
-            if (held.isEmpty() || table.getValue().isEmpty()) {
-                continue;
-            }
-
-            for (Map.Entry<String, String> column : table.getValue().entrySet()) {
-                if (!held.contains(column.getKey()) && addable(column.getValue())) {
-                    db.execSQL("ALTER TABLE " + table.getKey() + " ADD COLUMN "
-                            + column.getKey() + " " + column.getValue());
-                }
-            }
-
-            for (String column : held) {
-                if (!table.getValue().containsKey(column)) {
-                    dropColumn(db, table.getKey(), column);
-                }
-            }
-        }
-
-        // NOTE: a moved index or trigger is rebuilt: CREATE ... IF NOT EXISTS
-        // keys on the name and would keep the old plan or body.
-        for (String statement : PimdirSql.schema()) {
-            String name = declaredName(statement);
-            if (name == null || statement.trim().toUpperCase().startsWith("CREATE TABLE")) {
-                continue;
-            }
-
-            String stored = existing.get(name);
-            if (stored == null || !normalized(stored).equals(normalized(statement))) {
-                db.execSQL("DROP " + kindOf(statement) + " IF EXISTS " + name);
-                db.execSQL(statement);
-            }
-        }
-
-        if (invitations) {
-            backfillReferences(db, blobs);
-        }
-        reconcileRoles(db);
-    }
-
-    /**
-     * Gives the attachments role to an older store's attachments collections.
-     *
-     * <p>Found by the id {@code FileStore} files them under; once, on open,
-     * after the role's constraint takes it.
-     */
-    private static void reconcileRoles(SQLiteDatabase db) {
-        List<String> missing = new ArrayList<>();
-        String sql = PimdirSql.split(PimdirSql.of("LIST_COLLECTIONS"))[0];
-        try (Cursor cursor = db.rawQuery(sql, null)) {
-            while (cursor.moveToNext()) {
-                String id = cursor.getString(0);
-                if (PimdirSummary.FILE.equals(cursor.getString(2)) && cursor.isNull(9)
-                        && id.endsWith(PimdirAccount.SEPARATOR + PimdirCollections.ATTACHMENTS)) {
-                    missing.add(id);
-                }
-            }
-        }
-        for (String id : missing) {
-            setRole(db, id);
+    /** Runs a pragma, whether or not it answers a row. */
+    private static void pragma(SQLiteDatabase db, String pragma) {
+        try (Cursor cursor = db.rawQuery(pragma, null)) {
+            cursor.moveToFirst();
         }
     }
 
@@ -276,300 +337,6 @@ public final class PimdirDb extends SQLiteOpenHelper {
         values.put("role", PimdirCollections.ATTACHMENTS_ROLE);
         PimdirSql.Bound bound = PimdirSql.bind("SET_COLLECTION_ROLE", values);
         db.execSQL(bound.sql, bound.args);
-    }
-
-    /**
-     * Rebuilds {@code collections} whose role check predates §14.3's.
-     *
-     * <p>§6's procedure: foreign keys off (no cascade), {@code
-     * legacy_alter_table} on (other triggers stay), rows copied, keys checked
-     * before commit.
-     */
-    private static void rebuildCollections(SQLiteDatabase db) {
-        String create = null;
-        for (String statement : PimdirSql.schema()) {
-            if (statement.trim().toUpperCase().startsWith("CREATE TABLE")
-                    && "collections".equals(declaredName(statement))) {
-                create = statement;
-            }
-        }
-        String stored = heldObjects(db).get("collections");
-        if (create == null || stored == null || !create.contains("'attachments'")
-                || stored.contains("'attachments'")) {
-            return;
-        }
-
-        Set<String> columns = columnsOf(db, "collections");
-        columns.retainAll(canonicalColumns().get("collections").keySet());
-        String list = String.join(", ", columns);
-        db.setForeignKeyConstraintsEnabled(false);
-        try {
-            db.beginTransaction();
-            try {
-                db.execSQL("PRAGMA legacy_alter_table = ON");
-                db.execSQL(create.replaceFirst("collections", "collections_rebuild"));
-                db.execSQL("INSERT INTO collections_rebuild (" + list + ") SELECT " + list
-                        + " FROM collections");
-                db.execSQL("DROP TABLE collections");
-                db.execSQL("ALTER TABLE collections_rebuild RENAME TO collections");
-                db.execSQL("PRAGMA legacy_alter_table = OFF");
-                try (Cursor broken = db.rawQuery("PRAGMA foreign_key_check", null)) {
-                    if (broken.moveToFirst()) {
-                        throw new IllegalStateException(
-                                "The collections rebuild left a foreign key dangling");
-                    }
-                }
-                db.setTransactionSuccessful();
-            } finally {
-                db.endTransaction();
-            }
-        } finally {
-            db.setForeignKeyConstraintsEnabled(true);
-        }
-    }
-
-    /**
-     * Backfills the automatic references an older store owes, once.
-     *
-     * <p>Each held message's invitation from its body (Annex A.1), then every
-     * rule store-wide (§14.2), over {@code list_mail_page_filtered}'s keyset. A
-     * body missing from the blobs leaves its row.
-     */
-    private static void backfillReferences(SQLiteDatabase db, File blobs) {
-        List<String> mailboxes = new ArrayList<>();
-        try (Cursor cursor =
-                db.rawQuery(PimdirSql.split(PimdirSql.of("LIST_COLLECTIONS"))[0], null)) {
-            while (cursor.moveToNext()) {
-                if (PimdirSummary.MAIL.equals(cursor.getString(2))) {
-                    mailboxes.add(cursor.getString(0));
-                }
-            }
-        }
-        PimdirBlobs store = new PimdirBlobs(blobs);
-        db.beginTransaction();
-        try {
-            Map<String, Object> values = new LinkedHashMap<>();
-            values.put("collections", new org.json.JSONArray(mailboxes).toString());
-            values.put("limit", 500);
-            while (!mailboxes.isEmpty()) {
-                PimdirSql.Bound bound = PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values);
-                List<String[]> held = new ArrayList<>();
-                int read = 0;
-                try (Cursor cursor = typed(db, bound.sql, bound.args)) {
-                    while (cursor.moveToNext()) {
-                        read++;
-                        if (!cursor.isNull(4)) {
-                            held.add(new String[] {
-                                cursor.getString(0), cursor.getString(2), cursor.getString(4)
-                            });
-                        }
-                        values.put("after_key", cursor.isNull(5) ? "" : cursor.getString(5));
-                        values.put("after_seq", cursor.getLong(1));
-                        values.put("after_collection", cursor.getString(0));
-                    }
-                }
-                for (String[] row : held) {
-                    restateInvitation(db, store, row[0], row[1], row[2]);
-                }
-                if (read < 500) {
-                    break;
-                }
-            }
-            PimdirSummary.linkAll(db);
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
-        }
-    }
-
-    /** Restates a held message's summary from a body naming an invitation. */
-    private static void restateInvitation(
-            SQLiteDatabase db, PimdirBlobs blobs, String collection, String linkId, String hash) {
-        try {
-            byte[] body = blobs.get(hash);
-            if (body == null) {
-                return;
-            }
-            org.json.JSONObject summary =
-                    PimdirSql.derive(PimdirSummary.MAIL, body).summary();
-            org.json.JSONObject mail = summary == null ? null : summary.optJSONObject("mail");
-            if (mail != null && mail.has("invitation")) {
-                PimdirSummary.write(db, collection, linkId, summary);
-            }
-        } catch (java.io.IOException | RuntimeException unreadable) {
-            Log.w("pimalaya", "invitation not derived: " + linkId, unreadable);
-        }
-    }
-    /**
-     * Every table, index and trigger held, by name, with its creating text.
-     *
-     * <p>Compared against the canonical statement, it tells a moved index or
-     * trigger from an unchanged one.
-     */
-    private static Map<String, String> heldObjects(SQLiteDatabase db) {
-        Map<String, String> objects = new LinkedHashMap<>();
-        try (Cursor cursor =
-                db.rawQuery("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL", null)) {
-            while (cursor.moveToNext()) {
-                objects.put(cursor.getString(0), cursor.getString(1));
-            }
-        }
-        return objects;
-    }
-
-    /** The name a {@code CREATE} statement declares, or null otherwise. */
-    private static String declaredName(String statement) {
-        String[] tokens = statement.trim().split("\\s+|\\(");
-        if (tokens.length < 3 || !tokens[0].equalsIgnoreCase("CREATE")) {
-            return null;
-        }
-
-            // NOTE: a UNIQUE index names itself one token later.
-        int kind = tokens[1].equalsIgnoreCase("UNIQUE") ? 2 : 1;
-        if (tokens.length <= kind + 1) {
-            return null;
-        }
-
-        switch (tokens[kind].toUpperCase()) {
-            case "TABLE":
-            case "INDEX":
-            case "TRIGGER":
-                return tokens[kind + 1];
-            default:
-                return null;
-        }
-    }
-
-    /** What a {@code CREATE} statement declares, as {@code DROP} spells it. */
-    private static String kindOf(String statement) {
-        return statement.trim().toUpperCase().startsWith("CREATE TRIGGER") ? "TRIGGER" : "INDEX";
-    }
-
-    /** A statement with whitespace collapsed, to compare two spellings. */
-    private static String normalized(String statement) {
-        return statement.replaceAll("\\s+", " ").trim();
-    }
-
-    /**
-     * Every canonical table's columns, name to declaration, in order.
-     *
-     * <p>A shallow parse (top-level commas, first token the name, constraint
-     * parts skipped): enough to compare with {@code PRAGMA table_info}.
-     */
-    private static Map<String, Map<String, String>> canonicalColumns() {
-        Map<String, Map<String, String>> tables = new LinkedHashMap<>();
-
-        for (String statement : PimdirSql.schema()) {
-            String[] head = statement.split("\\(", 2);
-            if (head.length < 2 || !head[0].trim().toUpperCase().startsWith("CREATE TABLE")) {
-                continue;
-            }
-
-            String name = head[0].trim().split("\\s+")[2];
-            Map<String, String> columns = new LinkedHashMap<>();
-            for (String part : splitTopLevel(head[1].substring(0, head[1].lastIndexOf(')')))) {
-                String[] tokens = part.trim().split("\\s+", 2);
-                if (tokens.length < 2 || CONSTRAINTS.contains(tokens[0].toUpperCase())) {
-                    continue;
-                }
-                columns.put(tokens[0], tokens[1].trim());
-            }
-            tables.put(name, columns);
-        }
-        return tables;
-    }
-
-    /** Keywords a {@code CREATE TABLE} part opens on when naming no column. */
-    private static final Set<String> CONSTRAINTS =
-            Set.of("PRIMARY", "UNIQUE", "CHECK", "FOREIGN", "CONSTRAINT");
-
-    /** A comma-separated list split outside its parentheses. */
-    private static List<String> splitTopLevel(String body) {
-        List<String> parts = new ArrayList<>();
-        int depth = 0;
-        int start = 0;
-
-        for (int index = 0; index < body.length(); index++) {
-            char current = body.charAt(index);
-            if (current == '(') {
-                depth++;
-            } else if (current == ')') {
-                depth--;
-            } else if (current == ',' && depth == 0) {
-                parts.add(body.substring(start, index));
-                start = index + 1;
-            }
-        }
-        parts.add(body.substring(start));
-        return parts;
-    }
-
-    /**
-     * Whether a column so declared can be added to a populated table.
-     *
-     * <p>SQLite refuses {@code NOT NULL} without a default. Read before any
-     * {@code CHECK}, which may well hold for every existing row.
-     */
-    private static boolean addable(String declaration) {
-        String upper = declaration.toUpperCase();
-        int check = upper.indexOf("CHECK");
-        String constraints = check < 0 ? upper : upper.substring(0, check);
-        return !constraints.contains("NOT NULL") || constraints.contains("DEFAULT");
-    }
-
-    /**
-     * Drops a column the canonical schema no longer declares, best-effort.
-     *
-     * <p>One still named by an index, constraint or trigger is kept and logged:
-     * an unused column decides nothing, refusing the store would be worse.
-     */
-    private static void dropColumn(SQLiteDatabase db, String table, String column) {
-        try {
-            db.execSQL("ALTER TABLE " + table + " DROP COLUMN " + column);
-        } catch (SQLException error) {
-            Log.i("pimalaya", "keeping retired column " + table + "." + column, error);
-        }
-    }
-
-    /**
-     * The column names the store's table holds; empty when there is none.
-     *
-     * <p>Through a {@code SELECT}, not a bare {@code PRAGMA}: outside a
-     * transaction a read may hit another WAL connection, which sees the new
-     * schema only in a read transaction.
-     */
-    private static Set<String> columnsOf(SQLiteDatabase db, String table) {
-        Set<String> columns = new LinkedHashSet<>();
-        try (Cursor cursor =
-                db.rawQuery("SELECT name FROM pragma_table_info(?)", new String[] {table})) {
-            while (cursor.moveToNext()) {
-                columns.add(cursor.getString(0));
-            }
-        }
-        return columns;
-    }
-
-    @Override
-    public void onDowngrade(SQLiteDatabase db, int from, int to) {
-        // NOTE: a store written by a newer app has a shape this one cannot
-        // read, and no migration runs backwards, so it is recreated: what it
-        // staged and never pushed is lost, which only a downgrade costs. Every
-        // table goes, read from the store rather than listed here: the list
-        // is what would go stale.
-        List<String> tables = new ArrayList<>();
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT name FROM sqlite_master WHERE type = 'table'"
-                                + " AND name NOT LIKE 'sqlite_%'",
-                        null)) {
-            while (cursor.moveToNext()) {
-                tables.add(cursor.getString(0));
-            }
-        }
-        for (String table : tables) {
-            db.execSQL("DROP TABLE IF EXISTS " + table);
-        }
-        migrate(db, 0);
     }
 
     /**
@@ -595,7 +362,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
      *
      * <p>{@code rawQuery} binds text, and {@code :seen = EXISTS (...)} has no
      * affinity: {@code '1'} never equals {@code 1}, so the unread chip would
-     * match nothing.
+     * match nothing. A statement reading lists goes through {@link #read}.
      */
     public static Cursor typed(SQLiteDatabase db, String sql, Object[] args) {
         return db.rawQueryWithFactory(
@@ -609,17 +376,154 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
+     * Runs a canonical read and answers its cursor, its lists bound through
+     * {@code temp.param} first (STORAGE §4.4).
+     *
+     * <p>A read with no list streams as {@link #typed} does; one with lists
+     * is read whole inside the transaction that holds its connection, the
+     * table being per connection, and answered as a copy.
+     */
+    public static Cursor query(SQLiteDatabase db, PimdirSql.Bound bound) {
+        if (bound.params.isEmpty()) {
+            return typed(db, bound.sql, bound.args);
+        }
+        try {
+            return read(db, bound, PimdirDb::copy);
+        } catch (JSONException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    /** A cursor's rows copied whole, each value as its own type. */
+    private static Cursor copy(Cursor cursor) {
+        android.database.MatrixCursor copy =
+                new android.database.MatrixCursor(cursor.getColumnNames(), cursor.getCount());
+        while (cursor.moveToNext()) {
+            Object[] row = new Object[cursor.getColumnCount()];
+            for (int index = 0; index < row.length; index++) {
+                switch (cursor.getType(index)) {
+                    case Cursor.FIELD_TYPE_NULL:
+                        row[index] = null;
+                        break;
+                    case Cursor.FIELD_TYPE_INTEGER:
+                        row[index] = cursor.getLong(index);
+                        break;
+                    case Cursor.FIELD_TYPE_FLOAT:
+                        row[index] = cursor.getDouble(index);
+                        break;
+                    case Cursor.FIELD_TYPE_BLOB:
+                        row[index] = cursor.getBlob(index);
+                        break;
+                    default:
+                        row[index] = cursor.getString(index);
+                }
+            }
+            copy.addRow(row);
+        }
+        return copy;
+    }
+
+    /** What a {@link #read} does with its cursor, read whole before it ends. */
+    public interface Rows<T> {
+        T read(Cursor cursor) throws JSONException;
+    }
+
+    /**
+     * Runs a canonical read, its lists bound through {@code temp.param}
+     * (STORAGE §4.4), and hands its cursor to {@code rows}.
+     *
+     * <p>The table is per connection, so the lists and the read share one:
+     * the caller's transaction, else one of the read's own, the cursor read
+     * whole inside it ({@code rows} returns what it read).
+     */
+    public static <T> T read(SQLiteDatabase db, PimdirSql.Bound bound, Rows<T> rows)
+            throws JSONException {
+        if (bound.params.isEmpty()) {
+            try (Cursor cursor = typed(db, bound.sql, bound.args)) {
+                return rows.read(cursor);
+            }
+        }
+        boolean own = !db.inTransaction();
+        if (own) {
+            db.beginTransactionDeferred();
+        }
+        try {
+            params(db, bound);
+            T read;
+            try (Cursor cursor = typed(db, bound.sql, bound.args)) {
+                read = rows.read(cursor);
+            }
+            if (own) {
+                db.setTransactionSuccessful();
+            }
+            return read;
+        } finally {
+            if (own) {
+                db.endTransaction();
+            }
+        }
+    }
+
+    /**
+     * Binds a statement's lists into {@code temp.param} on the connection the
+     * caller's transaction holds: {@code create_param}, {@code clear_param},
+     * then {@code bind_param} for each value in order.
+     */
+    private static void params(SQLiteDatabase db, PimdirSql.Bound bound) {
+        db.execSQL(PimdirSql.split(PimdirSql.of("CREATE_PARAM"))[0]);
+        db.execSQL(PimdirSql.bind("CLEAR_PARAM", Map.of()).sql);
+        PimdirSql.Bound insert = PimdirSql.bind("BIND_PARAM", Map.of());
+        try (SQLiteStatement statement = db.compileStatement(insert.sql)) {
+            for (Map.Entry<String, List<Object>> slot : bound.params.entrySet()) {
+                int position = 0;
+                for (Object value : slot.getValue()) {
+                    Map<String, Object> values = new HashMap<>();
+                    values.put("slot", slot.getKey());
+                    values.put("position", position++);
+                    values.put("value", value);
+                    statement.clearBindings();
+                    bind(statement, PimdirSql.bind("BIND_PARAM", values).args);
+                    statement.executeInsert();
+                }
+            }
+        }
+    }
+
+    /**
      * Runs a canonical write, {@code RETURNING} dropped; answers rows changed.
      *
      * <p>Never through a cursor: a refill of its 2 MB window reruns the
      * statement, so a {@code DELETE ... RETURNING} deletes again, its later
-     * rows lost.
+     * rows lost. Its lists are bound first, in the caller's transaction or
+     * one of its own.
      */
     public static int changed(SQLiteDatabase db, PimdirSql.Bound bound) {
         String sql = RETURNING.matcher(bound.sql).replaceFirst("");
-        try (SQLiteStatement statement = db.compileStatement(sql)) {
-            bind(statement, bound.args);
-            return statement.executeUpdateDelete();
+        if (bound.params.isEmpty()) {
+            try (SQLiteStatement statement = db.compileStatement(sql)) {
+                bind(statement, bound.args);
+                return statement.executeUpdateDelete();
+            }
+        }
+        boolean own = !db.inTransaction();
+        if (own) {
+            db.beginTransaction();
+        }
+        try {
+            params(db, bound);
+            int changed;
+            try (SQLiteStatement statement = db.compileStatement(sql)) {
+                bind(statement, bound.args);
+                changed = statement.executeUpdateDelete();
+            }
+            if (own) {
+                db.setTransactionSuccessful();
+            }
+            return changed;
+        } finally {
+            if (own) {
+                db.endTransaction();
+            }
         }
     }
 

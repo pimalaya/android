@@ -108,7 +108,7 @@ public abstract class PimdirEngine extends Stager {
         Log.d(
                 "pimalaya",
                 "hydrate " + collection + " (" + pending.size() + " below full): "
-                        + clients.offline().upgrade(this, collection, pending));
+                        + clients.offline().upgrade(this, collection, pending, true));
     }
 
     /** Whether reading {@code collection}'s bodies is a download to report. */

@@ -271,8 +271,8 @@ public class PimdirContactsTest {
     @Test
     public void aBodilessSpineIsNotShownAsANamelessContact() {
         db.execSQL(
-                "INSERT INTO items(collection, link_id, seq, flags, level)"
-                        + " VALUES(?, 'u10', 1, '[]', 1)",
+                "INSERT INTO items(collection, link_id, seq, flags_known, level)"
+                        + " VALUES(?, 'u10', 1, 1, 1)",
                 new Object[] {BOOK});
 
         // NOTE: an empty row would read as a broken contact, not one arriving.
@@ -322,8 +322,8 @@ public class PimdirContactsTest {
     @Test
     public void aBodilessSpineIsNotRepairedIntoAnEmptySummary() {
         db.execSQL(
-                "INSERT INTO items(collection, link_id, seq, flags, level)"
-                        + " VALUES(?, 'u13', 1, '[]', 1)",
+                "INSERT INTO items(collection, link_id, seq, flags_known, level)"
+                        + " VALUES(?, 'u13', 1, 1, 1)",
                 new Object[] {BOOK});
 
         // NOTE: an empty summary would read as known-nameless; the hydrate

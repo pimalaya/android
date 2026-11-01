@@ -145,26 +145,123 @@ public final class PimdirItems {
     }
 
     /**
-     * The item's public id, shared by every placement of its link id.
+     * The public id an item of {@code linkId} takes in {@code collection},
+     * shared by every placement of that key within the collection's kind
+     * (STORAGE §9.1, {@code seq_for_link_any}).
      *
-     * <p>Drawn from the store-wide counter the first time a link id is seen.
+     * <p>Drawn from the store-wide counter ({@code bump_next_seq}) the first
+     * time the key is seen in the kind, and always for a key the writer
+     * derived ({@code alt:}, {@code hash:}, {@code dup:}), which names no
+     * identity to share one with.
      */
-    public long seqFor(SQLiteDatabase db, String linkId) {
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT seq FROM items WHERE link_id = ? LIMIT 1",
-                        new String[] {linkId})) {
-            if (cursor.moveToFirst()) {
-                return cursor.getLong(0);
+    public static long seqFor(SQLiteDatabase db, String collection, String linkId) {
+        if (!derived(linkId)) {
+            Map<String, Object> values = new java.util.HashMap<>();
+            values.put("collection", collection);
+            values.put("link_id", linkId);
+            PimdirSql.Bound held = PimdirSql.bind("SEQ_FOR_LINK_ANY", values);
+            try (Cursor cursor = PimdirDb.typed(db, held.sql, held.args)) {
+                if (cursor.moveToFirst()) {
+                    return cursor.getLong(0);
+                }
             }
         }
-        try (Cursor cursor =
-                db.rawQuery(
-                        "UPDATE store_meta SET next_seq = next_seq + 1 WHERE id = 1"
-                                + " RETURNING next_seq - 1",
-                        null)) {
+        PimdirSql.Bound bump = PimdirSql.bind("BUMP_NEXT_SEQ", Map.of());
+        try (Cursor cursor = db.rawQuery(bump.sql, null)) {
             return cursor.moveToFirst() ? cursor.getLong(0) : 1;
         }
+    }
+
+    /**
+     * A placement's flags as one space-joined text, NULL when nobody read
+     * them, for an {@code items} row aliased {@code alias}: the expression the
+     * canonical {@code load_items} reads its {@code placement_flag} rows
+     * with (STORAGE §13).
+     */
+    public static String flagsOf(String alias) {
+        return "CASE WHEN " + alias + ".flags_known = 1 THEN coalesce((SELECT"
+                + " group_concat(pf.flag, ' ') FROM placement_flag pf WHERE pf.collection = "
+                + alias + ".collection AND pf.link_id = " + alias + ".link_id), '') END";
+    }
+
+    /**
+     * A binding's base flags on {@link #flagsOf}'s terms, for a {@code
+     * bindings} row aliased {@code alias} ({@code binding_base_flag}).
+     */
+    public static String baseFlagsOf(String alias) {
+        return "CASE WHEN " + alias + ".base_flags_known = 1 THEN coalesce((SELECT"
+                + " group_concat(bf.flag, ' ') FROM binding_base_flag bf WHERE bf.collection = "
+                + alias + ".collection AND bf.link_id = " + alias + ".link_id AND bf.source = "
+                + alias + ".source), '') END";
+    }
+
+    /**
+     * Writes an item's flags as rows (STORAGE §13): {@code flags_known}, then
+     * {@code retain_flags} and {@code add_flags} over the set; null forgets
+     * them, the schema's trigger dropping the rows. The row is written first.
+     */
+    public static void writeFlags(
+            SQLiteDatabase db,
+            String collection,
+            String linkId,
+            java.util.Collection<String> flags) {
+        db.execSQL(
+                "UPDATE items SET flags_known = ? WHERE collection = ? AND link_id = ?",
+                new Object[] {flags == null ? 0 : 1, collection, linkId});
+        if (flags == null) {
+            return;
+        }
+        Map<String, Object> values = new java.util.HashMap<>();
+        values.put("collection", collection);
+        values.put("link_id", linkId);
+        values.put("flags", new ArrayList<Object>(new java.util.LinkedHashSet<>(flags)));
+        PimdirDb.changed(db, PimdirSql.bind("RETAIN_FLAGS", values));
+        PimdirDb.changed(db, PimdirSql.bind("ADD_FLAGS", values));
+    }
+
+    /**
+     * Writes a binding's base flags as rows, on {@link #writeFlags}'s terms
+     * ({@code retain_base_flags}, {@code add_base_flags}).
+     */
+    public static void writeBaseFlags(
+            SQLiteDatabase db,
+            String collection,
+            String linkId,
+            String source,
+            java.util.Collection<String> flags) {
+        db.execSQL(
+                "UPDATE bindings SET base_flags_known = ? WHERE collection = ? AND link_id = ?"
+                        + " AND source = ?",
+                new Object[] {flags == null ? 0 : 1, collection, linkId, source});
+        if (flags == null) {
+            return;
+        }
+        Map<String, Object> values = new java.util.HashMap<>();
+        values.put("collection", collection);
+        values.put("link_id", linkId);
+        values.put("source", source);
+        values.put("flags", new ArrayList<Object>(new java.util.LinkedHashSet<>(flags)));
+        PimdirDb.changed(db, PimdirSql.bind("RETAIN_BASE_FLAGS", values));
+        PimdirDb.changed(db, PimdirSql.bind("ADD_BASE_FLAGS", values));
+    }
+
+    /** A space-joined flags column as its flags, null for a NULL one. */
+    public static List<String> flagsFrom(String joined) {
+        if (joined == null) {
+            return null;
+        }
+        List<String> flags = new ArrayList<>();
+        for (String flag : joined.split(" ")) {
+            if (!flag.isEmpty()) {
+                flags.add(flag);
+            }
+        }
+        return flags;
+    }
+
+    /** Whether a key is one the writer derived (STORAGE §9). */
+    static boolean derived(String linkId) {
+        return linkId.startsWith("alt:") || linkId.startsWith("hash:") || linkId.startsWith("dup:");
     }
 
     /** Files and indexes a file's bytes, streamed; refcount the caller's. */

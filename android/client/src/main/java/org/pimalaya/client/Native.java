@@ -217,6 +217,34 @@ final class Native {
      */
     static native String pimdirDerive(String kind, byte[] body);
 
+    /** The name the store files a body under: BLAKE3, 52 base32 characters. */
+    static native String pimdirHash(byte[] body);
+
+    /** A file's {@link #pimdirHash}, read whole: {@code {hash}} or {@code {error}}. */
+    static native String pimdirHashFile(String path);
+
+    /**
+     * The versions a store is created with and opened at.
+     *
+     * <p>{@code {formatVersion, syncVersion, derivation, version, hashAlgo}}.
+     */
+    static native String pimdirIdentity();
+
+    /**
+     * Whether an existing store opens (STORAGE §6), from facts read off it.
+     *
+     * <p>Returns {@code {}}, or {@code {refused, detail}}.
+     */
+    static native String pimdirCheck(String facts);
+
+    /**
+     * A queue row read strictly as its payload schema types it (§15.3).
+     *
+     * <p>Returns {@code {targetCollection?}} or {@code {error}}; an empty
+     * {@code objectHash} pins no body.
+     */
+    static native String pimdirAction(String kind, String payload, String objectHash);
+
     /**
      * The account's mailboxes, a JSON array of {@code {name, role}}.
      *
@@ -712,14 +740,17 @@ final class Native {
     /**
      * Raises handles (a JSON array) to the full tier.
      *
-     * <p>Returns {@code {upgraded, fetched, deduped}}.
+     * <p>{@code content}: whether the collection's sync pushes bodies, its
+     * policy settling a divergence the upgrade reads. Returns {@code
+     * {upgraded, fetched, deduped, overruled}}.
      */
-    static native String offlineUpgrade(OfflineDriver driver, String collection, String handles);
+    static native String offlineUpgrade(
+            OfflineDriver driver, String collection, String handles, boolean content);
 
     /**
      * Stages a local {@link Mutation}; the remote is never touched.
      *
-     * <p>Returns {@code {}}.
+     * <p>Returns {@code {overruled}}.
      */
     static native String offlineMutate(OfflineDriver driver, String collection, String mutation);
 

@@ -172,17 +172,17 @@ public class MailClientTest {
                             List.of(),
                             false));
 
-    /** What each message of the corpus describes to, its summary apart. */
+    /** What each message of the corpus describes to, its summary and hash apart. */
     private static final List<Description> DESCRIBED =
             List.of(
                     new Description(
                             List.of(),
-                            "6b5huqsihshplsmfkrnpwjl2km",
+                            null,
                             210L,
                             null),
                     new Description(
                             List.of(),
-                            "vs6e3yurjrnpibxr3yaifyxsia",
+                            null,
                             390L,
                             null),
                     new Description(
@@ -198,17 +198,17 @@ public class MailClientTest {
                                             "application/octet-stream",
                                             3L,
                                             "4")),
-                            "utwmwcojlrarw7winioihfxg3a",
+                            null,
                             611L,
                             null),
                     new Description(
                             List.of(),
-                            "fvivl5gez3v64x6sk6ykcmcb2q",
+                            null,
                             378L,
                             null),
                     new Description(
                             List.of(),
-                            "2i34y4dkvspqcdeg3hz3cxf6ji",
+                            null,
                             357L,
                             null),
                     new Description(
@@ -218,7 +218,7 @@ public class MailClientTest {
                                             "application/ics",
                                             30L,
                                             "2")),
-                            "vwcbov6ehy6fq6d4fgwcu5ssuy",
+                            null,
                             656L,
                             null),
                     new Description(
@@ -228,27 +228,27 @@ public class MailClientTest {
                                             "message/rfc822",
                                             67L,
                                             "2")),
-                            "3v2g4sye43d4awgd677ifahuxm",
+                            null,
                             375L,
                             null),
                     new Description(
                             List.of(),
-                            "pug7fhjak5ea4cexrtjlq4fwie",
+                            null,
                             15L,
                             null),
                     new Description(
                             List.of(),
-                            "bxpmxdd7ojyioai54hvl56r6km",
+                            null,
                             133L,
                             null),
                     new Description(
                             null,
-                            "4oymiquy7qobjgx36tejs35zeq",
+                            null,
                             0L,
                             null),
                     new Description(
                             List.of(),
-                            "cety7qeb6qkjdnrwpht5inbbyu",
+                            null,
                             8L,
                             null));
 
@@ -352,7 +352,12 @@ public class MailClientTest {
             Description described = client.describeMessage(file(index));
             Description expected = DESCRIBED.get(index);
             assertEquals("message " + index, expected.attachments(), described.attachments());
-            assertEquals("message " + index, expected.hash(), described.hash());
+            // NOTE: the name the store files the bytes under (STORAGE §5),
+            // objects.json pinning the algorithm itself (PimdirHashTest).
+            assertEquals(
+                    "message " + index,
+                    PimdirSql.hash(MessageCorpus.MESSAGES.get(index)),
+                    described.hash());
             assertEquals("message " + index, expected.size(), described.size());
             assertSameJson(SUMMARIES.get(index), described.summary().toString());
         }
@@ -791,7 +796,8 @@ public class MailClientTest {
         assertMirrors(
                 MailPage.class,
                 "{\"checkpoint\":\"1:42\",\"complete\":false,\"cursor\":null,"
-                        + "\"cursorRejected\":true,\"items\":[],\"last\":true,\"vanished\":[]}");
+                        + "\"cursorRejected\":true,\"enumerated\":[\"7\"],\"items\":[],"
+                        + "\"last\":true,\"narrowed\":true,\"vanished\":[]}");
         assertMirrors(Named.class, elements(field(ROUND, "items")).get(0));
 
         MailPage round = MailPage.from(Replies.object(ROUND));
@@ -822,6 +828,14 @@ public class MailClientTest {
                 "{\"complete\":false,\"cursorRejected\":true,\"items\":[],\"last\":false,"
                         + "\"vanished\":[]}";
         assertSameJson(rejected, MailPage.from(Replies.object(rejected)).toJson().toString());
+        String narrowed =
+                "{\"complete\":true,\"enumerated\":[\"7\",\"9\"],\"items\":[],\"last\":true,"
+                        + "\"narrowed\":true,\"vanished\":[]}";
+        MailPage last = MailPage.from(Replies.object(narrowed));
+        assertEquals(true, last.narrowed());
+        assertEquals(List.of("7", "9"), last.enumerated());
+        assertSameJson(narrowed, last.toJson().toString());
+        assertEquals(null, round.enumerated());
         assertEquals(
                 "a page saying nothing of last closes its listing, as the engine reads it",
                 true,

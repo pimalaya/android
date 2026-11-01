@@ -9,6 +9,7 @@ import android.util.Log;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executors;
+import org.json.JSONObject;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.calendar.CalendarPhonePass;
 import org.pimalaya.client.Clients;
@@ -58,10 +59,42 @@ public final class App extends Application
      */
     synchronized PimdirDb pimdir() {
         if (pimdir == null) {
+            if (refusal() != null) {
+                // NOTE: a store of another draft is neither read nor written
+                // (pimdir STORAGE §6): every entry point checks storeRefused
+                // first, and one that did not fails here, before any open.
+                throw new IllegalStateException("The pimdir store is refused: " + refusal);
+            }
             pimdir = new PimdirDb(this);
         }
         return pimdir;
     }
+
+    /**
+     * Why the store on disk is not opened, or null when it is, checked once
+     * per process before anything opens it ({@link PimdirDb#refusal}).
+     */
+    synchronized JSONObject refusal() {
+        if (!refusalChecked) {
+            refusal = PimdirDb.refusal(this);
+            refusalChecked = true;
+            if (refusal != null) {
+                Log.e("pimalaya", "pimdir store refused, the app must be reinstalled: " + refusal);
+            }
+        }
+        return refusal;
+    }
+
+    /** Whether the store is one this app does not open: reinstall. */
+    boolean storeRefused() {
+        return refusal() != null;
+    }
+
+    /** {@link #refusal}, once read. */
+    private JSONObject refusal;
+
+    /** Whether {@link #refusal} was read. */
+    private boolean refusalChecked;
 
     /**
      * The process's one card store, over the shared store ({@link #pimdir}).

@@ -9,7 +9,7 @@
 
 use std::{borrow::Cow, io::Write};
 
-use io_pimdir::{hash::PimdirHashAlgo, summary::derive};
+use io_pimdir::{hash, summary::derive};
 use mail_parser::{
     Address, Message, MessageParser, MessagePart, MessagePartId, MimeHeaders, PartType,
     decoders::{base64::base64_decode, quoted_printable::quoted_printable_decode},
@@ -190,7 +190,7 @@ fn sections(parsed: &Message<'_>) -> Vec<(MessagePartId, String)> {
 
 /// What the store files of one message, read once.
 pub fn describe(raw: &[u8]) -> Description {
-    let hash = PimdirHashAlgo::Sha256_128.hash(raw);
+    let hash = hash::hash(raw);
     let summary = derive("message/rfc822", derivable(raw)).and_then(|derived| derived.summary);
     let attachments = parse(raw).ok().map(|message| message.attachments);
     Description {
@@ -207,7 +207,7 @@ pub struct Description {
     /// Its attachments as [`parse`] lists them, null when it cannot parse.
     #[serde(serialize_with = "sorted")]
     pub attachments: Option<Vec<MessageAttachment>>,
-    /// Its content hash under the store's algorithm (`sha256-128`, the
+    /// Its content hash under the store's algorithm (BLAKE3, STORAGE §5, the
     /// app's `PimdirHash`).
     pub hash: String,
     /// Its size in octets.
@@ -462,7 +462,7 @@ mod tests {
 
         assert_eq!(
             described["hash"],
-            PimdirHashAlgo::Sha256_128.hash(&raw).0.as_str(),
+            io_pimdir::hash::hash(&raw).0.as_str(),
             "the store's algorithm"
         );
         assert_eq!(described["size"], raw.len());

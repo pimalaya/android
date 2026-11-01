@@ -110,9 +110,9 @@ public class PimdirSqlTest {
     @Test
     public void theAccountColumnGroupsWithoutPartitioning() {
         SQLiteDatabase db = pimdir();
-        db.execSQL(
-                "INSERT INTO store_meta(id, version, hash_algo, created_at)"
-                        + " VALUES(1, 1, 'blake3', '2026-08-08T00:00:00Z')");
+        PimdirSql.Bound meta =
+                PimdirSql.bind("INIT_STORE_META", java.util.Map.of("version", 1, "derivation", 3));
+        db.execSQL(meta.sql, meta.args);
 
         db.execSQL(bind(PimdirSql.of("ENSURE_COLLECTION"), "work/INBOX", "work"));
         db.execSQL(bind(PimdirSql.of("ENSURE_COLLECTION"), "home/INBOX", "home"));

@@ -206,7 +206,7 @@ public final class FileStore {
         values.put("link_id", messageLinkId);
         PimdirSql.Bound bound = PimdirSql.bind("LIST_ATTACHMENTS", values);
         List<StoredFile> attachments = new ArrayList<>();
-        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
             while (cursor.moveToNext()) {
                 attachments.add(
                         new StoredFile(
@@ -251,7 +251,7 @@ public final class FileStore {
         while (true) {
             PimdirSql.Bound bound = PimdirSql.bind("LIST_ATTACHMENTS_BY_ACCOUNT", values);
             int read = 0;
-            try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+            try (Cursor cursor = PimdirDb.query(db, bound)) {
                 while (cursor.moveToNext()) {
                     read++;
                     values.put("after_key", cursor.getString(10));
@@ -286,7 +286,7 @@ public final class FileStore {
     /** The one text column a statement answers, null for no row or NULL. */
     private static String text(SQLiteDatabase db, String name, Map<String, Object> values) {
         PimdirSql.Bound bound = PimdirSql.bind(name, values);
-        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(db, bound)) {
             return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getString(0) : null;
         }
     }
@@ -302,7 +302,7 @@ public final class FileStore {
         while (true) {
             PimdirSql.Bound bound = PimdirSql.bind("LIST_FILES_PAGE_ASC", values);
             int read = 0;
-            try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
+            try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
                 while (cursor.moveToNext()) {
                     read++;
                     files.add(
@@ -338,7 +338,7 @@ public final class FileStore {
         values.put("link_id", fileLinkId);
         List<String> messages = new ArrayList<>();
         PimdirSql.Bound bound = PimdirSql.bind("REFERENCES_TO", values);
-        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(db, bound)) {
             while (cursor.moveToNext()) {
                 if (PimdirSummary.MAIL.equals(cursor.getString(0))
                         && "attachment".equals(cursor.getString(4))) {
@@ -360,7 +360,7 @@ public final class FileStore {
         Map<String, Object> values = new HashMap<>();
         values.put("link_id", messageLinkId);
         PimdirSql.Bound bound = PimdirSql.bind("LIST_LINK_PLACEMENTS", values);
-        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(db, bound)) {
             while (cursor.moveToNext()) {
                 String collection = cursor.getString(0);
                 if (!PimdirSummary.MAIL.equals(kindOf(db, collection))) {
@@ -375,8 +375,8 @@ public final class FileStore {
                         return new Origin(
                                 collection,
                                 messageLinkId,
-                                row.isNull(9) ? "" : row.getString(9),
-                                row.isNull(10) ? "" : row.getString(10));
+                                row.isNull(8) ? "" : row.getString(8),
+                                row.isNull(9) ? "" : row.getString(9));
                     }
                 }
             }
@@ -507,7 +507,7 @@ public final class FileStore {
             key.put("link_id", file.linkId);
             PimdirSql.Bound bound = PimdirSql.bind("DELETE_UNBOUND_ITEM", key);
             List<String> released = new ArrayList<>();
-            try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+            try (Cursor cursor = PimdirDb.query(db, bound)) {
                 while (cursor.moveToNext()) {
                     for (int column = 0; column < 2; column++) {
                         if (!cursor.isNull(column)) {
@@ -606,7 +606,7 @@ public final class FileStore {
         Map<String, Object> values = new HashMap<>();
         values.put("collection", collection);
         PimdirSql.Bound bound = PimdirSql.bind("LOAD_KIND", values);
-        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(db, bound)) {
             return cursor.moveToFirst() ? cursor.getString(0) : null;
         }
     }
@@ -633,8 +633,8 @@ public final class FileStore {
         Map<String, Object> values = new HashMap<>();
         values.put("collection", collection);
         values.put("link_id", linkId);
-        values.put("seq", items.seqFor(db, linkId));
-        values.put("flags", "[]");
+        values.put("seq", PimdirItems.seqFor(db, collection, linkId));
+        values.put("flags_known", 1);
         values.put("object_hash", hash);
         values.put("sort_key", name.toLowerCase(Locale.ROOT).trim());
         values.put("level", level);
@@ -655,7 +655,7 @@ public final class FileStore {
         PimdirSql.Bound bound = PimdirSql.bind("ADD_REFERENCE", values);
         // NOTE: a query, not an exec: the statement answers the row it
         // recorded, and Android refuses a statement returning rows to execSQL.
-        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.query(db, bound)) {
             cursor.moveToFirst();
         }
     }

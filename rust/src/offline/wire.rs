@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use io_pimdir::{
     change::{PimdirChange, PimdirChangeKind, PimdirDropReason, PimdirWriteOp},
     collection::{PimdirCheckpoint, PimdirCursor, PimdirScope},
-    mutate::PimdirMutation,
+    mutate::{PimdirMutateReport, PimdirMutation},
     object::{PimdirHash, PimdirObject},
     placement::{
         PimdirBase, PimdirFlags, PimdirHandle, PimdirLevel, PimdirLinkId, PimdirOrigin,
@@ -19,7 +19,7 @@ use io_pimdir::{
         PimdirRemoteSnapshot,
     },
     summary::{PimdirSummary, mail::PimdirMailSummary},
-    sync::PimdirSyncReport,
+    sync::{PimdirSyncEvent, PimdirSyncReport},
     upgrade::PimdirUpgradeReport,
 };
 use serde::{Deserialize, Serialize, Serializer, ser::Error as _};
@@ -106,19 +106,30 @@ pub struct PlacementJson {
     /// What the engine tells a round's scope by (SYNC §5); read only.
     #[serde(default, skip_serializing)]
     date: Option<String>,
+    /// A message's `Subject` (Annex A.1), on a load carrying no summary,
+    /// beside its date and sender: what tells a listed member reusing a
+    /// `Message-ID` from the create it would land (SYNC §6); read only.
+    #[serde(default, skip_serializing)]
+    subject: Option<String>,
+    /// A message's sender's address (Annex A.1), on the same terms.
+    #[serde(default, skip_serializing)]
+    sender: Option<String>,
 }
 
 impl From<PlacementJson> for PimdirPlacement {
     fn from(wire: PlacementJson) -> Self {
-        // NOTE: a date-only summary, which the driver never writes back
-        // (`Dated`).
-        let summary = match (wire.summary, wire.date.filter(|date| !date.is_empty())) {
-            (Some(summary), _) => Some(summary.into()),
-            (None, Some(date)) => Some(PimdirSummary::Mail(PimdirMailSummary {
-                date: Some(date),
+        // NOTE: a summary of the date, subject and sender alone, which the
+        // driver never writes back (`Dated`).
+        let date = wire.date.filter(|date| !date.is_empty());
+        let summary = match (wire.summary, date, wire.subject) {
+            (Some(summary), _, _) => Some(summary.into()),
+            (None, None, None) => None,
+            (None, date, subject) => Some(PimdirSummary::Mail(PimdirMailSummary {
+                date,
+                subject: subject.unwrap_or_default(),
+                sender: wire.sender,
                 ..Default::default()
             })),
-            (None, None) => None,
         };
         Self {
             collection: wire.collection.into(),
@@ -158,6 +169,8 @@ impl From<&PimdirPlacement> for PlacementJson {
             base: placement.base.as_ref().map(BaseJson::from),
             origin: placement.origin.as_ref().map(OriginJson::from),
             date: None,
+            subject: None,
+            sender: None,
         }
     }
 }
@@ -414,6 +427,13 @@ pub enum WriteOpJson {
         collection: String,
         scope: ScopeJson,
     },
+    /// Settles the conflict of the next upsert of `handle` by an overruling
+    /// edit (SYNC §7, §9): the diverging bodies it does not adopt kept as
+    /// retained items, the write refused while one was never read.
+    Overrule {
+        collection: String,
+        handle: String,
+    },
 }
 
 impl From<&PimdirWriteOp> for WriteOpJson {
@@ -498,6 +518,10 @@ impl From<&PimdirWriteOp> for WriteOpJson {
                 collection: collection.as_str().into(),
                 scope: scope.into(),
             },
+            PimdirWriteOp::Overrule { collection, handle } => Self::Overrule {
+                collection: collection.as_str().into(),
+                handle: handle.as_str().into(),
+            },
         }
     }
 }
@@ -558,11 +582,13 @@ pub enum ChangeJson {
         #[serde(skip_serializing_if = "Option::is_none")]
         if_match: Option<String>,
     },
+    /// Two deltas, applied as such, never a whole set (SYNC §4): a flag
+    /// the server changed since the listing survives the push.
     SetFlags {
         key: String,
         handle: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        flags: Option<Vec<String>>,
+        add: Vec<String>,
+        remove: Vec<String>,
     },
     Update {
         key: String,
@@ -606,10 +632,15 @@ impl From<&PimdirChange> for ChangeJson {
                 link_id: link_id.as_ref().map(|link| link.as_str().into()),
                 if_match: if_match.clone(),
             },
-            PimdirChangeKind::SetFlags { handle, flags } => Self::SetFlags {
+            PimdirChangeKind::SetFlags {
+                handle,
+                add,
+                remove,
+            } => Self::SetFlags {
                 key,
                 handle: handle.as_str().into(),
-                flags: flags_json(flags),
+                add: add.iter().cloned().collect(),
+                remove: remove.iter().cloned().collect(),
             },
             PimdirChangeKind::Update {
                 handle,
@@ -659,6 +690,14 @@ pub enum MutationJson {
         /// write does not restate: no new key sends none, never an empty one.
         #[serde(default)]
         sort_key: Option<String>,
+        /// The body the edit was made over: refused once another write
+        /// replaced it (SYNC §7). Absent applies over whatever is held.
+        #[serde(default)]
+        if_match: Option<String>,
+        /// Whether a rule of the app's settles the conflict rather than a
+        /// person (SYNC §7): the bodies it does not adopt are kept.
+        #[serde(default)]
+        overrule: bool,
     },
     Add {
         link_id: String,
@@ -704,6 +743,8 @@ impl TryFrom<MutationJson> for PimdirMutation {
                 body,
                 summary,
                 sort_key,
+                if_match,
+                overrule,
             } => Self::Edit {
                 handle: PimdirHandle(handle),
                 object: PimdirObject {
@@ -713,6 +754,8 @@ impl TryFrom<MutationJson> for PimdirMutation {
                 body: body.into_bytes(),
                 summary: summary.map(Into::into),
                 sort_key: sort_key.map(Into::into),
+                if_match: if_match.filter(|hash| !hash.is_empty()).map(PimdirHash),
+                overrule,
             },
             MutationJson::Add {
                 link_id,
@@ -866,6 +909,14 @@ pub struct SnapshotJson {
     cursor: Option<String>,
     #[serde(default)]
     checkpoint: Option<String>,
+    /// Whether a date filter narrowed the round's listing, on every page of
+    /// such a round and on no other (SYNC §4, §5).
+    #[serde(default)]
+    narrowed: bool,
+    /// Every handle the collection holds, read by an enumeration no date
+    /// filter narrowed, on the last page of a narrowed round.
+    #[serde(default)]
+    enumerated: Option<Vec<String>>,
 }
 
 /// A page closes its listing unless it says otherwise, as non-paging
@@ -894,6 +945,10 @@ impl From<SnapshotJson> for PimdirEnumerated {
                 .checkpoint
                 .filter(|token| !token.is_empty())
                 .map(|token| PimdirCheckpoint(token.into_bytes())),
+            narrowed: wire.narrowed,
+            enumerated: wire
+                .enumerated
+                .map(|handles| handles.into_iter().map(PimdirHandle).collect()),
         })
     }
 }
@@ -1005,7 +1060,7 @@ pub struct PushResultJson {
 pub enum YieldJson<'a> {
     Load {
         collection: &'a str,
-        scope: LoadScopeJson<'a>,
+        selection: LoadSelectionJson<'a>,
     },
     Lookup {
         links: Vec<&'a str>,
@@ -1028,15 +1083,65 @@ pub enum YieldJson<'a> {
         collection: &'a str,
         changes: Vec<ChangeJson>,
     },
+    /// Read each body whole and check it against its name (STORAGE §7).
+    Verify {
+        hashes: Vec<&'a str>,
+    },
 }
 
-/// The placements a `load` yield asks for, tagged by `kind`.
+/// The placements a `load` yield asks for, its selection, tagged by `kind`.
 #[derive(Serialize)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-pub enum LoadScopeJson<'a> {
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum LoadSelectionJson<'a> {
     All,
-    Handles { handles: Vec<&'a str> },
-    Links { links: Vec<&'a str> },
+    /// Every placement, as `all`, for a round's last page: the unstamped
+    /// bindings answered from `list_unstamped_bindings` bound with
+    /// `:narrowed`, `:enumerated` and the enumeration (SYNC §4, §5).
+    LastPage {
+        narrowed: bool,
+        /// Absent when the page hands no unfiltered enumeration.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        enumerated: Option<Vec<&'a str>>,
+    },
+    Handles {
+        handles: Vec<&'a str>,
+    },
+    Links {
+        links: Vec<&'a str>,
+    },
+}
+
+/// Reply to a `write` yield: what the cross-source merge recorded beyond
+/// the ops (SYNC §5, §9), nothing for a write recording nothing more.
+#[derive(Deserialize)]
+pub struct WrittenJson {
+    /// The handles whose upsert the write recorded as a divergence on the
+    /// shared item.
+    #[serde(default)]
+    pub conflicted: Vec<String>,
+    /// The bodies a policy did not adopt, each kept as a retained item.
+    #[serde(default)]
+    pub overruled: Vec<OverruledJson>,
+}
+
+/// A body kept as a retained item, and the handle whose write kept it.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverruledJson {
+    pub handle: String,
+    pub link_id: String,
+}
+
+/// Reply to a `verify` yield: the bodies that read whole and hash to their
+/// name, a missing or corrupt one left out (STORAGE §7).
+#[derive(Deserialize)]
+pub struct VerifiedJson {
+    #[serde(default)]
+    pub verified: Vec<String>,
 }
 
 /// What an `enumerate` yield lists, tagged by `kind`.
@@ -1068,10 +1173,18 @@ pub enum TierJson {
 #[derive(Serialize)]
 pub struct SyncReportJson {
     pub conflicts: usize,
+    /// The bodies a policy did not adopt, kept as retained items (SYNC §9).
+    pub overruled: usize,
+    /// Whether the round was parked rather than closed, its last page
+    /// finding most of its scope absent (SYNC §5).
+    pub parked: bool,
     pub pulled: usize,
     pub pushed: usize,
     pub refreshed: usize,
     pub rejected: usize,
+    /// The changes withheld because their body failed its name or was
+    /// missing (STORAGE §7).
+    pub unreadable: usize,
     pub waiting: usize,
 }
 
@@ -1079,13 +1192,24 @@ impl From<&PimdirSyncReport> for SyncReportJson {
     fn from(report: &PimdirSyncReport) -> Self {
         Self {
             conflicts: report.conflicts,
+            overruled: overruled(&report.events),
+            parked: report.parked.is_some(),
             pulled: report.pulled,
             pushed: report.pushed,
             refreshed: report.refreshed,
             rejected: report.rejected,
+            unreadable: report.unreadable,
             waiting: report.waiting,
         }
     }
+}
+
+/// How many bodies the events say a policy kept as retained items.
+fn overruled(events: &[PimdirSyncEvent]) -> usize {
+    events
+        .iter()
+        .filter(|event| matches!(event, PimdirSyncEvent::Overruled { .. }))
+        .count()
 }
 
 /// An upgrade report on the JSON wire (engine to Java only).
@@ -1093,6 +1217,8 @@ impl From<&PimdirSyncReport> for SyncReportJson {
 pub struct UpgradeReportJson {
     pub deduped: usize,
     pub fetched: usize,
+    /// The bodies a policy did not adopt, kept as retained items (SYNC §9).
+    pub overruled: usize,
     pub upgraded: usize,
 }
 
@@ -1101,7 +1227,23 @@ impl From<&PimdirUpgradeReport> for UpgradeReportJson {
         Self {
             deduped: report.deduped,
             fetched: report.fetched,
+            overruled: overruled(&report.events),
             upgraded: report.upgraded,
+        }
+    }
+}
+
+/// A mutation report on the JSON wire (engine to Java only).
+#[derive(Serialize)]
+pub struct MutateReportJson {
+    /// The bodies its write kept as retained items (SYNC §9).
+    pub overruled: usize,
+}
+
+impl From<&PimdirMutateReport> for MutateReportJson {
+    fn from(report: &PimdirMutateReport) -> Self {
+        Self {
+            overruled: overruled(&report.events),
         }
     }
 }

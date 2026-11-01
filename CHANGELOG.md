@@ -44,6 +44,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Set the minimum supported Android version to 8.0 (API 26).
 - Added English and French, French covering every screen; the app ships no other language.
 
+### Changed
+
+- Changed the store to pimdir storage-draft-08, sync-draft-07 (io-pimdir bff5737). **Breaking:** a store an earlier version of the app wrote is not opened, nor read, nor written: the app opens on a screen saying it has to be reinstalled, and a new store syncs back from the servers, whatever was not synced yet lost with the old one. Bodies are named by BLAKE3 and checked against their name before they are shown, pushed or reused, one that fails moved aside rather than served.
+- Changed a marker push to carry only what changed (read, important, answered), so a marker another client changed meanwhile is no longer set back, and a mail listing narrowed by the download window to say so, so a message with no date, or dated ahead of its arrival, is no longer taken for deleted.
+- Changed a sync whose listing comes back empty to keep what the collection holds rather than empty it, until a later listing names its members.
+- Changed an attachment saved into a folder on the phone to no longer read as downloaded on its message, the folder being the phone's own and not the message's account.
+
 ### Fixed
 
 - Fixed the calendar showing No event for a moment on opening, before its entries were read.

@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
+    <string name="store_refused_title">Réinstallez l\'application</string>
+    <string name="store_refused_message">Cette version de l\'application ne peut pas ouvrir les données qu\'une version précédente a enregistrées sur ce téléphone. Rien n\'y a été lu ni modifié. Désinstallez puis réinstallez l\'application : elle repart d\'un nouveau stockage, et vos comptes se resynchronisent depuis leurs serveurs. Ce qui n\'était pas encore synchronisé, comme un message encore dans la boîte d\'envoi, est perdu avec l\'ancien stockage.</string>
+    <string name="store_refused_code">Raison : %1$s (%2$s)</string>
     <string name="new_account">Nouveau compte</string>
     <string name="cancel_auth">Annuler</string>
     <string name="welcome_title">Vos e-mails, contacts et agendas, hors ligne.</string>

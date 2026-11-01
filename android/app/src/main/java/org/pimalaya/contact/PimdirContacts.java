@@ -331,27 +331,28 @@ public final class PimdirContacts {
      */
     private void copy(SQLiteDatabase db, String from, String target, String linkId) {
         String object;
-        String flags;
+        List<String> flags;
         try (Cursor cursor =
                 db.rawQuery(
-                        "SELECT object_hash, flags FROM items"
-                                + " WHERE collection = ? AND link_id = ?",
+                        "SELECT i.object_hash, " + PimdirItems.flagsOf("i") + " FROM items i"
+                                + " WHERE i.collection = ? AND i.link_id = ?",
                         new String[] {from, linkId})) {
             if (!cursor.moveToFirst()) {
                 return;
             }
             object = cursor.isNull(0) ? null : cursor.getString(0);
-            flags = cursor.isNull(1) ? "[]" : cursor.getString(1);
+            flags = cursor.isNull(1) ? List.of() : PimdirItems.flagsFrom(cursor.getString(1));
         }
 
         CardIndex index = indexOf(items.body(object));
         db.execSQL(
-                "INSERT INTO items(collection, link_id, seq, flags, object_hash,"
-                        + " sort_key, level) VALUES(?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO items(collection, link_id, seq, flags_known, object_hash,"
+                        + " sort_key, level) VALUES(?, ?, ?, 1, ?, ?, ?)",
                 new Object[] {
-                    target, linkId, items.seqFor(db, linkId), flags, object,
+                    target, linkId, PimdirItems.seqFor(db, target, linkId), object,
                     index.sortKey(), PimdirItems.FULL
                 });
+        PimdirItems.writeFlags(db, target, linkId, flags);
         PimdirSummary.write(db, target, linkId, index.summary());
         items.adjustRefcount(db, null, object);
     }

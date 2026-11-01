@@ -178,10 +178,21 @@ public class PimdirEngineTest {
 
     @Test
     public void aMemberTheRemoteNoLongerHoldsLeaves() {
+        // NOTE: another member listed: a listing naming none parks the round
+        // rather than finding every member absent (pimdir SYNC §5, §8).
+        engine.members.clear();
+        engine.members.put("ev-2.ics", new String[] {"etag-1", BODY.replace("ev-1", "ev-2")});
+        engine.sync(COLLECTION);
+
+        assertEquals(java.util.Set.of("ev-2.ics"), stored().keySet());
+    }
+
+    @Test
+    public void anEmptiedCollectionParksRatherThanDroppingEverything() {
         engine.members.clear();
         engine.sync(COLLECTION);
 
-        assertTrue(stored().isEmpty());
+        assertEquals(Map.of("ev-1.ics", BODY), stored());
     }
 
     @Test
