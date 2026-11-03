@@ -61,7 +61,9 @@ public class MutationTest {
         stager.mutateRemove("c", "h3");
         assertSameJson("{\"op\":\"remove\",\"handle\":\"h3\"}", last());
         stager.mutateMove("c", "h4", "t");
-        assertSameJson("{\"op\":\"move\",\"handle\":\"h4\",\"target\":\"t\"}", last());
+        assertSameJson(
+                "{\"op\":\"move\",\"handle\":\"h4\",\"target\":\"t\",\"syncsTarget\":false}",
+                last());
         assertEquals(4, client.sent.size());
     }
 

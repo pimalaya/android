@@ -239,7 +239,7 @@ public abstract class Stager implements OfflineDriver {
      * §3); the next sync of either collection carries it.
      */
     public void mutateMove(String collection, String handle, String target) throws JSONException {
-        mutate(collection, Mutation.move(handle, target));
+        mutate(collection, Mutation.move(handle, target, offline.syncsTarget(collection, target)));
         staged(target);
     }
 
@@ -250,7 +250,7 @@ public abstract class Stager implements OfflineDriver {
      * target carries it, no body uploaded.
      */
     public void mutateCopy(String collection, String handle, String target) throws JSONException {
-        mutate(collection, Mutation.copy(handle, target));
+        mutate(collection, Mutation.copy(handle, target, offline.syncsTarget(collection, target)));
         staged(target);
     }
 

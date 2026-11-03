@@ -538,6 +538,21 @@ public class PimdirStorageTest {
     }
 
     @Test
+    public void anEditOverAnUnreadBaseIsHydrated() throws Exception {
+        JSONObject body = storeObject("aa01", "EDITED");
+        JSONObject edited = upsert("q.vcf", "uid-q", h("aa01"), "quinn").getJSONObject("placement");
+        edited.put("status", "dirty");
+        edited.put("base", new JSONObject().put("revision", "rev-uid-q"));
+        JSONObject op = new JSONObject();
+        op.put("op", "upsert");
+        op.put("placement", edited);
+        storage.applyWrites(batch(body, op));
+
+        assertEquals("the edit pushes once the base it was made over is read (SYNC §5)",
+                List.of("q.vcf"), storage.handlesBelowFull("acct/Contacts"));
+    }
+
+    @Test
     public void aConflictWaitingOnItsRemoteBodyIsHydratedRatherThanOffered() throws Exception {
         storage.applyWrites(batch(storeObject("bb02", "LOCAL"), conflicted(h("bb02"), null)));
 

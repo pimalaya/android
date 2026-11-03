@@ -140,8 +140,10 @@ impl<H: Host> Driver<H> {
     ) -> Result<MutateReportJson, BridgeError> {
         let mutation: MutationJson =
             from_str(mutation).map_err(|err| format!("Invalid mutation: {err}"))?;
+        let syncs_target = mutation.syncs_target();
         let mutation = PimdirMutation::try_from(mutation)?;
-        let report = self.run(PimdirMutate::new(collection, mutation))?;
+        let mutate = PimdirMutate::new(collection, mutation).syncs_target(syncs_target);
+        let report = self.run(mutate)?;
 
         Ok(MutateReportJson::from(&report))
     }

@@ -1883,6 +1883,27 @@ public final class PimdirStorage {
         }
     }
 
+    /**
+     * Whether the source of {@code engineCollection} syncs {@code engineTarget},
+     * holding a binding or a checkpoint there ({@code collection_sources}).
+     */
+    public boolean syncsTarget(String engineCollection, String engineTarget) {
+        Map<String, Object> values = new HashMap<>();
+        values.put("collection", collectionOf(engineTarget));
+        PimdirSql.Bound bound = PimdirSql.bind("COLLECTION_SOURCES", values);
+
+        String source = sourceOf(engineCollection);
+        SQLiteDatabase db = store.getReadableDatabase();
+        try (Cursor cursor = db.rawQuery(bound.sql, stringsOf(bound.args))) {
+            while (cursor.moveToNext()) {
+                if (source.equals(cursor.getString(0))) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
     /** The pending create a move staged here, own or minted key, or null. */
     public String pendingCreateOf(String engineCollection, String linkId) {
         SQLiteDatabase db = store.getReadableDatabase();

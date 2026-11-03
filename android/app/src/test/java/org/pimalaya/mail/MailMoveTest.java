@@ -139,13 +139,24 @@ public class MailMoveTest {
                 List.of(
                         new Mailbox("INBOX", "inbox"),
                         new Mailbox("Trash", "trash"),
-                        new Mailbox("Sent", "sent")));
+                        new Mailbox("Sent", "sent"),
+                        new Mailbox("Archive", "")));
         accountId = new PimdirAccount(context).idOf(EMAIL);
         inbox = store.collectionOf(EMAIL, "INBOX");
         trash = store.collectionOf(EMAIL, "Trash");
         sent = store.collectionOf(EMAIL, "Sent");
 
         file(inbox, named("42", "Hello"));
+        synced(trash);
+        synced(sent);
+    }
+
+    /** Checkpoints a mailbox, as its first sync would (SYNC §7). */
+    private void synced(String collection) throws JSONException {
+        write(new JSONObject()
+                .put("op", "setCheckpoint")
+                .put("collection", collection)
+                .put("checkpoint", "cp"));
     }
 
     /** One named member of a listed page, as a mail connector answers it. */
@@ -218,6 +229,23 @@ public class MailMoveTest {
         List<MailStore.StoredMessage> rows = MailFixtures.merged(store, 10);
         assertEquals(1, rows.size());
         assertEquals("Trash", rows.get(0).mailbox);
+    }
+
+    @Test
+    public void aBodilessMoveIntoAMailboxNeverSyncedIsRefused() throws Exception {
+        String archive = store.collectionOf(EMAIL, "Archive");
+        try {
+            stager().mutateMove(inbox, "42", archive);
+            throw new AssertionError("a move no body nor origin could deliver stages");
+        } catch (PimalayaException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains("42"));
+        }
+
+        assertEquals("the source stays live", "0",
+                scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '42'", inbox));
+        assertNull("nothing lands in the target",
+                scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '42'",
+                        archive));
     }
 
     @Test

@@ -361,6 +361,11 @@ The store SHALL derive what a placement owes rather than store it, by the first 
 - WHEN the collection is loaded
 - THEN the placement projects at most meta, so an upgrade refetches it
 
+#### Scenario: An edit over a base the store never read
+- GIVEN an item holding a local body over a binding whose base names a revision and no body
+- WHEN the hydrate pass runs
+- THEN that handle is among the ones it upgrades, which reads the base, the edit pushing only after (pimdir SYNC section 5)
+
 ### Requirement: A staged removal is a tombstone the load hands back
 An item staged for removal SHALL be kept, marked, and SHALL be loaded back to the engine as a tombstone until a push has carried it. It SHALL leave every listing at once, and an edit after it SHALL revive it.
 
@@ -451,7 +456,7 @@ A store load SHALL carry each mail placement's `Date`, `Subject` and sender besi
 - THEN the staged copy lands on it and is not pushed a second time
 
 ### Requirement: A local action is visible before any sync
-Every action a user takes on an item (create, edit, flag, delete, send) SHALL be staged as a pimdir mutation, never as a direct row write, and SHALL show in every list it concerns at once, a relocation's target included. The bridge SHALL carry pimdir's `Move` and `Copy` beside `Add`, `Edit`, `SetFlags` and `Remove`, and the sync SHALL carry each staged change out as staged (pimdir SYNC section 4): a `Remove` naming a destination as a server move, one naming none as a server delete, an `Add` with an origin as a server-side copy and one without as an append, never one turned into another. A connector that cannot carry one out, a relocation into another account's collection or any calendar relocation, SHALL reject it. A staged removal SHALL be listed nowhere. A row SHALL carry no mark of whether its change was pushed yet.
+Every action a user takes on an item (create, edit, flag, delete, send) SHALL be staged as a pimdir mutation, never as a direct row write, and SHALL show in every list it concerns at once, a relocation's target included. The bridge SHALL carry pimdir's `Move` and `Copy` beside `Add`, `Edit`, `SetFlags` and `Remove`, and the sync SHALL carry each staged change out as staged (pimdir SYNC section 4): a `Remove` naming a destination as a server move, one naming none as a server delete, an `Add` with an origin as a server-side copy and one without as an append, never one turned into another. A `Move` or a `Copy` of an item whose body the store does not hold SHALL be refused, staging nothing, unless the source staging it syncs the target, holding a binding or a checkpoint there (`collection_sources`, pimdir SYNC section 7), which the bridge states as `syncsTarget`. A connector that cannot carry one out, a relocation into another account's collection or any calendar relocation, SHALL reject it. A staged removal SHALL be listed nowhere. A row SHALL carry no mark of whether its change was pushed yet.
 
 #### Scenario: A message deleted offline
 - GIVEN a message in the inbox of an account with a trash

@@ -685,11 +685,17 @@ pub enum MutationJson {
     Move {
         handle: String,
         target: String,
+        /// Whether the placement's source syncs `target` (SYNC §7).
+        #[serde(default)]
+        syncs_target: bool,
     },
     /// A copy into `target`, the source kept.
     Copy {
         handle: String,
         target: String,
+        /// Whether the placement's source syncs `target` (SYNC §7).
+        #[serde(default)]
+        syncs_target: bool,
     },
     Edit {
         handle: String,
@@ -735,6 +741,16 @@ pub enum MutationJson {
     },
 }
 
+impl MutationJson {
+    /// Whether a copy or a move names a target its source syncs.
+    pub fn syncs_target(&self) -> bool {
+        match self {
+            Self::Move { syncs_target, .. } | Self::Copy { syncs_target, .. } => *syncs_target,
+            _ => false,
+        }
+    }
+}
+
 impl TryFrom<MutationJson> for PimdirMutation {
     type Error = String;
 
@@ -745,11 +761,11 @@ impl TryFrom<MutationJson> for PimdirMutation {
                 flags: PimdirFlags::from_iter(flags),
             },
             MutationJson::Remove { handle } => Self::Remove(PimdirHandle(handle)),
-            MutationJson::Move { handle, target } => Self::Move {
+            MutationJson::Move { handle, target, .. } => Self::Move {
                 handle: PimdirHandle(handle),
                 target: target.into(),
             },
-            MutationJson::Copy { handle, target } => Self::Copy {
+            MutationJson::Copy { handle, target, .. } => Self::Copy {
                 handle: PimdirHandle(handle),
                 target: target.into(),
             },
@@ -950,6 +966,9 @@ pub struct SnapshotJson {
     /// filter narrowed, on the last page of a narrowed round.
     #[serde(default)]
     enumerated: Option<Vec<String>>,
+    /// Whether the source caps the round's listing (SYNC §4, §5).
+    #[serde(default)]
+    capped: bool,
 }
 
 /// A page closes its listing unless it says otherwise, as non-paging
@@ -982,6 +1001,7 @@ impl From<SnapshotJson> for PimdirEnumerated {
             enumerated: wire
                 .enumerated
                 .map(|handles| handles.into_iter().map(PimdirHandle).collect()),
+            capped: wire.capped,
         })
     }
 }

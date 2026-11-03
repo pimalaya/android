@@ -27,6 +27,8 @@ import org.json.JSONObject;
  * @param resolves the diverging bodies a resolution was decided over, for an
  *     edit settling a conflict (SYNC §7); null for an ordinary edit, which a
  *     conflict refuses, and for every other op
+ * @param syncsTarget whether the placement's source syncs {@code target}
+ *     (SYNC §7), for a copy or a move; null otherwise
  */
 public record Mutation(
         Op op,
@@ -40,7 +42,8 @@ public record Mutation(
         String bodyBase64,
         JSONObject summary,
         String sortKey,
-        java.util.List<String> resolves) {
+        java.util.List<String> resolves,
+        Boolean syncsTarget) {
     /** The operation of a mutation, as the wire tags it. */
     public enum Op {
         /** A flag set replacing the placement's markers. */
@@ -71,25 +74,25 @@ public record Mutation(
     /** A flag set on one placement. */
     public static Mutation setFlags(String handle, Flags flags) {
         return new Mutation(Op.SET_FLAGS, handle, null, null, flags, null, null, null, null, null,
-                null, null);
+                null, null, null);
     }
 
     /** A removal of one placement. */
     public static Mutation remove(String handle) {
         return new Mutation(Op.REMOVE, handle, null, null, null, null, null, null, null, null,
-                null, null);
+                null, null, null);
     }
 
     /** A move of one placement into {@code target}. */
-    public static Mutation move(String handle, String target) {
+    public static Mutation move(String handle, String target, boolean syncsTarget) {
         return new Mutation(Op.MOVE, handle, null, target, null, null, null, null, null, null,
-                null, null);
+                null, null, syncsTarget);
     }
 
     /** A copy of one placement into {@code target}. */
-    public static Mutation copy(String handle, String target) {
+    public static Mutation copy(String handle, String target, boolean syncsTarget) {
         return new Mutation(Op.COPY, handle, null, target, null, null, null, null, null, null,
-                null, null);
+                null, null, syncsTarget);
     }
 
     /**
@@ -120,7 +123,8 @@ public record Mutation(
                 null,
                 summary,
                 sortKey,
-                resolves == null ? null : java.util.List.copyOf(resolves));
+                resolves == null ? null : java.util.List.copyOf(resolves),
+                null);
     }
 
     /** A locally authored item, its body text. */
@@ -138,6 +142,7 @@ public record Mutation(
                 null,
                 summary,
                 sortKey,
+                null,
                 null);
     }
 
@@ -160,6 +165,7 @@ public record Mutation(
                 Base64.getEncoder().encodeToString(body),
                 summary,
                 sortKey,
+                null,
                 null);
     }
 
@@ -184,6 +190,7 @@ public record Mutation(
             if (resolves != null) {
                 mutation.put("resolves", new org.json.JSONArray(resolves));
             }
+            mutation.put("syncsTarget", syncsTarget);
             return mutation;
         } catch (JSONException error) {
             throw new PimalayaException("Unwritable mutation: " + error.getMessage());
