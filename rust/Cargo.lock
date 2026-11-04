@@ -746,16 +746,16 @@ dependencies = [
 
 [[package]]
 name = "io-webdav"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4e3edb6a03c2d12a63227573abda2fbef5e39b72f1268084f4b392667bca610"
+checksum = "8fe0634d06f91a00dd0a36431c072ebd3482b6731bf7cc2f9e7e8b645bdf3f84"
 dependencies = [
  "io-http",
  "log",
+ "memchr",
  "serde",
  "thiserror",
  "url",
- "xmlparser",
 ]
 
 [[package]]
@@ -1501,12 +1501,6 @@ name = "xml"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f45bb2c13fec6a6cb4c0f76a7e94839e110a14ec803ec2940777a94c347bc52"
-
-[[package]]
-name = "xmlparser"
-version = "0.13.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
 name = "yoke"
