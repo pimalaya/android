@@ -22,6 +22,15 @@ public final class Account {
     public final String submitUrl;
 
     /**
+     * The login and secret submission signs in with, null when it signs in as
+     * the account reads: SMTP is a second server, which may take another
+     * login.
+     */
+    public final String submitLogin;
+
+    public final String submitSecret;
+
+    /**
      * The account's own address, or null for none.
      *
      * <p>Google and JMAP announce a calendar write to attendees only for a
@@ -45,18 +54,33 @@ public final class Account {
     /** An endpoint with its submission endpoint and the account's address. */
     public Account(
             String baseUrl, String login, String secret, String submitUrl, String address) {
+        this(baseUrl, login, secret, submitUrl, address, null, null);
+    }
+
+    /** An endpoint whose submission signs in with a credential of its own. */
+    public Account(
+            String baseUrl,
+            String login,
+            String secret,
+            String submitUrl,
+            String address,
+            String submitLogin,
+            String submitSecret) {
         this.baseUrl = baseUrl;
         this.login = login;
         this.secret = secret;
         this.submitUrl = submitUrl;
         this.address = address;
+        this.submitLogin = submitLogin;
+        this.submitSecret = submitSecret;
     }
 
     /**
      * The account as the bridge's network verbs take it (rs/account.rs
      * {@code AccountJson}).
      *
-     * <p>{@code {address?, baseUrl, login, secret, submitUrl?}}; a null
+     * <p>{@code {address?, baseUrl, login, secret, submitUrl?, submitLogin?,
+     * submitSecret?}}; a null
      * component is an absent key, which the bridge reads empty.
      */
     JSONObject toJson() {
@@ -67,6 +91,8 @@ public final class Account {
             account.put("login", login);
             account.put("secret", secret);
             account.put("submitUrl", submitUrl);
+            account.put("submitLogin", submitLogin);
+            account.put("submitSecret", submitSecret);
             return account;
         } catch (JSONException error) {
             throw new PimalayaException("Unwritable account");

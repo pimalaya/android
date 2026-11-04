@@ -43,6 +43,10 @@ public final class AccountEntry {
         for (Map.Entry<PimDomain, AccountConnection> entry : this.connections.entrySet()) {
             AccountConnection connection = entry.getValue();
             AccountCredential credential = this.credentials.get(connection.credentialId);
+            AccountCredential sending =
+                    connection.submitCredentialId == null
+                            ? null
+                            : this.credentials.get(connection.submitCredentialId);
             if (credential != null) {
                 servers.put(
                         entry.getKey(),
@@ -51,7 +55,9 @@ public final class AccountEntry {
                                 credential.login,
                                 credential.secret,
                                 connection.submitUrl,
-                                email));
+                                email,
+                                sending == null ? null : sending.login,
+                                sending == null ? null : sending.secret));
             }
         }
     }
@@ -95,6 +101,18 @@ public final class AccountEntry {
     public AccountCredential credential(PimDomain domain) {
         AccountConnection connection = connections.get(domain);
         return connection == null ? null : credentials.get(connection.credentialId);
+    }
+
+    /**
+     * What a domain's submission signs in with when it is not what the domain
+     * reads with, or null: SMTP is a second server, which may take another
+     * login.
+     */
+    public AccountCredential submitCredential(PimDomain domain) {
+        AccountConnection connection = connections.get(domain);
+        return connection == null || connection.submitCredentialId == null
+                ? null
+                : credentials.get(connection.submitCredentialId);
     }
 
     /** Every credential this account holds, by id. */
@@ -184,16 +202,42 @@ public final class AccountEntry {
      */
     public AccountEntry with(
             PimDomain domain, String baseUrl, String submitUrl, AccountCredential credential) {
+        return with(domain, baseUrl, submitUrl, credential, null);
+    }
+
+    /**
+     * The same account with mail connected, submission signing in with a
+     * credential of its own, or with reading's when null.
+     */
+    public AccountEntry with(
+            PimDomain domain,
+            String baseUrl,
+            String submitUrl,
+            AccountCredential credential,
+            AccountCredential sending) {
         Map<PimDomain, AccountConnection> merged = new EnumMap<>(connections);
         AccountConnection replaced =
-                merged.put(domain, new AccountConnection(baseUrl, credential.id, submitUrl));
+                merged.put(
+                        domain,
+                        new AccountConnection(
+                                baseUrl,
+                                credential.id,
+                                submitUrl,
+                                sending == null ? null : sending.id));
 
         Map<String, AccountCredential> held = new HashMap<>(credentials);
         held.put(credential.id, credential);
-        // NOTE: a domain moved onto another credential may leave its old one
+        if (sending != null) {
+            held.put(sending.id, sending);
+        }
+        // NOTE: a domain moved onto another credential may leave its old ones
         // named by nothing, and a secret nothing can present is dropped.
-        if (replaced != null && !usedBy(merged, replaced.credentialId)) {
-            held.remove(replaced.credentialId);
+        if (replaced != null) {
+            for (String id : new String[] {replaced.credentialId, replaced.submitCredentialId}) {
+                if (id != null && !usedBy(merged, id)) {
+                    held.remove(id);
+                }
+            }
         }
 
         return new AccountEntry(email, merged, held);
@@ -221,7 +265,8 @@ public final class AccountEntry {
     private static boolean usedBy(
             Map<PimDomain, AccountConnection> connections, String credentialId) {
         for (AccountConnection connection : connections.values()) {
-            if (credentialId.equals(connection.credentialId)) {
+            if (credentialId.equals(connection.credentialId)
+                    || credentialId.equals(connection.submitCredentialId)) {
                 return true;
             }
         }

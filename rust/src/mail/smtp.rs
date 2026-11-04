@@ -278,6 +278,19 @@ fn mailbox(address: &str) -> Result<SmtpMailbox<'static>, BridgeError> {
     })
 }
 
+/// Connects and authenticates, then closes, sending nothing: whether the
+/// server takes the credential, as the setup asks before saving it.
+pub fn check<H: Host>(client: &mut Client<H>, url: &Url, auth: &Auth) -> Result<(), BridgeError> {
+    let mut session = SmtpSession::new(client, url);
+    session.connect(auth)?;
+    // NOTE: as after a send, so the pooled connection is not left half
+    // open; the credential was taken, which is all this asks.
+    if let Err(err) = session.run(SmtpQuit::new()) {
+        log::debug!("quit after a sign-in check failed: {err}");
+    }
+    Ok(())
+}
+
 /// Connects, authenticates, submits one message and closes.
 pub fn send<H: Host>(
     client: &mut Client<H>,

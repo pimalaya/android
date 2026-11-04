@@ -17,13 +17,25 @@ public final class AccountConnection {
     /** Where mail is submitted, or null when there is nowhere separate. */
     public final String submitUrl;
 
+    /**
+     * Which credential submission signs in with, or null for the one reading
+     * does: SMTP is a second server, which may take another login.
+     */
+    final String submitCredentialId;
+
     AccountConnection(String baseUrl, String credentialId) {
         this(baseUrl, credentialId, null);
     }
 
     AccountConnection(String baseUrl, String credentialId, String submitUrl) {
+        this(baseUrl, credentialId, submitUrl, null);
+    }
+
+    AccountConnection(
+            String baseUrl, String credentialId, String submitUrl, String submitCredentialId) {
         this.baseUrl = baseUrl;
         this.credentialId = credentialId;
         this.submitUrl = submitUrl;
+        this.submitCredentialId = submitCredentialId;
     }
 }

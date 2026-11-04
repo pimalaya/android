@@ -421,6 +421,14 @@ final class Native {
             Transport transport, long session, byte[] source, String payload);
 
     /**
+     * Whether the account's submission server takes its sending credential,
+     * authenticated and closed with nothing sent.
+     *
+     * <p>Returns {@code {}}, or an error for a refusal or no submit URL.
+     */
+    static native String checkSubmission(Transport transport, String account);
+
+    /**
      * Moves one message into {@code target}, returning {@code {}}.
      *
      * <p>The push of a removal naming a destination (pimdir SYNC §4).

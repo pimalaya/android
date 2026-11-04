@@ -340,6 +340,33 @@ pub mod tests {
         assert_eq!(without.submit_url, "");
     }
 
+    /// Submission signs in with its own credential when one rides in the
+    /// account, as the account reads otherwise.
+    #[test]
+    fn submission_signs_in_with_its_own_credential_when_given() {
+        let own = parse_account(r#"{"baseUrl":"imaps://imap.example.org:993","login":"jane","secret":"pw","submitUrl":"smtps://smtp.example.org","submitLogin":"jane.smtp","submitSecret":"other"}"#).unwrap();
+        let shared = parse_account(r#"{"baseUrl":"imaps://imap.example.org:993","login":"jane","secret":"pw","submitUrl":"smtps://smtp.example.org"}"#).unwrap();
+
+        match own.submit_auth() {
+            Auth::Basic { login, password } => {
+                assert_eq!(login, "jane.smtp");
+                assert_eq!(password, "other");
+            }
+            Auth::Bearer(_) => panic!("own: a password read as a token"),
+        }
+        match shared.submit_auth() {
+            Auth::Basic { login, password } => {
+                assert_eq!(login, "jane");
+                assert_eq!(password, "pw");
+            }
+            Auth::Bearer(_) => panic!("shared: a password read as a token"),
+        }
+        match own.account().auth {
+            Auth::Basic { login, .. } => assert_eq!(login, "jane"),
+            Auth::Bearer(_) => panic!("reading: a password read as a token"),
+        }
+    }
+
     /// An unreadable account names where, never what: it holds a secret.
     #[test]
     fn an_unreadable_account_never_quotes_it() {

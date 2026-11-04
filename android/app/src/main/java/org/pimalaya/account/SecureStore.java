@@ -185,6 +185,20 @@ public class SecureStore {
             String baseUrl,
             String submitUrl,
             AccountCredential credential) {
+        return connect(email, domain, baseUrl, submitUrl, credential, null);
+    }
+
+    /**
+     * Connects one domain, its submission signing in with a credential of its
+     * own, or with reading's when null; persists.
+     */
+    public AccountEntry connect(
+            String email,
+            PimDomain domain,
+            String baseUrl,
+            String submitUrl,
+            AccountCredential credential,
+            AccountCredential sending) {
         synchronized (LOCK) {
             List<AccountEntry> entries = loadAll();
             AccountEntry existing = null;
@@ -196,7 +210,7 @@ public class SecureStore {
 
             AccountEntry merged =
                     (existing == null ? AccountEntry.empty(email) : existing)
-                            .with(domain, baseUrl, submitUrl, credential);
+                            .with(domain, baseUrl, submitUrl, credential, sending);
             entries.removeIf(entry -> entry.email.equals(email));
             entries.add(merged);
             save(entries);
@@ -227,7 +241,9 @@ public class SecureStore {
             // NOTE: a token signs in with SASL XOAUTH2, which names its user
             // from the URL, as the mail connection's own URL already does.
             AccountCredential credential = existing.credential(PimDomain.MAIL);
-            if (submitUrl != null && credential.login.isEmpty()) {
+            AccountCredential sending = existing.submitCredential(PimDomain.MAIL);
+            AccountCredential signing = sending == null ? credential : sending;
+            if (submitUrl != null && signing.login.isEmpty()) {
                 submitUrl = AccountClient.withUser(submitUrl, email);
             }
 
@@ -236,7 +252,8 @@ public class SecureStore {
                             PimDomain.MAIL,
                             existing.server(PimDomain.MAIL).baseUrl,
                             submitUrl,
-                            credential);
+                            credential,
+                            sending);
             entries.removeIf(entry -> entry.email.equals(email));
             entries.add(merged);
             save(entries);
@@ -332,7 +349,10 @@ public class SecureStore {
                                     // NOTE: only mail ever has one, so the
                                     // key is left out rather than written
                                     // null on every other connection.
-                                    .putOpt("submitUrl", connection.submitUrl));
+                                    .putOpt("submitUrl", connection.submitUrl)
+                                    .putOpt(
+                                            "submitCredential",
+                                            connection.submitCredentialId));
                 }
 
                 JSONObject credentials = new JSONObject();
@@ -422,7 +442,10 @@ public class SecureStore {
                             connection.getString("credential"),
                             connection.isNull("submitUrl")
                                     ? null
-                                    : connection.getString("submitUrl")));
+                                    : connection.getString("submitUrl"),
+                            connection.isNull("submitCredential")
+                                    ? null
+                                    : connection.getString("submitCredential")));
         }
 
         return new AccountEntry(email, located, decoded);

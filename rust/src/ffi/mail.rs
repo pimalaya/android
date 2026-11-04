@@ -27,7 +27,7 @@ use serde_json::{from_str, to_string};
 use crate::{
     client::Client,
     error::BridgeError,
-    ffi::{ErrorReply, error_json, host::JniHost, parse_account, read_string},
+    ffi::{ErrorReply, error_json, host::JniHost, parse_account, parse_url, read_string},
     mail::{
         self,
         compose::{self, Draft},
@@ -37,6 +37,7 @@ use crate::{
             FlagWrite, Mail, MailSession, MailStep, MailStepRequest, MessageAppend, MessageFetch,
             MessageTransfer, Refused,
         },
+        smtp,
     },
     offline::wire::sorted,
 };
@@ -699,6 +700,42 @@ pub extern "system" fn Java_org_pimalaya_client_Native_submitMessage<'local>(
                 uncertain: refused.uncertain,
             })
             .unwrap_or_else(|err| error_json(err.to_string())),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.checkSubmission`: whether the account's submission server takes
+/// its sending credential, authenticating and closing with nothing sent.
+///
+/// Returns `{}`, or `{"error": ".."}` for a refusal or no submit URL.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_checkSubmission<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    account: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let account = read_string(env, &account);
+
+        let json = match parse_account(&account) {
+            Err(err) => error_json(err),
+            Ok(account) if account.submit_url.is_empty() => {
+                error_json("This account has no server to send through")
+            }
+            Ok(account) => {
+                let mut client = Client::new(JniHost::new(env, &transport, None));
+                let checked = parse_url(&account.submit_url)
+                    .map_err(BridgeError::from)
+                    .and_then(|url| smtp::check(&mut client, &url, &account.submit_auth()));
+                match checked {
+                    Ok(()) => "{}".to_string(),
+                    Err(err) => error_json(err),
+                }
+            }
         };
 
         Ok(env.new_string(json)?.into())

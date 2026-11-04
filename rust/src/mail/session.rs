@@ -167,6 +167,11 @@ impl MailSession {
         self.account.account().auth
     }
 
+    /// The credential submission signs in with ([`AccountJson::submit_auth`]).
+    fn submit_auth(&self) -> Auth<'_> {
+        self.account.submit_auth()
+    }
+
     /// The JMAP session resource this account is reached through.
     fn jmap_url(&self) -> Result<Url, BridgeError> {
         Ok(account::jmap_session_url(&self.account.base_url)?)
@@ -1106,7 +1111,7 @@ impl<H: Host> Mail<'_, '_, H> {
                 }
 
                 let submit = parse_url(submit_url).map_err(Refused::transient)?;
-                smtp::send(self.client, &submit, &self.session.auth(), &composed).map_err(
+                smtp::send(self.client, &submit, &self.session.submit_auth(), &composed).map_err(
                     |err| Refused {
                         permanent: err.is_permanent(),
                         uncertain: err.is_uncertain(),

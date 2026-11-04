@@ -111,6 +111,43 @@ public class SecureStoreTest {
     }
 
     @Test
+    public void submissionKeepsALoginOfItsOwnUntilMailIsReconnected() {
+        SecureStore store = new SecureStore(context);
+        AccountCredential reading = new AccountCredential("cred-imap", "jane", "pw", null);
+        AccountCredential sending = new AccountCredential("cred-smtp", "jane.smtp", "other", null);
+        store.connect(
+                "jane@example.org",
+                PimDomain.MAIL,
+                "imaps://imap.example.org:993",
+                "smtps://smtp.example.org:465",
+                reading,
+                sending);
+
+        AccountEntry jane = new SecureStore(context).loadAll().get(0);
+        assertEquals("cred-smtp", jane.submitCredential(PimDomain.MAIL).id);
+        assertEquals("jane", jane.server(PimDomain.MAIL).login);
+        assertEquals("jane.smtp", jane.server(PimDomain.MAIL).submitLogin);
+        assertEquals("other", jane.server(PimDomain.MAIL).submitSecret);
+
+        // NOTE: pointing submission elsewhere keeps what it signs in with.
+        jane = store.submitThrough("jane@example.org", "smtp://smtp.example.org:587");
+        assertEquals("cred-smtp", jane.submitCredential(PimDomain.MAIL).id);
+
+        // NOTE: mail connected again signs in to both as it reads, and the
+        // secret nothing names any more is dropped.
+        jane =
+                store.connect(
+                        "jane@example.org",
+                        PimDomain.MAIL,
+                        "imaps://imap.example.org:993",
+                        "smtps://smtp.example.org:465",
+                        reading);
+        assertNull(jane.submitCredential(PimDomain.MAIL));
+        assertNull(jane.server(PimDomain.MAIL).submitSecret);
+        assertEquals(Set.of("cred-imap"), jane.credentials().keySet());
+    }
+
+    @Test
     public void aStoreThePreviousReleaseWroteReadsBack() throws Exception {
         String[] sealed = SecureStore.seal(WRITTEN);
         prefs().edit().putString("payload", sealed[0]).putString("iv", sealed[1]).commit();

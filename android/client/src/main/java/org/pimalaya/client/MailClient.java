@@ -281,6 +281,16 @@ public class MailClient {
     }
 
     /**
+     * Signs in to the account's submission server and out again, sending
+     * nothing: whether it takes the sending credential.
+     *
+     * @throws PimalayaException when it is refused or cannot be reached
+     */
+    public static void checkSubmission(Transport transport, Account account) {
+        Replies.object(Native.checkSubmission(transport, account.toJson().toString()));
+    }
+
+    /**
      * Opens one account's mail connection, greeted and authenticated.
      *
      * <p>Per account, not mailbox: one IMAP session spans every mailbox, one

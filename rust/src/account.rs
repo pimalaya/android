@@ -370,6 +370,12 @@ pub struct AccountJson {
     pub secret: SecretString,
     /// Where mail is submitted, empty when the session submits itself.
     pub submit_url: String,
+    /// The login submission signs in with, beside [`Self::submit_secret`].
+    pub submit_login: String,
+    /// The password or token submission signs in with, empty when it signs
+    /// in as the account reads: SMTP is a second server, which may take
+    /// another login.
+    pub submit_secret: SecretString,
 }
 
 impl AccountJson {
@@ -379,6 +385,17 @@ impl AccountJson {
             base_url: &self.base_url,
             backend: Backend::of(&self.base_url),
             auth: Auth::new(&self.login, self.secret.expose_secret()),
+        }
+    }
+
+    /// The credential submission signs in with: its own when one was given,
+    /// the account's otherwise.
+    pub fn submit_auth(&self) -> Auth<'_> {
+        let secret = self.submit_secret.expose_secret();
+        if secret.is_empty() {
+            Auth::new(&self.login, self.secret.expose_secret())
+        } else {
+            Auth::new(&self.submit_login, secret)
         }
     }
 }

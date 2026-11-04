@@ -19,8 +19,21 @@ import org.pimalaya.pimdir.PimdirSummary;
  * subscribes. Runs on the calling thread, the main one, as the wizard does.
  */
 final class AccountCommit {
-    /** One domain the sign-ins connected: endpoints and credential. */
-    record Connection(PimDomain domain, String baseUrl, String submitUrl, AccountCredential credential) {}
+    /**
+     * One domain the sign-ins connected: endpoints and credential, and the
+     * credential submission signs in with when it is not reading's, else null.
+     */
+    record Connection(
+            PimDomain domain,
+            String baseUrl,
+            String submitUrl,
+            AccountCredential credential,
+            AccountCredential sending) {
+        Connection(
+                PimDomain domain, String baseUrl, String submitUrl, AccountCredential credential) {
+            this(domain, baseUrl, submitUrl, credential, null);
+        }
+    }
 
     private AccountCommit() {}
 
@@ -37,13 +50,24 @@ final class AccountCommit {
             String submitUrl = connection.submitUrl();
             if (connection.domain() == PimDomain.MAIL && connection.credential().login.isEmpty()) {
                 baseUrl = Endpoints.asUser(baseUrl, email);
-                submitUrl = submitUrl == null ? null : Endpoints.asUser(submitUrl, email);
+            }
+            AccountCredential signing =
+                    connection.sending() == null ? connection.credential() : connection.sending();
+            if (connection.domain() == PimDomain.MAIL
+                    && submitUrl != null
+                    && signing.login.isEmpty()) {
+                submitUrl = Endpoints.asUser(submitUrl, email);
             }
             if (connectedAccount == null) {
                 connectedAccount = AccountEntry.empty(email);
             }
             connectedAccount =
-                    connectedAccount.with(connection.domain(), baseUrl, submitUrl, connection.credential());
+                    connectedAccount.with(
+                            connection.domain(),
+                            baseUrl,
+                            submitUrl,
+                            connection.credential(),
+                            connection.sending());
         }
         return connectedAccount;
     }
@@ -63,7 +87,8 @@ final class AccountCommit {
                             domain,
                             connected.connection(domain).baseUrl,
                             connected.connection(domain).submitUrl,
-                            connected.credential(domain));
+                            connected.credential(domain),
+                            connected.submitCredential(domain));
         }
 
         // NOTE: a grant that asked for the union (Google's incremental
@@ -78,7 +103,8 @@ final class AccountCommit {
                                 domain,
                                 merged.connection(domain).baseUrl,
                                 merged.connection(domain).submitUrl,
-                                granted);
+                                granted,
+                                merged.submitCredential(domain));
             }
         }
         return merged;
