@@ -27,17 +27,31 @@ pub mod smtp;
 
 use std::path::{Path, PathBuf};
 
-use mail_parser::{MessageParser, MessagePartId, PartType};
+use mime::{
+    header::marker::MESSAGE_ID,
+    tree::{cst::MimeCst, parse::MimeParseOptions},
+};
 use serde::Serialize;
 
 /// A message's `Message-ID`, its angle brackets taken off, read from its
 /// header alone; [`None`] when it carries none.
 pub fn message_id(raw: &[u8]) -> Option<String> {
-    MessageParser::default()
-        .parse_headers(raw)?
-        .message_id()
+    header_block(raw)
+        .root
+        .header::<MESSAGE_ID>()?
+        .into_iter()
+        .next()
         .filter(|id| !id.is_empty())
-        .map(str::to_string)
+}
+
+/// A raw message parsed down to its header block alone, the body left
+/// unsplit.
+pub fn header_block(raw: &[u8]) -> MimeCst<'_> {
+    let opts = MimeParseOptions {
+        structure_depth: Some(0),
+        ..Default::default()
+    };
+    MimeCst::parse_with(raw, opts)
 }
 
 /// How deep a multipart tree is walked; parts nested deeper go unnumbered.
@@ -76,17 +90,19 @@ pub fn derivable(raw: &[u8]) -> &[u8] {
 /// How many multipart levels a raw message nests, walked with a stack
 /// of its own.
 fn depth(raw: &[u8]) -> usize {
-    let Some(parsed) = MessageParser::default().parse(raw) else {
-        return 0;
+    // NOTE: one container past the limit, so a tree exactly at it reads
+    // whole and a deeper one still counts past it.
+    let opts = MimeParseOptions {
+        max_depth: Some(MAX_DEPTH + 1),
+        ..Default::default()
     };
+    let cst = MimeCst::parse_with(raw, opts);
     let mut deepest = 0;
-    let mut pending: Vec<(MessagePartId, usize)> = vec![(0, 0)];
-    while let Some((id, level)) = pending.pop() {
-        if let Some(PartType::Multipart(children)) =
-            parsed.parts.get(id as usize).map(|part| &part.body)
-        {
+    let mut pending = vec![(&cst.root, 0)];
+    while let Some((entity, level)) = pending.pop() {
+        if let Some(multipart) = entity.body.multipart() {
             deepest = deepest.max(level + 1);
-            pending.extend(children.iter().map(|child| (*child, level + 1)));
+            pending.extend(multipart.parts.iter().map(|part| (&part.entity, level + 1)));
         }
     }
     deepest

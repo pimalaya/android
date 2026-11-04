@@ -3,7 +3,7 @@ name = "pimalaya"
 description = "JNI bridge driving Pimalaya I/O-free coroutines for the Pimalaya Android client"
 version = "0.1.0"
 authors = ["Clément DOUIN (soywod) <pimalaya.org@posteo.net>"]
-rust-version = "1.88"
+rust-version = "1.89"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 publish = false
@@ -16,38 +16,32 @@ lto = "fat"
 codegen-units = 1
 strip = "symbols"
 opt-level = "s"
-# NOTE: no `panic = "abort"`: every export catches a panic at the JNI
-# boundary (`EnvUnowned::with_env`) and answers it as an error reply.
 
 [dev-dependencies]
-# NOTE: the std store, for the tests running the real sync engine and store
-# over a fake provider; the bridge itself compiles no SQLite.
-io-pimdir = { version = "0.8", features = ["client", "vendored"] }
-# NOTE: the canonical statements and the app's shape run side by side on
-# one SQLite (offline/shape/tests.rs), io-pimdir's own.
+io-pimdir = { version = "0.9", features = ["client", "vendored"] }
 rusqlite = { version = "0.41", default-features = false, features = ["bundled"] }
 tempfile = { version = "3", default-features = false }
 
 [dependencies]
 chrono = { version = "0.4", default-features = false }
-ical-rs = { version = "0.6.1", default-features = false, features = ["jscalendar", "parser"] }
-io-gcal = { version = "0.2", default-features = false, features = ["ical"] }
-io-gmail = { version = "0.5", default-features = false }
-io-gpeople = { version = "0.5", default-features = false, features = ["vcard"] }
-io-http = { version = "0.5", default-features = false }
-io-imap = { version = "0.7", default-features = false }
-io-jmap = { version = "0.6", default-features = false, features = ["ical", "vcard"] }
-io-msgraph = { version = "0.6", default-features = false, features = ["ical", "vcard"] }
-io-oauth = { version = "0.3", default-features = false }
-io-pim-discovery = { version = "0.9", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
-io-pimdir = { version = "0.8", default-features = false, features = ["search"] }
-io-smtp = { version = "0.5", default-features = false }
-io-webdav = { version = "0.5", default-features = false }
+ical-rs = { version = "0.7", default-features = false, features = ["jscalendar", "parser"] }
+io-gcal = { version = "0.3", default-features = false, features = ["ical"] }
+io-gmail = { version = "0.6", default-features = false }
+io-gpeople = { version = "0.6", default-features = false, features = ["vcard"] }
+io-http = { version = "0.6", default-features = false }
+io-imap = { version = "0.8", default-features = false }
+io-jmap = { version = "0.7", default-features = false, features = ["ical", "vcard"] }
+io-msgraph = { version = "0.7", default-features = false, features = ["ical", "vcard"] }
+io-oauth = { version = "0.5", default-features = false }
+io-pim-discovery = { version = "0.11", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
+io-pimdir = { version = "0.9", default-features = false, features = ["search"] }
+io-smtp = { version = "0.7", default-features = false }
+io-webdav = { version = "0.6", default-features = false }
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 jni = "0.22"
 libc = { version = "0.2", default-features = false }
 log = { version = "0.4", default-features = false }
-mail-parser = { version = "0.11", default-features = false, features = ["full_encoding"] }
+mime-rs = { version = "0.1", default-features = false, features = ["parser", "base64", "encoding"] }
 percent-encoding = "2"
 pulldown-cmark = { version = "0.13", default-features = false }
 rand = "0.10"
@@ -56,16 +50,6 @@ serde = { version = "1", default-features = false, features = ["alloc", "derive"
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.11", default-features = false }
 siphasher = { version = "1", default-features = false }
+simd-cpu = { version = "0.1", default-features = false, features = ["std"] }
 url = { version = "2", default-features = false }
-vcard-rs = { version = "0.5", default-features = false, features = ["parser", "jscontact"] }
-
-[patch.crates-io]
-io-jmap = { git = "https://github.com/pimalaya/io-jmap", rev = "3d25e2ba5194a494028a04d60a23bfb61b16f5aa" }
-io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "2ae26370aefa671c16316dbad98107634436bce6" }
-# NOTE: unreleased fixes, to be replaced by released versions.
-ical-rs = { git = "https://github.com/pimalaya/ical", rev = "99b92736a6a076c72936fac29c9b85a5168e4c2f" }
-io-http = { git = "https://github.com/pimalaya/io-http", rev = "e1815307771c1ec65a86b77256d46c33241d3038" }
-io-imap = { git = "https://github.com/pimalaya/io-imap", rev = "b1ab38ea9f24578b46dda56aa009600571b6b9ef" }
-io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "0c701447473a03e5cf9effcd0039a49a78419c4d" }
-io-pim-discovery = { git = "https://github.com/pimalaya/io-pim-discovery", rev = "6ceeaf43e655da1f0dac87e844f652c56c1c5d7a" }
-io-webdav = { git = "https://github.com/pimalaya/io-webdav", rev = "b2b9a00462f7d371de3fb419e53288f0a13cee39" }
+vcard-rs = { version = "0.6", default-features = false, features = ["parser", "jscontact"] }

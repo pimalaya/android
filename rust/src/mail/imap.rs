@@ -136,6 +136,8 @@ const HEADER_FIELDS: [&str; 9] = [
 /// read times out. No JNI reference: the JVM invalidates those on return.
 pub struct ImapState {
     fragmentizer: Fragmentizer,
+    /// How many commands this connection tagged, numbering the next one.
+    tagged: u64,
     url: String,
     /// What the server says it can do, read once at authentication.
     ///
@@ -192,11 +194,19 @@ impl ImapState {
     fn new(url: &Url) -> Self {
         Self {
             fragmentizer: Fragmentizer::new(MAX_MESSAGE_SIZE),
+            tagged: 0,
             url: url.to_string(),
             capabilities: Vec::new(),
             selected: None,
             cache: None,
         }
+    }
+
+    /// The tag of the next command, unique on the connection (RFC 3501
+    /// section 2.2.1).
+    fn tag(&mut self) -> Vec<u8> {
+        self.tagged += 1;
+        format!("P{}", self.tagged).into_bytes()
     }
 
     /// Whether the server expunges one message alone ([`disposal`]).
@@ -292,6 +302,9 @@ impl<'a, H: Host> ImapSession<'a, H> {
         loop {
             match coroutine.resume(&mut self.state.fragmentizer, arg.as_deref()) {
                 ImapCoroutineState::Complete(result) => return Ok(result),
+                ImapCoroutineState::Yielded(ImapYield::WantsTag) => {
+                    arg = Some(self.state.tag());
+                }
                 ImapCoroutineState::Yielded(ImapYield::WantsRead) => {
                     arg = Some(self.client.read(&self.state.url)?);
                 }
@@ -892,7 +905,8 @@ impl<'a, H: Host> ImapSession<'a, H> {
             vanished: data
                 .vanished_earlier
                 .iter()
-                .map(|uid| uid.get().to_string())
+                .flat_map(|range| range.start().get()..=range.end().get())
+                .map(|uid| uid.to_string())
                 .collect(),
             checkpoint: encode_cursor(validity_now, data.highest_mod_seq.unwrap_or(modseq)),
         }))
@@ -1079,6 +1093,9 @@ impl<H: Host> ImapSession<'_, H> {
                         }
                         _ => Refusal::Failed(err.to_string().into()),
                     });
+                }
+                ImapCoroutineState::Yielded(ImapMessageFetchStreamBatchYield::WantsTag) => {
+                    arg = Some(self.state.tag());
                 }
                 ImapCoroutineState::Yielded(ImapMessageFetchStreamBatchYield::WantsRead) => {
                     arg = Some(self.client.read(&self.state.url)?);

@@ -10,9 +10,10 @@
 use std::{borrow::Cow, io::Write};
 
 use io_pimdir::{hash, summary::derive};
-use mail_parser::{
-    Address, Message, MessageParser, MessagePart, MessagePartId, MimeHeaders, PartType,
-    decoders::{base64::base64_decode, quoted_printable::quoted_printable_decode},
+use mime::{
+    header::marker::{CC, CONTENT_TYPE, DATE, FROM, SUBJECT, TO},
+    tree::{cst::MimeCst, entity::MimeEntity},
+    value::address::MimeAddressList,
 };
 use serde::Serialize;
 
@@ -26,48 +27,57 @@ use crate::{
 ///
 /// HTML wins over text when the message carries both, being the alternative
 /// the sender laid out; the reader sandboxes it, which makes that safe.
+///
+/// An empty input is refused, as no message: the parser reads any other
+/// bytes as one, a header block or not.
 pub fn parse(raw: &[u8]) -> Result<MessageBody, BridgeError> {
-    let parsed = MessageParser::default()
-        .parse(raw)
-        .ok_or_else(|| BridgeError::from("Could not read the message"))?;
+    if raw.is_empty() {
+        return Err("Could not read the message".into());
+    }
+    let cst = MimeCst::parse(raw);
+    let root = &cst.root;
+    let lists = root.body_lists();
 
-    let sender = parsed.from().and_then(|address| address.first());
+    let from = root.header::<FROM>();
+    let sender = from.as_ref().and_then(MimeAddressList::first);
 
-    // NOTE: the part itself, as `body_html` renders a text-only message
-    // into HTML, which the reader would sandbox in a web view for nothing.
-    let html = parsed.html_part(0).and_then(|part| match &part.body {
-        PartType::Html(html) => Some(html.to_string()),
-        _ => None,
-    });
+    // NOTE: the HTML list holds the text part of a text-only message (RFC
+    // 8621 section 4.1.4), which the reader would sandbox in a web view for
+    // nothing.
+    let html = lists
+        .html
+        .first()
+        .filter(|part| part.content_type().is("text", "html"))
+        .and_then(|part| part.text())
+        .map(Cow::into_owned);
     let (kind, body) = match html {
         Some(html) => ("html", html),
-        None => match parsed.body_text(0) {
+        None => match lists.text.first().and_then(|part| part.text()) {
             Some(text) => ("plain", text.into_owned()),
             None => ("", String::new()),
         },
     };
 
     Ok(MessageBody {
-        subject: parsed.subject().unwrap_or_default().to_string(),
+        subject: root.header::<SUBJECT>().unwrap_or_default(),
         from: sender
-            .and_then(|address| address.name.as_deref())
+            .and_then(|mailbox| mailbox.name.as_deref())
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .unwrap_or_default()
             .to_string(),
         from_address: sender
-            .and_then(|address| address.address.as_deref())
-            .unwrap_or_default()
-            .to_string(),
-        to: header_addresses(parsed.to()),
-        cc: header_addresses(parsed.cc()),
-        date: parsed
-            .date()
+            .and_then(|mailbox| mailbox.address.clone())
+            .unwrap_or_default(),
+        to: header_addresses(root.header::<TO>()),
+        cc: header_addresses(root.header::<CC>()),
+        date: root
+            .header::<DATE>()
             .map(|date| date.to_rfc3339())
             .unwrap_or_default(),
         kind: kind.to_string(),
         body,
-        attachments: attachments(&parsed),
+        attachments: attachments(root),
         attachment_mark: match io_pimdir::summary::mail::derive(derivable(raw)).summary {
             Some(io_pimdir::summary::PimdirSummary::Mail(summary)) => {
                 summary.attachment.unwrap_or(false)
@@ -82,27 +92,30 @@ pub fn parse(raw: &[u8]) -> Result<MessageBody, BridgeError> {
 /// Each carries its IMAP section, the key pimdir names its stand-in by.
 /// Exactly the parts making the attachment mark: those carrying
 /// `Content-Disposition: attachment` (STORAGE Annex A.1, section 14.3).
-fn attachments(parsed: &Message<'_>) -> Vec<MessageAttachment> {
-    sections(parsed)
+fn attachments(root: &MimeEntity<'_>) -> Vec<MessageAttachment> {
+    sections(root)
         .into_iter()
-        .filter_map(|(id, section)| {
-            let part = parsed.parts.get(id as usize)?;
-            let attached = part
-                .content_disposition()
-                .is_some_and(|disposition| disposition.ctype().eq_ignore_ascii_case("attachment"));
-            attached.then(|| MessageAttachment {
-                name: part.attachment_name().unwrap_or_default().to_string(),
-                mime: part
-                    .content_type()
-                    .map(|content| match content.subtype() {
-                        Some(subtype) => format!("{}/{subtype}", content.ctype()),
-                        None => content.ctype().to_string(),
-                    })
-                    .unwrap_or_default()
-                    .to_lowercase(),
-                size: decoded(parsed, part).len() as u64,
+        .filter(|(part, _)| {
+            part.disposition()
+                .is_some_and(|disposition| disposition.is("attachment"))
+        })
+        .map(|(part, section)| {
+            // NOTE: the field as stated, none when absent, rather than the
+            // `text/plain` RFC 2045 section 5.2 defaults it to.
+            let mime = part
+                .header::<CONTENT_TYPE>()
+                .map(|media| match media.sub.is_empty() {
+                    true => media.top,
+                    false => format!("{}/{}", media.top, media.sub),
+                })
+                .unwrap_or_default()
+                .to_lowercase();
+            MessageAttachment {
+                name: part.attachment_name().unwrap_or_default(),
+                mime,
+                size: decoded(part).len() as u64,
                 part: section,
-            })
+            }
         })
         .collect()
 }
@@ -113,76 +126,63 @@ fn attachments(parsed: &Message<'_>) -> Vec<MessageAttachment> {
 /// How an attachment opens from the body the store holds; the part is
 /// written as the parser holds it, never copied first.
 pub fn write_part(raw: &[u8], section: &str, out: &mut impl Write) -> Result<usize, BridgeError> {
-    let parsed = MessageParser::default()
-        .parse(raw)
-        .ok_or_else(|| BridgeError::from("Could not read the message"))?;
-    let id = sections(&parsed)
+    // NOTE: no message, as [`parse`] refuses it.
+    if raw.is_empty() {
+        return Err("Could not read the message".into());
+    }
+    let cst = MimeCst::parse(raw);
+    let part = sections(&cst.root)
         .into_iter()
-        .find_map(|(id, held)| (held == section).then_some(id))
+        .find_map(|(part, held)| (held == section).then_some(part))
         .ok_or_else(|| BridgeError::from(format!("No part {section} in the message")))?;
-    let bytes = decoded(&parsed, &parsed.parts[id as usize]);
+    let bytes = decoded(part);
     out.write_all(&bytes)
         .map_err(|err| BridgeError::from(err.to_string()))?;
     Ok(bytes.len())
 }
 
 /// One part's bytes as its sender wrote them, only the
-/// `Content-Transfer-Encoding` undone.
+/// `Content-Transfer-Encoding` undone: no charset conversion, which would
+/// change a text file's bytes.
 ///
-/// A text part is read from the raw message, as the parser converts it to
-/// UTF-8 from its charset, which would change a file's bytes.
-fn decoded<'a>(parsed: &'a Message<'_>, part: &'a MessagePart<'_>) -> Cow<'a, [u8]> {
-    if !matches!(part.body, PartType::Text(_) | PartType::Html(_)) {
-        return Cow::Borrowed(part.contents());
-    }
-    let raw = parsed
-        .raw_message
-        .get(part.raw_body_offset() as usize..part.raw_end_offset() as usize)
-        .unwrap_or_default();
-    let encoding = part
-        .content_transfer_encoding()
+/// A nested message the parse split is its bytes again, as RFC 2046
+/// section 5.2.1 leaves such a part unencoded.
+fn decoded<'e>(part: &'e MimeEntity<'_>) -> Cow<'e, [u8]> {
+    part.decoded()
+        .or_else(|| {
+            part.body
+                .message()
+                .map(|message| Cow::Owned(message.to_bytes()))
+        })
         .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    match encoding.as_str() {
-        "base64" => base64_decode(raw).map_or(Cow::Borrowed(raw), Cow::Owned),
-        "quoted-printable" => quoted_printable_decode(raw).map_or(Cow::Borrowed(raw), Cow::Owned),
-        _ => Cow::Borrowed(raw),
-    }
 }
 
 /// The IMAP section (RFC 3501 section 6.4.5) of every part, in document
-/// order, by index in the parser's flat list.
+/// order.
 ///
 /// A single-part body is `1`, a multipart's children count from 1 under it;
 /// a nested message is one part. Walked on a stack, at most [`MAX_DEPTH`].
-fn sections(parsed: &Message<'_>) -> Vec<(MessagePartId, String)> {
-    let mut sections = Vec::new();
-    let root = match parsed.parts.first().map(|root| &root.body) {
-        Some(PartType::Multipart(children)) => children,
-        Some(_) => {
-            sections.push((0, String::from("1")));
-            return sections;
-        }
-        None => return sections,
+fn sections<'t, 'a>(root: &'t MimeEntity<'a>) -> Vec<(&'t MimeEntity<'a>, String)> {
+    let Some(multipart) = root.body.multipart() else {
+        return vec![(root, String::from("1"))];
     };
 
     // NOTE: each level holds the children it numbers, how many of them
     // are numbered, and the prefix they are numbered under.
-    let mut levels: Vec<(&[MessagePartId], usize, String)> = vec![(root, 0, String::new())];
+    let mut sections = Vec::new();
+    let mut levels = vec![(multipart.parts.iter(), 0, String::new())];
     while let Some((children, numbered, prefix)) = levels.last_mut() {
-        let Some(id) = children.get(*numbered).copied() else {
+        let Some(part) = children.next() else {
             levels.pop();
             continue;
         };
         *numbered += 1;
         let section = format!("{prefix}{numbered}");
-        sections.push((id, section.clone()));
+        sections.push((&part.entity, section.clone()));
         if levels.len() < MAX_DEPTH
-            && let Some(PartType::Multipart(nested)) =
-                parsed.parts.get(id as usize).map(|part| &part.body)
+            && let Some(nested) = part.entity.body.multipart()
         {
-            levels.push((nested, 0, format!("{section}.")));
+            levels.push((nested.parts.iter(), 0, format!("{section}.")));
         }
     }
     sections
@@ -218,23 +218,19 @@ pub struct Description {
 }
 
 /// A header's addresses as one line, the way a header reads them.
-fn header_addresses(header: Option<&Address>) -> String {
+fn header_addresses(header: Option<MimeAddressList>) -> String {
     let Some(header) = header else {
         return String::new();
     };
 
     header
-        .clone()
-        .into_list()
-        .iter()
-        .map(|address| match address.name.as_deref().map(str::trim) {
-            Some(name) if !name.is_empty() => {
-                format!(
-                    "{name} <{}>",
-                    address.address.as_deref().unwrap_or_default()
-                )
+        .mailboxes()
+        .map(|mailbox| {
+            let address = mailbox.address.as_deref().unwrap_or_default();
+            match mailbox.name.as_deref().map(str::trim) {
+                Some(name) if !name.is_empty() => format!("{name} <{address}>"),
+                _ => address.to_string(),
             }
-            _ => address.address.as_deref().unwrap_or_default().to_string(),
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -383,6 +379,39 @@ mod tests {
         assert_eq!(part(&raw, "2").unwrap(), b"caf\xe9");
         assert_eq!(message.attachments[0].size, 4);
         assert_eq!(part(&raw, "3").unwrap(), "café".as_bytes());
+    }
+
+    #[test]
+    fn a_multipart_cut_off_reads_what_arrived() {
+        let raw = b"Subject: Broken\r\n\
+                    Date: yesterday-ish\r\n\
+                    Content-Type: multipart/mixed; boundary=\"gone\"\r\n\
+                    \r\n\
+                    --gone\r\n\
+                    Content-Type: text/plain\r\n\
+                    \r\n\
+                    cut off\r\n";
+
+        let message = parse(raw).unwrap();
+
+        assert_eq!(message.subject, "Broken");
+        assert_eq!(message.date, "");
+        assert_eq!(message.body, "cut off\r\n");
+        assert!(message.attachments.is_empty());
+        assert_eq!(describe(raw).attachments.map(|found| found.len()), Some(0));
+    }
+
+    #[test]
+    fn an_empty_input_is_refused_and_a_headerless_one_read() {
+        assert_eq!(
+            parse(b"").err().unwrap().to_string(),
+            "Could not read the message"
+        );
+        assert!(describe(b"").attachments.is_none());
+
+        let message = parse(b"\r\njust a body\r\n").unwrap();
+        assert_eq!(message.kind, "plain");
+        assert_eq!(message.body, "just a body\r\n");
     }
 
     #[test]

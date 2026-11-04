@@ -271,7 +271,7 @@ apply BEGIN:VCARD\r\nVERSION:4.0\r\nUID:onlyuid\r\nEND:VCARD\r\n
   dialog t:[Note] e:[A very long note that is folded across several lines because it exceeds seventy-five octets per line as the RFC asks]/null b:Remove b:Cancel b:OK
 chooser [Address] [Anniversary] [Birthday] [Company] [Department] [Email] [First name] [Gender] [Language] [Last name] [Messaging address] [Middle name] [Nickname] [Note] [Phone] [Prefix] [Relation] [Role] [Suffix] [Title] [Website]
 birthday [] anniversary []
-apply BEGIN:VCARD\r\nVERSION:4.0\r\nUID:folded\r\nFN:Folded Name That Is Rather Long And Goes On And On Beyond The Line Limit\r\nNOTE:A very long note that is folded across several lines because it exceeds seventy-five octets per line as the RFC asks\r\nEND:VCARD\r\n
+apply BEGIN:VCARD\r\nVERSION:4.0\r\nUID:folded\r\nFN:Folded Name That Is Rather Long And Goes On And On Beyond The Line Limit\r\nNOTE:A very long note that is folded across several lines because it exceed\r\n s seventy-five octets per line as the RFC asks\r\nEND:VCARD\r\n
 == browse 13
   page i:ic_section_person t:[Identity] i:ic_add_entry+ t:[Display name] t:[Sparse] t:[Gender] t:[Male] i:ic_section_call t:[Phones] i:ic_add_entry+ t:[Other] i:ic_section_mail t:[Emails] i:ic_add_entry+ t:[Other] i:ic_section_location_on t:[Addresses] i:ic_add_entry+ t:[Other] t:[Other] t:[Other] i:ic_section_language t:[Websites] i:ic_add_entry+ t:[Website]
   dialog t:[Display name] e:[Sparse]/Display name b:Remove b:Cancel b:OK

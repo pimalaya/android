@@ -67,7 +67,7 @@ public class MailClientTest {
                             "billing@example.org",
                             "bob@example.org",
                             "",
-                            "2026-01-08T10:00:00Z",
+                            "2026-01-08T10:00:00+00:00",
                             "plain",
                             "Your invoice.",
                             List.of(
@@ -89,7 +89,7 @@ public class MailClientTest {
                             "news@example.org",
                             "bob@example.org",
                             "",
-                            "2026-01-09T07:00:00Z",
+                            "2026-01-09T07:00:00+00:00",
                             "html",
                             "<img src=\"cid:logo@x\">",
                             List.of(),
@@ -111,7 +111,7 @@ public class MailClientTest {
                             "alice@example.org",
                             "bob@example.org",
                             "",
-                            "2026-01-11T08:00:00Z",
+                            "2026-01-11T08:00:00+00:00",
                             "plain",
                             "Join us",
                             List.of(
@@ -127,7 +127,7 @@ public class MailClientTest {
                             "bob@example.org",
                             "carol@example.org",
                             "",
-                            "2026-01-12T10:00:00Z",
+                            "2026-01-12T10:00:00+00:00",
                             "plain",
                             "Forwarding.",
                             List.of(
@@ -155,11 +155,12 @@ public class MailClientTest {
                             "",
                             "",
                             "",
-                            "",
-                            "",
+                            "plain",
+                            "cut off\r\n",
                             List.of(),
                             false),
                     null,
+                    // NOTE: FF FE reads as a UTF-16LE byte order mark.
                     new MessageBody(
                             "",
                             "",
@@ -167,8 +168,8 @@ public class MailClientTest {
                             "",
                             "",
                             "",
-                            "",
-                            "",
+                            "plain",
+                            "Āം耊",
                             List.of(),
                             false));
 

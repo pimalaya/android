@@ -104,6 +104,8 @@ pub fn authorize_url(request: &AuthorizationRequest) -> Result<String, String> {
         scope: scope.split_whitespace().map(Cow::Borrowed).collect(),
         state: Some(Cow::Owned(state)),
         pkce_code_challenge: Some(Cow::Owned(challenge)),
+        // NOTE: the resource travels as an extra, which replaces these.
+        resource: Vec::new(),
         extras: extras
             .into_iter()
             .map(|(key, value)| (Cow::Owned(key), Cow::Owned(value)))
@@ -337,6 +339,7 @@ impl<H: Host> Client<H> {
             client_id: client_id.into(),
             client_secret: client_secret.map(SecretString::from),
             pkce_code_verifier: Some(Cow::Owned(verifier)),
+            resource: Vec::new(),
         };
 
         let mut coroutine =

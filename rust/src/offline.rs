@@ -532,7 +532,7 @@ fn enumerate_json<'a>(collection: &'a str, request: &PimdirEnumerate) -> YieldJs
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use io_pimdir::{
         change::PimdirWriteOp,
         collection::{PimdirCheckpoint, PimdirCollectionId, PimdirCursor, PimdirScope},
@@ -554,35 +554,59 @@ mod tests {
         yield_json,
     };
 
-    /// A file of the pimdir spec io-pimdir vendors (spec/), from the git
-    /// checkout cargo made of the pinned revision (Cargo.toml's
-    /// `[patch.crates-io]`), so its vectors run against the bridge.
+    /// A file of the pimdir spec io-pimdir vendors ([`io_pimdir_spec_dir`]).
     pub fn io_pimdir_spec(file: &str) -> std::path::PathBuf {
-        let manifest = include_str!("../Cargo.toml");
-        let rev = manifest
-            .lines()
-            .find(|line| line.starts_with("io-pimdir = { git"))
-            .and_then(|line| line.split("rev = \"").nth(1))
-            .map(|rev| &rev[..7])
-            .expect("io-pimdir pinned by git rev");
-        let home = std::env::var("CARGO_HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| {
-                std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".cargo")
-            });
-        let checkouts = home.join("git").join("checkouts");
-        std::fs::read_dir(&checkouts)
-            .expect("cargo's git checkouts")
+        io_pimdir_spec_dir().join(file)
+    }
+
+    /// The pimdir spec io-pimdir vendors (spec/), so its vectors run against
+    /// the bridge: `PIMALAYA_IO_PIMDIR_SPEC`, else the source cargo fetched
+    /// of the io-pimdir rust/Cargo.lock locks, a git checkout or a registry
+    /// package.
+    pub fn io_pimdir_spec_dir() -> std::path::PathBuf {
+        use std::{env, fs, path::PathBuf};
+
+        if let Ok(dir) = env::var("PIMALAYA_IO_PIMDIR_SPEC") {
+            return PathBuf::from(dir);
+        }
+
+        let lock = include_str!("../Cargo.lock");
+        let package = lock
+            .split("[[package]]")
+            .find(|package| package.contains("\nname = \"io-pimdir\"\n"))
+            .expect("io-pimdir in Cargo.lock");
+        let field = |name: &str| {
+            package
+                .lines()
+                .find_map(|line| line.strip_prefix(name))
+                .map(|value| value.trim_matches('"'))
+                .unwrap_or_default()
+        };
+        let version = field("version = ");
+        let source = field("source = ");
+
+        let home = env::var("CARGO_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(env::var("HOME").unwrap()).join(".cargo"));
+        let (root, name) = match source.split_once('#') {
+            Some((_, commit)) => (home.join("git/checkouts"), commit[..7].to_string()),
+            None => (home.join("registry/src"), format!("io-pimdir-{version}")),
+        };
+        let found = fs::read_dir(&root)
+            .into_iter()
+            .flatten()
             .filter_map(Result::ok)
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("io-pimdir-")
-            })
-            .map(|entry| entry.path().join(rev).join("spec").join(file))
-            .find(|path| path.is_file())
-            .unwrap_or_else(|| panic!("io-pimdir {rev} spec/{file} under {}", checkouts.display()))
+            .map(|entry| entry.path().join(&name).join("spec"))
+            .find(|spec| spec.join("vectors").is_dir());
+
+        found.unwrap_or_else(|| {
+            panic!(
+                "no io-pimdir {version} spec with its vectors under {}: the \
+                 published crate leaves them out, point \
+                 PIMALAYA_IO_PIMDIR_SPEC at a checkout's spec/",
+                root.display()
+            )
+        })
     }
 
     /// A round's last page asks its load with what the page states of its

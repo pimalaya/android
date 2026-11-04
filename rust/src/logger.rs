@@ -24,6 +24,7 @@ use jni::{
     sys::{JNI_VERSION_1_6, JavaVM, jboolean, jint},
 };
 use log::{Level, LevelFilter, Log, Metadata, Record};
+use simd_cpu::SimdCpu;
 
 use crate::ffi::ErrorReply;
 
@@ -38,15 +39,19 @@ static LOGGER: Logcat = Logcat;
 /// Whether debug logs are on ([`Java_org_pimalaya_client_Native_debugLogs`]).
 static VERBOSE: AtomicBool = AtomicBool::new(false);
 
-/// Installs the logger when the JVM loads the library, once.
+/// Installs the logger and the CPU token of the SIMD codecs when the JVM
+/// loads the library, once.
 ///
-/// A panic must not unwind into the JVM, so one leaves no logger.
+/// The token matters on x86 alone: NEON is the aarch64 baseline, and the
+/// codecs carry no 32-bit ARM backend. A panic must not unwind into the
+/// JVM, so one leaves no logger.
 #[unsafe(no_mangle)]
 pub extern "system" fn JNI_OnLoad(_vm: *mut JavaVM, _reserved: *mut c_void) -> jint {
     let _ = catch_unwind(|| {
         if log::set_logger(&LOGGER).is_ok() {
             log::set_max_level(LevelFilter::Warn);
         }
+        let _ = SimdCpu::install_detected();
     });
     JNI_VERSION_1_6
 }

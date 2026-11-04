@@ -293,7 +293,7 @@ impl Account {
             .iter()
             .filter(|(_, mail)| {
                 let has = |id: &str| mail.labels.iter().any(|carried| carried == id);
-                label.is_none_or(&has) && (spam_trash || !(has(TRASH) || has(SPAM)))
+                label.is_none_or(has) && (spam_trash || !(has(TRASH) || has(SPAM)))
             })
             .filter(|(_, mail)| since.is_none_or(|since| millis(&mail.received) / 1000 >= since))
             .collect();

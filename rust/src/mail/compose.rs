@@ -14,12 +14,16 @@
 
 use std::fmt::Write as _;
 
-use mail_parser::{Address, MessageParser};
+use mime::{
+    header::marker::{BCC, CC, FROM, SUBJECT, TO},
+    tree::cst::MimeCst,
+    value::address::MimeAddressList,
+};
 use serde::Deserialize;
 
 use crate::{
     error::BridgeError,
-    mail::{base64, base64_len, markdown},
+    mail::{base64, base64_len, header_block, markdown},
 };
 
 /// How long a header line may run before it folds (RFC 5322 section
@@ -173,19 +177,22 @@ fn text_part(kind: &str, text: &str) -> String {
 /// The step RFC 5322 section 3.6.3 asks of the sender: blind recipients
 /// become `RCPT TO` and leave the document, so no copy received names them.
 pub fn envelope(raw: &[u8]) -> Result<Composed, BridgeError> {
-    let parsed = MessageParser::default()
-        .parse(raw)
-        .ok_or_else(|| BridgeError::from("Could not read the message"))?;
+    let cst = MimeCst::parse(raw);
+    let root = &cst.root;
 
-    let sender = parsed
-        .from()
-        .and_then(|address| address.first())
-        .and_then(|address| address.address.as_deref())
-        .ok_or_else(|| BridgeError::from("The message has no sender"))?
-        .to_string();
+    let sender = root
+        .header::<FROM>()
+        .as_ref()
+        .and_then(MimeAddressList::first)
+        .and_then(|mailbox| mailbox.address.clone())
+        .ok_or_else(|| BridgeError::from("The message has no sender"))?;
 
     let mut recipients = Vec::new();
-    for header in [parsed.to(), parsed.cc(), parsed.bcc()] {
+    for header in [
+        root.header::<TO>(),
+        root.header::<CC>(),
+        root.header::<BCC>(),
+    ] {
         recipients.extend(envelope_addresses(header));
     }
     if recipients.is_empty() {
@@ -212,22 +219,18 @@ pub fn stated(raw: &[u8], from: &str, rcpts: &[String]) -> Composed {
 
 /// The subject one message's header states, decoded, `None` without one.
 pub fn subject(raw: &[u8]) -> Option<String> {
-    MessageParser::default()
-        .parse_headers(raw)
-        .and_then(|parsed| parsed.subject().map(str::to_string))
+    header_block(raw).root.header::<SUBJECT>()
 }
 
 /// The bare addresses of one address header, for the envelope.
-fn envelope_addresses(header: Option<&Address>) -> Vec<String> {
+fn envelope_addresses(header: Option<MimeAddressList>) -> Vec<String> {
     let Some(header) = header else {
         return Vec::new();
     };
 
     header
-        .clone()
-        .into_list()
-        .into_iter()
-        .filter_map(|address| address.address.map(|address| address.into_owned()))
+        .mailboxes()
+        .filter_map(|mailbox| mailbox.address.clone())
         .filter(|address| !address.is_empty())
         .collect()
 }
@@ -403,7 +406,7 @@ fn addresses(field: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use mail_parser::MessageParser;
+    use mime::{header::marker::SUBJECT, tree::cst::MimeCst};
 
     use crate::mail::{compose::*, unbase64};
 
@@ -546,10 +549,13 @@ mod tests {
             "Ada Løvelace",
         ] {
             let written = format!("{}\r\n", header("Subject", original));
-            let parsed = MessageParser::default().parse(written.as_bytes());
-            let subject = parsed.as_ref().and_then(|parsed| parsed.subject());
+            let subject = MimeCst::parse(written.as_bytes()).root.header::<SUBJECT>();
 
-            assert_eq!(subject, Some(original), "round trip of {original:?}");
+            assert_eq!(
+                subject.as_deref(),
+                Some(original),
+                "round trip of {original:?}"
+            );
         }
     }
 
@@ -646,12 +652,13 @@ mod tests {
         draft.body = "See **this** [page](https://example.org)".into();
         let raw = compose(&draft).unwrap();
 
-        let parsed = MessageParser::default().parse(&raw).unwrap();
+        let cst = MimeCst::parse(&raw);
+        let lists = cst.root.body_lists();
         assert_eq!(
-            parsed.body_text(0).unwrap(),
+            lists.text[0].text().unwrap(),
             "See **this** [page](https://example.org)"
         );
-        let html = parsed.body_html(0).unwrap();
+        let html = lists.html[0].text().unwrap();
         assert!(html.contains("<strong>this</strong>"));
         assert!(html.contains("<a href=\"https://example.org\">page</a>"));
         assert!(

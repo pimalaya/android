@@ -475,7 +475,7 @@ impl ContactFields {
                     group: None,
                     name: VcardPropName::Kind(VcardPropKind::Adr),
                     params: type_params(&adr.types, adr.pref, version),
-                    value: VcardValue::Adr(value),
+                    value: VcardValue::Adr(Box::new(value)),
                 });
             }
         }

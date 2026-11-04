@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs = {
-      url = "github:nixos/nixpkgs/nixos-25.11";
+      url = "github:nixos/nixpkgs/nixos-26.05";
     };
     fenix = {
       url = "github:nix-community/fenix/monthly";
@@ -378,7 +378,7 @@
             rust
             pkgs.cargo-deny
             pkgs.cargo-ndk
-            pkgs.jdk17
+            pkgs.jdk21
             pkgs.gradle
             androidSdk
             pkgs.jdt-language-server
@@ -388,7 +388,9 @@
           ANDROID_SDK_ROOT = sdkRoot;
           ANDROID_NDK_ROOT = "${sdkRoot}/ndk/${ndkVersion}";
           ANDROID_NDK_HOME = "${sdkRoot}/ndk/${ndkVersion}";
-          JAVA_HOME = pkgs.jdk17.home;
+          # NOTE: Robolectric runs SDK 36 on Java 21 only; the bytecode still
+          # targets 17 (build.gradle.kts compileOptions).
+          JAVA_HOME = pkgs.jdk21.home;
           PIMALAYA_SQLITE_HOST = "${sqliteHost}/lib";
           # NOTE: an env var rather than a build input, so 3.18's sqlite3.h
           # and libsqlite3.so never reach the compiler's search paths.

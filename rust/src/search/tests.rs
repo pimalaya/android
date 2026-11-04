@@ -41,34 +41,9 @@ use crate::{
     },
 };
 
-/// io-pimdir's vendored spec at the pinned revision, the cargo checkout
-/// of the rev rust/Cargo.toml patches in, or `PIMALAYA_IO_PIMDIR_SPEC`.
+/// io-pimdir's vendored spec ([`crate::offline::tests::io_pimdir_spec_dir`]).
 fn spec() -> PathBuf {
-    if let Ok(dir) = env::var("PIMALAYA_IO_PIMDIR_SPEC") {
-        return PathBuf::from(dir);
-    }
-    let manifest = include_str!("../../Cargo.toml");
-    let line = manifest
-        .lines()
-        .find(|line| line.starts_with("io-pimdir = { git"))
-        .expect("io-pimdir is patched to a revision");
-    let rev = line.split("rev = \"").nth(1).unwrap();
-    let short = &rev[..7];
-    let home = env::var("CARGO_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(env::var("HOME").unwrap()).join(".cargo"));
-    let checkouts = home.join("git/checkouts");
-    for entry in fs::read_dir(&checkouts).expect("cargo's git checkouts") {
-        let dir = entry.unwrap().path().join(short);
-        let name = dir.parent().unwrap().file_name().unwrap().to_string_lossy();
-        if name.starts_with("io-pimdir-") && dir.join("spec").is_dir() {
-            return dir.join("spec");
-        }
-    }
-    panic!(
-        "no io-pimdir checkout at {short} under {}",
-        checkouts.display()
-    );
+    crate::offline::tests::io_pimdir_spec_dir()
 }
 
 fn json(path: &Path) -> Json {

@@ -34,6 +34,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: Clippy
         run: nix develop --command bash -c 'cd rust && cargo clippy --all-targets --locked -- -D warnings'
+      # NOTE: the published io-pimdir leaves its spec vectors out, so the
+      # tests read them from its tag at the version Cargo.lock locks.
+      - name: io-pimdir spec
+        run: |
+          version=$(grep -A1 '^name = "io-pimdir"$' rust/Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')
+          git clone --depth 1 --branch "v$version" https://github.com/pimalaya/io-pimdir "$RUNNER_TEMP/io-pimdir"
+          echo "PIMALAYA_IO_PIMDIR_SPEC=$RUNNER_TEMP/io-pimdir/spec" >> "$GITHUB_ENV"
       - name: Rust tests
         run: nix develop --command bash -c 'cd rust && cargo test --locked'
       # The unit tests load the host libpimalaya.so (cargoHostBuild), and
