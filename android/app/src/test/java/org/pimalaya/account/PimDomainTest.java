@@ -66,10 +66,10 @@ public class PimDomainTest {
     public void eachDomainRanksWhatTheAppCanDoOverIt() {
         assertTrue(PimDomain.MAIL.rank("jmap") < PimDomain.MAIL.rank("imap"));
         assertTrue(PimDomain.CONTACTS.rank("jmap") < PimDomain.CONTACTS.rank("carddav"));
-        // NOTE: JMAP calendars are known only once signed in, and the probe
-        // drops what is not served, so CalDAV leads.
-        assertTrue(PimDomain.CALENDAR.rank("caldav") < PimDomain.CALENDAR.rank("jmap"));
-        assertTrue(PimDomain.CALENDAR.rank("jmap") < PimDomain.CALENDAR.rank(null));
+        // NOTE: JMAP leads calendars too, so one grant covers the three; a
+        // session not serving them falls back to CalDAV after the grant.
+        assertTrue(PimDomain.CALENDAR.rank("jmap") < PimDomain.CALENDAR.rank("caldav"));
+        assertTrue(PimDomain.CALENDAR.rank("caldav") < PimDomain.CALENDAR.rank(null));
     }
 
     @Test

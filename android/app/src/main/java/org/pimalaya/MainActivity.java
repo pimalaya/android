@@ -996,7 +996,7 @@ public class MainActivity extends Host
             authBusy = loading;
             int[] controls;
             if (buttonId == R.id.email_continue) {
-                controls = new int[] {R.id.email_input, R.id.email_advanced};
+                controls = new int[] {R.id.email_input};
             } else if (buttonId == R.id.signin_continue) {
                 controls = new int[] {R.id.signin_back, R.id.signin_container};
             } else if (buttonId == R.id.oauth_continue) {
@@ -1007,7 +1007,6 @@ public class MainActivity extends Host
                 controls =
                         new int[] {
                             R.id.domain_back,
-                            R.id.domain_advanced,
                             R.id.domain_password,
                             R.id.domain_password_toggle,
                             R.id.domain_container

@@ -49,6 +49,29 @@ public class SetupPlanTest {
     }
 
     @Test
+    public void aPasswordSignsInToOneServerAndAJmapSessionIsOne() {
+        // NOTE: one host, one login, one password: still three servers, each
+        // of which may take another login.
+        Map<PimDomain, SetupOption> oneHost = new EnumMap<>(PimDomain.class);
+        oneHost.put(PimDomain.MAIL, password("imap", "imaps://example.org:993"));
+        oneHost.put(PimDomain.CONTACTS, password("carddav", "https://example.org:8443/"));
+        oneHost.put(PimDomain.CALENDAR, password("caldav", "https://example.org:8443/calendars/"));
+
+        Map<PimDomain, SetupOption> session = new EnumMap<>(PimDomain.class);
+        session.put(PimDomain.MAIL, password("jmap", "jmap://api.example.org/jmap/session"));
+        session.put(PimDomain.CONTACTS, password("jmap", "jmap://api.example.org/jmap/session"));
+
+        assertEquals(
+                List.of(
+                        List.of(PimDomain.MAIL),
+                        List.of(PimDomain.CONTACTS),
+                        List.of(PimDomain.CALENDAR)),
+                SetupPlan.signIns(oneHost));
+        assertEquals(
+                List.of(List.of(PimDomain.MAIL, PimDomain.CONTACTS)), SetupPlan.signIns(session));
+    }
+
+    @Test
     public void manualEntryNeverShares() {
         SetupOption oauth = option("jmap", SESSION, oauth(AUTHORIZE, "mail"));
 
@@ -249,12 +272,41 @@ public class SetupPlanTest {
                         source);
     }
 
+    @Test
+    public void aServerIsNamedByItsHostWithoutItsServiceLabel() {
+        assertEquals("fastmail.com", SetupPlan.serverName(at("imap", "imaps://imap.fastmail.com:993")));
+        assertEquals("fastmail.com", SetupPlan.serverName(at("jmap", "jmap://api.fastmail.com/jmap/session")));
+        assertEquals(
+                "fastmail.com",
+                SetupPlan.serverName(at("caldav", "https://caldav.fastmail.com/dav/calendars/")));
+        assertEquals("fastmail.com", SetupPlan.serverName(at("carddav", "https://fastmail.com/")));
+        assertEquals("mx1.example.org", SetupPlan.serverName(at("imap", "imaps://mx1.example.org")));
+    }
+
+    @Test
+    public void aProviderApiSignsInWithItsOwnersAccount() {
+        assertEquals("Google", SetupPlan.provider(at("gmail", null), EMAIL));
+        assertEquals("Google", SetupPlan.provider(at(null, AccountClient.googleBase(EMAIL)), EMAIL));
+        assertEquals("Microsoft", SetupPlan.provider(at("msgraphCalendar", null), EMAIL));
+        assertEquals("Microsoft", SetupPlan.provider(at(null, AccountClient.msgraphBase(EMAIL)), EMAIL));
+        assertNull(SetupPlan.provider(at("caldav", "https://caldav.example.org/"), EMAIL));
+    }
+
+    private static SetupOption at(String service, String baseUrl) {
+        return new SetupOption(service, service, null, baseUrl, null, oauth(AUTHORIZE, "mail"), EMAIL);
+    }
+
     private static AuthMethod oauth(String authorize, String scope) {
         return AuthMethod.codeGrant(authorize, "https://auth.example.org/token", scope);
     }
 
     private static SetupOption option(String service, String resource, AuthMethod method) {
         return new SetupOption(service, service, service + ".example.org", null, resource, method, EMAIL);
+    }
+
+    private static SetupOption password(String service, String baseUrl) {
+        return new SetupOption(
+                service, service, "example.org", baseUrl, null, AuthMethod.password(), EMAIL);
     }
 
     private static SetupOption manual() {

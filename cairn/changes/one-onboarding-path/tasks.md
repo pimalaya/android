@@ -7,14 +7,19 @@ change: one-onboarding-path
 
 - [x] Review the proposal; settle the open points
 - [x] Fold advanced-onboarding-pages, standard-onboarding-one-password and onboarding-options-ask-on-switch into the spec as they stand, log and archive them
-- [ ] Step 1: drop the setup mode question; one domain screen with checkbox rows, nothing ticked, the best-ranked option selected under each ticked domain as a sentence row
-- [ ] Step 1: the sentence wording per method and provider (browser, password, API token), no protocol, host or port
+- [x] Step 1: drop the setup mode question and its links; the domain screen is checkbox rows alone, its one-password field and options gone
+- [x] Step 1: Continue leads to the sign-in page for everyone (`runSignIns`)
 - [ ] Step 1: device check
-- [ ] Step 2: More unfolding the alternatives as radio rows in the card, folding back on a pick
-- [ ] Step 2: one settings form (protocol, host, port, security, method), prefilled from the selected option, empty for a domain discovery found nothing for; it replaces manual entry
-- [ ] Step 2: sending on mail's card: *Send mail* checkbox, its sentence row, More and the form
-- [ ] Step 2: the advanced setup's sign-in page as the only sign-in step
+- [x] Step 2: the sentence wording per method and provider (`SetupPlan.serverName`, `provider`), no protocol, host or port
+- [ ] Step 2: device check of the per-server cards (Posteo, Fastmail)
+- [ ] Step 2: each sign-in card names its domains and says its sentence
+- [x] Step 2: one password or token card per server, the "same login and password" switch (manual, off to begin with), sending as its own card checked over SMTP, a second credential stored when it differs
+- [x] Step 2: the tune menu (`showTuneMenu`): each domain's other options, a pick moving it (`moveDomain`, `fallBack` on it too), *Custom settings* as a form in the card (`addCustomForm`), *Use discovered settings* back; sending's menu with the other servers and *Do not send*
+- [ ] Step 2: device check of the tune menu and custom form
+- [ ] Step 2: a ticked domain discovery found nothing for starts as the form; the nothing-connectable dialog goes
 - [ ] Step 2: device check
+- [x] Step 3, first piece: mail's mailboxes on the books page in a mailbox mode (`openMailboxSelection`), skipped for a single mailbox, applied at the first roster (`MailStore.chooseMailboxes`, MailFilterDefaultsTest)
+- [ ] Step 3, first piece: device check
 - [ ] Step 3: extract the per-domain section builders of `AccountSettings` so onboarding and settings render the same rows
 - [ ] Step 3: one page per ticked domain (mail: notifications, download window; contacts and calendars: collections, phone mirror), Continue, Finish on the last
 - [ ] Step 3: no collection selection for a single collection

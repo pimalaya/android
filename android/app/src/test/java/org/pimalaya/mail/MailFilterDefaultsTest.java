@@ -19,6 +19,7 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * What the mail filter ticks to begin with, and its page's draft.
@@ -85,6 +86,27 @@ public class MailFilterDefaultsTest {
                         new Mailbox("Projects", "")));
         assertTrue(filter.chosen(store.collectionOf(IMAP, "Sent")));
         assertFalse(filter.chosen(store.collectionOf(IMAP, "Projects")));
+    }
+
+    @Test
+    public void theSetupsMailboxesStandInForTheInboxAlone() {
+        store.chooseMailboxes(IMAP, Set.of("INBOX", "Clients", "Trash"));
+        store.replaceMailboxes(IMAP, roster());
+
+        assertTrue(filter.chosen(store.collectionOf(IMAP, "INBOX")));
+        assertTrue(filter.chosen(store.collectionOf(IMAP, "Clients")));
+        assertTrue(filter.chosen(store.collectionOf(IMAP, "Trash")));
+        assertFalse(filter.chosen(store.collectionOf(IMAP, "Sent")));
+        assertFalse(filter.chosen(store.collectionOf(IMAP, "Spam")));
+
+        // NOTE: the choice applies to the roster it was made for; a mailbox
+        // the server adds later follows the defaults of an account not
+        // keeping its inbox alone.
+        store.replaceMailboxes(
+                IMAP,
+                List.of(new Mailbox("INBOX", "inbox"), new Mailbox("Projects", "")));
+        assertTrue(filter.chosen(store.collectionOf(IMAP, "Projects")));
+        assertFalse(filter.chosen(store.collectionOf(IMAP, "Sent")));
     }
 
     @Test

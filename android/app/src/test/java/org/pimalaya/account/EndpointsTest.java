@@ -61,25 +61,6 @@ public class EndpointsTest {
     }
 
     @Test
-    public void theUserIsShownSchemeHostAndPortOnly() {
-        assertEquals(
-                "imaps://imap.example.org:993",
-                Endpoints.destination("imaps://jane%40example.org@imap.example.org:993"));
-        assertEquals("https://dav.example.org", Endpoints.destination("https://dav.example.org/dav/jane/"));
-        assertEquals("https://api.fastmail.com", Endpoints.destination("jmap://api.fastmail.com/jmap/session"));
-        assertNull(Endpoints.destination("google://jane@gmail.com"));
-    }
-
-    @Test
-    public void aHostOutsideTheAddressDomainIsFlagged() {
-        assertFalse(Endpoints.otherDomain("imaps://imap.example.org:993", "jane@example.org"));
-        assertFalse(Endpoints.otherDomain("https://example.org/dav/", "jane@Example.org"));
-        assertTrue(Endpoints.otherDomain("imaps://imap.fastmail.com:993", "jane@example.org"));
-        assertTrue(Endpoints.otherDomain("imaps://example.org.evil.net:993", "jane@example.org"));
-        assertFalse(Endpoints.otherDomain("imaps://imap.fastmail.com:993", "example.org"));
-    }
-
-    @Test
     public void everyEndpointMustBeTheProvidersOwn() {
         List<String> gmail =
                 List.of(

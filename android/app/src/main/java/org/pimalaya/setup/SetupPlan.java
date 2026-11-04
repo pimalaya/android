@@ -3,6 +3,7 @@ package org.pimalaya.setup;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import org.pimalaya.account.Endpoints;
 import org.pimalaya.account.Oauth;
@@ -227,7 +228,14 @@ final class SetupPlan {
         return groups;
     }
 
-    /** Whether two picked options sign in once for both. */
+    /**
+     * Whether two picked options sign in once for both.
+     *
+     * <p>A grant, behind one authorization server for one audience; a password
+     * or a token, at one server: a JMAP session serves every domain it does at
+     * one URL, while IMAP, SMTP, CardDAV and CalDAV are a server each, even on
+     * one host, any of which may take another login.
+     */
     static boolean sameSignIn(SetupOption left, SetupOption right) {
         if (left.isOauth() || right.isOauth()) {
             return left.isOauth()
@@ -239,7 +247,8 @@ final class SetupPlan {
             return false;
         }
         return left.method.type() == right.method.type()
-                && java.util.Objects.equals(left.detail, right.detail)
+                && left.baseUrl != null
+                && left.baseUrl.equals(right.baseUrl)
                 && java.util.Objects.equals(left.login, right.login);
     }
 
@@ -303,6 +312,52 @@ final class SetupPlan {
     /** Whether a config came from a fixed provider rule (Google, Microsoft). */
     static boolean fromProvider(ServiceConfig config) {
         return config.source() != null && config.source().startsWith("provider:");
+    }
+
+    /** The first labels of a host naming a service rather than whose it is. */
+    private static final Set<String> SERVICE_LABELS =
+            Set.of("api", "caldav", "carddav", "dav", "imap", "jmap", "mail", "smtp", "webdav");
+
+    /**
+     * The server an option connects to, the way a reader names it.
+     *
+     * <p>Its host with a leading service label dropped, so imap.fastmail.com
+     * and caldav.fastmail.com both read fastmail.com; a host of two labels is
+     * kept whole. Any scheme, the {@code jmap://} marker included.
+     */
+    static String serverName(SetupOption option) {
+        String base = option.baseUrl == null ? "" : option.baseUrl;
+        String host;
+        try {
+            host = java.net.URI.create(base).getHost();
+        } catch (IllegalArgumentException error) {
+            host = null;
+        }
+        if (host == null) {
+            return base;
+        }
+        String[] labels = host.split("\\.");
+        if (labels.length > 2
+                && SERVICE_LABELS.contains(labels[0].toLowerCase(java.util.Locale.ROOT))) {
+            return host.substring(labels[0].length() + 1);
+        }
+        return host;
+    }
+
+    /**
+     * Whose own account a provider-API option signs in with: Google,
+     * Microsoft, or null for any other option ({@link #proprietary}).
+     */
+    static String provider(SetupOption option, String email) {
+        if (!proprietary(option, email)) {
+            return null;
+        }
+        boolean google =
+                "gmail".equals(option.service)
+                        || "gcal".equals(option.service)
+                        || (option.service == null
+                                && AccountClient.googleBase(email).equals(option.baseUrl));
+        return google ? "Google" : "Microsoft";
     }
 
     static String hostOf(String url) {

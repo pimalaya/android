@@ -13,7 +13,10 @@
     <string name="welcome_title">Your mail, contacts and calendars, offline.</string>
     <string name="welcome_description">Enter your email address. Pimalaya finds your server settings for you.</string>
     <string name="setup_advanced_link">Advanced setup</string>
-    <string name="setup_advanced_different">Different passwords? Advanced setup</string>
+    <string name="setup_via_account">With your %1$s account, in the browser</string>
+    <string name="setup_via_browser">In the browser, at %1$s</string>
+    <string name="setup_via_password">With your password, at %1$s</string>
+    <string name="setup_via_token">With an API token, at %1$s</string>
     <string name="domain_title_simple">What do you want on this phone?</string>
     <string name="password_show">Show password</string>
     <string name="password_hide">Hide password</string>
@@ -29,7 +32,6 @@
     <string name="domains_not_served">Not offered by this server, left out: %1$s</string>
     <string name="result_later">You can connect the rest later by adding this address again.</string>
     <string name="result_continue">Continue without %1$s</string>
-    <string name="result_advanced">Set up %1$s in advanced setup</string>
     <string name="result_elsewhere_title">Connected</string>
     <string name="phone_contacts">Show in phone contacts</string>
     <string name="phone_contacts_note">Calls and texts show their names.</string>
@@ -58,7 +60,6 @@
     <string name="send_mail_advanced">Sending</string>
     <string name="send_mail_none">Do not send from this account</string>
 
-    <string name="manual_mail_server">Mail server (host or host:port)</string>
     <string name="manual_dav_url">Server URL</string>
     <string name="manual_submit_server">Sending server (host or host:port)</string>
     <string name="manual_submit_message">Where this account sends through. Implicit TLS, port 465 unless you say otherwise.</string>
@@ -100,6 +101,8 @@
     <string name="error_title">Error</string>
     <string name="connect_failed">Could not connect</string>
 
+    <string name="mailboxes_title">Which mailboxes?</string>
+    <string name="mailboxes_description">The ones you pick sync to this phone. You can change this later in the mail list\'s filter.</string>
     <string name="books_title">Which addressbooks?</string>
     <string name="books_description">The ones you pick sync to this phone. You can change this later in the account\'s settings.</string>
     <string name="books_signed">Signed in · %1$s</string>
@@ -107,13 +110,21 @@
     <string name="domain_manual_detail">Server, login and password</string>
     <string name="signin_message">One sign-in per server. Domains sharing a server share it.</string>
     <string name="signin_same">Same login and password as %1$s</string>
+    <string name="signin_sending">Mail (sending)</string>
+    <string name="signin_tune">Change how this signs in</string>
+    <string name="signin_custom">Custom settings</string>
+    <string name="signin_custom_for">Custom settings for %1$s</string>
+    <string name="signin_discovered">Use discovered settings</string>
+    <string name="custom_server">Server</string>
+    <string name="custom_port">Port</string>
+    <string name="custom_starttls">STARTTLS</string>
+    <string name="custom_token">Sign in with an API token</string>
     <string name="signin_browser">Sign in with browser</string>
     <string name="signin_own_client">Use my own OAuth client</string>
-    <string name="signin_signed">Signed in</string>
+    <string name="signin_check">Sign in</string>
+    <string name="signin_again">Sign in again</string>
     <string name="signin_manual">Entered manually</string>
     <string name="signin_sends">%1$s, sends through %2$s</string>
-    <string name="signin_sent_to">Sent to %1$s</string>
-    <string name="signin_other_domain">%1$s, not on %2$s</string>
     <string name="server_insecure">Only encrypted servers are accepted: imaps:// for mail, https:// for contacts and calendars, smtps:// or smtp:// for sending.</string>
     <string name="hint_token">Paste your API token</string>
     <string name="token_refused">Token not accepted</string>

@@ -103,11 +103,6 @@
             android:id="@+id/result_continue"
             style="@style/PrimaryButton" />
 
-        <Button
-            android:id="@+id/result_advanced"
-            style="@style/TextLink"
-            android:layout_marginTop="4dp" />
-
     </LinearLayout>
 
 </LinearLayout>

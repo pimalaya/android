@@ -164,47 +164,6 @@ public final class Endpoints {
     }
 
     /**
-     * An endpoint as shown before signing in: scheme, host and any port.
-     *
-     * <p>No userinfo or path; null for the {@code google://} and
-     * {@code msgraph://} markers, which no password signs in to.
-     */
-    public static String destination(String url) {
-        String host = host(url);
-        if (host == null) {
-            return null;
-        }
-        String scheme = scheme(url);
-        int port = -1;
-        try {
-            port = URI.create(url).getPort();
-        } catch (IllegalArgumentException invalid) {
-            // NOTE: host() parsed it, so this does not happen.
-        }
-        String shown = host.contains(":") ? "[" + host + "]" : host;
-        return ("jmap".equals(scheme) ? "https" : scheme)
-                + "://"
-                + shown
-                + (port == -1 ? "" : ":" + port);
-    }
-
-    /**
-     * Whether an endpoint's host sits outside the address's domain.
-     *
-     * <p>The user is shown it before a password goes there: such a host is what
-     * a forged configuration would point at.
-     */
-    public static boolean otherDomain(String url, String email) {
-        String host = host(url);
-        int at = email == null ? -1 : email.lastIndexOf('@');
-        if (host == null || at < 0) {
-            return false;
-        }
-        String domain = email.substring(at + 1).trim().toLowerCase(Locale.ROOT);
-        return !(host.equals(domain) || host.endsWith("." + domain));
-    }
-
-    /**
      * Whether every endpoint is one of the provider's own.
      *
      * <p>Its marker scheme, or a TLS scheme on one of its hosts. The app's own

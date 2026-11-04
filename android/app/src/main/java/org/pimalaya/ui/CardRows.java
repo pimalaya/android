@@ -122,6 +122,37 @@ public final class CardRows {
         return item;
     }
 
+    /**
+     * A row of one line under a hairline, aligned with the option rows, then
+     * an optional trailing view.
+     */
+    public static LinearLayout lineRow(Host host, CharSequence text, View trailing) {
+        LinearLayout item = new LinearLayout(host);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.addView(rowDivider(host));
+
+        LinearLayout row = new LinearLayout(host);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(host.ui.dp(48));
+        row.setPadding(host.ui.dp(60), host.ui.dp(8), host.ui.dp(8), host.ui.dp(8));
+
+        TextView line = new TextView(host);
+        line.setText(text);
+        line.setTextSize(15);
+        line.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
+        LinearLayout.LayoutParams lineParams =
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        lineParams.setMarginEnd(host.ui.dp(12));
+        row.addView(line, lineParams);
+        if (trailing != null) {
+            row.addView(trailing);
+        }
+
+        item.addView(row);
+        return item;
+    }
+
     /** The line between two rows of a card, inset past the glyph. */
     public static View rowDivider(Host host) {
         View divider = new View(host);

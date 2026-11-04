@@ -16,7 +16,7 @@ Contacts has three layers. Mail and calendars have one each.
 | protocol client | `client/jmap.rs`, eight RFC 9610 verbs | nothing | nothing |
 | library | io-jmap `rfc9610` | io-jmap `rfc8621`, complete and uncalled | does not exist |
 
-So the two are not the same size of problem. **Mail is a two-file job in this repository.** **Calendars need the protocol implemented upstream first** ([io-jmap/docs/jmap-calendars-plan.md](../../io-jmap/docs/jmap-calendars-plan.md)), and only then the same two files.
+So the two are not the same size of problem. **Mail is a two-file job in this repository.** **Calendars need the protocol implemented upstream first** ([io-jmap's jmap-calendars change](../../io-jmap/cairn/changes/archive/jmap-calendars/proposal.md)), and only then the same two files.
 
 `Backend::of` already recognises a `jmap://` base (`rust/src/account.rs`), and the Java layer already passes the account's base URL down, so nothing above the bridge changes for either.
 
@@ -86,7 +86,7 @@ Steps 1 and 2 unblock a Fastmail mail account today, which is the only way to re
 
 ## 5. Landed
 
-All four steps of §4, in order, against io-jmap's calendars module (draft-ietf-jmap-calendars-27, [its plan](../../io-jmap/docs/jmap-calendars-plan.md)). `PimDomain.servedBy("jmap")` now returns all three domains, and `PimDomainTest.jmapIsOfferedOnlyWhereThereIsSomethingToReadItWith` stays an exhaustive assertion so a fourth domain cannot be mapped there without someone stating its reader exists.
+All four steps of §4, in order, against io-jmap's calendars module (draft-ietf-jmap-calendars-27, [its plan](../../io-jmap/cairn/changes/archive/jmap-calendars/proposal.md)). `PimDomain.servedBy("jmap")` now returns all three domains, and `PimDomainTest.jmapIsOfferedOnlyWhereThereIsSomethingToReadItWith` stays an exhaustive assertion so a fourth domain cannot be mapped there without someone stating its reader exists.
 
 The two files per domain the plan predicted were the two files per domain it took: `rust/src/client/jmap.rs` grew the verbs, `rust/src/ffi/mail.rs` and `rust/src/ffi/calendar.rs` each grew a `Backend::of` match. Nothing above the bridge changed for mail. Four things did not go to plan, and they are the parts worth keeping:
 

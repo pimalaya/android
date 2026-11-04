@@ -59,6 +59,7 @@
     <style name="TextLink">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">48dp</item>
+        <item name="android:gravity">center</item>
         <item name="android:background">?android:attr/selectableItemBackground</item>
         <item name="android:stateListAnimator">@null</item>
         <item name="android:textAllCaps">false</item>

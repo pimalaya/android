@@ -20,6 +20,8 @@ public final class MailPolicy {
     /** Accounts whose inbox alone starts ticked, by account id. */
     private static final String INBOX_ONLY_PREFS = "mail-inbox-only";
 
+    private static final String CHOSEN_PREFS = "mail-chosen-mailboxes";
+
     /** Where each account's trash mailbox is remembered, by address. */
     private static final String TRASH_PREFS = "mail-trash";
 
@@ -176,6 +178,31 @@ public final class MailPolicy {
         context.getSharedPreferences(INBOX_ONLY_PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .remove(accountId)
+                .apply();
+    }
+
+    /**
+     * Remembers the mailboxes the setup ticked, by name, until the account's
+     * first roster applies them ({@link MailStore#replaceMailboxes}).
+     */
+    void markChosen(String accountEmail, java.util.Set<String> names) {
+        context.getSharedPreferences(CHOSEN_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putStringSet(accountEmail, new java.util.HashSet<>(names))
+                .apply();
+    }
+
+    /** The mailboxes the setup ticked and no roster applied yet, or null. */
+    java.util.Set<String> chosen(String accountEmail) {
+        return context.getSharedPreferences(CHOSEN_PREFS, Context.MODE_PRIVATE)
+                .getStringSet(accountEmail, null);
+    }
+
+    /** Forgets the setup's mailboxes once applied, or with the account. */
+    void forgetChosen(String accountEmail) {
+        context.getSharedPreferences(CHOSEN_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .remove(accountEmail)
                 .apply();
     }
 

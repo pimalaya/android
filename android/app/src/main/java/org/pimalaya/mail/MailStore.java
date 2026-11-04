@@ -101,7 +101,10 @@ public final class MailStore {
                 break;
             }
         }
-        if (fresh && !MailPolicy.keepsAllMail(context, account)) {
+        // NOTE: the mailboxes the setup ticked, when it asked, stand in for
+        // that default: they alone show and sync, junk and trash included.
+        java.util.Set<String> chosen = policy.chosen(accountEmail);
+        if (fresh && chosen == null && !MailPolicy.keepsAllMail(context, account)) {
             policy.markInboxOnly(account);
         }
         boolean inboxOnly = policy.inboxOnly(account);
@@ -135,12 +138,19 @@ public final class MailStore {
         // account that keeps its inbox alone, so is every other mailbox.
         List<String> quiet = new ArrayList<>();
         for (Mailbox mailbox : mailboxes) {
-            if (!MailBodies.downloads(mailbox.role(), false)
-                    || (inboxOnly && !"inbox".equals(mailbox.role()))) {
+            boolean off =
+                    chosen != null
+                            ? !chosen.contains(mailbox.name())
+                            : !MailBodies.downloads(mailbox.role(), false)
+                                    || (inboxOnly && !"inbox".equals(mailbox.role()));
+            if (off) {
                 quiet.add(PimdirAccount.collectionId(account, mailbox.name()));
             }
         }
         MergedFilter.of(context, PimDomain.MAIL).quiet(quiet);
+        if (chosen != null) {
+            policy.forgetChosen(accountEmail);
+        }
 
         String trash = "";
         for (Mailbox mailbox : mailboxes) {
@@ -150,6 +160,14 @@ public final class MailStore {
             }
         }
         policy.markTrash(accountEmail, trash);
+    }
+
+    /**
+     * Keeps the mailboxes the setup ticked, by name, for the account's first
+     * roster to show and sync alone.
+     */
+    public void chooseMailboxes(String accountEmail, java.util.Set<String> names) {
+        policy.markChosen(accountEmail, names);
     }
 
     /** Drops all of one account's mail, its outbox included. */
@@ -169,6 +187,7 @@ public final class MailStore {
         MailPolicy.markAccountWide(context, accounts.idOf(accountEmail), false);
         MailPolicy.markAllMail(context, accounts.idOf(accountEmail), false);
         policy.forgetInboxOnly(accounts.idOf(accountEmail));
+        policy.forgetChosen(accountEmail);
         MailPolicy.markExpungesOne(context, accounts.idOf(accountEmail), true);
     }
 

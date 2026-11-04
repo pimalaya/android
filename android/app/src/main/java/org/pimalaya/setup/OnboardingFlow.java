@@ -10,6 +10,7 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.Switch;
 import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -105,11 +106,14 @@ public final class OnboardingFlow {
     /** The sign-ins Continue planned, one card each; null outside them. */
     private List<AuthStep> authSteps;
 
-    /** The first card asking for a password, which later ones may reuse. */
-    private AuthStep firstPassword;
+    /** The cards asking for a password, in order, which later ones reuse. */
+    private final List<AuthStep> passwordCards = new ArrayList<>();
 
     /** The card whose browser grant is in flight. */
     private AuthStep pendingStep;
+
+    /** The password or token cards being signed in, their buttons turning. */
+    private final Set<AuthStep> checking = new java.util.HashSet<>();
 
     /** Whether Connect's chain of grants is running, each starting the next. */
     private boolean connecting;
@@ -142,6 +146,15 @@ public final class OnboardingFlow {
 
     /** The books step's subscribe checkboxes. */
     private List<BookChoice> bookChoices = new ArrayList<>();
+
+    /**
+     * Whether the books page shows the mailboxes, mail's step before the
+     * addressbooks.
+     */
+    private boolean pickingMailboxes;
+
+    /** The mailboxes ticked on mail's step, by name; null until chosen. */
+    private Set<String> chosenMailboxes;
 
     /** Whether the one password is being tried against the servers. */
     private boolean verifying;
@@ -198,16 +211,6 @@ public final class OnboardingFlow {
                             advanced = false;
                             submitEmail();
                         });
-        host.findViewById(R.id.email_advanced)
-                .setOnClickListener(
-                        view -> {
-                            advanced = true;
-                            if (emailSubmittable()) {
-                                submitEmail();
-                            } else {
-                                email.requestFocus();
-                            }
-                        });
         email.setOnEditorActionListener(
                 (view, action, event) -> {
                     if (emailSubmittable()) {
@@ -229,8 +232,15 @@ public final class OnboardingFlow {
 
         host.findViewById(R.id.domain_connect).setOnClickListener(view -> confirmSetup());
         host.findViewById(R.id.signin_continue).setOnClickListener(view -> connectAll());
-        host.findViewById(R.id.books_continue).setOnClickListener(view -> confirmBooks());
-        host.findViewById(R.id.domain_advanced).setOnClickListener(view -> switchToAdvanced());
+        host.findViewById(R.id.books_continue)
+                .setOnClickListener(
+                        view -> {
+                            if (pickingMailboxes) {
+                                confirmMailboxes();
+                            } else {
+                                confirmBooks();
+                            }
+                        });
         password.setOnEditorActionListener(
                 (view, action, event) -> {
                     if (host.findViewById(R.id.domain_connect).isEnabled()) {
@@ -325,6 +335,8 @@ public final class OnboardingFlow {
         setups.clear();
         oauthGroup.clear();
         connectedAccount = null;
+        chosenMailboxes = null;
+        pickingMailboxes = false;
         ((EditText) host.findViewById(R.id.email_input)).setText("");
         ((EditText) host.findViewById(R.id.domain_password)).setText("");
         host.setAuthLoading(R.id.email_continue, R.id.email_progress, false);
@@ -492,6 +504,12 @@ public final class OnboardingFlow {
          */
         AccountCredential credential;
 
+        /**
+         * What mail's sending card signed in with; null until it did, and
+         * for every other domain.
+         */
+        AccountCredential submitCredential;
+
         /** Whether this domain is on and has something to connect to. */
         boolean ready() {
             return enabled && selected != null;
@@ -502,37 +520,80 @@ public final class OnboardingFlow {
      * One sign-in the selection owes: a sign-in card, or a browser hop.
      *
      * <p>Planned, not run per domain: domains behind one authorization server
-     * are one hop, domains on one server under one login one password.
+     * are one hop, a password or a token one server, mail's sending a card of
+     * its own when it signs in with one.
      */
     private static final class AuthStep {
         final List<PimDomain> domains = new ArrayList<>();
         final SetupOption option;
 
-        /** The card's fields, null for the ones its method does not ask. */
-        PillField server;
+        /**
+         * Whether this card signs mail's sending in, at the submission server,
+         * rather than its domains at theirs.
+         */
+        final boolean sending;
 
+        /** The card's fields, null for the ones its method does not ask. */
         PillField login;
+
         PillField secret;
 
-        /** Where mail sends, when mail's sending was entered manually. */
-        PillField submit;
+        /**
+         * The custom settings form, null on a card of discovered settings:
+         * the server (a host, or a URL for contacts and calendars), its port,
+         * STARTTLS for sending, and whether the secret is an API token.
+         */
+        PillField server;
 
-        /** "Same login and password as", from the second password card on. */
-        CheckBox same;
+        PillField port;
+        Switch starttls;
+        Switch token;
+
+        /** The endpoint the custom form starts from, or null for empty. */
+        String prefill;
+
+        /**
+         * "Same login and password as", from the second password card on,
+         * and the card whose login and password it reuses while on.
+         */
+        Switch same;
+
+        TextView sameLabel;
+        AuthStep linked;
 
         /** The card's outcome line: signed in, or what went wrong. */
         TextView status;
 
         /** The browser card's button and its own-client link. */
-        View browser;
+        CardAction browser;
 
         View ownClient;
+
+        /** A password or token card's own sign-in button. */
+        CardAction verify;
+
+        /** The header's glyph, a check once signed in. */
+        android.widget.ImageView glyph;
+
+        /** The link signing the card in again, in place of its status. */
+        View again;
+
+        /** The card itself, on the sign-in page. */
+        View card;
+
+        /** The header's names of the domains it covers. */
+        TextView names;
 
         /** Whether this card's domains hold their credential. */
         boolean signed;
 
         AuthStep(SetupOption option) {
+            this(option, false);
+        }
+
+        AuthStep(SetupOption option, boolean sending) {
             this.option = option;
+            this.sending = sending;
         }
 
         /** Whether this card signs in through a browser. */
@@ -542,12 +603,30 @@ public final class OnboardingFlow {
 
         /** Whether this card asks for a login and a password. */
         boolean password() {
+            if (token != null) {
+                return !token.isChecked();
+            }
             return option.method == null || option.method.type() == AuthMethod.Type.PASSWORD;
         }
 
-        /** Whether the "same as" box is ticked, its fields reused. */
+        /** Whether this card holds the custom settings form. */
+        boolean custom() {
+            return server != null;
+        }
+
+        /** Whether the "same as" switch is on, the linked card's fields reused. */
         boolean reuses() {
-            return same != null && same.isChecked();
+            return same != null && same.isChecked() && linked != null;
+        }
+
+        /** The card whose login and password this one signs in with. */
+        AuthStep source() {
+            AuthStep step = this;
+            // NOTE: a card links only to one before it, so the walk ends.
+            while (step.reuses()) {
+                step = step.linked;
+            }
+            return step;
         }
     }
 
@@ -679,13 +758,6 @@ public final class OnboardingFlow {
         return null;
     }
 
-    /** Leaves the standard setup for the advanced one, keeping the ticks. */
-    private void switchToAdvanced() {
-        advanced = true;
-        host.hideKeyboard();
-        showSetup();
-    }
-
     /** The standard setup's card: a row per domain, glyph, name and tick. */
     private View domainCard(AccountEntry existing) {
         LinearLayout card = CardRows.card(host);
@@ -706,16 +778,9 @@ public final class OnboardingFlow {
                     existing != null && existing.covers(setup.domain)
                             ? host.getString(R.string.domain_connected)
                             : null;
+            // NOTE: a tick and nothing else: how each domain signs in is the
+            // sign-in page's, its options its own page's.
             LinearLayout row = domainRow(setup.domain, status, false, tick);
-            // NOTE: the domain's option under it, shown while it is ticked.
-            View phone =
-                    setup.domain == PimDomain.MAIL
-                            ? notifyRow()
-                            : phoneRow(PhoneMirror.of(setup.domain));
-            View option =
-                    setup.domain == PimDomain.CALENDAR && !takesTasks(setup.selected)
-                            ? withTasksNote(phone)
-                            : phone;
             row.setOnClickListener(
                     view -> {
                         if (verifying) {
@@ -723,17 +788,31 @@ public final class OnboardingFlow {
                         }
                         setup.enabled = !setup.enabled;
                         tick.setChecked(setup.enabled);
-                        option.setVisibility(setup.enabled ? View.VISIBLE : View.GONE);
                         resetSetupContinue();
-                        if (setup.enabled) {
-                            reveal(view);
-                        }
                     });
             card.addView(row);
-            option.setVisibility(setup.enabled ? View.VISIBLE : View.GONE);
-            card.addView(option);
         }
         return card;
+    }
+
+    /**
+     * How an option connects, in the words of someone who never set a server:
+     * whose account, or how one signs in and at which server.
+     */
+    private String sentence(SetupOption option) {
+        String provider = SetupPlan.provider(option, pendingEmail);
+        if (provider != null) {
+            return host.getString(R.string.setup_via_account, provider);
+        }
+        String server = SetupPlan.serverName(option);
+        switch (option.method.type()) {
+            case PASSWORD:
+                return host.getString(R.string.setup_via_password, server);
+            case BEARER:
+                return host.getString(R.string.setup_via_token, server);
+            default:
+                return host.getString(R.string.setup_via_browser, server);
+        }
     }
 
     /**
@@ -1094,34 +1173,12 @@ public final class OnboardingFlow {
     private void resetSetupContinue() {
         host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, false);
 
-        boolean password = !sharedPassword().isEmpty();
-        boolean browser = false;
-        for (DomainSetup setup : setups.values()) {
-            browser |= setup.ready() && setup.selected.isOauth();
-        }
-
-        boolean simple = simpleSetup();
-        host.findViewById(R.id.domain_password_block)
-                .setVisibility(simple && password ? View.VISIBLE : View.GONE);
-        host.findViewById(R.id.domain_browser_note)
-                .setVisibility(simple && !password && browser ? View.VISIBLE : View.GONE);
-
-        Button connect = host.findViewById(R.id.domain_connect);
-        if (!simple) {
-            connect.setText(R.string.email_submit);
-        } else if (!password && browser) {
-            connect.setText(R.string.browser_continue);
-        } else {
-            connect.setText(R.string.password_submit);
-        }
-
-        TextView link = host.findViewById(R.id.domain_advanced);
-        link.setVisibility(simple ? View.VISIBLE : View.GONE);
-        link.setText(password ? R.string.setup_advanced_different : R.string.setup_advanced_link);
-
-        boolean typed =
-                ((EditText) host.findViewById(R.id.domain_password)).getText().length() > 0;
-        host.setFabEnabled(R.id.domain_connect, setupReady() && (!simple || !password || typed));
+        // NOTE: no password here any more: every sign-in is the sign-in
+        // page's, Continue leading to it.
+        host.findViewById(R.id.domain_password_block).setVisibility(View.GONE);
+        host.findViewById(R.id.domain_browser_note).setVisibility(View.GONE);
+        ((Button) host.findViewById(R.id.domain_connect)).setText(R.string.email_submit);
+        host.setFabEnabled(R.id.domain_connect, setupReady());
     }
 
     private boolean setupReady() {
@@ -1142,7 +1199,13 @@ public final class OnboardingFlow {
     public void busy() {
         switch (shell.authStep()) {
             case STEP_SIGNIN:
-                host.setAuthLoading(R.id.signin_continue, R.id.signin_progress, true);
+                // NOTE: a card's own grant turns on that card's button,
+                // Continue staying as it was.
+                if (pendingStep != null) {
+                    refreshSignIn();
+                } else {
+                    host.setAuthLoading(R.id.signin_continue, R.id.signin_progress, true);
+                }
                 break;
             case STEP_OAUTH:
                 host.setAuthLoading(R.id.oauth_continue, R.id.oauth_progress, true);
@@ -1390,8 +1453,36 @@ public final class OnboardingFlow {
             AuthStep step = new AuthStep(picked.get(domains.get(0)));
             step.domains.addAll(domains);
             steps.add(step);
+            AuthStep sending = sendingStep(step);
+            if (sending != null) {
+                steps.add(sending);
+            }
         }
         return steps;
+    }
+
+    /**
+     * Mail's sending card, right after the card reading mail, or null.
+     *
+     * <p>Only beside mail read with a password or a token: SMTP is a second
+     * server, which may take another login. A browser grant covers sending
+     * (its scopes merged, {@link #startGrant}), and JMAP, Gmail and Graph
+     * submit through the session they read with.
+     */
+    private AuthStep sendingStep(AuthStep reading) {
+        DomainSetup mail = setups.get(PimDomain.MAIL);
+        if (!reading.domains.contains(PimDomain.MAIL)
+                || reading.oauth()
+                || !sends(mail)
+                || mail.submitSelected == null
+                || mail.submitSelected.none()
+                || mail.submitSelected.through != null
+                || mail.submitCredential != null) {
+            return null;
+        }
+        AuthStep sending = new AuthStep(reading.option, true);
+        sending.domains.add(PimDomain.MAIL);
+        return sending;
     }
 
     /**
@@ -1410,6 +1501,7 @@ public final class OnboardingFlow {
         oauthGroup.clear();
         for (DomainSetup setup : setups.values()) {
             setup.credential = null;
+            setup.submitCredential = null;
         }
         shell.showAuth(STEP_DOMAIN);
         resetSetupContinue();
@@ -1422,6 +1514,7 @@ public final class OnboardingFlow {
      */
     public void grantAborted() {
         connecting = false;
+        pendingStep = null;
         resetConfigContinue();
     }
 
@@ -1437,28 +1530,18 @@ public final class OnboardingFlow {
             return;
         }
         connecting = false;
+        pendingStep = null;
         shell.showAuth(STEP_SIGNIN);
         resetConfigContinue();
     }
 
     /**
-     * Plans the sign-ins the domains still owe and runs them.
-     *
-     * <p>On the sign-in page when one asks for something to type, or in the
-     * advanced setup; straight to the browser otherwise, one grant after the
-     * other.
+     * Plans the sign-ins the domains still owe and shows them on the sign-in
+     * page, browser grants included, one card each.
      */
     private void runSignIns() {
         authSteps = planAuthSteps();
-        boolean fields = false;
-        for (AuthStep step : authSteps) {
-            fields |= !step.oauth();
-        }
-        if (advanced || fields) {
-            showSignIn();
-        } else {
-            nextGrant();
-        }
+        showSignIn();
     }
 
     /**
@@ -1471,7 +1554,7 @@ public final class OnboardingFlow {
 
         LinearLayout container = host.findViewById(R.id.signin_container);
         container.removeAllViews();
-        firstPassword = null;
+        passwordCards.clear();
         for (AuthStep step : authSteps) {
             container.addView(signInCard(step));
         }
@@ -1496,37 +1579,23 @@ public final class OnboardingFlow {
         LinearLayout header =
                 CardRows.domainRow(
                         host,
-                        step.domains.get(0).icon,
+                        glyphOf(step),
                         domainNames(step),
                         signInDetail(step),
                         false,
-                        null,
+                        tuneButton(step),
                         true);
         header.setPadding(0, 0, 0, host.ui.dp(4));
         header.setMinimumHeight(0);
         header.setForeground(null);
+        step.glyph = (android.widget.ImageView) header.getChildAt(0);
+        step.names = (TextView) ((LinearLayout) header.getChildAt(1)).getChildAt(0);
         card.addView(header);
-        View sentTo = sentTo(step);
-        if (sentTo != null) {
-            card.addView(sentTo);
-        }
 
-        PimDomain first = step.domains.get(0);
         if (step.oauth()) {
-            Button browser = new Button(host);
-            browser.setText(R.string.signin_browser);
-            browser.setAllCaps(false);
-            browser.setTextSize(15);
-            browser.setTypeface(browser.getTypeface(), android.graphics.Typeface.BOLD);
-            browser.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
-            browser.setBackgroundResource(R.drawable.button_on_card);
-            browser.setStateListAnimator(null);
-            LinearLayout.LayoutParams browserParams =
-                    new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT, host.ui.dp(48));
-            browserParams.topMargin = host.ui.dp(10);
-            card.addView(browser, browserParams);
-            browser.setOnClickListener(
+            CardAction browser = cardAction(R.string.signin_browser);
+            card.addView(browser.view);
+            browser.button.setOnClickListener(
                     view -> {
                         connecting = false;
                         startGrant(step, false);
@@ -1536,10 +1605,14 @@ public final class OnboardingFlow {
             Button own = new Button(host, null, 0, R.style.TextLink);
             own.setText(R.string.signin_own_client);
             own.setTextSize(14);
-            card.addView(
-                    own,
+            // NOTE: room above and below, so it does not read as part of the
+            // browser button.
+            LinearLayout.LayoutParams ownParams =
                     new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT, host.ui.dp(40)));
+                            LinearLayout.LayoutParams.MATCH_PARENT, host.ui.dp(44));
+            ownParams.topMargin = host.ui.dp(10);
+            ownParams.bottomMargin = host.ui.dp(4);
+            card.addView(own, ownParams);
             own.setOnClickListener(
                     view -> {
                         connecting = false;
@@ -1547,30 +1620,12 @@ public final class OnboardingFlow {
                     });
             step.ownClient = own;
         } else if (step.password()) {
-            if (firstPassword != null) {
-                AuthStep reused = firstPassword;
-                CheckBox same = new CheckBox(host);
-                same.setText(host.getString(R.string.signin_same, domainNames(reused)));
-                same.setTextSize(15);
-                same.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
-                same.setMinHeight(host.ui.dp(44));
-                same.setOnCheckedChangeListener((view, checked) -> refreshSignIn());
-                card.addView(same);
-                step.same = same;
-            } else {
-                firstPassword = step;
+            if (!passwordCards.isEmpty()) {
+                card.addView(sameRow(step));
             }
-            if (step.option.isManual()) {
-                step.server =
-                        PillField.of(
-                                host,
-                                first == PimDomain.MAIL
-                                        ? R.string.manual_mail_server
-                                        : R.string.manual_dav_url,
-                                "",
-                                false,
-                                true);
-                card.addView(step.server.view);
+            passwordCards.add(step);
+            if (customCard(step)) {
+                addCustomForm(card, step, true);
             }
             String login = step.option.login != null ? step.option.login : emailLogin();
             step.login = PillField.of(host, R.string.custom_login, login, false, true);
@@ -1578,21 +1633,14 @@ public final class OnboardingFlow {
             card.addView(step.login.view);
             card.addView(step.secret.view);
         } else {
+            if (customCard(step)) {
+                addCustomForm(card, step, false);
+            }
             step.secret = PillField.of(host, R.string.hint_token, "", true, true);
             card.addView(step.secret.view);
         }
 
-        DomainSetup mail = setups.get(PimDomain.MAIL);
-        if (step.domains.contains(PimDomain.MAIL)
-                && sends(mail)
-                && mail.submitSelected != null
-                && mail.submitSelected.manual) {
-            step.submit =
-                    PillField.of(host, R.string.manual_submit_server, "", false, true);
-            card.addView(step.submit.view);
-        }
-
-        for (PillField field : new PillField[] {step.server, step.login, step.secret, step.submit}) {
+        for (PillField field : new PillField[] {step.server, step.port, step.login, step.secret}) {
             if (field != null) {
                 field.input.addTextChangedListener(
                         new android.text.TextWatcher() {
@@ -1612,69 +1660,629 @@ public final class OnboardingFlow {
             }
         }
 
+        // NOTE: a password or token card signs in on its own, as a browser
+        // card does, so Connect waits on every card being signed in.
+        if (!step.oauth()) {
+            step.verify = cardAction(R.string.signin_check);
+            step.verify.button.setOnClickListener(view -> verify(step));
+            card.addView(step.verify.view);
+        }
+
         step.status = new TextView(host);
         step.status.setTextSize(13);
         step.status.setPadding(host.ui.dp(16), host.ui.dp(8), host.ui.dp(16), 0);
         step.status.setVisibility(View.GONE);
         card.addView(step.status);
+
+        // NOTE: a button as the sign-in it replaces, so the folded card still
+        // reads as one that acts.
+        CardAction again = cardAction(R.string.signin_again);
+        again.view.setVisibility(View.GONE);
+        again.button.setOnClickListener(view -> signInAgain(step));
+        card.addView(again.view);
+        step.again = again.view;
+        step.card = card;
         return card;
     }
 
-    /**
-     * Where a card's password or token goes, shown before it does.
-     *
-     * <p>Each endpoint's scheme and host, flagged outside the address's domain,
-     * where a forged configuration would point. Null for a browser card, whose
-     * secret the app never holds, and a server typed by hand.
-     */
-    private View sentTo(AuthStep step) {
-        if (step.oauth() || step.option.isManual()) {
-            return null;
-        }
-        List<String> urls = new ArrayList<>();
-        for (PimDomain domain : step.domains) {
-            urls.add(setups.get(domain).selected.baseUrl);
-        }
-        DomainSetup mail = setups.get(PimDomain.MAIL);
-        if (step.domains.contains(PimDomain.MAIL)
-                && sends(mail)
-                && mail.submitSelected != null
-                && !mail.submitSelected.manual
-                && mail.submitSelected.url != null) {
-            urls.add(mail.submitSelected.url);
-        }
-
-        String email = pendingEmail == null ? "" : pendingEmail;
-        String domain = email.substring(email.lastIndexOf('@') + 1);
-        java.util.Set<String> shown = new java.util.LinkedHashSet<>();
-        boolean flagged = false;
-        for (String url : urls) {
-            String destination = Endpoints.destination(url);
-            if (destination == null) {
-                continue;
-            }
-            if (Endpoints.otherDomain(url, email)) {
-                flagged = true;
-                destination = host.getString(R.string.signin_other_domain, destination, domain);
-            }
-            shown.add(destination);
-        }
-        if (shown.isEmpty()) {
-            return null;
-        }
-
-        TextView line = new TextView(host);
-        line.setText(host.getString(R.string.signin_sent_to, String.join(", ", shown)));
-        line.setTextSize(13);
-        line.setTextColor(
-                host.ui.resolveColor(
-                        flagged ? android.R.attr.colorError : android.R.attr.textColorSecondary));
-        line.setPadding(host.ui.dp(16), 0, host.ui.dp(16), host.ui.dp(4));
-        return line;
+    /** A card's header glyph: its first domain's, or sending's. */
+    private static int glyphOf(AuthStep step) {
+        return step.sending ? R.drawable.ic_send : step.domains.get(0).icon;
     }
 
-    /** A card's domains, by name: "Contacts, Calendar". */
+    /**
+     * The switch linking a password card to an earlier one, off to begin with.
+     *
+     * <p>Linked to the first password card; with several before it, its label
+     * picks which. Available once that card is signed in: turning it on signs
+     * this card in with that card's login and password, against its own
+     * server, and turning it off undoes it. A switch, not a tick: it turns a
+     * setting of the card.
+     */
+    private View sameRow(AuthStep step) {
+        List<AuthStep> earlier = new ArrayList<>(passwordCards);
+        step.linked = earlier.get(0);
+
+        LinearLayout row = new LinearLayout(host);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(host.ui.dp(48));
+        row.setPadding(host.ui.dp(16), 0, host.ui.dp(4), 0);
+
+        TextView label = new TextView(host);
+        label.setTextSize(15);
+        label.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
+        LinearLayout.LayoutParams labelParams =
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        labelParams.setMarginEnd(host.ui.dp(12));
+        row.addView(label, labelParams);
+
+        Switch same = new Switch(host);
+        same.setOnCheckedChangeListener(
+                (view, checked) -> {
+                    step.status.setVisibility(View.GONE);
+                    if (checked && !step.signed && !verifying) {
+                        verify(step);
+                        return;
+                    }
+                    if (!checked && step.signed) {
+                        unsign(step);
+                    }
+                    refreshSignIn();
+                });
+        row.addView(same);
+        step.same = same;
+        step.sameLabel = label;
+
+        if (earlier.size() > 1) {
+            label.setCompoundDrawablesRelativeWithIntrinsicBounds(
+                    0, 0, R.drawable.ic_expand_more, 0);
+            label.setCompoundDrawableTintList(
+                    android.content.res.ColorStateList.valueOf(
+                            host.ui.resolveColor(android.R.attr.textColorSecondary)));
+            label.setOnClickListener(view -> pickLinked(step, earlier, label));
+        }
+        nameLinked(step);
+        return row;
+    }
+
+    private void nameLinked(AuthStep step) {
+        step.sameLabel.setText(host.getString(R.string.signin_same, domainNames(step.linked)));
+    }
+
+    /**
+     * Picks which earlier password card a card reuses, among those signed in,
+     * and signs it in with that one.
+     */
+    private void pickLinked(AuthStep step, List<AuthStep> earlier, View anchor) {
+        if (verifying || connecting || step.signed) {
+            return;
+        }
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(host, anchor);
+        for (int index = 0; index < earlier.size(); index++) {
+            menu.getMenu()
+                    .add(0, index, index, domainNames(earlier.get(index)))
+                    .setEnabled(earlier.get(index).signed);
+        }
+        menu.setOnMenuItemClickListener(
+                item -> {
+                    step.linked = earlier.get(item.getItemId());
+                    nameLinked(step);
+                    if (step.same.isChecked()) {
+                        verify(step);
+                    } else {
+                        step.same.setChecked(true);
+                    }
+                    return true;
+                });
+        menu.show();
+    }
+
+    /** Whether a card is drawn as the custom settings form. */
+    private boolean customCard(AuthStep step) {
+        return step.sending
+                ? setups.get(PimDomain.MAIL).submitSelected.manual
+                : step.option.isManual();
+    }
+
+    /** The card's tune button, opening how it signs in ({@link #showTuneMenu}). */
+    private View tuneButton(AuthStep step) {
+        android.widget.ImageButton tune = new android.widget.ImageButton(host);
+        tune.setImageResource(R.drawable.ic_tune);
+        tune.setBackgroundResource(R.drawable.ripple_circle);
+        tune.setContentDescription(host.getString(R.string.signin_tune));
+        int size = host.getResources().getDimensionPixelSize(R.dimen.app_bar_button);
+        tune.setLayoutParams(new LinearLayout.LayoutParams(size, size));
+        tune.setOnClickListener(view -> showTuneMenu(step, view));
+        return tune;
+    }
+
+    /** One row of the tune menu and what picking it does. */
+    private record TuneItem(String title, Runnable action) {}
+
+    /**
+     * The tune menu: the other ways discovery found for the card's domains,
+     * then custom settings, or back to the discovered ones from the form.
+     *
+     * <p>Picking a way for one domain moves it out of a card covering several
+     * ({@link #moveDomain}); the sending card lists the other submission
+     * servers and not sending ({@link #changeSending}).
+     */
+    private void showTuneMenu(AuthStep step, View anchor) {
+        if (verifying || connecting) {
+            return;
+        }
+        List<TuneItem> items = step.sending ? sendingItems(step) : readingItems(step);
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(host, anchor);
+        for (int index = 0; index < items.size(); index++) {
+            menu.getMenu().add(0, index, index, items.get(index).title());
+        }
+        menu.setOnMenuItemClickListener(
+                item -> {
+                    items.get(item.getItemId()).action().run();
+                    return true;
+                });
+        menu.show();
+    }
+
+    private List<TuneItem> readingItems(AuthStep step) {
+        List<TuneItem> items = new ArrayList<>();
+        boolean several = step.domains.size() > 1;
+        for (PimDomain domain : new ArrayList<>(step.domains)) {
+            DomainSetup setup = setups.get(domain);
+            String prefix = several ? host.getString(domain.label) + ": " : "";
+            for (SetupOption option : setup.options) {
+                if (option == setup.selected || option.isManual() || option.method == null) {
+                    continue;
+                }
+                items.add(
+                        new TuneItem(
+                                prefix + sentence(option) + " · " + option.label,
+                                () -> moveDomain(domain, option, null)));
+            }
+            if (step.custom()) {
+                SetupOption discovered =
+                        SetupPlan.standardOption(domain, setup.options, pendingEmail);
+                if (discovered != null) {
+                    items.add(
+                            new TuneItem(
+                                    host.getString(R.string.signin_discovered),
+                                    () -> moveDomain(domain, discovered, null)));
+                }
+            } else {
+                String prefill = prefillOf(domain);
+                items.add(
+                        new TuneItem(
+                                several
+                                        ? host.getString(
+                                                R.string.signin_custom_for,
+                                                host.getString(domain.label))
+                                        : host.getString(R.string.signin_custom),
+                                () -> moveDomain(domain, manualOption(), prefill)));
+            }
+        }
+        return items;
+    }
+
+    private List<TuneItem> sendingItems(AuthStep step) {
+        DomainSetup mail = setups.get(PimDomain.MAIL);
+        List<TuneItem> items = new ArrayList<>();
+        SubmitOption discovered = null;
+        for (SubmitOption option : mail.submitOptions) {
+            if (option.none()
+                    || option.manual
+                    || option.through != null
+                    || !SetupPlan.offers(mail.selected, option)) {
+                continue;
+            }
+            if (discovered == null) {
+                discovered = option;
+            }
+            if (option == mail.submitSelected) {
+                continue;
+            }
+            items.add(
+                    new TuneItem(
+                            option.detail == null ? option.label : option.label + " · " + option.detail,
+                            () -> changeSending(option, null)));
+        }
+        if (step.custom()) {
+            SubmitOption back = discovered;
+            if (back != null) {
+                items.add(
+                        new TuneItem(
+                                host.getString(R.string.signin_discovered),
+                                () -> changeSending(back, null)));
+            }
+        } else {
+            String prefill = mail.submitSelected.url;
+            items.add(
+                    new TuneItem(
+                            host.getString(R.string.signin_custom),
+                            () ->
+                                    changeSending(
+                                            new SubmitOption(
+                                                    host.getString(R.string.domain_manual),
+                                                    null,
+                                                    null,
+                                                    true),
+                                            prefill)));
+        }
+        items.add(
+                new TuneItem(
+                        host.getString(R.string.send_mail_none),
+                        () ->
+                                changeSending(
+                                        new SubmitOption(
+                                                host.getString(R.string.send_mail_none),
+                                                null,
+                                                null,
+                                                false),
+                                        null)));
+        return items;
+    }
+
+    /**
+     * The endpoint a domain's custom form starts from: its current option's
+     * when it speaks the form's protocol (IMAP, CardDAV, CalDAV), else the
+     * first such option discovery found, else none.
+     */
+    private String prefillOf(PimDomain domain) {
+        DomainSetup setup = setups.get(domain);
+        String wanted =
+                domain == PimDomain.MAIL
+                        ? "imap"
+                        : domain == PimDomain.CONTACTS ? "carddav" : "caldav";
+        if (setup.selected != null && wanted.equals(setup.selected.service)) {
+            return setup.selected.baseUrl;
+        }
+        for (SetupOption option : setup.options) {
+            if (wanted.equals(option.service)) {
+                return option.baseUrl;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Takes a domain out of the cards it is on: its card goes when it covered
+     * nothing else, and mail's sending card with mail. Answers where a card
+     * of its own goes in the page, the place its old card held.
+     */
+    private int detach(PimDomain domain) {
+        int at = -1;
+        for (AuthStep step : new ArrayList<>(authSteps)) {
+            boolean sending = step.sending && domain == PimDomain.MAIL;
+            if (!sending && (step.sending || !step.domains.contains(domain))) {
+                continue;
+            }
+            int index = authSteps.indexOf(step);
+            if (!sending && at < 0) {
+                at = index;
+            }
+            step.domains.remove(domain);
+            if (sending || step.domains.isEmpty()) {
+                removeCard(step);
+            } else {
+                // NOTE: what signed the card in covered the domain moved out
+                // too; the others keep it.
+                step.names.setText(domainNames(step));
+                if (at == index) {
+                    at = index + 1;
+                }
+            }
+        }
+        DomainSetup setup = setups.get(domain);
+        setup.credential = null;
+        if (domain == PimDomain.MAIL) {
+            setup.submitCredential = null;
+        }
+        return at < 0 ? authSteps.size() : Math.min(at, authSteps.size());
+    }
+
+    /** Takes one card off the page, the cards linked to it unlinked. */
+    private void removeCard(AuthStep step) {
+        LinearLayout container = host.findViewById(R.id.signin_container);
+        authSteps.remove(step);
+        passwordCards.remove(step);
+        container.removeView(step.card);
+        for (AuthStep other : authSteps) {
+            if (other.linked != step) {
+                continue;
+            }
+            if (other.same.isChecked()) {
+                other.same.setChecked(false);
+            }
+            int earlier = passwordCards.indexOf(other);
+            if (earlier > 0) {
+                other.linked = passwordCards.get(0);
+                nameLinked(other);
+            } else {
+                // NOTE: the first password card now, with nothing to reuse.
+                ((View) other.same.getParent()).setVisibility(View.GONE);
+                other.same = null;
+                other.linked = null;
+            }
+        }
+    }
+
+    /**
+     * Signs a domain in another way: out of its card, onto an unsigned card
+     * of the same sign-in or a card of its own where its old one stood, the
+     * other cards and what was typed in them kept.
+     *
+     * <p>Mail brings its sending card along, where it sends picked again for
+     * the new way to read.
+     */
+    private void moveDomain(PimDomain domain, SetupOption option, String prefill) {
+        LinearLayout container = host.findViewById(R.id.signin_container);
+        int at = detach(domain);
+        DomainSetup setup = setups.get(domain);
+        setup.selected = option;
+
+        AuthStep step = null;
+        if (!option.isManual()) {
+            for (AuthStep other : authSteps) {
+                if (!other.sending
+                        && !other.signed
+                        && !other.custom()
+                        && SetupPlan.sameSignIn(other.option, option)) {
+                    other.domains.add(domain);
+                    other.names.setText(domainNames(other));
+                    step = other;
+                    break;
+                }
+            }
+        }
+        if (step == null) {
+            step = new AuthStep(option);
+            step.domains.add(domain);
+            step.prefill = prefill;
+            authSteps.add(at, step);
+            container.addView(signInCard(step), at);
+            at++;
+        } else {
+            at = authSteps.indexOf(step) + 1;
+        }
+
+        if (domain == PimDomain.MAIL) {
+            if (setup.submitSelected == null
+                    || setup.submitSelected.manual
+                    || !SetupPlan.offers(option, setup.submitSelected)) {
+                setup.submitSelected = SetupPlan.firstOffered(option, setup.submitOptions);
+            }
+            AuthStep sending = sendingStep(step);
+            if (sending != null) {
+                authSteps.add(at, sending);
+                container.addView(signInCard(sending), at);
+            }
+        }
+        refreshSignIn();
+    }
+
+    /**
+     * Sends another way: another submission server, one typed in the custom
+     * form, or none; the sending card drawn again, or gone.
+     */
+    private void changeSending(SubmitOption choice, String prefill) {
+        DomainSetup mail = setups.get(PimDomain.MAIL);
+        LinearLayout container = host.findViewById(R.id.signin_container);
+        int at = -1;
+        AuthStep reading = null;
+        for (AuthStep step : new ArrayList<>(authSteps)) {
+            if (step.sending) {
+                at = authSteps.indexOf(step);
+                removeCard(step);
+            } else if (step.domains.contains(PimDomain.MAIL)) {
+                reading = step;
+            }
+        }
+        mail.submitSelected = choice;
+        mail.submitCredential = null;
+        if (reading != null) {
+            AuthStep sending = sendingStep(reading);
+            if (sending != null) {
+                sending.prefill = prefill;
+                int index = at < 0 ? authSteps.indexOf(reading) + 1 : at;
+                authSteps.add(index, sending);
+                container.addView(signInCard(sending), index);
+            }
+        }
+        refreshSignIn();
+    }
+
+    /**
+     * The custom settings form: the server and its port for mail and sending,
+     * STARTTLS for sending, a URL for contacts and calendars, and whether the
+     * secret is an API token, offered beside a login only; prefilled from
+     * {@link AuthStep#prefill}.
+     */
+    private void addCustomForm(LinearLayout card, AuthStep step, boolean tokenOffered) {
+        java.net.URI prefill = null;
+        try {
+            prefill = step.prefill == null ? null : java.net.URI.create(step.prefill);
+        } catch (IllegalArgumentException unreadable) {
+            // NOTE: an endpoint that reads as no URI starts the form empty.
+        }
+        boolean dav = !step.sending && step.domains.get(0) != PimDomain.MAIL;
+        if (dav) {
+            step.server =
+                    PillField.of(
+                            host,
+                            R.string.manual_dav_url,
+                            step.prefill == null ? "" : step.prefill,
+                            false,
+                            true);
+            card.addView(step.server.view);
+        } else {
+            String hostName = prefill == null || prefill.getHost() == null ? "" : prefill.getHost();
+            String port = prefill == null || prefill.getPort() < 0 ? "" : String.valueOf(prefill.getPort());
+            step.server = PillField.of(host, R.string.custom_server, hostName, false, true);
+            step.port = PillField.of(host, R.string.custom_port, port, false, true);
+            step.port.input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+            card.addView(step.server.view);
+            card.addView(step.port.view);
+        }
+        if (step.sending) {
+            step.starttls = new Switch(host);
+            step.starttls.setChecked(prefill != null && "smtp".equals(prefill.getScheme()));
+            card.addView(switchLine(R.string.custom_starttls, step.starttls));
+        }
+        if (!tokenOffered) {
+            return;
+        }
+        step.token = new Switch(host);
+        step.token.setOnCheckedChangeListener(
+                (view, checked) -> {
+                    step.secret.input.setHint(checked ? R.string.hint_token : R.string.password_hint);
+                    step.status.setVisibility(View.GONE);
+                    refreshSignIn();
+                });
+        card.addView(switchLine(R.string.custom_token, step.token));
+    }
+
+    /** A line of a card: a label and its switch. */
+    private View switchLine(int label, Switch toggle) {
+        LinearLayout row = new LinearLayout(host);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(host.ui.dp(48));
+        row.setPadding(host.ui.dp(16), host.ui.dp(6), host.ui.dp(4), 0);
+        TextView text = new TextView(host);
+        text.setText(label);
+        text.setTextSize(15);
+        text.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        params.setMarginEnd(host.ui.dp(12));
+        row.addView(text, params);
+        row.addView(toggle);
+        return row;
+    }
+
+    /** Where a custom reading form signs in, or null when it is not encrypted. */
+    private static String customUrl(AuthStep card, PimDomain domain) {
+        if (card.port == null) {
+            return Endpoints.manualUrl(domain, card.server.text());
+        }
+        String port = card.port.text();
+        return Endpoints.manualUrl(domain, card.server.text() + (port.isEmpty() ? "" : ":" + port));
+    }
+
+    /**
+     * Where a custom sending form submits: implicit TLS on 465 or STARTTLS on
+     * 587 when no port is typed; null when it reads as no server.
+     */
+    private static String customSubmitUrl(AuthStep card) {
+        boolean starttls = card.starttls.isChecked();
+        String port = card.port.text();
+        if (port.isEmpty()) {
+            port = starttls ? "587" : "465";
+        }
+        return Endpoints.submitUrl(
+                (starttls ? "smtp://" : "smtps://") + card.server.text() + ":" + port);
+    }
+
+    /** A card's own action, full width, on the card's tone. */
+    private CardAction cardAction(int text) {
+        Button button = new Button(host);
+        button.setText(text);
+        button.setAllCaps(false);
+        button.setTextSize(15);
+        button.setTypeface(button.getTypeface(), android.graphics.Typeface.BOLD);
+        button.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
+        button.setBackgroundResource(R.drawable.button_on_card);
+        button.setStateListAnimator(null);
+
+        // NOTE: the loader at the button's end, as the pages' Continue
+        // carries one, in the label's colour.
+        android.widget.ProgressBar progress = new android.widget.ProgressBar(host);
+        progress.setIndeterminateTintList(
+                android.content.res.ColorStateList.valueOf(
+                        host.ui.resolveColor(android.R.attr.textColorPrimary)));
+        progress.setElevation(host.ui.dp(4));
+        progress.setVisibility(View.GONE);
+
+        android.widget.FrameLayout frame = new android.widget.FrameLayout(host);
+        frame.addView(
+                button,
+                new android.widget.FrameLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, host.ui.dp(48)));
+        android.widget.FrameLayout.LayoutParams progressParams =
+                new android.widget.FrameLayout.LayoutParams(
+                        host.ui.dp(24),
+                        host.ui.dp(24),
+                        android.view.Gravity.END | android.view.Gravity.CENTER_VERTICAL);
+        progressParams.setMarginEnd(host.ui.dp(16));
+        frame.addView(progress, progressParams);
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.topMargin = host.ui.dp(10);
+        frame.setLayoutParams(params);
+        return new CardAction(frame, button, progress);
+    }
+
+    /** A card's own button with its loader, as {@link #cardAction} builds it. */
+    private static final class CardAction {
+        final View view;
+        final Button button;
+        final android.widget.ProgressBar progress;
+
+        CardAction(View view, Button button, android.widget.ProgressBar progress) {
+            this.view = view;
+            this.button = button;
+            this.progress = progress;
+        }
+
+        /** Dims the button as when disabled, its loader turning, or not. */
+        void loading(boolean on) {
+            enable(!on);
+            progress.setVisibility(on ? View.VISIBLE : View.GONE);
+        }
+
+        void enable(boolean on) {
+            button.setEnabled(on);
+            button.setAlpha(on ? 1f : 0.4f);
+        }
+    }
+
+    /**
+     * Undoes a card's sign-in, its domains' credentials dropped, so it can be
+     * signed in again.
+     */
+    private void signInAgain(AuthStep step) {
+        if (verifying || connecting) {
+            return;
+        }
+        unsign(step);
+        step.status.setVisibility(View.GONE);
+        // NOTE: a linked card signed in again takes its own fields: with the
+        // switch on it would have nothing to sign in with.
+        if (step.reuses()) {
+            step.same.setChecked(false);
+        }
+        refreshSignIn();
+    }
+
+    /** Drops what a card signed in with. */
+    private void unsign(AuthStep step) {
+        step.signed = false;
+        if (step.sending) {
+            setups.get(PimDomain.MAIL).submitCredential = null;
+        } else {
+            for (PimDomain domain : step.domains) {
+                setups.get(domain).credential = null;
+            }
+        }
+    }
+
+    /** A card's domains, by name: "Contacts, Calendar", or mail's sending. */
     private String domainNames(AuthStep step) {
+        if (step.sending) {
+            return host.getString(R.string.signin_sending);
+        }
         List<String> names = new ArrayList<>();
         for (PimDomain domain : step.domains) {
             names.add(host.getString(domain.label));
@@ -1683,16 +2291,25 @@ public final class OnboardingFlow {
     }
 
     /**
-     * A card's second line: protocol and server (or by hand), and the sender.
+     * A card's second line: protocol and server (or by hand); a browser card
+     * reading mail adds where it sends, its grant covering it.
      */
     private String signInDetail(AuthStep step) {
+        DomainSetup mail = setups.get(PimDomain.MAIL);
+        if (step.sending) {
+            SubmitOption submit = mail.submitSelected;
+            if (submit.manual) {
+                return host.getString(R.string.signin_manual);
+            }
+            return submit.detail == null ? submit.label : submit.label + " · " + submit.detail;
+        }
         SetupOption option = step.option;
         if (option.isManual()) {
             return host.getString(R.string.signin_manual);
         }
         String detail = option.detail == null ? option.label : option.label + " · " + option.detail;
-        DomainSetup mail = setups.get(PimDomain.MAIL);
-        if (step.domains.contains(PimDomain.MAIL)
+        if (step.oauth()
+                && step.domains.contains(PimDomain.MAIL)
                 && sends(mail)
                 && mail.submitSelected != null
                 && !mail.submitSelected.none()
@@ -1706,8 +2323,9 @@ public final class OnboardingFlow {
     /**
      * Brings the cards in line with their state, and Connect with them.
      *
-     * <p>Connect is available once every card left has what it asks for; a
-     * browser card, whose grant Connect runs, does not hold it back.
+     * <p>A signed card folds to its header, a check for its glyph, and the
+     * link signing it in again. A card's own sign-in is available once it
+     * has what it asks for; Connect once every card is signed in.
      */
     private void refreshSignIn() {
         if (authSteps == null) {
@@ -1716,35 +2334,68 @@ public final class OnboardingFlow {
         boolean ready = true;
         for (AuthStep step : authSteps) {
             boolean open = !step.signed;
+            ready &= step.signed;
             if (step.browser != null) {
-                step.browser.setVisibility(open ? View.VISIBLE : View.GONE);
+                step.browser.view.setVisibility(open ? View.VISIBLE : View.GONE);
+                step.browser.loading(step == pendingStep);
                 step.ownClient.setVisibility(open ? View.VISIBLE : View.GONE);
             }
             if (step.same != null) {
-                step.same.setVisibility(open ? View.VISIBLE : View.GONE);
+                ((View) step.same.getParent()).setVisibility(open ? View.VISIBLE : View.GONE);
+                // NOTE: there is nothing to reuse before that card signed in.
+                step.same.setEnabled(step.linked.signed && !verifying && !connecting);
             }
             boolean typed = open && !step.reuses();
-            for (PillField field : new PillField[] {step.login, step.secret}) {
-                if (field != null) {
-                    field.view.setVisibility(typed ? View.VISIBLE : View.GONE);
+            if (step.secret != null) {
+                step.secret.view.setVisibility(typed ? View.VISIBLE : View.GONE);
+            }
+            // NOTE: a token names no login.
+            boolean login = step.login != null && step.password();
+            if (step.login != null) {
+                step.login.view.setVisibility(typed && login ? View.VISIBLE : View.GONE);
+            }
+            if (step.custom()) {
+                for (View field :
+                        new View[] {
+                            step.server.view,
+                            step.port == null ? null : step.port.view,
+                            step.starttls == null ? null : (View) step.starttls.getParent(),
+                            step.token == null ? null : (View) step.token.getParent()
+                        }) {
+                    if (field != null) {
+                        field.setVisibility(open ? View.VISIBLE : View.GONE);
+                    }
                 }
             }
-            for (PillField field : new PillField[] {step.server, step.submit}) {
-                if (field != null) {
-                    field.view.setVisibility(open ? View.VISIBLE : View.GONE);
+            if (step.verify != null) {
+                boolean filled =
+                        filled(step.server)
+                                && filled(step.secret)
+                                && (!login || filled(step.login));
+                // NOTE: a linked card signs in as its switch turns on, the
+                // button turning meanwhile, so it shows only while checking.
+                boolean shown = open && (!step.reuses() || checking.contains(step));
+                step.verify.view.setVisibility(shown ? View.VISIBLE : View.GONE);
+                if (checking.contains(step)) {
+                    step.verify.loading(true);
+                } else {
+                    step.verify.loading(false);
+                    step.verify.enable(filled && !verifying);
                 }
             }
+            step.glyph.setImageResource(step.signed ? R.drawable.ic_check : glyphOf(step));
+            step.glyph.setImageTintList(
+                    android.content.res.ColorStateList.valueOf(
+                            host.ui.resolveColor(
+                                    step.signed
+                                            ? android.R.attr.colorAccent
+                                            : android.R.attr.textColorPrimary)));
             if (step.signed) {
-                status(step, host.getString(R.string.signin_signed), false);
+                step.status.setVisibility(View.GONE);
             }
-            if (open && !step.oauth()) {
-                ready &= filled(step.server) && filled(step.submit);
-                if (!step.reuses()) {
-                    ready &= filled(step.secret) && (step.login == null || filled(step.login));
-                }
-            }
+            step.again.setVisibility(step.signed ? View.VISIBLE : View.GONE);
         }
-        host.setFabEnabled(R.id.signin_continue, ready);
+        host.setFabEnabled(R.id.signin_continue, ready && !verifying);
     }
 
     private static boolean filled(PillField field) {
@@ -1788,60 +2439,79 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Connect on the sign-in page: tries every card left, side by side.
-     *
-     * <p>Each reports on its card; once all have, the browser cards left run,
-     * then the commit.
+     * Connect on the sign-in page, every card signed in by then: the commit
+     * ({@link #nextGrant} finds no grant left).
      */
     private void connectAll() {
         host.hideKeyboard();
 
-        DomainSetup mail = setups.get(PimDomain.MAIL);
+        nextGrant();
+    }
+
+    /**
+     * A password or token card's own sign-in: each of its domains tried the
+     * way it will sync, side by side, the outcome said on the card.
+     *
+     * <p>A linked card signs in with the login and password of the card it
+     * reuses, against its own server, and only itself: each card is the
+     * user's own step.
+     */
+    private void verify(AuthStep step) {
+        host.hideKeyboard();
+
+        List<AuthStep> cards = List.of(step);
+
         List<Probe> probes = new ArrayList<>();
-        for (AuthStep step : authSteps) {
-            if (step.submit != null) {
-                mail.submitSelected.url = Endpoints.submitUrl(step.submit.text());
-                if (mail.submitSelected.url == null) {
-                    insecure(step);
+        for (AuthStep card : cards) {
+            AuthStep source = card.source();
+            String login = card.password() ? source.login.text() : "";
+            String secret = source.secret.input.getText().toString();
+            if (card.sending) {
+                SubmitOption submit = setups.get(PimDomain.MAIL).submitSelected;
+                String url = card.custom() ? customSubmitUrl(card) : submit.url;
+                if (url == null) {
+                    insecure(card);
                     return;
                 }
-            }
-            if (step.signed || step.oauth()) {
+                submit.url = url;
+                probes.add(new Probe(card, PimDomain.MAIL, url, login, secret));
                 continue;
             }
-            AuthStep source = step.reuses() ? firstPassword : step;
-            String login = step.password() ? source.login.text() : "";
-            String secret = source.secret.input.getText().toString();
-            for (PimDomain domain : step.domains) {
+            for (PimDomain domain : card.domains) {
                 String baseUrl =
-                        step.option.isManual()
-                                ? Endpoints.manualUrl(domain, step.server.text())
+                        card.custom()
+                                ? customUrl(card, domain)
                                 : setups.get(domain).selected.baseUrl;
                 if (baseUrl == null) {
-                    insecure(step);
+                    insecure(card);
                     return;
                 }
-                probes.add(new Probe(step, domain, baseUrl, login, secret));
+                probes.add(new Probe(card, domain, baseUrl, login, secret));
             }
-        }
-        if (probes.isEmpty()) {
-            nextGrant();
-            return;
         }
 
         verifying = true;
-        busy();
+        for (AuthStep card : cards) {
+            card.status.setVisibility(View.GONE);
+        }
+        checking.addAll(cards);
+        refreshSignIn();
         java.util.concurrent.ExecutorService pool =
                 java.util.concurrent.Executors.newFixedThreadPool(probes.size() + 1);
         for (Probe probe : probes) {
-            // NOTE: a token signs in to IMAP with SASL XOAUTH2, which names
-            // its user in the URL, as the stored account will.
+            // NOTE: a token signs in to IMAP and SMTP with SASL XOAUTH2, which
+            // names its user in the URL, as the stored account will.
             String url =
                     probe.domain == PimDomain.MAIL && probe.login.isEmpty()
                             ? Endpoints.asUser(probe.baseUrl, pendingEmail)
                             : probe.baseUrl;
-            Account account = new Account(url, probe.login, probe.secret);
-            probe.result = pool.submit(() -> probe(probe.domain, account));
+            if (probe.step.sending) {
+                Account account = new Account(url, probe.login, probe.secret, url);
+                probe.result = pool.submit(() -> probeSending(account));
+            } else {
+                Account account = new Account(url, probe.login, probe.secret);
+                probe.result = pool.submit(() -> probe(probe.domain, account));
+            }
         }
         pool.execute(
                 () -> {
@@ -1870,6 +2540,7 @@ public final class OnboardingFlow {
             return;
         }
         verifying = false;
+        checking.clear();
 
         Map<AuthStep, Exception> refused = new java.util.HashMap<>();
         Set<PimDomain> unserved = java.util.EnumSet.noneOf(PimDomain.class);
@@ -1884,7 +2555,7 @@ public final class OnboardingFlow {
         // NOTE: a card whose every domain the server does not serve signed in
         // to nothing, which is its refusal; one serving some connects those.
         for (Probe probe : probes) {
-            if (unserved.containsAll(probe.step.domains)) {
+            if (!probe.step.sending && unserved.containsAll(probe.step.domains)) {
                 refused.putIfAbsent(probe.step, failures.get(probe));
             }
         }
@@ -1894,6 +2565,10 @@ public final class OnboardingFlow {
             }
             probe.step.signed = true;
             DomainSetup setup = setups.get(probe.domain);
+            if (probe.step.sending) {
+                setup.submitCredential = AccountCredential.password(probe.login, probe.secret);
+                continue;
+            }
             if (unserved.contains(probe.domain)) {
                 setup.enabled = false;
                 continue;
@@ -1902,29 +2577,33 @@ public final class OnboardingFlow {
             setup.credential = AccountCredential.password(probe.login, probe.secret);
         }
         for (Map.Entry<AuthStep, Exception> entry : refused.entrySet()) {
+            AuthStep card = entry.getKey();
             Exception failure = entry.getValue();
             String text;
             if (failure instanceof NotServed) {
                 text = failure.getMessage();
             } else if (!wrongPassword(failure)) {
                 text = host.getString(R.string.connect_failed);
-            } else if (entry.getKey().password()) {
+            } else if (card.password()) {
                 text = host.getString(R.string.result_refused);
             } else {
                 text = host.getString(R.string.token_refused);
             }
-            status(entry.getKey(), text, true);
+            // NOTE: a linked card that did not sign in takes its own login and
+            // password: unlinked, its fields shown. Set before the outcome, as
+            // the switch hides the outcome line.
+            if (card.reuses()) {
+                card.same.setChecked(false);
+            }
+            status(card, text, true);
         }
 
         if (!unserved.isEmpty()) {
             host.toast(notServed(unserved));
         }
-        if (!refused.isEmpty()) {
-            resetConfigContinue();
-            return;
-        }
+        // NOTE: the page stays: the other cards sign in on their own, and
+        // Connect commits once all have.
         refreshSignIn();
-        nextGrant();
     }
 
     /**
@@ -2093,9 +2772,10 @@ public final class OnboardingFlow {
                 () -> {
                     Set<PimDomain> served = null;
                     try (Transport transport = new Transport()) {
-                        served =
-                                PimDomain.servedByJmap(
-                                        parts.clients().contact().jmapCapabilities(transport, session));
+                        Set<String> capabilities =
+                                parts.clients().contact().jmapCapabilities(transport, session);
+                        Log.d("pimalaya", "jmap session capabilities: " + capabilities);
+                        served = PimDomain.servedByJmap(capabilities);
                     } catch (Exception error) {
                         // NOTE: unread rather than refused: the grant stands,
                         // and the first sync says what the session cannot do.
@@ -2104,15 +2784,13 @@ public final class OnboardingFlow {
                     Set<PimDomain> read = served;
                     host.postAlive(
                             () -> {
-                                List<PimDomain> left = new ArrayList<>();
+                                List<PimDomain> unserved = new ArrayList<>();
                                 for (PimDomain domain : overJmap) {
                                     if (read != null && !read.contains(domain)) {
-                                        DomainSetup setup = setups.get(domain);
-                                        setup.credential = null;
-                                        setup.enabled = false;
-                                        left.add(domain);
+                                        unserved.add(domain);
                                     }
                                 }
+                                List<PimDomain> left = fallBack(unserved);
                                 if (!left.isEmpty()) {
                                     host.toast(notServed(left));
                                 }
@@ -2140,13 +2818,9 @@ public final class OnboardingFlow {
         connectedEmail = pendingEmail;
         for (DomainSetup setup : setups.values()) {
             setup.credential = null;
+            setup.submitCredential = null;
         }
-        List<DomainSetup> shared = sharedPassword();
-        if (shared.isEmpty()) {
-            runSignIns();
-        } else {
-            verifyPassword(shared);
-        }
+        runSignIns();
     }
 
     /**
@@ -2273,6 +2947,56 @@ public final class OnboardingFlow {
         }
     }
 
+    /**
+     * Signs in to the submission server and out, sending nothing: whether it
+     * takes the sending card's credential. Null when it does.
+     */
+    private Exception probeSending(Account account) {
+        try (Transport transport = new Transport()) {
+            MailClient.checkSubmission(transport, account);
+            return null;
+        } catch (Exception error) {
+            Log.w("pimalaya", "sending check failed", error);
+            return error;
+        }
+    }
+
+    /**
+     * Moves the domains a JMAP session turned out not to serve onto their best
+     * option off JMAP, each a card of its own on the sign-in page, and answers
+     * those with none, which are left out.
+     *
+     * <p>Whether a session serves calendars is known only once signed in, so
+     * JMAP leads every domain and this is the way back to CalDAV.
+     */
+    private List<PimDomain> fallBack(List<PimDomain> unserved) {
+        List<PimDomain> left = new ArrayList<>();
+        if (unserved.isEmpty() || authSteps == null) {
+            return left;
+        }
+        for (PimDomain domain : unserved) {
+            DomainSetup setup = setups.get(domain);
+            List<SetupOption> offJmap = new ArrayList<>();
+            for (SetupOption option : setup.options) {
+                if (!"jmap".equals(option.service)) {
+                    offJmap.add(option);
+                }
+            }
+            SetupOption fallback = SetupPlan.standardOption(domain, offJmap, pendingEmail);
+            if (fallback == null) {
+                detach(domain);
+                setup.credential = null;
+                setup.enabled = false;
+                left.add(domain);
+                continue;
+            }
+            Log.d("pimalaya", domain + " not served over jmap, falls back to " + fallback.service);
+            moveDomain(domain, fallback, null);
+        }
+        refreshSignIn();
+        return left;
+    }
+
     /** A domain the JMAP session serves no account for, in the user's words. */
     private static final class NotServed extends Exception {
         NotServed(String message) {
@@ -2349,17 +3073,6 @@ public final class OnboardingFlow {
                     runSignIns();
                 });
 
-        Button advancedLink = host.findViewById(R.id.result_advanced);
-        advancedLink.setVisibility(View.VISIBLE);
-        advancedLink.setText(host.getString(R.string.result_advanced, named));
-        advancedLink.setOnClickListener(
-                view -> {
-                    for (DomainSetup setup : setups.values()) {
-                        setup.credential = null;
-                    }
-                    switchToAdvanced();
-                });
-
         shell.showAuth(STEP_RESULT);
     }
 
@@ -2397,7 +3110,6 @@ public final class OnboardingFlow {
         Button onward = host.findViewById(R.id.result_continue);
         onward.setText(R.string.email_submit);
         onward.setOnClickListener(view -> connected(email));
-        host.findViewById(R.id.result_advanced).setVisibility(View.GONE);
 
         shell.showAuth(STEP_RESULT);
     }
@@ -2448,6 +3160,20 @@ public final class OnboardingFlow {
      * <p>Adds the contacts domain's address book selection when it is among
      * them.
      */
+    /**
+     * What mail's sending signed in with when it is not mail's own login and
+     * password, else null: the same secret is stored once.
+     */
+    private static AccountCredential ownSending(DomainSetup setup) {
+        AccountCredential sending = setup.submitCredential;
+        AccountCredential reading = setup.credential;
+        if (sending == null
+                || (reading.login.equals(sending.login) && reading.secret.equals(sending.secret))) {
+            return null;
+        }
+        return sending;
+    }
+
     private void commitConnections() {
         authSteps = null;
 
@@ -2462,10 +3188,22 @@ public final class OnboardingFlow {
                             : null;
             connections.add(
                     new AccountCommit.Connection(
-                            setup.domain, setup.baseUrl, submitUrl, setup.credential));
+                            setup.domain,
+                            setup.baseUrl,
+                            submitUrl,
+                            setup.credential,
+                            submitUrl == null ? null : ownSending(setup)));
         }
         connectedAccount = AccountCommit.assemble(connectedEmail, connections);
         if (connectedAccount == null) {
+            return;
+        }
+
+        // NOTE: mail's mailboxes are asked first, in the bar's order, then
+        // this runs again with them chosen.
+        Account mailServer = connectedAccount.server(PimDomain.MAIL);
+        if (mailServer != null && chosenMailboxes == null) {
+            listMailboxes(mailServer);
             return;
         }
 
@@ -2538,6 +3276,9 @@ public final class OnboardingFlow {
     private void openBooksSelection(String email, List<Addressbook> books) {
         connectedEmail = email;
         bookChoices = new ArrayList<>();
+        pickingMailboxes = false;
+        ((TextView) host.findViewById(R.id.books_heading)).setText(R.string.books_title);
+        ((Button) host.findViewById(R.id.books_continue)).setText(R.string.books_finish);
 
         ((TextView) host.findViewById(R.id.books_line))
                 .setText(host.getString(R.string.books_signed, email));
@@ -2557,49 +3298,130 @@ public final class OnboardingFlow {
             container.addView(card);
 
             for (Addressbook book : books) {
-                if (card.getChildCount() > 0) {
-                    View divider = CardRows.rowDivider(host);
-                    ((LinearLayout.LayoutParams) divider.getLayoutParams())
-                            .setMarginStart(host.ui.dp(20));
-                    card.addView(divider);
-                }
-                CheckBox subscribe = new CheckBox(host);
-                subscribe.setChecked(true);
-                subscribe.setClickable(false);
-                subscribe.setFocusable(false);
-
-                LinearLayout row = new LinearLayout(host);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-                row.setMinimumHeight(host.ui.dp(60));
-                row.setPadding(host.ui.dp(20), 0, host.ui.dp(8), 0);
-                TypedValue ripple = new TypedValue();
-                host.getTheme()
-                        .resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
-                row.setForeground(host.getDrawable(ripple.resourceId));
-
-                TextView name = new TextView(host);
-                name.setText(book.name());
-                name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-                name.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
-                row.addView(
-                        name,
-                        new LinearLayout.LayoutParams(
-                                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-                row.addView(subscribe);
-                row.setOnClickListener(
-                        view -> {
-                            subscribe.toggle();
-                            updateBooksContinue();
-                        });
-                card.addView(row);
-
-                bookChoices.add(new BookChoice(book.url(), subscribe));
+                addChoice(card, book.name(), book.url(), true);
             }
         }
 
         shell.showAuth(STEP_BOOKS);
         resetConfigContinue();
+    }
+
+    /** One checkbox row of the books page, kept with its key. */
+    private void addChoice(LinearLayout card, String label, String key, boolean on) {
+        if (card.getChildCount() > 0) {
+            View divider = CardRows.rowDivider(host);
+            ((LinearLayout.LayoutParams) divider.getLayoutParams()).setMarginStart(host.ui.dp(20));
+            card.addView(divider);
+        }
+        CheckBox subscribe = new CheckBox(host);
+        subscribe.setChecked(on);
+        subscribe.setClickable(false);
+        subscribe.setFocusable(false);
+
+        LinearLayout row = new LinearLayout(host);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(host.ui.dp(60));
+        row.setPadding(host.ui.dp(20), 0, host.ui.dp(8), 0);
+        TypedValue ripple = new TypedValue();
+        host.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
+        row.setForeground(host.getDrawable(ripple.resourceId));
+
+        TextView name = new TextView(host);
+        name.setText(label);
+        name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        name.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
+        row.addView(name, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(subscribe);
+        row.setOnClickListener(
+                view -> {
+                    subscribe.toggle();
+                    updateBooksContinue();
+                });
+        card.addView(row);
+
+        bookChoices.add(new BookChoice(key, subscribe));
+    }
+
+    /**
+     * Lists the signed-in mail's mailboxes for mail's step; a single one is
+     * taken without asking.
+     */
+    private void listMailboxes(Account server) {
+        busy();
+        host.io.execute(
+                () -> {
+                    List<org.pimalaya.client.Mailbox> listed;
+                    try (org.pimalaya.client.MailSession session = MailClient.openMail(server)) {
+                        listed = parts.clients().mail().listMailboxes(session);
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "mailboxes unlisted", error);
+                        host.postAlive(
+                                () -> {
+                                    resetConfigContinue();
+                                    host.showError(error, R.string.connect_failed);
+                                });
+                        return;
+                    }
+                    // NOTE: not postAlive: the step it leads to may persist
+                    // the account (finishOnboarding).
+                    host.main.post(
+                            () -> {
+                                resetConfigContinue();
+                                if (listed.size() <= 1) {
+                                    chosenMailboxes = new HashSet<>();
+                                    for (org.pimalaya.client.Mailbox mailbox : listed) {
+                                        chosenMailboxes.add(mailbox.name());
+                                    }
+                                    commitConnections();
+                                } else {
+                                    openMailboxSelection(listed);
+                                }
+                            });
+                });
+    }
+
+    /**
+     * Mail's step: one checkbox row per mailbox, every one ticked but the
+     * junk and the trash, which the store would otherwise hide on its own.
+     */
+    private void openMailboxSelection(List<org.pimalaya.client.Mailbox> mailboxes) {
+        pickingMailboxes = true;
+        bookChoices = new ArrayList<>();
+
+        ((TextView) host.findViewById(R.id.books_heading)).setText(R.string.mailboxes_title);
+        ((TextView) host.findViewById(R.id.books_line))
+                .setText(host.getString(R.string.books_signed, connectedEmail));
+        ((TextView) host.findViewById(R.id.books_message)).setText(R.string.mailboxes_description);
+        host.findViewById(R.id.books_note).setVisibility(View.GONE);
+        ((Button) host.findViewById(R.id.books_continue)).setText(R.string.email_submit);
+
+        LinearLayout container = host.findViewById(R.id.books_container);
+        container.removeAllViews();
+        LinearLayout card = CardRows.card(host);
+        container.addView(card);
+        for (org.pimalaya.client.Mailbox mailbox : mailboxes) {
+            boolean on =
+                    !"junk".equals(mailbox.role())
+                            && !org.pimalaya.client.Mailbox.TRASH.equals(mailbox.role());
+            addChoice(card, mailbox.name(), mailbox.name(), on);
+        }
+
+        shell.showAuth(STEP_BOOKS);
+        resetConfigContinue();
+    }
+
+    /** Mail's step continued: the ticked mailboxes, then the rest of the commit. */
+    private void confirmMailboxes() {
+        Set<String> chosen = new HashSet<>();
+        for (BookChoice choice : bookChoices) {
+            if (choice.subscribe.isChecked()) {
+                chosen.add(choice.url);
+            }
+        }
+        chosenMailboxes = chosen;
+        pickingMailboxes = false;
+        commitConnections();
     }
 
     /**
@@ -2682,6 +3504,9 @@ public final class OnboardingFlow {
         }
 
         AccountEntry stored = AccountCommit.persist(parts.accounts(), connected);
+        if (chosenMailboxes != null && stored.server(PimDomain.MAIL) != null) {
+            parts.mail().chooseMailboxes(stored.email, chosenMailboxes);
+        }
         accounts.removeIf(entry -> entry.email.equals(stored.email));
         accounts.add(stored);
 

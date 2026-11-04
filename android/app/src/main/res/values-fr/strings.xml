@@ -9,7 +9,10 @@
     <string name="welcome_title">Vos e-mails, contacts et agendas, hors ligne.</string>
     <string name="welcome_description">Saisissez votre adresse e-mail. Pimalaya trouve les réglages de votre serveur pour vous.</string>
     <string name="setup_advanced_link">Configuration avancée</string>
-    <string name="setup_advanced_different">Mots de passe différents ? Configuration avancée</string>
+    <string name="setup_via_account">Avec votre compte %1$s, dans le navigateur</string>
+    <string name="setup_via_browser">Dans le navigateur, chez %1$s</string>
+    <string name="setup_via_password">Avec votre mot de passe, chez %1$s</string>
+    <string name="setup_via_token">Avec un jeton d\'API, chez %1$s</string>
     <string name="domain_title_simple">Que voulez-vous sur ce téléphone ?</string>
     <string name="password_show">Afficher le mot de passe</string>
     <string name="password_hide">Masquer le mot de passe</string>
@@ -25,7 +28,6 @@
     <string name="domains_not_served">Non proposé par ce serveur, laissé de côté : %1$s</string>
     <string name="result_later">Vous pourrez connecter le reste plus tard en ajoutant de nouveau cette adresse.</string>
     <string name="result_continue">Continuer sans %1$s</string>
-    <string name="result_advanced">Configurer %1$s en mode avancé</string>
     <string name="result_elsewhere_title">Connecté</string>
     <string name="phone_contacts">Afficher dans les contacts du téléphone</string>
     <string name="phone_contacts_note">Les appels et SMS affichent leur nom.</string>
@@ -322,7 +324,6 @@
     <string name="compose_from_label">De</string>
     <string name="compose_copies_short">Cc/Cci</string>
 
-    <string name="manual_mail_server">Serveur de messagerie (hôte ou hôte:port)</string>
     <string name="manual_dav_url">URL du serveur</string>
     <string name="manual_submit_server">Serveur d\'envoi (hôte ou hôte:port)</string>
     <string name="manual_submit_message">Le serveur par lequel ce compte envoie. TLS implicite, port 465 sauf indication contraire.</string>
@@ -354,6 +355,8 @@
     <string name="error_title">Erreur</string>
     <string name="connect_failed">Impossible de se connecter</string>
 
+    <string name="mailboxes_title">Quelles boîtes aux lettres ?</string>
+    <string name="mailboxes_description">Celles que vous choisissez se synchronisent sur ce téléphone. Vous pourrez changer cela plus tard dans le filtre de la liste des messages.</string>
     <string name="books_title">Quels carnets d\'adresses ?</string>
     <string name="books_description">Ceux que vous choisissez se synchronisent sur ce téléphone. Vous pourrez changer ce choix plus tard dans les réglages du compte.</string>
     <string name="send_mail_advanced">Envoi</string>
@@ -362,13 +365,21 @@
     <string name="domain_manual_detail">Serveur, identifiant et mot de passe</string>
     <string name="signin_message">Une connexion par serveur. Les domaines qui partagent un serveur la partagent.</string>
     <string name="signin_same">Même identifiant et mot de passe que %1$s</string>
+    <string name="signin_sending">E-mails (envoi)</string>
+    <string name="signin_tune">Changer la connexion</string>
+    <string name="signin_custom">Paramètres personnalisés</string>
+    <string name="signin_custom_for">Paramètres personnalisés pour %1$s</string>
+    <string name="signin_discovered">Utiliser les paramètres découverts</string>
+    <string name="custom_server">Serveur</string>
+    <string name="custom_port">Port</string>
+    <string name="custom_starttls">STARTTLS</string>
+    <string name="custom_token">Se connecter avec un jeton d\'API</string>
     <string name="signin_browser">Se connecter avec le navigateur</string>
     <string name="signin_own_client">Utiliser mon propre client OAuth</string>
-    <string name="signin_signed">Connecté</string>
+    <string name="signin_check">Se connecter</string>
+    <string name="signin_again">Se reconnecter</string>
     <string name="signin_manual">Saisi manuellement</string>
     <string name="signin_sends">%1$s, envoie par %2$s</string>
-    <string name="signin_sent_to">Envoyé à %1$s</string>
-    <string name="signin_other_domain">%1$s, hors de %2$s</string>
     <string name="server_insecure">Seuls les serveurs chiffrés sont acceptés : imaps:// pour le courrier, https:// pour les contacts et les agendas, smtps:// ou smtp:// pour l\'envoi.</string>
     <string name="hint_token">Collez votre jeton d\'API</string>
     <string name="token_refused">Jeton refusé</string>

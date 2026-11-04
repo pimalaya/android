@@ -148,9 +148,10 @@ public enum PimDomain {
     /**
      * Where a discovered service ranks for this domain, lower first.
      *
-     * <p>JMAP first for mail and contacts; CalDAV over JMAP for calendars,
-     * whose JMAP support is known only once signed in (the probe then drops the
-     * domain, no fallback); the DAVs over the rest.
+     * <p>JMAP first for every domain, so one session and one grant cover them;
+     * a session found not to serve calendars once signed in moves them to
+     * their best option off JMAP (OnboardingFlow.fallBack). The DAVs over the
+     * rest.
      */
     public int rank(String service) {
         if (service == null) {
@@ -158,10 +159,10 @@ public enum PimDomain {
         }
         switch (service) {
             case "jmap":
-                return this == CALENDAR ? 1 : 0;
+                return 0;
             case "carddav":
             case "caldav":
-                return this == CALENDAR ? 0 : 1;
+                return 1;
             default:
                 return 2;
         }
