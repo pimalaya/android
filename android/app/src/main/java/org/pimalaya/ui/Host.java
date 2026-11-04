@@ -18,7 +18,8 @@ import org.pimalaya.R;
  */
 public abstract class Host extends Activity {
     /** The single-thread io executor. */
-    public final ExecutorService io = Executors.newSingleThreadExecutor();
+    public final ExecutorService io =
+            Executors.newSingleThreadExecutor(task -> new Thread(task, "pimalaya-io"));
 
     /** The main thread's handler. */
     public final Handler main = new Handler(Looper.getMainLooper());
@@ -32,7 +33,8 @@ public abstract class Host extends Activity {
      * {@link #io}. Its store writes take {@code Locks.store}, the store keeping
      * one writer.
      */
-    public final ExecutorService interactive = Executors.newSingleThreadExecutor();
+    public final ExecutorService interactive =
+            Executors.newSingleThreadExecutor(task -> new Thread(task, "pimalaya-interactive"));
 
     /** The screen currently shown: a flipper panel, or an overlay. */
     public int screen;

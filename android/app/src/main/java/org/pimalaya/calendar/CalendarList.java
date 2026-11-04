@@ -306,7 +306,8 @@ public final class CalendarList {
     private boolean loaded;
 
     /** Where the agenda's rows are read, one reload after another. */
-    private final ExecutorService reads = Executors.newSingleThreadExecutor();
+    private final ExecutorService reads =
+            Executors.newSingleThreadExecutor(task -> new Thread(task, "calendar-list-reads"));
 
     /**
      * Each entry's last expanded occurrences, with their object.

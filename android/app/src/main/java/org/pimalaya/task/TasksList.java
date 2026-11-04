@@ -205,7 +205,8 @@ public final class TasksList {
     /** The UIDs of Waiting For items a reply arrived to. */
     private Set<String> replied = Set.of();
 
-    private final ExecutorService reads = Executors.newSingleThreadExecutor();
+    private final ExecutorService reads =
+            Executors.newSingleThreadExecutor(task -> new Thread(task, "tasks-list-reads"));
     private int generation;
 
     /** One row: a task, and what its line says. */

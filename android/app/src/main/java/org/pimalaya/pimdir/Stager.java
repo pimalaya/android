@@ -79,8 +79,17 @@ public abstract class Stager implements OfflineDriver {
         /** Nanoseconds in the engine from a reply to its next yield. */
         long engine;
 
-        /** Nanoseconds the store spent on loads and writes. */
+        /** Nanoseconds the store spent on loads, lookups and writes. */
         long store;
+
+        /** Of {@link #store}, the nanoseconds loading the collection. */
+        long load;
+
+        /**
+         * Nanoseconds waiting for the store's one writer, held by another
+         * pass or worker, before a load, lookup or write began.
+         */
+        long waited;
 
         /** Members the pages listed. */
         public int listed;
@@ -93,6 +102,8 @@ public abstract class Stager implements OfflineDriver {
             json += other.json;
             engine += other.engine;
             store += other.store;
+            load += other.load;
+            waited += other.waited;
             listed += other.listed;
             pages += other.pages;
         }
@@ -101,7 +112,8 @@ public abstract class Stager implements OfflineDriver {
         public String toString() {
             return listed + " listed in " + pages + " pages: remote " + remote / 1_000_000
                     + " ms, json " + json / 1_000_000 + " ms, engine " + engine / 1_000_000
-                    + " ms, store " + store / 1_000_000 + " ms";
+                    + " ms, store " + store / 1_000_000 + " ms (load " + load / 1_000_000
+                    + " ms), waited " + waited / 1_000_000 + " ms for the store";
         }
     }
 
@@ -145,24 +157,33 @@ public abstract class Stager implements OfflineDriver {
             switch (op) {
                 case "load": {
                     JSONObject loaded;
+                    long asked = System.nanoTime();
                     synchronized (locks.store) {
                         long began = System.nanoTime();
+                        page.waited += began - asked;
                         loaded =
                                 offline.loadCollection(
                                         yielded.getString("collection"),
                                         yielded.optJSONObject("selection"));
-                        page.store += System.nanoTime() - began;
+                        long spent = System.nanoTime() - began;
+                        page.store += spent;
+                        page.load += spent;
                     }
                     long read = System.nanoTime();
                     reply = loaded.toString();
                     page.json += System.nanoTime() - read;
                     break;
                 }
-                case "lookup":
+                case "lookup": {
+                    long asked = System.nanoTime();
                     synchronized (locks.store) {
+                        long began = System.nanoTime();
+                        page.waited += began - asked;
                         reply = lookup(yielded.getJSONArray("links")).toString();
+                        page.store += System.nanoTime() - began;
                     }
                     break;
+                }
                 case "verify":
                     synchronized (locks.store) {
                         reply = offline.verify(yielded.getJSONArray("hashes")).toString();
@@ -170,11 +191,27 @@ public abstract class Stager implements OfflineDriver {
                     break;
                 case "write": {
                     JSONArray effects;
+                    long asked = System.nanoTime();
+                    JSONArray writes = yielded.getJSONArray("writes");
+                    long spent;
+                    long queued;
                     synchronized (locks.store) {
                         long began = System.nanoTime();
-                        effects = offline.applyWrites(yielded.getJSONArray("writes"));
+                        queued = began - asked;
+                        page.waited += queued;
+                        effects = offline.applyWrites(writes);
                         applied(effects);
-                        page.store += System.nanoTime() - began;
+                        spent = System.nanoTime() - began;
+                        page.store += spent;
+                    }
+                    // NOTE: a write landing a page's members often comes
+                    // after the one the page line is logged at, so a slow
+                    // one says itself what it held.
+                    if (spent > 100_000_000L) {
+                        Log.d(
+                                "pimalaya",
+                                "store write " + opCounts(writes) + " in " + spent / 1_000_000
+                                        + " ms, waited " + queued / 1_000_000 + " ms");
                     }
                     reply = PimdirStorage.written(effects).toString();
                     // NOTE: the index follows each write batch (SEARCH §4), a
@@ -200,6 +237,19 @@ public abstract class Stager implements OfflineDriver {
             returned = System.nanoTime();
             return error(failure);
         }
+    }
+
+    /** A write batch's ops by kind, for the log: {@code upsert 500, stamp 1}. */
+    private static String opCounts(JSONArray writes) throws JSONException {
+        java.util.Map<String, Integer> counts = new java.util.TreeMap<>();
+        for (int index = 0; index < writes.length(); index++) {
+            counts.merge(writes.getJSONObject(index).getString("op"), 1, Integer::sum);
+        }
+        java.util.List<String> parts = new java.util.ArrayList<>();
+        for (java.util.Map.Entry<String, Integer> count : counts.entrySet()) {
+            parts.add(count.getKey() + " " + count.getValue());
+        }
+        return String.join(", ", parts);
     }
 
     /** Any other yield; a stager answers "Unsupported engine yield". */

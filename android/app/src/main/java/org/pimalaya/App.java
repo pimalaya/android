@@ -139,7 +139,8 @@ public final class App extends Application
         phoneQueue =
                 new PhoneQueue(
                         new Handler(Looper.getMainLooper()),
-                        Executors.newSingleThreadExecutor(),
+                        Executors.newSingleThreadExecutor(
+                                task -> new Thread(task, "phone-queue")),
                         url -> {
                             try {
                                 new ContactPhonePass(pimdir, Clients.real())

@@ -138,7 +138,8 @@ public final class MailList {
     private final Adapter adapter = new Adapter();
 
     /** One reader, so pages and counts never race each other. */
-    private final ExecutorService reads = Executors.newSingleThreadExecutor();
+    private final ExecutorService reads =
+            Executors.newSingleThreadExecutor(task -> new Thread(task, "mail-list-reads"));
 
     /** What the list shows now; replaced whole by each reload. */
     private Layout layout = Layout.empty();
