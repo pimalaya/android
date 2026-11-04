@@ -59,10 +59,38 @@ The flow SHALL save the account once its sign-ins succeed, marked as being set u
 - WHEN the user backs out of the flow
 - THEN the account and what its syncs stored are removed
 
+### Requirement: The setup signs in on one page
+The setup SHALL gather every sign-in its selection needs on one page, one card per server and login, and SHALL NOT open a dialog per sign-in. A card SHALL ask what its method needs: a login and a password, an API token, or a browser grant; a server set through the settings form SHALL be signed in the same way, the form having set the server. Domains sharing a server and a login SHALL share a card, and every card SHALL name the domains it signs in for. A password card after the first SHALL offer to reuse the first card's login and password. Connecting SHALL run every card and report each one's outcome on its card, keeping the cards that succeeded.
+
+#### Scenario: Two servers, two passwords
+- GIVEN a selection reading mail over IMAP and contacts over CardDAV, on two servers
+- WHEN the sign-in page opens
+- THEN it shows one card per server, each with a login and a password
+- AND no dialog opens
+
+#### Scenario: Reusing a password
+- GIVEN the same page
+- WHEN the second card's reuse box is ticked
+- THEN its fields hide and it signs in with the first card's login and password
+
+#### Scenario: One card refused
+- GIVEN the same page and a password the contacts server refuses
+- WHEN Connect is tapped
+- THEN the contacts card says the password was not accepted
+- AND mail stays connected
+
 ## MODIFIED Requirements
+### Requirement: An OAuth client is entered on a page
+When a server registers no client on its own, or the user asks to use their own, the setup SHALL ask for the client on a page of its own (client ID, optional secret, authorization and token endpoints, scope, redirect URI, the discovered ones prefilled), and SHALL return to the sign-in page with nothing lost.
+
+#### Scenario: A server without dynamic registration
+- GIVEN a browser card whose server refuses dynamic client registration
+- WHEN its sign-in starts
+- THEN the OAuth client page opens with the endpoints prefilled and the client ID empty
+
 
 ### Requirement: The standard setup connects with the best sign-in found
-The setup SHALL select for each domain, by default, the best-ranked discovered option: at Google and Microsoft, their own APIs (Gmail, Google Calendar, the People API, Graph) signed in through the app's OAuth registration; elsewhere JMAP over IMAP, SMTP, CardDAV and CalDAV, then OAuth over an API token over a password. The sign-ins SHALL run on one page, one card per server and login, domains sharing a server and a login sharing a card, and every card SHALL name the domains it signs in for.
+The setup SHALL select for each domain, by default, the best-ranked discovered option: at Google and Microsoft, their own APIs (Gmail, Google Calendar, the People API, Graph) signed in through the app's OAuth registration; elsewhere JMAP over IMAP, SMTP, CardDAV and CalDAV, then OAuth over an API token over a password. The sign-ins SHALL run on the sign-in page (*The setup signs in on one page*).
 
 #### Scenario: A Google address
 - GIVEN an address hosted at Google, custom domain included
@@ -154,3 +182,9 @@ The domain screen SHALL open with every domain unticked, so each ticked one show
 
 ### Requirement: The setup mode decides what the domain screen asks
 Replaced by *The setup has one path*: there is no mode to choose, the alternatives and manual settings live behind each domain's row.
+
+### Requirement: The standard setup asks for one password
+Replaced by *The setup signs in on one page*: a password typed once for several domains is the reuse box of the sign-in page.
+
+### Requirement: The advanced setup signs in on one page
+Replaced by *The setup signs in on one page*, which every setup runs.

@@ -18,8 +18,8 @@ change: standard-onboarding-one-password
 - [x] Sending (standard): connect the discovered endpoint with mail, no switch
 - [x] Strings, English and French
 - [x] Build: `:app:assembleDebug` and `:app:testDebugUnitTest`
-- [ ] Device test
-- [ ] Fold the delta and log
+- [x] Device test
+- [x] Fold the delta and log
 
 ## Open points (settled)
 

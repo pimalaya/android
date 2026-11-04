@@ -5,8 +5,8 @@ change: one-onboarding-path
 
 # Tasks
 
-- [ ] Review the proposal; settle the open points
-- [ ] Fold advanced-onboarding-pages, standard-onboarding-one-password and onboarding-options-ask-on-switch into the spec as they stand, log and archive them
+- [x] Review the proposal; settle the open points
+- [x] Fold advanced-onboarding-pages, standard-onboarding-one-password and onboarding-options-ask-on-switch into the spec as they stand, log and archive them
 - [ ] Step 1: drop the setup mode question; one domain screen with checkbox rows, nothing ticked, the best-ranked option selected under each ticked domain as a sentence row
 - [ ] Step 1: the sentence wording per method and provider (browser, password, API token), no protocol, host or port
 - [ ] Step 1: device check
@@ -28,4 +28,4 @@ change: one-onboarding-path
 - [ ] Step 5: Finish lands on the first ticked domain in the bar's order, the dock showing what still runs
 - [ ] Step 5: device check
 - [ ] Remove the setup mode, its strings and the advanced domain step once nothing reads them
-- [ ] Fold the delta into cairn/spec/onboarding.md, log, CHANGELOG, archive
+- [ ] Fold the delta into cairn/spec/onboarding.md, log, CHANGELOG, archive; reword the "advanced setup" left in the intro, in "An account can gain a sender after it is connected" and in "Setup accepts encrypted servers only"

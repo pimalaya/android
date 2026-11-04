@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: onboarding-options-ask-on-switch
-status: active
+status: landed
 created: 2026-10-10
 ---
 

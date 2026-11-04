@@ -6,52 +6,46 @@ status: current
 
 # Onboarding
 
-The connection flow is one address, one question about how much to ask, and one screen per account. Discovery turns the address into services (the fixed provider rules first, then PACC, CardDAV, CalDAV, autoconfig and JMAP), and the domains those services serve are what the screen offers: mail, contacts and calendars, each a switch carrying its name and the glyph the app's own bar draws it with.
+The connection flow is one address, the standard setup with the advanced one a link away, and one screen per account. Discovery turns the address into services (the fixed provider rules first, then PACC, CardDAV, CalDAV, autoconfig and JMAP), and the domains those services serve are what the screen offers: mail, contacts and calendars, each a switch carrying its name and the glyph the app's own bar draws it with.
 
 An account is the unit. Whatever the run connected is saved once, as one entry naming every domain it covers, and one browser grant covers every domain that chose the same authorization server for the same API.
 
 ### Requirement: The setup mode decides what the domain screen asks
-The connection flow SHALL ask, once the address is entered, whether to set the account up the standard way or step by step, and the answer SHALL decide what the domain screen offers. The standard setup SHALL offer one switch per domain and no configuration; the advanced setup SHALL offer, under each switch, one option per discovered service and authentication method plus manual entry. Two options reading the same, protocol, server and authentication method, SHALL be one: a server taking OAuth through two grants is one OAuth sign-in, and the grant kept is the code grant, a phone having a browser.
+The connection flow SHALL start in the standard setup, without asking how much to ask, and SHALL offer the advanced setup as a link on the address screen and beside the standard setup's password field. The standard setup SHALL offer one row per discovered domain, unticked to begin with, and no configuration; the advanced setup SHALL offer, under each switch, one option per discovered service and authentication method plus manual entry. Two options reading the same, protocol, server and authentication method, SHALL be one: a server taking OAuth through two grants is one OAuth sign-in, and the grant kept is the code grant, a phone having a browser.
 
 #### Scenario: The standard setup
 - GIVEN an address whose services are discovered
-- WHEN the standard setup is chosen
-- THEN each domain is one switch carrying its name and glyph
+- WHEN the address is entered
+- THEN the domain screen lists each discovered domain, unticked, carrying its name and glyph
 - AND nothing on the screen names a protocol or an authentication method
 
 #### Scenario: The advanced setup
 - GIVEN the same address
-- WHEN the advanced setup is chosen
+- WHEN the advanced setup link is followed
 - THEN each switched-on domain lists its configurations, manual entry among them
 
 ### Requirement: The standard setup connects with the best sign-in found
-The standard setup SHALL connect a domain without asking how: at Google and Microsoft, with their own APIs (Gmail, Google Calendar, the People API, Graph) signed in through the app's OAuth registration; elsewhere with the best-ranked discovered configuration, JMAP over IMAP, SMTP, CardDAV and CalDAV, then OAuth over an API token over a password. The user SHALL choose only which domains to connect. A domain offering no sign-in at all SHALL be shown switched off and unswitchable, naming the setup that can connect it. An address offering none for any domain SHALL send the flow to the advanced setup rather than to an empty screen. Every credential prompt it opens SHALL name the domains it signs in for, and SHALL say how far along the sequence is whenever that sequence has more than one step.
+The standard setup SHALL connect a domain without asking how: at Google and Microsoft, with their own APIs (Gmail, Google Calendar, the People API, Graph) signed in through the app's OAuth registration; elsewhere with the best-ranked discovered configuration, JMAP over IMAP, SMTP, CardDAV and CalDAV, then OAuth over an API token over a password. The user SHALL choose only which domains to connect and, for password sign-ins, type one password. A domain offering no sign-in at all SHALL NOT be listed. An address offering none for any domain SHALL send the flow to the advanced setup rather than to an empty screen. When the chosen domains need more than one kind of sign-in, a password and a browser grant, each SHALL run once, for every domain it covers.
 
 #### Scenario: A Google address
 - GIVEN an address hosted at Google, custom domain included
-- WHEN the standard setup switches mail, contacts and calendars on
+- WHEN the standard setup connects mail, contacts and calendars
 - THEN they connect over Gmail, the People API and Google Calendar, through one Google consent
 
 #### Scenario: A JMAP server offering OAuth and a password
 - GIVEN an address whose server offers JMAP with OAuth and with a password, and IMAP with a password
-- WHEN the standard setup switches mail on
+- WHEN the standard setup connects mail
 - THEN mail connects over JMAP through OAuth
 
 #### Scenario: A password sign-in alone
 - GIVEN an address whose mail is discovered with a password sign-in only
-- WHEN the standard setup switches mail on
-- THEN the credential prompt asks for a login and a password
-- AND names mail in its title
-
-#### Scenario: Several domains, several servers
-- GIVEN a standard setup connecting three domains at three servers
-- WHEN the prompts run
-- THEN each names its own domain and its place in the sequence
-- AND none of them names a protocol or an authentication method
+- WHEN the standard setup lists mail
+- THEN the domain screen asks for a password, the login being the address
+- AND no credential dialog opens
 
 #### Scenario: Nothing is in reach
 - GIVEN an address offering no sign-in this client drives
-- WHEN the standard setup is shown
+- WHEN the address is entered
 - THEN the flow offers the advanced setup instead
 
 ### Requirement: A connected account is synchronised before the app shows it
@@ -69,36 +63,26 @@ Finishing the connection flow SHALL land on the list of the first domain the acc
 - THEN its first sync runs again, the domains that succeeded untouched
 
 ### Requirement: The setup names sending in the words of the setup it is in
-The connection flow SHALL offer where mail is submitted as part of connecting mail, and SHALL name it the way the chosen setup names everything else. The standard setup SHALL offer one switch reading *send mail*, carrying no protocol, on when the discovery run turned up an endpoint this client can drive and off and unswitchable when it did not, naming the setup that can connect it. The advanced setup SHALL list, under a switched-on mail section, one row per discovered submission configuration, a row for none, and manual entry. Implicit TLS and STARTTLS are both driven. Submission SHALL sign in with the credential the mail connection signed in with, and the flow SHALL NOT prompt a second time.
+The connection flow SHALL offer where mail is submitted as part of connecting mail, and SHALL name it the way the chosen setup names everything else. The standard setup SHALL connect the discovered endpoint this client can drive with mail and SHALL ask nothing about it; when none was discovered, the account SHALL be saved without one, a sender being addable from its settings. The advanced setup SHALL list, under a switched-on mail section, one row per discovered submission configuration, a row for none, and manual entry. Implicit TLS and STARTTLS are both driven. Submission SHALL sign in with the credential the mail connection signed in with, and the flow SHALL NOT prompt a second time.
 
 The advanced setup SHALL list one row per discovered submission endpoint and sign-in method, as it lists reading rows, and SHALL drop a row naming no method when the same endpoint is offered with one.
 
 #### Scenario: An address that publishes submission
 - GIVEN an address whose discovery turned up an implicit-TLS SMTP endpoint
-- WHEN the standard setup switches mail on
-- THEN a *send mail* switch is shown on under it
-- AND no protocol is named anywhere on the screen
+- WHEN the standard setup connects mail
+- THEN the account stores the submit endpoint and is offered as a sender
+- AND nothing on the screen asked about sending
 
 #### Scenario: An address that publishes none
 - GIVEN an address whose discovery turned up no submission this client can drive
-- WHEN the standard setup is shown
-- THEN the *send mail* switch is off, unswitchable, and says the advanced setup can connect it
+- WHEN the standard setup connects mail
+- THEN the account stores no submit endpoint, and its settings can add one
 
 #### Scenario: The same address, advanced
 - GIVEN the same address
 - WHEN the advanced setup switches mail on
 - THEN the section lists its SMTP configurations, a row for none, and manual entry
 - AND manual entry asks for a host and builds an implicit-TLS endpoint on port 465 when none was typed
-
-#### Scenario: Sending switched off
-- GIVEN an address that publishes submission
-- WHEN the flow finishes with sending switched off
-- THEN the account stores no submit endpoint, and is not offered as a sender
-
-#### Scenario: Sending switched on
-- GIVEN an address that publishes submission
-- WHEN the flow finishes with sending switched on
-- THEN the account stores the submit endpoint, and is offered as a sender
 
 #### Scenario: One server found twice
 - GIVEN an SMTP endpoint discovered once with a password method and once with none
@@ -265,3 +249,57 @@ The loopback redirect of a custom client SHALL be `http://127.0.0.1` (RFC 8252 s
 - GIVEN a custom-client grant waiting on its loopback port
 - WHEN another app connects and sends nothing, then the browser lands
 - THEN the silent connection is dropped after its timeout and the browser's redirect completes the grant, the app's sync never held
+
+### Requirement: The standard setup asks for one password
+When every domain the standard setup connects signs in with a password, the domain screen SHALL carry one password field, the login being the entered address, and the flow SHALL NOT open a credential prompt per domain. The password SHALL be tried against every password domain, and the outcome SHALL be reported per domain. A domain whose server refuses it SHALL be offered two ways on: continue without it, connecting the domains that accepted, or set it up in the advanced setup. A password every server refuses SHALL be reported on the field and SHALL save nothing.
+
+#### Scenario: One password for three domains
+- GIVEN an address whose mail, contacts and calendars are discovered with password sign-ins
+- WHEN the standard setup connects all three with one password every server accepts
+- THEN the password was typed once
+- AND the saved account covers the three domains
+
+#### Scenario: One server refuses
+- GIVEN the same address, its calendar server refusing the password
+- WHEN the standard setup connects
+- THEN mail and contacts read as connected and calendar as not accepted
+- AND continuing without the calendar saves an account covering mail and contacts
+
+#### Scenario: Every server refuses
+- GIVEN the same address and a wrong password
+- WHEN the standard setup connects
+- THEN the field says the password is wrong
+- AND no account is saved
+
+### Requirement: The advanced setup signs in on one page
+The advanced setup SHALL gather every sign-in its selection needs on one page, one card per server and login, and SHALL NOT open a dialog per sign-in. A card SHALL ask what its method needs: a login and a password, an API token, a server with a login and a password for manual entry, or a browser grant. Domains sharing a server and a login SHALL share a card. A password card after the first SHALL offer to reuse the first card's login and password. Connecting SHALL run every card and report each one's outcome on its card, keeping the cards that succeeded.
+
+#### Scenario: Two servers, two passwords
+- GIVEN an advanced selection reading mail over IMAP and contacts over CardDAV, on two servers
+- WHEN the sign-in page opens
+- THEN it shows one card per server, each with a login and a password
+- AND no dialog opens
+
+#### Scenario: Reusing a password
+- GIVEN the same page
+- WHEN the second card's reuse box is ticked
+- THEN its fields hide and it signs in with the first card's login and password
+
+#### Scenario: One card refused
+- GIVEN the same page and a password the contacts server refuses
+- WHEN Connect is tapped
+- THEN the contacts card says the password was not accepted
+- AND mail stays connected
+
+#### Scenario: Manual entry
+- GIVEN mail set to manual entry
+- WHEN the sign-in page opens
+- THEN mail's card asks for a server, a login and a password
+
+### Requirement: An OAuth client is entered on a page
+When a server registers no client on its own, or the user asks to use their own, the advanced setup SHALL ask for the client on a page of its own (client ID, optional secret, authorization and token endpoints, scope, redirect URI, the discovered ones prefilled), and SHALL return to the sign-in page with nothing lost.
+
+#### Scenario: A server without dynamic registration
+- GIVEN a browser card whose server refuses dynamic client registration
+- WHEN its sign-in starts
+- THEN the OAuth client page opens with the endpoints prefilled and the client ID empty

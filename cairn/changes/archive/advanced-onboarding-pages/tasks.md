@@ -20,8 +20,8 @@ change: advanced-onboarding-pages
 - [x] Remove the sign-in `AlertDialog`s and the strings only they used (`setup_step_title` and its kin) once nothing reads them
 - [x] Strings, English and French
 - [x] Build: `:app:assembleDebug` and `:app:testDebugUnitTest`
-- [ ] Device test
-- [ ] Fold the delta and log
+- [x] Device test
+- [x] Fold the delta and log
 
 ## Open points (settled)
 

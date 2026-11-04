@@ -11,7 +11,7 @@ created: 2026-10-09
 
 `jmap-release-readiness` made JMAP calendars read only: io-jmap had no `CalendarEvent/set`, so the `writesEvents` trait is false for JMAP, the three write verbs refuse with 422, the entry page hides its save and delete, and the standard setup ranks CalDAV over JMAP for calendars. A Stalwart user with no CalDAV discovered gets a calendar the app can only read, and the phone's calendar app cannot edit it either.
 
-io-jmap left `CalendarEvent/set` out because nothing wrote (docs/jmap-calendars-plan.md in io-jmap, "a `set` coroutine with no caller is untested surface"). This change is that caller, so the reason no longer holds.
+io-jmap left `CalendarEvent/set` out because nothing wrote (the jmap-calendars change in io-jmap's cairn, "a `set` coroutine with no caller is untested surface"). This change is that caller, so the reason no longer holds.
 
 ## What
 

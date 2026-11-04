@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: advanced-onboarding-pages
-status: active
+status: landed
 created: 2026-10-09
 ---
 

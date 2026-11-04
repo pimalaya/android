@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: standard-onboarding-one-password
-status: active
+status: landed
 created: 2026-10-09
 ---
 
