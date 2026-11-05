@@ -182,8 +182,8 @@ public final class PimdirItems {
         values.put("collection", collection);
         values.put("link_id", linkId);
         values.put("flags", new ArrayList<Object>(new java.util.LinkedHashSet<>(flags)));
-        PimdirDb.changed(db, PimdirSql.bind("RETAIN_FLAGS", values));
-        PimdirDb.changed(db, PimdirSql.bind("ADD_FLAGS", values));
+        PimdirDb.changedSharing(
+                db, PimdirSql.bind("RETAIN_FLAGS", values), PimdirSql.bind("ADD_FLAGS", values));
     }
 
     /**
@@ -208,8 +208,10 @@ public final class PimdirItems {
         values.put("link_id", linkId);
         values.put("source", source);
         values.put("flags", new ArrayList<Object>(new java.util.LinkedHashSet<>(flags)));
-        PimdirDb.changed(db, PimdirSql.bind("RETAIN_BASE_FLAGS", values));
-        PimdirDb.changed(db, PimdirSql.bind("ADD_BASE_FLAGS", values));
+        PimdirDb.changedSharing(
+                db,
+                PimdirSql.bind("RETAIN_BASE_FLAGS", values),
+                PimdirSql.bind("ADD_BASE_FLAGS", values));
     }
 
     /** A space-joined flags column as its flags, null for a NULL one. */

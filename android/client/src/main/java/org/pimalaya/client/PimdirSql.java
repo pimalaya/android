@@ -403,6 +403,22 @@ public final class PimdirSql {
         return made;
     }
 
+    /**
+     * The name a bound statement's text was rewritten from, null for one no
+     * name gave (a wrapped read): a profile's label, read once a batch, so
+     * a scan of the names bound so far.
+     */
+    public static String nameOf(String sql) {
+        for (Map.Entry<String, Rewritten[]> entry : rewrites.entrySet()) {
+            for (Rewritten step : entry.getValue()) {
+                if (step.sql.equals(sql)) {
+                    return entry.getKey();
+                }
+            }
+        }
+        return null;
+    }
+
     /** One statement made positional, the lists it reads named. */
     private static Rewritten rewrite(String sql) {
         StringBuilder rewritten = new StringBuilder(sql.length());

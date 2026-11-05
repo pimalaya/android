@@ -477,10 +477,26 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     public static Cursor typed(SQLiteDatabase db, String sql, Object[] args) {
+        boolean profiled = StoreProfile.on();
+        long opened = profiled ? System.nanoTime() : 0;
         return db.rawQueryWithFactory(
                 (database, driver, table, query) -> {
                     bind(query, args);
-                    return new SQLiteCursor(driver, table, query);
+                    if (!profiled) {
+                        return new SQLiteCursor(driver, table, query);
+                    }
+                    return new SQLiteCursor(driver, table, query) {
+                        private boolean counted;
+
+                        @Override
+                        public void close() {
+                            super.close();
+                            if (!counted) {
+                                counted = true;
+                                StoreProfile.add(sql, System.nanoTime() - opened);
+                            }
+                        }
+                    };
                 },
                 sql,
                 null,
@@ -589,12 +605,15 @@ public final class PimdirDb extends SQLiteOpenHelper {
 
     /**
      * Binds a statement's lists into {@code temp.param} on the connection the
-     * caller's transaction holds: {@code create_param}, {@code clear_param},
-     * then {@code bind_param} for each value in order.
+     * caller's transaction holds: {@code clear_param} ({@code create_param}
+     * first on a connection with none), then {@code bind_param} for each
+     * value in order.
      */
     private static void params(SQLiteDatabase db, PimdirSql.Bound bound) {
-        db.execSQL(PimdirSql.bind("CREATE_PARAM", Map.of()).sql);
-        db.execSQL(PimdirSql.bind("CLEAR_PARAM", Map.of()).sql);
+        long began = System.nanoTime();
+        clearParams(db);
+        long cleared = System.nanoTime();
+        StoreProfile.add("temp.param clear", cleared - began);
         PimdirSql.Bound insert = PimdirSql.bind("BIND_PARAM", Map.of());
         try (SQLiteStatement statement = db.compileStatement(insert.sql)) {
             for (Map.Entry<String, List<Object>> slot : bound.params.entrySet()) {
@@ -609,6 +628,33 @@ public final class PimdirDb extends SQLiteOpenHelper {
                     statement.executeInsert();
                 }
             }
+        }
+        StoreProfile.add("temp.param insert", System.nanoTime() - cleared);
+    }
+
+    /**
+     * Empties this connection's {@code temp.param}, creating it first on a
+     * connection that has none.
+     *
+     * <p>NOTE: the clear runs first and the create only when it fails. The
+     * create is DDL, which the platform's statement cache never holds
+     * (SQLiteConnection.isCacheable keeps reads and writes alone), and run
+     * before every bind it slowed every statement of the connection, not
+     * itself alone: a fill page of 500 took 355 ms on the host, 106 ms
+     * without it (io-pimdir's a-page-lands-in-few-statements). The table is
+     * per connection and no hook runs as the pool opens one, so its absence
+     * shows as the clear failing; any other failure, the retried clear
+     * throws again.
+     */
+    private static void clearParams(SQLiteDatabase db) {
+        String clear = PimdirSql.bind("CLEAR_PARAM", Map.of()).sql;
+        try {
+            db.execSQL(clear);
+        } catch (android.database.sqlite.SQLiteException missing) {
+            long began = System.nanoTime();
+            db.execSQL(PimdirSql.bind("CREATE_PARAM", Map.of()).sql);
+            StoreProfile.add("temp.param create", System.nanoTime() - began);
+            db.execSQL(clear);
         }
     }
 
@@ -629,12 +675,8 @@ public final class PimdirDb extends SQLiteOpenHelper {
         if (!bound.steps.isEmpty()) {
             return steps(db, bound, false).changed;
         }
-        String sql = bound.sql;
         if (bound.params.isEmpty()) {
-            try (SQLiteStatement statement = db.compileStatement(sql)) {
-                bind(statement, bound.args);
-                return statement.executeUpdateDelete();
-            }
+            return write(db, bound.sql, bound.args);
         }
         boolean own = !db.inTransaction();
         if (own) {
@@ -642,10 +684,40 @@ public final class PimdirDb extends SQLiteOpenHelper {
         }
         try {
             params(db, bound);
-            int changed;
-            try (SQLiteStatement statement = db.compileStatement(sql)) {
-                bind(statement, bound.args);
-                changed = statement.executeUpdateDelete();
+            int changed = write(db, bound.sql, bound.args);
+            if (own) {
+                db.setTransactionSuccessful();
+            }
+            return changed;
+        } finally {
+            if (own) {
+                db.endTransaction();
+            }
+        }
+    }
+
+    /**
+     * {@link #changed} of writes reading the same lists, in order: the lists
+     * bound once for all of them, in the caller's transaction or one of its
+     * own. Answers the rows they changed.
+     */
+    public static int changedSharing(SQLiteDatabase db, PimdirSql.Bound... bounds) {
+        for (PimdirSql.Bound bound : bounds) {
+            if (!bound.steps.isEmpty() || !bound.params.equals(bounds[0].params)) {
+                throw new IllegalArgumentException("Writes sharing lists bind the same ones");
+            }
+        }
+        boolean own = !db.inTransaction();
+        if (own) {
+            db.beginTransaction();
+        }
+        try {
+            if (!bounds[0].params.isEmpty()) {
+                params(db, bounds[0]);
+            }
+            int changed = 0;
+            for (PimdirSql.Bound bound : bounds) {
+                changed += write(db, bound.sql, bound.args);
             }
             if (own) {
                 db.setTransactionSuccessful();
@@ -700,10 +772,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
                     }
                     continue;
                 }
-                try (SQLiteStatement statement = db.compileStatement(step.sql)) {
-                    bind(statement, step.args);
-                    ran.changed += statement.executeUpdateDelete();
-                }
+                ran.changed += write(db, step.sql, step.args);
             }
             if (own) {
                 db.setTransactionSuccessful();
@@ -717,6 +786,17 @@ public final class PimdirDb extends SQLiteOpenHelper {
             ran.rows = new android.database.MatrixCursor(new String[0]);
         }
         return ran;
+    }
+
+    /** Runs one write statement; answers rows changed, its time profiled. */
+    private static int write(SQLiteDatabase db, String sql, Object[] args) {
+        long began = System.nanoTime();
+        try (SQLiteStatement statement = db.compileStatement(sql)) {
+            bind(statement, args);
+            return statement.executeUpdateDelete();
+        } finally {
+            StoreProfile.add(sql, System.nanoTime() - began);
+        }
     }
 
     private static void bind(SQLiteProgram query, Object[] args) {

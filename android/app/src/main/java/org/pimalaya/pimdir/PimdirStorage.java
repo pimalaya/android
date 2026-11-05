@@ -2252,6 +2252,7 @@ public final class PimdirStorage {
         PimdirSql.Bound bound = PimdirSql.bind(name, values);
         String sql = bound.sql;
         Object[] args = bound.args;
+        long began = System.nanoTime();
         SQLiteStatement statement = compiled == null ? null : compiled.get(sql);
         boolean kept = statement != null;
         if (statement == null) {
@@ -2277,6 +2278,7 @@ public final class PimdirStorage {
             if (!kept) {
                 statement.close();
             }
+            StoreProfile.add(sql, System.nanoTime() - began);
         }
     }
 

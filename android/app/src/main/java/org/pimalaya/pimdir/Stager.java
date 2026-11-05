@@ -195,11 +195,17 @@ public abstract class Stager implements OfflineDriver {
                     JSONArray writes = yielded.getJSONArray("writes");
                     long spent;
                     long queued;
+                    StoreProfile profile;
                     synchronized (locks.store) {
                         long began = System.nanoTime();
                         queued = began - asked;
                         page.waited += queued;
-                        effects = offline.applyWrites(writes);
+                        StoreProfile.begin();
+                        try {
+                            effects = offline.applyWrites(writes);
+                        } finally {
+                            profile = StoreProfile.end();
+                        }
                         applied(effects);
                         spent = System.nanoTime() - began;
                         page.store += spent;
@@ -211,7 +217,8 @@ public abstract class Stager implements OfflineDriver {
                         Log.d(
                                 "pimalaya",
                                 "store write " + opCounts(writes) + " in " + spent / 1_000_000
-                                        + " ms, waited " + queued / 1_000_000 + " ms");
+                                        + " ms, waited " + queued / 1_000_000 + " ms"
+                                        + (profile == null ? "" : ", " + profile));
                     }
                     reply = PimdirStorage.written(effects).toString();
                     // NOTE: the index follows each write batch (SEARCH §4), a
