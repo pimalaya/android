@@ -6,19 +6,28 @@
 -- one text, on load_items' terms (§4.4).
 SELECT i.link_id,
        CASE WHEN i.flags_known = 1
-            THEN coalesce((SELECT group_concat(f.flag, ' ') FROM placement_flag f
-                           WHERE f.collection = i.collection AND f.link_id = i.link_id), '') END AS flags,
+            THEN trim(CASE WHEN i.marks & 1 THEN '\Seen ' ELSE '' END
+                   || CASE WHEN i.marks & 2 THEN '\Answered ' ELSE '' END
+                   || CASE WHEN i.marks & 4 THEN '\Flagged ' ELSE '' END
+                   || CASE WHEN i.marks & 8 THEN '\Draft ' ELSE '' END
+                   || CASE WHEN i.marks & 16 THEN '\Deleted ' ELSE '' END
+                   || coalesce((SELECT group_concat(f.flag, ' ') FROM placement_flag f
+                                WHERE f.item = i.id), '')) END AS flags,
        i.object_hash, i.sort_key, i.level, b.handle,
        CASE WHEN b.base_flags_known = 1
-            THEN coalesce((SELECT group_concat(g.flag, ' ') FROM binding_base_flag g
-                           WHERE g.collection = b.collection AND g.link_id = b.link_id
-                             AND g.source = b.source), '') END AS base_flags,
+            THEN trim(CASE WHEN b.base_marks & 1 THEN '\Seen ' ELSE '' END
+                   || CASE WHEN b.base_marks & 2 THEN '\Answered ' ELSE '' END
+                   || CASE WHEN b.base_marks & 4 THEN '\Flagged ' ELSE '' END
+                   || CASE WHEN b.base_marks & 8 THEN '\Draft ' ELSE '' END
+                   || CASE WHEN b.base_marks & 16 THEN '\Deleted ' ELSE '' END
+                   || coalesce((SELECT group_concat(g.flag, ' ') FROM binding_base_flag g
+                                WHERE g.item = b.item AND g.source = b.source), '')) END AS base_flags,
        b.base_object, b.base_revision, b.base_present, b.conflicted, b.conflict_revision,
        b.conflict_object, i.deleted, i.conflicted, c.kind, s.date, s.subject, s.sender,
        i.conflict_object AS item_conflict_object
 FROM items i
 JOIN collections c ON c.id = i.collection
-LEFT JOIN bindings b ON b.collection = i.collection AND b.link_id = i.link_id
+LEFT JOIN bindings b ON b.item = i.id
                     AND b.source = :source
-LEFT JOIN mail_summary s ON s.collection = i.collection AND s.link_id = i.link_id
+LEFT JOIN mail_summary s ON s.item = i.id
 WHERE i.collection = :collection AND i.retained_at IS NULL;

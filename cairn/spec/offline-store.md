@@ -8,7 +8,7 @@ status: current
 
 The app keeps one pimdir store for every account and every domain: `collections.kind` carries the media type (`message/rfc822`, `text/vcard`, `text/calendar`) and `collections.account` groups by account, so the merged view's two filter axes are columns rather than three databases. Bodies live in a content-addressed blob directory beside the database, referenced by hash and refcounted.
 
-The schema is io-pimdir's canonical storage-draft-08 schema, handed to Java over JNI rather than transcribed; the statements run on it are the app's own text, the `pimalaya-android` shape, which SQLite 3.18 runs, so the store lives on the platform's own SQLite from Android 8.0 up and the app bundles none. The search index, index.db beside the store, is a second database on that same SQLite, written by io-pimdir's I/O-free refresh. The crate is taken without its `client` feature: compiling a second engine into every ABI would work against the app's first design goal.
+The schema is io-pimdir's canonical storage-draft-09 schema, handed to Java over JNI rather than transcribed; the statements run on it are the app's own text, the `pimalaya-android` shape, which SQLite 3.18 runs, so the store lives on the platform's own SQLite from Android 8.0 up and the app bundles none. The search index, index.db beside the store, is a second database on that same SQLite, written by io-pimdir's I/O-free refresh. The crate is taken without its `client` feature: compiling a second engine into every ABI would work against the app's first design goal.
 
 Every collection is reconciled by io-pimdir's sync engine, so every collection carries bindings, staged writes and conflicts. A contacts collection is reconciled against two sources, the server and the phone, which the store holds as one item with one `bindings` row per source; mail and calendar have the one source each and are otherwise the same. Nothing replaces a collection's contents: a refresh reconciles it, which is what lets a write staged before it survive it.
 
@@ -21,7 +21,7 @@ The bridge SHALL run io-pimdir's sync, upgrade and mutate coroutines, and the ap
 - THEN `PimdirSync` derives the push and the driver services its yields
 
 ### Requirement: The store's shape follows the canonical schema
-The store SHALL be created by the canonical draft-08 schema alone (0001_init.sql and `init_store_meta`), served over JNI, and SHALL NOT reconcile, widen, narrow nor rebuild a store of another shape: drafts are exact (STORAGE §4.2), and a store whose schema differs from the canonical text is refused as damaged. The statements it runs SHALL be the app's own shape, `pimalaya-android` (STORAGE §4.4: each canonical statement's name, parameters, columns and effect kept, its text free), and the store SHALL record no shape: a store the canonical statement text wrote is the same store and opens.
+The store SHALL be created by the canonical draft-09 schema alone (0001_init.sql and `init_store_meta`), served over JNI, and SHALL NOT reconcile, widen, narrow nor rebuild a store of another shape: drafts are exact (STORAGE §4.2), and a store whose schema differs from the canonical text is refused as damaged. The statements it runs SHALL be the app's own shape, `pimalaya-android` (STORAGE §4.4: each canonical statement's name, parameters, columns and effect kept, its text free), and the store SHALL record no shape: a store the canonical statement text wrote is the same store and opens.
 
 #### Scenario: A store whose index moved
 - GIVEN a store holding an index the canonical text does not declare
@@ -610,6 +610,22 @@ A load scoped to some handles or link ids SHALL read those rows alone, whatever 
 - WHEN a round's page of 1000 members is loaded by handle
 - THEN 1000 placements come back, read by key, and the page costs what it holds rather than the mailbox
 
+### Requirement: A delta loads what owes a push
+A delta's load (`owing`, pimdir SYNC §10) SHALL read the rows of the handles it names, of the bindings `list_owing_bindings` names and of the items `list_lacking_items` names, by link id, never the whole collection, so a delta costs what moved rather than the mailbox; a round's last page and a rekey still read the whole collection.
+
+#### Scenario: A delta among rows in sync
+- GIVEN a collection of rows in sync with their base and one create no fetch based yet
+- WHEN a delta naming one of the rows in sync loads
+- THEN that row and the create come back, and no other (PimdirStorageTest `anOwingLoadAnswersWhatItNamesAndWhatOwesAPush`)
+
+### Requirement: A flag set's system flags are the row's bits
+A placement's or a base's flag set SHALL be written whole: `set_flags_known` and `set_base_flags_known` take it in the `flags` slot and write its system flags (`\Seen`, `\Answered`, `\Flagged`, `\Draft`, `\Deleted`, each by its exact bytes) as `marks` and `base_marks` (STORAGE §13), the app's `add_flags` and `add_base_flags` skip them and keep every other flag, `\seen` included, as a row, and every read answers the bits and the rows as one set. No Java reads which flag is which.
+
+#### Scenario: A read message round-trips
+- GIVEN a message listed `\Seen`
+- WHEN its write lands and the list reads it back
+- THEN its row holds bit 1 and no flag row, and it reads `\Seen` (BodyLossRacesTest, DeletedItemsTest)
+
 ### Requirement: A store write is never read through a cursor
 A write SHALL run as a statement and count what it changed (`changes()`), its `RETURNING` clause dropped, never stepped through a cursor: a cursor runs its statement again each time it refills its window, so a delete read through one runs again past its first window. A purge whose pins a statement would return SHALL leave them to the collector's recount.
 
@@ -640,10 +656,10 @@ A body moved into the blob store before the write naming it (a downloaded messag
 - THEN it is refused, and the message stays at meta, its body owed
 
 ### Requirement: A store of another draft is not opened
-The app SHALL create its store at storage-draft-08 (`store_meta.format_version`, a `store_id` and an `incarnation` by the canonical text, `derivation` 3) and record `sync_version` with the first engine write. It SHALL decide whether an existing store opens by io-pimdir's rules (STORAGE §6) over facts read off the file read-only, and SHALL NOT read, write nor reconcile a store another draft, another program or another sync version wrote: start-up stands aside on a screen saying the app has to be reinstalled, and the background job, the sync adapters and the time-zone receiver do nothing.
+The app SHALL create its store at storage-draft-09 (`store_meta.format_version`, a `store_id` and an `incarnation` by the canonical text, `derivation` 3) and record `sync_version` with the first engine write. It SHALL decide whether an existing store opens by io-pimdir's rules (STORAGE §6) over facts read off the file read-only, and SHALL NOT read, write nor reconcile a store another draft, another program or another sync version wrote: start-up stands aside on a screen saying the app has to be reinstalled, and the background job, the sync adapters and the time-zone receiver do nothing.
 
 #### Scenario: A store an earlier version wrote
-- GIVEN a store created before draft-08
+- GIVEN a store created before draft-09, a draft-08 store among them
 - WHEN the app starts
 - THEN it opens on the reinstall screen, and nothing in the store is written
 
@@ -742,7 +758,7 @@ Every statement the app runs on the store SHALL prepare and run on SQLite 3.18 a
 - THEN the row is inserted, then updated, keeping the invitation the first write stated
 
 #### Scenario: A store the previous build wrote
-- GIVEN a store created by io-pimdir's canonical statement text at storage-draft-08
+- GIVEN a store created by io-pimdir's canonical statement text at storage-draft-09
 - WHEN this build starts
 - THEN the store opens, and its rows are read and written by the app's statements
 

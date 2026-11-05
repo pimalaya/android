@@ -3,10 +3,15 @@
 -- diverging body.
 SELECT i.conflicted, i.conflict_object, i.object_hash, i.sort_key,
        CASE WHEN i.flags_known = 1
-            THEN coalesce((SELECT group_concat(f.flag, ' ') FROM placement_flag f
-                           WHERE f.collection = i.collection AND f.link_id = i.link_id), '') END AS flags,
+            THEN trim(CASE WHEN i.marks & 1 THEN '\Seen ' ELSE '' END
+                   || CASE WHEN i.marks & 2 THEN '\Answered ' ELSE '' END
+                   || CASE WHEN i.marks & 4 THEN '\Flagged ' ELSE '' END
+                   || CASE WHEN i.marks & 8 THEN '\Draft ' ELSE '' END
+                   || CASE WHEN i.marks & 16 THEN '\Deleted ' ELSE '' END
+                   || coalesce((SELECT group_concat(f.flag, ' ') FROM placement_flag f
+                                WHERE f.item = i.id), '')) END AS flags,
        b.conflicted, b.conflict_object
 FROM items i
-LEFT JOIN bindings b ON b.collection = i.collection AND b.link_id = i.link_id
+LEFT JOIN bindings b ON b.item = i.id
                     AND b.source = :source
 WHERE i.collection = :collection AND i.link_id = :link_id;

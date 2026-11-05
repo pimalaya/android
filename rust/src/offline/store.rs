@@ -445,7 +445,7 @@ mod tests {
             objects,
             meta: Some(MetaFacts {
                 format: Some("pimdir".into()),
-                format_version: Some("storage-draft-08".into()),
+                format_version: Some("storage-draft-09".into()),
                 version: Some(1),
                 hash_algo: Some("blake3".into()),
                 sync_version: None,
@@ -469,7 +469,7 @@ mod tests {
         assert_eq!(check(&facts).unwrap_err().code, "store-version");
 
         let mut facts = current();
-        facts.meta.as_mut().unwrap().format_version = Some("storage-draft-07".into());
+        facts.meta.as_mut().unwrap().format_version = Some("storage-draft-08".into());
         assert_eq!(check(&facts).unwrap_err().code, "store-version");
     }
 

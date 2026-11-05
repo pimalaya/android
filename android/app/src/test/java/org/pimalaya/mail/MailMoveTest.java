@@ -223,7 +223,7 @@ public class MailMoveTest {
         assertEquals("the target holds it, live", "0",
                 scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '42'", trash));
         assertEquals("with the summary the store holds of it", "Hello",
-                scalar("SELECT subject FROM mail_summary WHERE collection = ? AND link_id = '42'",
+                scalar("SELECT subject FROM mail_summary WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = '42')",
                         trash));
 
         List<MailStore.StoredMessage> rows = MailFixtures.merged(store, 10);
@@ -407,7 +407,7 @@ public class MailMoveTest {
         assertEquals("the page landed", "0",
                 scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '8'", trash));
         assertNull("the removal converged",
-                scalar("SELECT handle FROM bindings WHERE collection = ? AND link_id = '7'",
+                scalar("SELECT handle FROM bindings WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = '7')",
                         trash));
     }
 
@@ -457,7 +457,7 @@ public class MailMoveTest {
                 scalar("SELECT link_id FROM items WHERE collection = ?", sent));
         assertEquals("1", scalar("SELECT count(*) FROM items WHERE collection = ?", sent));
         assertEquals("Hi",
-                scalar("SELECT subject FROM mail_summary WHERE collection = ?", sent));
+                scalar("SELECT subject FROM mail_summary WHERE item IN (SELECT id FROM items WHERE collection = ?)", sent));
     }
 
     @Test

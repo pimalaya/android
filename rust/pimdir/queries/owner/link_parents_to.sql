@@ -1,4 +1,4 @@
--- Fork of LINK_PARENTS_TO (sha256 4d1b835a92c8b44e) for SQLite 3.18:
+-- Fork of LINK_PARENTS_TO (sha256 4af0ef27506f8a19) for SQLite 3.18:
 -- `ON CONFLICT DO NOTHING` (3.24) as an insert of the references not
 -- recorded yet, the rows distinct on their key; any other constraint still
 -- raises, where `INSERT OR IGNORE` would swallow it.
@@ -14,7 +14,7 @@ SELECT DISTINCT 'text/calendar', ti.link_id, 'text/calendar', p.link_id, 'parent
 FROM items p
 JOIN collections pc ON pc.id = p.collection AND pc.kind = 'text/calendar'
 JOIN task_summary t ON t.parent = p.link_id
-JOIN items ti ON ti.collection = t.collection AND ti.link_id = t.link_id AND ti.deleted = 0
+JOIN items ti ON ti.id = t.item AND ti.deleted = 0
 WHERE p.link_id BETWEEN coalesce(:link_id, '') AND coalesce(:link_id, x'') AND p.deleted = 0
   AND p.link_id != ti.link_id
   AND NOT (ti.link_id GLOB 'alt:*' OR ti.link_id GLOB 'dup:*' OR ti.link_id GLOB 'hash:*') AND NOT (p.link_id GLOB 'alt:*' OR p.link_id GLOB 'dup:*' OR p.link_id GLOB 'hash:*')

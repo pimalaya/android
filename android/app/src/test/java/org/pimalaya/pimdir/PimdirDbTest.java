@@ -54,8 +54,10 @@ public class PimdirDbTest {
                 "INSERT INTO items(collection, link_id, seq, level, flags_known) VALUES(?, ?, ?, 2, 1)",
                 new Object[] {collection, linkId, seq});
         db.execSQL(
-                "INSERT INTO bindings(collection, link_id, source, handle) VALUES(?, ?, 'server', ?)",
-                new Object[] {collection, linkId, linkId + ".vcf"});
+                "INSERT INTO bindings(item, collection, source, handle)"
+                        + " SELECT id, collection, 'server', ? FROM items"
+                        + " WHERE collection = ? AND link_id = ?",
+                new Object[] {linkId + ".vcf", collection, linkId});
     }
 
     @Test
@@ -455,7 +457,7 @@ public class PimdirDbTest {
                                 + " read_version, produce_version FROM store_meta",
                         null)) {
             assertTrue(cursor.moveToFirst());
-            assertEquals("storage-draft-08", cursor.getString(0));
+            assertEquals("storage-draft-09", cursor.getString(0));
             assertTrue(cursor.getString(1), cursor.getString(1).matches("[0-9a-f]{32}"));
             assertEquals(1, cursor.getInt(2));
             assertEquals(PimdirSql.identity().optLong("derivation"), cursor.getLong(3));
@@ -565,8 +567,9 @@ public class PimdirDbTest {
         canonical.execSQL(
                 "INSERT INTO items(collection, link_id, seq, level) VALUES('INBOX', 'm1', 1, 1)");
         canonical.execSQL(
-                "INSERT INTO mail_summary(collection, link_id, subject, invitation)"
-                        + " VALUES('INBOX', 'm1', 'one', 'e1')");
+                "INSERT INTO mail_summary(item, subject, invitation)"
+                        + " SELECT id, 'one', 'e1' FROM items"
+                        + " WHERE collection = 'INBOX' AND link_id = 'm1'");
         canonical.setVersion(PimdirSql.version());
         canonical.close();
 

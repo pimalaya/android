@@ -640,6 +640,8 @@ public final class FileStore {
         values.put("level", level);
         values.put("deleted", 0);
         values.put("conflicted", 0);
+        // NOTE: a file holds no flag, so no system flag bit (STORAGE §13).
+        values.put("marks", 0);
         exec(db, "INSERT_ITEM", values);
     }
 

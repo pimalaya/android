@@ -635,8 +635,8 @@ mod tests {
                    VALUES('INBOX', 'a', 'message/rfc822', 'INBOX');
                  INSERT INTO items(collection, link_id, seq, level)
                    VALUES('INBOX', 'm1', 1, 1);
-                 INSERT INTO mail_summary(collection, link_id, subject)
-                   VALUES('INBOX', 'm1', 'one');",
+                 INSERT INTO mail_summary(item, subject)
+                   VALUES((SELECT id FROM items WHERE link_id = 'm1'), 'one');",
             )
             .unwrap();
         newer
@@ -665,7 +665,7 @@ mod tests {
         );
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            format!("{FLOOR}\nwal\nstorage-draft-08\ntwo\nok\n"),
+            format!("{FLOOR}\nwal\nstorage-draft-09\ntwo\nok\n"),
         );
     }
 }

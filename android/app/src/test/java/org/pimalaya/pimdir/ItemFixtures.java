@@ -95,15 +95,17 @@ public final class ItemFixtures {
         if (row.revision != null) {
             db.execSQL(
                     "UPDATE bindings SET base_revision = ?, base_present = 1"
-                            + " WHERE collection = ? AND link_id = ? AND source = ?",
+                            + " WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = ?)"
+                            + " AND source = ?",
                     new Object[] {row.revision, collection, row.linkId, PimdirStorage.SERVER});
             db.execSQL(
-                    "INSERT INTO bindings(collection, link_id, source, handle, base_revision,"
-                            + " base_present) SELECT ?, ?, ?, ?, ?, 1 WHERE NOT EXISTS (SELECT 1"
-                            + " FROM bindings WHERE collection = ? AND link_id = ? AND source = ?)",
+                    "INSERT INTO bindings(item, collection, source, handle, base_revision,"
+                            + " base_present) SELECT i.id, i.collection, ?, ?, ?, 1 FROM items i"
+                            + " WHERE i.collection = ? AND i.link_id = ? AND NOT EXISTS (SELECT 1"
+                            + " FROM bindings b WHERE b.item = i.id AND b.source = ?)",
                     new Object[] {
-                        collection, row.linkId, PimdirStorage.SERVER, row.linkId, row.revision,
-                        collection, row.linkId, PimdirStorage.SERVER
+                        PimdirStorage.SERVER, row.linkId, row.revision, collection, row.linkId,
+                        PimdirStorage.SERVER
                     });
         }
         items.adjustRefcount(db, previous, hash);

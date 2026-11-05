@@ -497,6 +497,9 @@ fn selection_json(selection: &PimdirLoadSelection) -> LoadSelectionJson<'_> {
         PimdirLoadSelection::Handles(handles) => LoadSelectionJson::Handles {
             handles: handles.iter().map(PimdirHandle::as_str).collect(),
         },
+        PimdirLoadSelection::Owing(handles) => LoadSelectionJson::Owing {
+            handles: handles.iter().map(PimdirHandle::as_str).collect(),
+        },
         PimdirLoadSelection::Links(links) => LoadSelectionJson::Links {
             links: links.iter().map(PimdirLinkId::as_str).collect(),
         },

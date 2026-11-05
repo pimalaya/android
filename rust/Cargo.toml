@@ -53,3 +53,6 @@ siphasher = { version = "1", default-features = false }
 simd-cpu = { version = "0.1", default-features = false, features = ["std"] }
 url = { version = "2", default-features = false }
 vcard-rs = { version = "0.6", default-features = false, features = ["parser", "jscontact"] }
+
+[patch.crates-io]
+io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "b25523df5360a363133e058f34495484b60cb5a2" }

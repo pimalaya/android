@@ -125,7 +125,9 @@ public class BodyLossRacesTest {
         assertEquals(
                 "the markers written",
                 "\\Seen",
-                text("SELECT group_concat(flag, ' ') FROM placement_flag"
+                text("SELECT trim(CASE WHEN marks & 1 THEN '\\Seen ' ELSE '' END"
+                        + " || coalesce((SELECT group_concat(flag, ' ') FROM placement_flag"
+                        + " WHERE item = items.id), '')) FROM items"
                         + " WHERE collection = ? AND link_id = ?", inbox, "m1"));
     }
 
@@ -153,7 +155,7 @@ public class BodyLossRacesTest {
         assertEquals("2", item("level", "m1"));
         assertEquals(hash, item("object_hash", "m1"));
         assertEquals("the base kept", hash,
-                text("SELECT base_object FROM bindings WHERE collection = ? AND link_id = 'm1'",
+                text("SELECT base_object FROM bindings WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = 'm1')",
                         inbox));
         assertEquals("item, base and the shared body still", "3", refcount(hash));
         assertTrue(blobs.has(hash));

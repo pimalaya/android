@@ -1163,6 +1163,11 @@ pub enum LoadSelectionJson<'a> {
     Handles {
         handles: Vec<&'a str>,
     },
+    /// The named handles, and every placement that may owe the source a
+    /// push: `list_owing_bindings` and `list_lacking_items` (SYNC §10).
+    Owing {
+        handles: Vec<&'a str>,
+    },
     Links {
         links: Vec<&'a str>,
     },

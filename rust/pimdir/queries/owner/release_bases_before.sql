@@ -1,4 +1,4 @@
--- Fork of RELEASE_BASES_BEFORE (sha256 1a931747b40030fa) for SQLite 3.18:
+-- Fork of RELEASE_BASES_BEFORE (sha256 969be1ca3b5dc729) for SQLite 3.18:
 -- `UPDATE ... FROM` (3.33) as correlated reads of the binding's item, the
 -- join's predicate an EXISTS over it, and the bindings sought by the
 -- collections the slot names, as the join seeks them.
@@ -11,27 +11,25 @@
 -- true.
 UPDATE bindings SET
        base_object = CASE WHEN bindings.base_object = (SELECT i.object_hash FROM items i
-                                                       WHERE i.collection = bindings.collection
-                                                         AND i.link_id = bindings.link_id)
+                                                       WHERE i.id = bindings.item)
                           THEN NULL ELSE bindings.base_object END,
        shared_object = CASE WHEN bindings.shared_object = (SELECT i.object_hash FROM items i
-                                                           WHERE i.collection = bindings.collection
-                                                             AND i.link_id = bindings.link_id)
+                                                           WHERE i.id = bindings.item)
                             THEN NULL ELSE bindings.shared_object END,
        base_present = 1
 WHERE bindings.collection IN (SELECT value FROM temp.param WHERE slot = 'collections')
   AND EXISTS (
     SELECT 1 FROM items i
-    WHERE bindings.collection = i.collection AND bindings.link_id = i.link_id
+    WHERE bindings.item = i.id
       AND (bindings.base_object = i.object_hash OR bindings.shared_object = i.object_hash)
       AND i.collection IN (SELECT value FROM temp.param WHERE slot = 'collections')
       AND i.deleted = 0 AND i.conflicted = 0 AND i.object_hash IS NOT NULL
       AND i.sort_key < coalesce(:until, x'')
       AND (SELECT kind FROM collections c WHERE c.id = i.collection) = 'message/rfc822'
       AND EXISTS (SELECT 1 FROM bindings b
-                  WHERE b.collection = i.collection AND b.link_id = i.link_id)
+                  WHERE b.item = i.id)
       AND NOT EXISTS (SELECT 1 FROM bindings b
-                      WHERE b.collection = i.collection AND b.link_id = i.link_id
+                      WHERE b.item = i.id
                         AND (b.conflicted = 1
                              OR NOT (b.base_present = 1 OR b.base_flags_known = 1
                                      OR b.base_object IS NOT NULL OR b.base_revision IS NOT NULL)
@@ -39,6 +37,5 @@ WHERE bindings.collection IN (SELECT value FROM temp.param WHERE slot = 'collect
       AND NOT EXISTS (SELECT 1 FROM sources s
                       WHERE s.collection = i.collection
                         AND NOT EXISTS (SELECT 1 FROM bindings b
-                                        WHERE b.collection = i.collection
-                                          AND b.link_id = i.link_id
+                                        WHERE b.item = i.id
                                           AND b.source = s.source)));

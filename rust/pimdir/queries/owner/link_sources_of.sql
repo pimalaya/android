@@ -1,4 +1,4 @@
--- Fork of LINK_SOURCES_OF (sha256 cbf7351ee1fa9784) for SQLite 3.18:
+-- Fork of LINK_SOURCES_OF (sha256 dce964d067ecb25d) for SQLite 3.18:
 -- `ON CONFLICT DO NOTHING` (3.24) as an insert of the references not
 -- recorded yet, the rows distinct on their key; any other constraint still
 -- raises, where `INSERT OR IGNORE` would swallow it.
@@ -11,7 +11,7 @@ INSERT INTO item_reference(from_kind, from_link_id, to_kind, to_link_id, role, o
 SELECT DISTINCT 'text/calendar', ti.link_id, 'message/rfc822', mi.link_id, 'source', 'auto',
        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 FROM items ti
-JOIN task_summary t ON t.collection = ti.collection AND t.link_id = ti.link_id
+JOIN task_summary t ON t.item = ti.id
 JOIN items mi ON mi.link_id = t.mid AND mi.deleted = 0
 JOIN collections mc ON mc.id = mi.collection AND mc.kind = 'message/rfc822'
 WHERE ti.link_id BETWEEN coalesce(:link_id, '') AND coalesce(:link_id, x'') AND ti.deleted = 0

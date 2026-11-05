@@ -3,7 +3,7 @@
 -- base.
 SELECT EXISTS (
   SELECT 1 FROM items i
-  LEFT JOIN bindings b ON b.collection = i.collection AND b.link_id = i.link_id
+  LEFT JOIN bindings b ON b.item = i.id
                       AND b.source = :source
   WHERE i.collection = :collection
     AND (b.conflicted = 1

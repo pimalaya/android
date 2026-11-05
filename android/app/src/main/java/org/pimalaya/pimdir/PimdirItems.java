@@ -163,9 +163,11 @@ public final class PimdirItems {
     }
 
     /**
-     * Writes an item's flags as rows (STORAGE §13): {@code flags_known}, then
-     * {@code retain_flags} and {@code add_flags} over the set; null forgets
-     * them, the schema's trigger dropping the rows. The row is written first.
+     * Writes an item's flags (STORAGE §13): {@code set_flags_known} over the
+     * whole set, its system flags becoming the item's bits, then {@code
+     * retain_flags} and {@code add_flags}, which keep the other flags as
+     * rows; null forgets them, no bit kept and the schema's trigger dropping
+     * the rows. The row is written first.
      */
     public static void writeFlags(
             SQLiteDatabase db,
@@ -174,6 +176,7 @@ public final class PimdirItems {
             java.util.Collection<String> flags) {
         Map<String, Object> known = key(collection, linkId);
         known.put("flags_known", flags == null ? 0 : 1);
+        known.put("flags", flags == null ? List.of() : new ArrayList<Object>(flags));
         PimdirDb.exec(db, "SET_FLAGS_KNOWN", known);
         if (flags == null) {
             return;
@@ -187,8 +190,9 @@ public final class PimdirItems {
     }
 
     /**
-     * Writes a binding's base flags as rows, on {@link #writeFlags}'s terms
-     * ({@code retain_base_flags}, {@code add_base_flags}).
+     * Writes a binding's base flags on {@link #writeFlags}'s terms ({@code
+     * set_base_flags_known}, {@code retain_base_flags}, {@code
+     * add_base_flags}).
      */
     public static void writeBaseFlags(
             SQLiteDatabase db,
@@ -199,6 +203,7 @@ public final class PimdirItems {
         Map<String, Object> known = key(collection, linkId);
         known.put("source", source);
         known.put("base_flags_known", flags == null ? 0 : 1);
+        known.put("flags", flags == null ? List.of() : new ArrayList<Object>(flags));
         PimdirDb.exec(db, "SET_BASE_FLAGS_KNOWN", known);
         if (flags == null) {
             return;

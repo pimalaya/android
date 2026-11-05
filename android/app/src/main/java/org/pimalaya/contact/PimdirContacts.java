@@ -520,6 +520,8 @@ public final class PimdirContacts {
         row.put("level", PimdirItems.FULL);
         row.put("deleted", 0);
         row.put("conflicted", 0);
+        // NOTE: no system flag yet: writeFlags sets the bits with the rows.
+        row.put("marks", 0);
         PimdirDb.exec(db, "INSERT_ITEM", row);
         PimdirItems.writeFlags(db, target, linkId, flags);
         PimdirSummary.write(db, target, linkId, index.summary());

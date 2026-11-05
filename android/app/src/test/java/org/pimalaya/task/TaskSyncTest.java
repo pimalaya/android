@@ -523,7 +523,7 @@ public class TaskSyncTest {
         assertEquals("pushed after the listing", List.of("gate.ics"), dav.deletes);
         assertEquals(
                 "the tombstone settled", "0",
-                one("SELECT COUNT(*) FROM bindings WHERE collection = ?", calendar("Work").id));
+                one("SELECT COUNT(*) FROM bindings WHERE item IN (SELECT id FROM items WHERE collection = ?)", calendar("Work").id));
     }
 
     /**
@@ -546,7 +546,7 @@ public class TaskSyncTest {
         assertEquals(List.of("gate.ics"), dav.deletes);
         assertEquals(
                 "0",
-                one("SELECT COUNT(*) FROM bindings WHERE collection = ?", calendar("Work").id));
+                one("SELECT COUNT(*) FROM bindings WHERE item IN (SELECT id FROM items WHERE collection = ?)", calendar("Work").id));
     }
 
     @Test

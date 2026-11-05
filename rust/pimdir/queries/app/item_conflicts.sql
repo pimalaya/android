@@ -3,7 +3,7 @@
 -- left to binding_conflicts.
 SELECT i.link_id, i.object_hash, b.handle, b.base_revision, i.conflict_object
 FROM items i
-JOIN bindings b ON b.collection = i.collection AND b.link_id = i.link_id
+JOIN bindings b ON b.item = i.id
                AND b.source = :source
 WHERE i.collection = :collection AND i.deleted = 0
   AND i.retained_at IS NULL AND i.conflicted = 1

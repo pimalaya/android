@@ -365,14 +365,15 @@ public class MailboxStepsTest {
         // local edit (a base naming another body).
         SQLiteDatabase db = pimdir.getWritableDatabase();
         db.execSQL(
-                "UPDATE bindings SET conflicted = 1 WHERE collection = ? AND link_id = '118'",
+                "UPDATE bindings SET conflicted = 1 WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = '118')",
                 new Object[] {sent});
         db.execSQL(
                 "UPDATE bindings SET base_present = 0, base_flags_known = 0, base_object = NULL,"
-                        + " base_revision = NULL WHERE collection = ? AND link_id = '119'",
+                        + " base_revision = NULL"
+                        + " WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = '119')",
                 new Object[] {sent});
         db.execSQL(
-                "UPDATE bindings SET base_object = ? WHERE collection = ? AND link_id = '120'",
+                "UPDATE bindings SET base_object = ? WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = '120')",
                 new Object[] {own, sent});
 
         assertEquals("117 on both sides, the inbox's 118 to 120", 5, store.repairLinks(accountId));
@@ -393,7 +394,7 @@ public class MailboxStepsTest {
         String hash = hashOf(inbox, handle);
         SQLiteDatabase db = pimdir.getWritableDatabase();
         db.execSQL(
-                "UPDATE bindings SET base_object = ? WHERE collection = ? AND link_id = ?",
+                "UPDATE bindings SET base_object = ? WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = ?)",
                 new Object[] {hash, sent, handle});
         db.execSQL(
                 "UPDATE items SET object_hash = ? WHERE collection = ? AND link_id = ?",

@@ -206,14 +206,16 @@ public class StorePerformanceTest {
                         + " sort_key, level) SELECT ?, 'm' || i, i, 1, " + NAME + ", ?, ? FROM n",
                 new Object[] {collection, object, object, date, object == null ? 1 : 2});
         db.execSQL(
-                rows + "INSERT INTO bindings(collection, link_id, source, handle,"
-                        + " base_flags_known, base_object, base_present) SELECT ?, 'm' || i,"
-                        + " 'server', 'h' || i, 1, " + NAME + ", 1 FROM n",
-                new Object[] {collection, object, object});
+                rows + "INSERT INTO bindings(item, collection, source, handle,"
+                        + " base_flags_known, base_object, base_present) SELECT x.id, x.collection,"
+                        + " 'server', 'h' || i, 1, " + NAME + ", 1 FROM n"
+                        + " JOIN items x ON x.collection = ? AND x.link_id = 'm' || i",
+                new Object[] {object, object, collection});
         db.execSQL(
-                rows + "INSERT INTO mail_summary(collection, link_id, subject, date)"
-                        + " SELECT ?, 'm' || i, 's', ? FROM n",
-                new Object[] {collection, date});
+                rows + "INSERT INTO mail_summary(item, subject, date)"
+                        + " SELECT x.id, 's', ? FROM n"
+                        + " JOIN items x ON x.collection = ? AND x.link_id = 'm' || i",
+                new Object[] {date, collection});
     }
 
     /** More rows than one 2 MB cursor window holds of a seq (87,150). */
@@ -367,7 +369,7 @@ public class StorePerformanceTest {
             while (used.find()) {
                 assertTrue(
                         name + " reads s." + used.group(1),
-                        Set.of("collection", "link_id", "attachment").contains(used.group(1)));
+                        Set.of("item", "attachment").contains(used.group(1)));
             }
         }
     }
@@ -507,7 +509,7 @@ public class StorePerformanceTest {
         assertEquals(
                 "the summary restated from the body",
                 1,
-                scalar("SELECT attachment FROM mail_summary WHERE link_id = '42'"));
+                scalar("SELECT attachment FROM mail_summary WHERE item IN (SELECT id FROM items WHERE link_id = '42')"));
 
         MailReader.Read again = reader.read(store.message(inbox, "42"), () -> null);
         assertFalse(again.fetched);

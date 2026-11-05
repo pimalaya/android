@@ -18,7 +18,9 @@ import org.pimalaya.client.PimalayaException;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * io-pimdir's storage seam against a pimdir store.
@@ -471,7 +473,7 @@ public class PimdirStorageTest {
         assertEquals("one item, not two", 1,
                 scalar("SELECT count(*) FROM items WHERE link_id = 'uid-k'"));
         assertEquals("one binding per source", 2,
-                scalar("SELECT count(*) FROM bindings WHERE link_id = 'uid-k'"));
+                scalar("SELECT count(*) FROM bindings WHERE item IN (SELECT id FROM items WHERE link_id = 'uid-k')"));
 
         assertEquals("k.vcf", storage.loadCollection("acct/Contacts", null)
                 .getJSONArray("placements").getJSONObject(0).getString("handle"));
@@ -588,14 +590,14 @@ public class PimdirStorageTest {
                 batch(storeObject("cc03", "LOCAL"), storeObject("cc04", "REMOTE"),
                         conflicted(h("cc03"), h("cc04"))));
 
-        assertEquals(1, scalar("SELECT conflicted FROM bindings WHERE link_id = 'uid-p'"));
+        assertEquals(1, scalar("SELECT conflicted FROM bindings WHERE item IN (SELECT id FROM items WHERE link_id = 'uid-p')"));
         assertEquals(1, scalar("SELECT refcount FROM objects WHERE hash = '" + h("cc04") + "'"));
 
         // NOTE: the next clean upsert is the resolution: the diverging body has
         // no reader left, so it is released rather than pinned forever.
         storage.applyWrites(batch(upsert("p.vcf", "uid-p", h("cc03"), "pia")));
 
-        assertEquals(0, scalar("SELECT conflicted FROM bindings WHERE link_id = 'uid-p'"));
+        assertEquals(0, scalar("SELECT conflicted FROM bindings WHERE item IN (SELECT id FROM items WHERE link_id = 'uid-p')"));
         assertEquals("the diverging body has no reader left", 0,
                 scalar("SELECT count(*) FROM objects WHERE hash = '" + h("cc04") + "'"));
     }
@@ -787,7 +789,7 @@ public class PimdirStorageTest {
 
         assertEquals(1, scalar("SELECT count(*) FROM items"));
         assertEquals(1, scalar("SELECT count(*) FROM bindings WHERE handle = 'q.vcf'"));
-        assertEquals("uid-q", stringOf("SELECT link_id FROM bindings WHERE handle = 'q.vcf'"));
+        assertEquals("uid-q", stringOf("SELECT (SELECT link_id FROM items WHERE id = item) FROM bindings WHERE handle = 'q.vcf'"));
     }
 
     /** A round op on the collection, as the engine writes it. */
@@ -962,7 +964,7 @@ public class PimdirStorageTest {
         assertEquals(1, scalar("SELECT count(*) FROM bindings WHERE handle = 'r.vcf'"));
         assertEquals(
                 "uid-r2",
-                stringOf("SELECT link_id FROM bindings WHERE handle = 'r.vcf'"));
+                stringOf("SELECT (SELECT link_id FROM items WHERE id = item) FROM bindings WHERE handle = 'r.vcf'"));
     }
 
     @Test
@@ -996,11 +998,11 @@ public class PimdirStorageTest {
         storage.applyWrites(
                 batch(storeObject("ba12", "body"), upsert("x.vcf", "uid-x", h("ba12"), "xena")));
 
-        assertEquals(1, scalar("SELECT count(*) FROM contact_summary WHERE link_id = 'uid-x'"));
+        assertEquals(1, scalar("SELECT count(*) FROM contact_summary WHERE item IN (SELECT id FROM items WHERE link_id = 'uid-x')"));
         assertEquals(
                 1,
                 scalar(
-                        "SELECT count(*) FROM item_address WHERE link_id = 'uid-x'"
+                        "SELECT count(*) FROM item_address WHERE item IN (SELECT id FROM items WHERE link_id = 'uid-x')"
                                 + " AND role = 'email' AND position = 0"));
 
         // NOTE: a flag push carries no summary, and a write that does not
@@ -1013,7 +1015,7 @@ public class PimdirStorageTest {
         op.put("placement", placement);
         storage.applyWrites(batch(op));
 
-        assertEquals(1, scalar("SELECT count(*) FROM contact_summary WHERE link_id = 'uid-x'"));
+        assertEquals(1, scalar("SELECT count(*) FROM contact_summary WHERE item IN (SELECT id FROM items WHERE link_id = 'uid-x')"));
     }
 
     @Test
@@ -1130,6 +1132,30 @@ public class PimdirStorageTest {
                 2, storage.loadCollection("acct/Contacts", all).getJSONArray("placements").length());
     }
 
+    /**
+     * A delta's load (SYNC §10) answers the handles it names and what owes
+     * the source a push, here a create no fetch based yet, never a row in
+     * sync with its base.
+     */
+    @Test
+    public void anOwingLoadAnswersWhatItNamesAndWhatOwesAPush() throws Exception {
+        storage.applyWrites(batch(
+                storeObject("cc20", "one"), synced("a.vcf", "uid-a", h("cc20"), "a"),
+                storeObject("cc21", "two"), synced("b.vcf", "uid-b", h("cc21"), "b"),
+                storeObject("cc22", "three"), upsert("c.vcf", "uid-c", h("cc22"), "c")));
+
+        JSONObject owing = new JSONObject()
+                .put("kind", "owing")
+                .put("handles", new JSONArray().put("a.vcf"));
+        JSONArray loaded =
+                storage.loadCollection("acct/Contacts", owing).getJSONArray("placements");
+        Set<String> handles = new HashSet<>();
+        for (int index = 0; index < loaded.length(); index++) {
+            handles.add(loaded.getJSONObject(index).getString("handle"));
+        }
+        assertEquals(Set.of("a.vcf", "c.vcf"), handles);
+    }
+
     @Test
     public void unreadMarkersStayUnreadAcrossAWrite() throws Exception {
         JSONObject storedcc14 = storeObject("cc14", "body");
@@ -1214,7 +1240,7 @@ public class PimdirStorageTest {
         assertEquals(0, scalar("SELECT count(*) FROM store_meta WHERE sync_version IS NOT NULL"));
         storage.applyWrites(batch(storeObject("aa01", "body"), upsert("a.vcf", "uid-a", h("aa01"), "a")));
         assertEquals(
-                1, scalar("SELECT count(*) FROM store_meta WHERE sync_version = 'sync-draft-07'"));
+                1, scalar("SELECT count(*) FROM store_meta WHERE sync_version = 'sync-draft-08'"));
 
         db.execSQL("UPDATE store_meta SET sync_version = 'sync-draft-06'");
         try {
@@ -1302,8 +1328,8 @@ public class PimdirStorageTest {
 
     private String sharedOf(String collection) {
         return stringOf(
-                "SELECT shared_object FROM bindings WHERE collection = 'acct/Contacts'"
-                        + " AND link_id = 'uid-c' AND source = ?",
+                "SELECT shared_object FROM bindings WHERE item = (SELECT id FROM items"
+                        + " WHERE collection = 'acct/Contacts' AND link_id = 'uid-c') AND source = ?",
                 PimdirStorage.sourceOf(collection));
     }
 

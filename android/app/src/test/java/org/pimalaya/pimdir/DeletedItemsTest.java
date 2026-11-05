@@ -91,14 +91,16 @@ public class DeletedItemsTest {
         db.execSQL(
                 "UPDATE bindings SET handle = ?, base_object = ?, base_revision = 'etag',"
                         + " base_present = 1"
-                        + " WHERE collection = ? AND link_id = ? AND source = 'server'",
+                        + " WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = ?)"
+                        + " AND source = 'server'",
                 new Object[] {handle, object, collection, linkId});
         db.execSQL(
-                "INSERT INTO bindings(collection, link_id, source, handle, base_object,"
-                        + " base_revision, base_present) SELECT ?, ?, 'server', ?, ?, 'etag', 1"
-                        + " WHERE NOT EXISTS (SELECT 1 FROM bindings WHERE collection = ?"
-                        + " AND link_id = ? AND source = 'server')",
-                new Object[] {collection, linkId, handle, object, collection, linkId});
+                "INSERT INTO bindings(item, collection, source, handle, base_object,"
+                        + " base_revision, base_present) SELECT i.id, i.collection, 'server', ?, ?,"
+                        + " 'etag', 1 FROM items i WHERE i.collection = ? AND i.link_id = ?"
+                        + " AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.item = i.id"
+                        + " AND b.source = 'server')",
+                new Object[] {handle, object, collection, linkId});
         db.execSQL(
                 "UPDATE objects SET refcount = refcount + 1 WHERE hash = ?",
                 new Object[] {object});
@@ -162,7 +164,7 @@ public class DeletedItemsTest {
         assertEquals(0, scalar("SELECT count(*) FROM items WHERE link_id = 'u1'"
                 + " AND (deleted = 1 OR retained_at IS NOT NULL)"));
         assertEquals(PimdirStorage.provisionalOf("u1"),
-                string("SELECT handle FROM bindings WHERE link_id = 'u1'"));
+                string("SELECT handle FROM bindings WHERE item IN (SELECT id FROM items WHERE link_id = 'u1')"));
         List<PimdirContacts.Indexed> listed = contacts.list(BOOK);
         assertEquals(1, listed.size());
         assertTrue(deleted.list().isEmpty());
@@ -225,7 +227,7 @@ public class DeletedItemsTest {
         assertFalse(new PimdirBlobs(pimdir.blobs()).has(purgedObject));
         assertEquals("the waiting row stays, still bound", 1,
                 scalar("SELECT count(*) FROM items i JOIN bindings b"
-                        + " ON b.collection = i.collection AND b.link_id = i.link_id"
+                        + " ON b.item = i.id"
                         + " WHERE i.link_id = 'u4' AND i.deleted = 1"));
         assertEquals(0, deleted.retainedBytes());
         assertTrue(only().waiting());
@@ -323,7 +325,11 @@ public class DeletedItemsTest {
         assertEquals(seq, scalar("SELECT seq FROM items WHERE link_id = '42'"));
         assertEquals(0, scalar("SELECT deleted FROM items WHERE link_id = '42'"));
         assertNull(string("SELECT retained_at FROM items WHERE link_id = '42'"));
-        String flags = string("SELECT group_concat(flag, ' ') FROM placement_flag WHERE link_id = '42'");
+        String flags = string(
+                "SELECT trim(CASE WHEN marks & 1 THEN '\\Seen ' ELSE '' END"
+                        + " || CASE WHEN marks & 16 THEN '\\Deleted ' ELSE '' END"
+                        + " || coalesce((SELECT group_concat(flag, ' ') FROM placement_flag"
+                        + " WHERE item = items.id), '')) FROM items WHERE link_id = '42'");
         assertNotNull(flags);
         assertTrue(flags, flags.contains("Seen"));
         assertFalse("restored, no longer marked deleted", flags.contains("Deleted"));

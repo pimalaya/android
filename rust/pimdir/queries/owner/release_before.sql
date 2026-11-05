@@ -1,4 +1,4 @@
--- Fork of RELEASE_BEFORE (sha256 31a626d95b1e2622) for SQLite 3.18:
+-- Fork of RELEASE_BEFORE (sha256 c5ef50b5bdcee257) for SQLite 3.18:
 -- `RETURNING` (3.35) as a read of the rows, then their update under the
 -- same predicate, in one transaction.
 --
@@ -19,9 +19,9 @@ WHERE items.collection IN (SELECT value FROM temp.param WHERE slot = 'collection
   AND items.sort_key < coalesce(:until, x'')
   AND (SELECT kind FROM collections c WHERE c.id = items.collection) = 'message/rfc822'
   AND EXISTS (SELECT 1 FROM bindings b
-              WHERE b.collection = items.collection AND b.link_id = items.link_id)
+              WHERE b.item = items.id)
   AND NOT EXISTS (SELECT 1 FROM bindings b
-                  WHERE b.collection = items.collection AND b.link_id = items.link_id
+                  WHERE b.item = items.id
                     AND (b.conflicted = 1
                          OR NOT (b.base_present = 1 OR b.base_flags_known = 1
                                  OR b.base_object IS NOT NULL OR b.base_revision IS NOT NULL)
@@ -29,17 +29,16 @@ WHERE items.collection IN (SELECT value FROM temp.param WHERE slot = 'collection
   AND NOT EXISTS (SELECT 1 FROM sources s
                   WHERE s.collection = items.collection
                     AND NOT EXISTS (SELECT 1 FROM bindings b
-                                    WHERE b.collection = items.collection
-                                      AND b.link_id = items.link_id AND b.source = s.source));
+                                    WHERE b.item = items.id AND b.source = s.source));
 UPDATE items SET object_hash = NULL, level = 1
 WHERE items.collection IN (SELECT value FROM temp.param WHERE slot = 'collections')
   AND items.deleted = 0 AND items.conflicted = 0 AND items.object_hash IS NOT NULL
   AND items.sort_key < coalesce(:until, x'')
   AND (SELECT kind FROM collections c WHERE c.id = items.collection) = 'message/rfc822'
   AND EXISTS (SELECT 1 FROM bindings b
-              WHERE b.collection = items.collection AND b.link_id = items.link_id)
+              WHERE b.item = items.id)
   AND NOT EXISTS (SELECT 1 FROM bindings b
-                  WHERE b.collection = items.collection AND b.link_id = items.link_id
+                  WHERE b.item = items.id
                     AND (b.conflicted = 1
                          OR NOT (b.base_present = 1 OR b.base_flags_known = 1
                                  OR b.base_object IS NOT NULL OR b.base_revision IS NOT NULL)
@@ -47,5 +46,4 @@ WHERE items.collection IN (SELECT value FROM temp.param WHERE slot = 'collection
   AND NOT EXISTS (SELECT 1 FROM sources s
                   WHERE s.collection = items.collection
                     AND NOT EXISTS (SELECT 1 FROM bindings b
-                                    WHERE b.collection = items.collection
-                                      AND b.link_id = items.link_id AND b.source = s.source));
+                                    WHERE b.item = items.id AND b.source = s.source));

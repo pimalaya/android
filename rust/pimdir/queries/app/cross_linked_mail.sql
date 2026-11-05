@@ -11,9 +11,9 @@ WHERE c.account = :account AND c.kind = 'message/rfc822'
               WHERE o.link_id = i.link_id AND o.collection <> i.collection
                 AND o.object_hash = i.object_hash)
   AND EXISTS (SELECT 1 FROM bindings b
-              WHERE b.collection = i.collection AND b.link_id = i.link_id)
+              WHERE b.item = i.id)
   AND NOT EXISTS (SELECT 1 FROM bindings b
-                  WHERE b.collection = i.collection AND b.link_id = i.link_id
+                  WHERE b.item = i.id
                     AND (b.conflicted = 1
                          OR NOT (b.base_present = 1 OR b.base_flags_known = 1
                                  OR b.base_object IS NOT NULL OR b.base_revision IS NOT NULL)

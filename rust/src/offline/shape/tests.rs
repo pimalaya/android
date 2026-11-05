@@ -26,7 +26,7 @@ fn seed() -> String {
         "INSERT INTO store_meta(id, format, format_version, version, read_version,
                                 produce_version, store_id, incarnation, hash_algo,
                                 created_at, derivation)
-         VALUES (1, 'pimdir', 'storage-draft-08', 1, 1, 1,
+         VALUES (1, 'pimdir', 'storage-draft-09', 1, 1, 1,
                  '0123456789abcdef0123456789abcdef', 1, 'blake3',
                  '2026-11-01T00:00:00.000Z', 3);
          INSERT INTO collections(id, account, kind, name) VALUES
@@ -53,36 +53,40 @@ fn seed() -> String {
            ('cal', 't1', 6, 0, NULL, '', 1, 0, NULL, NULL),
            ('cal', 'j1', 10, 0, NULL, '', 1, 0, NULL, NULL),
            ('files', 'f1', 11, 0, NULL, '', 1, 0, NULL, NULL);
-         INSERT INTO placement_flag(collection, link_id, flag) VALUES ('INBOX', 'm1', '\\Seen');
-         INSERT INTO bindings(collection, link_id, source, handle, base_flags_known, base_object,
+         UPDATE items SET marks = 1 WHERE collection = 'INBOX' AND link_id = 'm1';
+         INSERT INTO placement_flag(item, flag)
+         VALUES ((SELECT id FROM items WHERE collection = 'INBOX' AND link_id = 'm1'), '$a');
+         INSERT INTO bindings(item, collection, source, handle, base_flags_known, base_object,
                               base_revision, base_present, shared_object)
          VALUES
-           ('INBOX', 'm1', 'imap', '10', 1, '{a}', NULL, 1, '{a}'),
-           ('INBOX', 'm2', 'imap', '11', 0, '{b}', NULL, 1, NULL),
-           ('Archive', 'm1', 'imap', '20', 0, '{a}', NULL, 1, NULL),
-           ('book', 'c1', 'server', 'c1.vcf', 0, '{b}', 'e1', 1, NULL),
-           ('cal', 'e1', 'server', 'e1.ics', 0, '{c}', 'e2', 1, NULL);
-         INSERT INTO binding_base_flag(collection, link_id, source, flag)
-         VALUES ('INBOX', 'm1', 'imap', '\\Seen');
-         INSERT INTO mail_summary(collection, link_id, message_id, subject, sender, date,
+           ((SELECT id FROM items WHERE collection = 'INBOX' AND link_id = 'm1'), 'INBOX', 'imap', '10', 1, '{a}', NULL, 1, '{a}'),
+           ((SELECT id FROM items WHERE collection = 'INBOX' AND link_id = 'm2'), 'INBOX', 'imap', '11', 0, '{b}', NULL, 1, NULL),
+           ((SELECT id FROM items WHERE collection = 'Archive' AND link_id = 'm1'), 'Archive', 'imap', '20', 0, '{a}', NULL, 1, NULL),
+           ((SELECT id FROM items WHERE collection = 'book' AND link_id = 'c1'), 'book', 'server', 'c1.vcf', 0, '{b}', 'e1', 1, NULL),
+           ((SELECT id FROM items WHERE collection = 'cal' AND link_id = 'e1'), 'cal', 'server', 'e1.ics', 0, '{c}', 'e2', 1, NULL);
+         UPDATE bindings SET base_marks = 1 WHERE collection = 'INBOX' AND handle = '10';
+         INSERT INTO binding_base_flag(item, source, flag)
+         VALUES ((SELECT id FROM items WHERE collection = 'INBOX' AND link_id = 'm1'), 'imap', '$a');
+         INSERT INTO mail_summary(item, message_id, subject, sender, date,
                                   invitation)
          VALUES
-           ('INBOX', 'm1', 'm1', 'one', 'x@example.org', '2026-01-01T00:00:00Z', NULL),
-           ('INBOX', 'm2', 'm2', 'two', 'y@example.org', '2026-03-01T00:00:00Z', 'e1'),
-           ('Archive', 'm1', 'm1', 'one', 'x@example.org', '2026-01-01T00:00:00Z', NULL);
-         INSERT INTO item_address(collection, link_id, role, position, address)
-         VALUES ('INBOX', 'm1', 'from', 0, 'x@example.org'),
-                ('INBOX', 'm2', 'from', 0, 'y@example.org'),
-                ('book', 'c1', 'email', 0, 'x@example.org'),
-                ('book', 'c1', 'email', 1, 'y@example.org');
-         INSERT INTO task_summary(collection, link_id, summary, parent, mid)
-         VALUES ('cal', 't1', 'task', 'e1', 'm2');
+           ((SELECT id FROM items WHERE collection = 'INBOX' AND link_id = 'm1'), 'm1', 'one', 'x@example.org', '2026-01-01T00:00:00Z', NULL),
+           ((SELECT id FROM items WHERE collection = 'INBOX' AND link_id = 'm2'), 'm2', 'two', 'y@example.org', '2026-03-01T00:00:00Z', 'e1'),
+           ((SELECT id FROM items WHERE collection = 'Archive' AND link_id = 'm1'), 'm1', 'one', 'x@example.org', '2026-01-01T00:00:00Z', NULL);
+         INSERT INTO item_address(item, role, position, address)
+         VALUES ((SELECT id FROM items WHERE collection = 'INBOX' AND link_id = 'm1'), 'from', 0, 'x@example.org'),
+                ((SELECT id FROM items WHERE collection = 'INBOX' AND link_id = 'm2'), 'from', 0, 'y@example.org'),
+                ((SELECT id FROM items WHERE collection = 'book' AND link_id = 'c1'), 'email', 0, 'x@example.org'),
+                ((SELECT id FROM items WHERE collection = 'book' AND link_id = 'c1'), 'email', 1, 'y@example.org');
+         INSERT INTO task_summary(item, summary, parent, mid)
+         VALUES ((SELECT id FROM items WHERE collection = 'cal' AND link_id = 't1'), 'task', 'e1', 'm2');
          INSERT INTO sources(collection, source, checkpoint) VALUES ('INBOX', 'imap', x'00');
          INSERT INTO capabilities(account, source, collection, capability, support)
          VALUES ('a', 'imap', NULL, 'x-move', 'full');
          INSERT INTO performers(account, capability, source) VALUES (NULL, 'x-send', 'smtp');
-         INSERT INTO supersessions(collection, link_id, by_collection, by_link_id)
-         VALUES ('INBOX', 'm2', 'Archive', 'm1');
+         INSERT INTO supersessions(item, by_item)
+         VALUES ((SELECT id FROM items WHERE collection = 'INBOX' AND link_id = 'm2'),
+                 (SELECT id FROM items WHERE collection = 'Archive' AND link_id = 'm1'));
          INSERT INTO queue(created_at, producer, collection, action, payload, object_hash)
          VALUES ('2026-11-01T00:00:00Z', 'p', 'INBOX', 'add', '{{}}', '{d}');
          INSERT INTO item_reference(from_kind, from_link_id, to_kind, to_link_id, role, origin,
@@ -577,18 +581,19 @@ fn a_flag_insert_skips_what_is_held_and_raises_what_is_malformed() {
     tells_apart(
         "flags held, named twice, then malformed",
         "ADD_FLAGS",
-        "INSERT OR IGNORE INTO placement_flag(collection, link_id, flag) \
-         SELECT :collection, :link_id, value FROM temp.param WHERE slot = 'flags';",
+        "INSERT OR IGNORE INTO placement_flag(item, flag) \
+         SELECT (SELECT id FROM items WHERE collection = :collection AND link_id = :link_id), \
+         value FROM temp.param WHERE slot = 'flags';",
         &[
-            flags("ADD_FLAGS", vec!["\\Seen", "\\Flagged", "\\Flagged"]),
-            flags("ADD_FLAGS", vec!["\\Draft", "no space"]),
+            flags("ADD_FLAGS", vec!["$a", "$b", "$b"]),
+            flags("ADD_FLAGS", vec!["$c", "no space"]),
         ],
     );
     same(
         "base flags held, named twice, then malformed",
         &[
-            flags("ADD_BASE_FLAGS", vec!["\\Seen", "\\Flagged", "\\Flagged"]),
-            flags("ADD_BASE_FLAGS", vec!["\\Draft", "no space"]),
+            flags("ADD_BASE_FLAGS", vec!["$a", "$b", "$b"]),
+            flags("ADD_BASE_FLAGS", vec!["$c", "no space"]),
         ],
     );
 }
@@ -615,6 +620,16 @@ fn every_reference_rule_records_what_it_lacks() {
             ],
         );
     }
+}
+
+#[test]
+fn the_sender_rule_once_per_page_records_what_it_lacks() {
+    let page = || Call {
+        name: "LINK_SENDERS_OF_BY_LINK",
+        values: Vec::new(),
+        lists: vec![("links", vec![text("m1"), text("m2"), text("c1")])],
+    };
+    same("LINK_SENDERS_OF_BY_LINK", &[page(), page()]);
 }
 
 #[test]

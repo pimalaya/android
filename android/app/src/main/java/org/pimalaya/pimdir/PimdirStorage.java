@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -177,7 +178,7 @@ public final class PimdirStorage {
         }
 
         JSONArray conflicted = new JSONArray();
-        try (Cursor cursor = PimdirDb.query(db, scoped(scope, stored, source))) {
+        try (Cursor cursor = PimdirDb.query(db, scoped(db, scope, stored, source))) {
             while (cursor.moveToNext()) {
                 // NOTE: one placement per item the source binds, and one
                 // create per item it does not bind but the store holds a body
@@ -452,12 +453,18 @@ public final class PimdirStorage {
      * The read of a load's placements over its scope ({@code
      * load_placements}): the whole collection, or the link ids or handles the
      * scope names, bound as lists (no variable limit); links seek the items'
-     * key, handles {@code bindings_by_handle}.
+     * key, handles {@code bindings_by_handle}. A delta's ({@code owing}) adds
+     * what may owe the source a push ({@link #owing}).
      */
-    private static PimdirSql.Bound scoped(JSONObject scope, String collection, String source)
+    private static PimdirSql.Bound scoped(
+            SQLiteDatabase db, JSONObject scope, String collection, String source)
             throws JSONException {
         Map<String, Object> values = PimdirSql.values("collection", collection, "source", source);
         String kind = scope == null ? "all" : scope.optString("kind", "all");
+        if ("owing".equals(kind)) {
+            values.put("links", owing(db, scope.optJSONArray("handles"), collection, source));
+            return PimdirSql.bind("LOAD_PLACEMENTS_BY_LINK", values);
+        }
         JSONArray named =
                 scope == null
                         ? null
@@ -483,6 +490,44 @@ public final class PimdirStorage {
         values.put("handles", named);
         values.put("names", names);
         return PimdirSql.bind("LOAD_PLACEMENTS_BY_HANDLE", values);
+    }
+
+    /**
+     * The link ids a delta loads (SYNC §10): those of the handles it names
+     * and of the bindings {@code list_owing_bindings} names, and the live
+     * items holding a body the source binds not ({@code list_lacking_items}),
+     * so its load grows with what moved, not with the collection. A named
+     * handle nothing binds adds the identity it spells, as a handle scope
+     * reaches a provisional row ({@link #scoped}).
+     */
+    private static List<String> owing(
+            SQLiteDatabase db, JSONArray named, String collection, String source)
+            throws JSONException {
+        Map<String, Object> key = PimdirSql.values("collection", collection, "source", source);
+        Set<String> links = new LinkedHashSet<>();
+        JSONArray handles = new JSONArray();
+        for (int index = 0; named != null && index < named.length(); index++) {
+            handles.put(named.getString(index));
+            links.add(nameOf(named.getString(index)));
+        }
+        try (Cursor cursor = PimdirDb.query(db, "LIST_OWING_BINDINGS", key)) {
+            while (cursor.moveToNext()) {
+                handles.put(cursor.getString(0));
+            }
+        }
+        try (Cursor cursor = PimdirDb.query(db, "LIST_LACKING_ITEMS", key)) {
+            while (cursor.moveToNext()) {
+                links.add(cursor.getString(0));
+            }
+        }
+        Map<String, Object> values = PimdirSql.values("collection", collection, "source", source);
+        values.put("handles", handles);
+        try (Cursor cursor = PimdirDb.query(db, "BOUND_HANDLES", values)) {
+            while (cursor.moveToNext()) {
+                links.add(cursor.getString(1));
+            }
+        }
+        return new ArrayList<>(links);
     }
 
     /**
@@ -974,6 +1019,8 @@ public final class PimdirStorage {
         kept.put("level", PimdirItems.FULL);
         kept.put("deleted", 1);
         kept.put("conflicted", 0);
+        // NOTE: no system flag yet: writeFlags sets the bits with the rows.
+        kept.put("marks", 0);
         PimdirDb.exec(db, "INSERT_ITEM", kept);
         PimdirItems.writeFlags(db, collection, key, PimdirItems.flagsFrom(flags));
         Map<String, Object> values = new HashMap<>();
@@ -1206,6 +1253,8 @@ public final class PimdirStorage {
             row.put("level", level);
             row.put("deleted", tombstone ? 1 : 0);
             row.put("conflicted", 0);
+            // NOTE: no system flag yet: writeFlags sets the bits with the rows.
+            row.put("marks", 0);
             PimdirDb.exec(db, "INSERT_ITEM", row);
         } else {
             // NOTE: a write not restating the key keeps it (SPEC.md §9.3); the

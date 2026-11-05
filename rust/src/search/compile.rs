@@ -314,7 +314,7 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
                 let attached = self.embed("ATTACHED", Vec::new());
                 format!(
                     "SELECT i.collection, i.seq {live} AND (EXISTS (SELECT 1 FROM store.mail_summary m \
-                     WHERE m.collection = i.collection AND m.link_id = i.link_id AND m.attachment = 1) \
+                     WHERE m.item = i.id AND m.attachment = 1) \
                      OR (c.kind = 'text/calendar' AND (i.collection, i.seq) IN ({attached})))"
                 )
             }
@@ -337,7 +337,7 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
                     };
                     format!(
                         "SELECT i.collection, i.seq {live} AND EXISTS (SELECT 1 FROM store.{table} s \
-                         WHERE s.collection = i.collection AND s.link_id = i.link_id)"
+                         WHERE s.item = i.id)"
                     )
                 }
                 kind => {
@@ -349,7 +349,7 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
                 let status = self.bind(status.into());
                 format!(
                     "SELECT i.collection, i.seq {live} AND EXISTS (SELECT 1 FROM store.task_summary s \
-                     WHERE s.collection = i.collection AND s.link_id = i.link_id \
+                     WHERE s.item = i.id \
                      AND s.status = {status})"
                 )
             }
@@ -362,7 +362,7 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
                 };
                 format!(
                     "SELECT i.collection, i.seq {live} AND EXISTS (SELECT 1 FROM store.task_summary s \
-                     WHERE s.collection = i.collection AND s.link_id = i.link_id AND {band})"
+                     WHERE s.item = i.id AND {band})"
                 )
             }
             PimdirQueryPredicate::Category(category) => {
@@ -390,7 +390,7 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
                 };
                 format!(
                     "SELECT i.collection, i.seq {live} AND (EXISTS (SELECT 1 FROM store.task_category s \
-                     WHERE s.collection = i.collection AND s.link_id = i.link_id \
+                     WHERE s.item = i.id \
                      AND {stated}) OR (i.collection, i.seq) IN ({carded}))"
                 )
             }
@@ -481,10 +481,10 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
         format!(
             "{contacts} UNION \
              SELECT i.collection, i.seq FROM store.item_address a \
-             JOIN store.items i ON i.collection = a.collection AND i.link_id = a.link_id \
+             JOIN store.items i ON i.id = a.item \
              WHERE i.deleted = 0 AND i.retained_at IS NULL AND a.address IN ( \
                SELECT e.address FROM store.item_address e \
-               JOIN store.items ei ON ei.collection = e.collection AND ei.link_id = e.link_id \
+               JOIN store.items ei ON ei.id = e.item \
                WHERE e.role = 'email' AND (ei.collection, ei.seq) IN ({contacts}))"
         )
     }
@@ -587,12 +587,12 @@ fn member(hits: &str) -> String {
 
 /// The titles a hit's placements carry, joined for the `name` order.
 const TITLES: &str = "FROM store.items i JOIN store.collections c ON c.id = i.collection
-   LEFT JOIN store.mail_summary ms ON ms.collection = i.collection AND ms.link_id = i.link_id
-   LEFT JOIN store.contact_summary cs ON cs.collection = i.collection AND cs.link_id = i.link_id
-   LEFT JOIN store.event_summary es ON es.collection = i.collection AND es.link_id = i.link_id
-   LEFT JOIN store.task_summary ts ON ts.collection = i.collection AND ts.link_id = i.link_id
-   LEFT JOIN store.journal_summary js ON js.collection = i.collection AND js.link_id = i.link_id
-   LEFT JOIN store.file_summary fs ON fs.collection = i.collection AND fs.link_id = i.link_id";
+   LEFT JOIN store.mail_summary ms ON ms.item = i.id
+   LEFT JOIN store.contact_summary cs ON cs.item = i.id
+   LEFT JOIN store.event_summary es ON es.item = i.id
+   LEFT JOIN store.task_summary ts ON ts.item = i.id
+   LEFT JOIN store.journal_summary js ON js.item = i.id
+   LEFT JOIN store.file_summary fs ON fs.item = i.id";
 
 /// Seconds in a day.
 const DAY: i64 = 86_400;
