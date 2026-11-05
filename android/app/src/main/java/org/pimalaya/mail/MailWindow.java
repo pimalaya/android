@@ -178,6 +178,11 @@ public final class MailWindow {
         return prefs(context).contains(accountId);
     }
 
+    /** Whether a mailbox holds a frontier yet, its own or its account's. */
+    static boolean held(Context context, String accountId, String collection) {
+        return held(context, accountId) || mailboxes(context).contains(collection);
+    }
+
     /** Whether a step may bring an account more: above the bound, not all. */
     static boolean more(Context context, String accountId) {
         String held = prefs(context).getString(accountId, null);

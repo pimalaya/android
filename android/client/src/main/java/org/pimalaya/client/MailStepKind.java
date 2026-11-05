@@ -6,10 +6,8 @@ package org.pimalaya.client;
  * <p>Mirrors rs/account.rs {@code MailStepKind} 228.
  */
 public enum MailStepKind {
-    /** The account as one listing, newest first. */
+    /** The account as one listing, newest first (Gmail). */
     ACCOUNT("account"),
-    /** Each stepped mailbox by date. */
-    MAILBOXES("mailboxes"),
     /** Widened from the store, the server listing per mailbox. */
     STORE("store");
 

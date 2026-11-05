@@ -135,9 +135,8 @@ impl Backend {
     /// How a mail step walks the account.
     pub fn mail_step(self) -> MailStepKind {
         match self {
-            Self::Carddav => MailStepKind::Store,
-            Self::Graph => MailStepKind::Mailboxes,
-            Self::Jmap | Self::Google => MailStepKind::Account,
+            Self::Carddav | Self::Graph | Self::Jmap => MailStepKind::Store,
+            Self::Google => MailStepKind::Account,
         }
     }
 
@@ -226,11 +225,10 @@ pub enum CardPush {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MailStepKind {
-    /// The account as one listing, newest first (Gmail, JMAP).
+    /// The account as one listing, newest first (Gmail).
     Account,
-    /// Each stepped mailbox by date (Graph).
-    Mailboxes,
-    /// Widened from the store, the server listing per mailbox (IMAP).
+    /// Widened from the store, the server listing per mailbox (IMAP, Graph,
+    /// JMAP).
     Store,
 }
 
@@ -499,7 +497,7 @@ mod tests {
     fn account_info_answers_every_backend() {
         use CardFetch::*;
         use CardPush::*;
-        use MailStepKind::{Account as AccountStep, Mailboxes, Store};
+        use MailStepKind::{Account as AccountStep, Store};
 
         #[rustfmt::skip]
         let table = [
@@ -508,9 +506,9 @@ mod tests {
             ("google://jane@gmail.com", true, false, false, BatchGet, Batch, true, "googleapis.com",
                 false, false, AccountStep, false, Protocol::Google, false, 2, true),
             ("msgraph://jane@outlook.com", false, false, false, JsonBatch, Round, false, "graph.microsoft.com",
-                false, false, Mailboxes, false, Protocol::Graph, false, 4, true),
+                false, false, Store, false, Protocol::Graph, false, 4, true),
             ("jmap://api.fastmail.com/jmap/session", true, true, false, Changes, Round, false, "api.fastmail.com",
-                true, false, AccountStep, false, Protocol::Jmap, false, 4, true),
+                true, false, Store, false, Protocol::Jmap, false, 4, true),
             ("imaps://imap.example.org:993", false, false, true, Multiget, Parallel, false, "imap.example.org",
                 true, true, Store, true, Protocol::Standard, true, 3, false),
             ("https://dav.example.org/", false, false, true, Multiget, Parallel, false, "dav.example.org",

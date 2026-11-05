@@ -639,9 +639,9 @@ public class MailStoreTest {
         String accountId = store.accountIdOf(ONE);
 
         // NOTE: bodies on open: the inbox's first chunk as stored, the
-        // date of its 50th newest message, so nothing downloads by surprise.
+        // date of its 25th newest message, so nothing downloads by surprise.
         MailWindow.migrate(context, store, ONE);
-        assertTrue(store.windowOf(ONE).startsWith("2026-09-01T10:00"));
+        assertTrue(store.windowOf(ONE).startsWith("2026-09-02T11:00"));
 
         // NOTE: an account that held its bodies takes its bound's floor,
         // and the old policy is forgotten.

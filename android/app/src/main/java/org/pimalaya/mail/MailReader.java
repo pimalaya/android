@@ -1,5 +1,7 @@
 package org.pimalaya.mail;
 
+import android.util.Log;
+
 import org.pimalaya.R;
 import org.pimalaya.client.Description;
 import org.pimalaya.client.MailClient;
@@ -73,6 +75,14 @@ public final class MailReader {
         }
         try {
             if (waiting == null && stored == null) {
+                // NOTE: said, so a body the phone should have held is told
+                // apart from one below the frontier.
+                Log.d(
+                        "pimalaya",
+                        "mail open " + message.collection + " dated " + message.sortKey
+                                + ": no body on the phone (row bodied " + message.bodied
+                                + ", frontier " + mail.mailboxWindow(message.collection)
+                                + "), fetching");
                 stored = fetch(message, open);
                 read.fetched = true;
             }

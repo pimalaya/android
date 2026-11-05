@@ -84,6 +84,14 @@ final class SyncProgress implements SyncPasses.Progress {
         renewed.accept(updated);
     }
 
+    @Override
+    public void uncounted() {
+        synchronized (passState) {
+            syncUncounted = true;
+        }
+        host.postAlive(this::renderSyncDock);
+    }
+
     /** A pass starts on the dock, the last one's lines gone (main thread). */
     void started() {
         synchronized (passState) {
@@ -136,7 +144,7 @@ final class SyncProgress implements SyncPasses.Progress {
             // NOTE: indeterminate until something is counted: a first Gmail
             // chunk can take seconds before its first mailbox lands.
             pass.done = syncShown;
-            pass.total = syncShown > 0 ? 1000 : 0;
+            pass.total = syncShown > 0 && !syncUncounted ? 1000 : 0;
             pass.download = syncFill;
             int of = syncPlan.size();
             if (of > 1 && !syncReached.isEmpty()) {
@@ -230,6 +238,9 @@ final class SyncProgress implements SyncPasses.Progress {
     /** Whether the pass takes mail steps, whose counts are not mailboxes. */
     private boolean syncStepping;
 
+    /** Whether the pass waits on what it cannot count: the bar indeterminate. */
+    private boolean syncUncounted;
+
     /**
      * The pass's sections, one per domain and account, weighed in collections.
      *
@@ -281,6 +292,7 @@ final class SyncProgress implements SyncPasses.Progress {
             syncDetail = null;
             syncFill = false;
             syncStepping = false;
+            syncUncounted = false;
         }
     }
 

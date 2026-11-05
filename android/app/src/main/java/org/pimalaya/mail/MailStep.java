@@ -1,6 +1,7 @@
 package org.pimalaya.mail;
 
 import org.pimalaya.client.Account;
+import org.pimalaya.client.MailStepKind;
 
 import java.util.List;
 
@@ -13,7 +14,7 @@ import java.util.List;
  */
 public interface MailStep {
     /** About how many messages a step brings an account. */
-    int COUNT = 50;
+    int COUNT = 25;
 
     /** One message a step brought, as {@link MailWindow#frontier} reads it. */
     final class Brought {
@@ -56,16 +57,12 @@ public interface MailStep {
      * The step of an account's mail backend, as its facts say it walks.
      *
      * <p>Gmail and JMAP step through the account as one listing
-     * ({@link GmailStep}).
+     * ({@link GmailStep}); every other account steps from the store, which
+     * its fill lists ({@link WidenStep}), its bodies left to the body step.
      */
     static MailStep of(Account server) {
-        switch (server.info().mailStep()) {
-            case ACCOUNT:
-                return new GmailStep();
-            case MAILBOXES:
-                return new GraphStep();
-            default:
-                return new ImapStep();
-        }
+        return server.info().mailStep() == MailStepKind.ACCOUNT
+                ? new GmailStep()
+                : new WidenStep();
     }
 }

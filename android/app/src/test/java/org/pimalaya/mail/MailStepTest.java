@@ -370,13 +370,18 @@ public class MailStepTest {
     }
 
     @Test
-    public void aJmapAccountStepsThroughTheAccountAndKeepsItsAnchors() throws Exception {
+    public void anAccountStepThroughTheAccountKeepsItsAnchors() throws Exception {
+        // NOTE: Gmail alone steps through the account; JMAP, as IMAP and
+        // Graph, steps from the store its fill lists.
         assertTrue(
-                MailStep.of(new Account("jmap://api.fastmail.com/jmap/session", "", "t", null))
+                MailStep.of(new Account("google://jane@gmail.com", "", "t", null))
                         instanceof GmailStep);
         assertTrue(
+                MailStep.of(new Account("jmap://api.fastmail.com/jmap/session", "", "t", null))
+                        instanceof WidenStep);
+        assertTrue(
                 MailStep.of(new Account("imaps://imap.example.org", "", "p", null))
-                        instanceof ImapStep);
+                        instanceof WidenStep);
 
         Instant now = Instant.parse("2026-10-09T12:00:00Z");
         Server server = new Server();
@@ -405,11 +410,11 @@ public class MailStepTest {
 
     @Test
     public void theFooterSaysWhatAStepBringsAndThatItWaitsForWifi() {
-        assertEquals("About 50 more per account", MailList.info(context, true, false));
+        assertEquals("About 25 more per account", MailList.info(context, true, false));
         assertEquals(
-                "About 50 more per account · Waits for Wi-Fi",
+                "About 25 more per account · Waits for Wi-Fi",
                 MailList.info(context, false, false));
-        assertEquals("About 50 more per mailbox", MailList.info(context, true, true));
+        assertEquals("About 25 more per mailbox", MailList.info(context, true, true));
     }
 
     @Test
@@ -426,7 +431,7 @@ public class MailStepTest {
 
         new GmailStep().run(server.engine, new StepRun(EMAIL, mailboxes(), null, true));
 
-        assertArrayEquals("planned a step before reading", new int[] {0, 50}, told.get(0));
+        assertArrayEquals("planned a step before reading", new int[] {0, 25}, told.get(0));
         assertArrayEquals(
                 "closed on the two files it wrote", new int[] {2, 2}, told.get(told.size() - 1));
     }

@@ -117,16 +117,32 @@ public final class SyncCoordinator implements MailSync {
     /** Whether the activity is in the foreground: the fill runs only then. */
     private volatile boolean foreground;
 
-    /** Whether a step of the background fill is queued or running. */
-    private volatile boolean filling;
+    /** Whether the body step's loop is queued or running, on the io thread. */
+    private final java.util.concurrent.atomic.AtomicBoolean bodying =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** Whether the fill's listing loop is queued or running. */
+    private final java.util.concurrent.atomic.AtomicBoolean listing =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** The fill's listing loop runs here, beside the body step's io thread. */
+    private final java.util.concurrent.ExecutorService fillThread =
+            java.util.concurrent.Executors.newSingleThreadExecutor(
+                    task -> {
+                        Thread thread = new Thread(task, "pimalaya-fill");
+                        thread.setDaemon(true);
+                        return thread;
+                    });
 
     /**
-     * The fill's and the body step's session pools by account; io thread only.
+     * The body step's session pools by account; io thread only. One session
+     * while the fill lists, the account's whole pool once it is done.
      */
-    private final Map<String, WorkerPool<MailSession>> fillPools = new HashMap<>();
+    private final Map<String, WorkerPool<MailSession>> bodyPools = new HashMap<>();
 
-    /** Whether the fill is done or failed for the loop under way; io thread. */
-    private boolean fillStopped;
+    /** The fill's listing pools by account, every session but the body's. */
+    private final Map<String, WorkerPool<MailSession>> listingPools =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     /** The body step's plan for the loop under way, else null; io thread. */
     private MailBodies.Run bodies;
@@ -771,19 +787,38 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Starts the background fill when allowed and not running.
+     * Starts the background fill's two loops when allowed and not running.
      *
-     * <p>An io task per {@link MailEngine#FILL_CHUNK} chunk, bodies first
-     * ({@link MailBodies}). Stops off the foreground or Wi-Fi, on a sync or
-     * failure, resuming from the store's floors; Gmail is not filled.
+     * <p>The body step on the io thread ({@link MailBodies}) first, then the
+     * listing on its own, each account's jobs taking its next mailbox by
+     * {@link MailEngine#FILL_CHUNK} as each is free ({@link MailFill.Queue}):
+     * what a first sync or Load more just showed reads whole before any older
+     * envelope is listed, and Graph never sees the bodies' batch and three
+     * listings at once. A chunk landing bodies to plan has the body step run
+     * beside the listing. Both stop off the foreground or Wi-Fi, on a sync or
+     * a failure, resuming from the store's floors; Gmail and JMAP are not
+     * listed.
      */
     public void fillMail() {
         replanBodies = true;
-        if (filling || !foreground || isSyncing() || !wifi()) {
+        if (!fillAllowed()) {
             return;
         }
-        filling = true;
-        host.io.execute(this::fillStep);
+        startBodies();
+    }
+
+    /** Starts the fill's listing loop on its own thread unless it runs. */
+    private void startListing() {
+        if (fillAllowed() && listing.compareAndSet(false, true)) {
+            fillThread.execute(this::listMail);
+        }
+    }
+
+    /** Starts the body step's loop on the io thread unless it runs. */
+    private void startBodies() {
+        if (bodying.compareAndSet(false, true)) {
+            host.io.execute(this::bodyStep);
+        }
     }
 
     /** Has the body step plan again at its next step. */
@@ -791,8 +826,8 @@ public final class SyncCoordinator implements MailSync {
         replanBodies = true;
     }
 
-    /** One step of the body step or the fill (io thread), the next queued. */
-    private void fillStep() {
+    /** One step of the body step (io thread), the next queued. */
+    private void bodyStep() {
         if (bodies == null || replanBodies) {
             replanBodies = false;
             BodyPlan.Plan plan =
@@ -811,41 +846,108 @@ public final class SyncCoordinator implements MailSync {
         }
         MailBodies.Step body = MailBodies.step(bodies, bodyHost());
         Log.d("pimalaya", "mail bodies: " + body);
-
-        MailFill.Step step = null;
-        if (body != MailBodies.Step.AGAIN) {
-            step = fillStopped ? MailFill.Step.DONE : MailFill.step(fillHost());
-            Log.d("pimalaya", "mail fill: " + step);
-            if (step == MailFill.Step.DONE || step == MailFill.Step.FAILED) {
-                fillStopped = true;
-            }
-            // NOTE: a chunk listed above a window brings bodies to plan.
-            if (step == MailFill.Step.AGAIN && bodies.drained()) {
-                replanBodies = true;
-            }
-        }
-
-        if (step == MailFill.Step.AGAIN || body == MailBodies.Step.AGAIN) {
+        if (body == MailBodies.Step.AGAIN || (replanBodies && fillAllowed())) {
             // NOTE: the glyph once a step worked, never for a loop that
             // found nothing to do.
-            host.postAlive(() -> screens.dock().filling(true));
-            host.io.execute(this::fillStep);
+            if (body == MailBodies.Step.AGAIN) {
+                host.postAlive(() -> screens.dock().filling(true));
+            }
+            host.io.execute(this::bodyStep);
             return;
         }
-        closeFillPools();
+        closePools(bodyPools);
         bodies = null;
-        fillStopped = false;
-        filling = false;
         bodiesTally.reset();
-        host.postAlive(() -> screens.dock().filling(false));
         if (!bodiesLeft.isEmpty()) {
             bodiesLeft.clear();
             host.postAlive(screens::bodiesChanged);
         }
+        bodying.set(false);
+        // NOTE: a chunk may have landed bodies to plan between the replan
+        // read above and the flag going down.
+        if (replanBodies && fillAllowed()) {
+            startBodies();
+            return;
+        }
+        startListing();
+        fillEnded();
     }
 
-    /** The fill step's reach: what it may do now, the mailboxes, the pools. */
-    private MailFill.Host fillHost() {
+    /**
+     * The fill's listing loop (its own thread): every account's queue at
+     * once, each on its listing pool, until each is done, paused or failed.
+     */
+    private void listMail() {
+        List<java.util.concurrent.Callable<WorkerPool.Outcome>> runs = new ArrayList<>();
+        List<MailFill.Queue> queues = new ArrayList<>();
+        List<String> emails = new ArrayList<>();
+        for (AccountEntry account : passes.accountsFor(PimDomain.MAIL)) {
+            MailFill.Queue queue = new MailFill.Queue(fillHost(account.email));
+            WorkerPool<MailSession> pool = listingPool(account);
+            String accountId = passes.accountIdOf(account.email);
+            queues.add(queue);
+            emails.add(account.email);
+            runs.add(
+                    () ->
+                            pool.drain(
+                                    "mail fill " + account.email,
+                                    new WorkerPool.Source() {
+                                        @Override
+                                        public String next() {
+                                            MailStore.Edge edge = queue.take();
+                                            if (edge == null) {
+                                                return null;
+                                            }
+                                            return edge.collection;
+                                        }
+
+                                        @Override
+                                        public void back(String collection, boolean landed) {
+                                            queue.done(collection, landed);
+                                            // NOTE: a chunk listed above a
+                                            // frontier brings bodies to plan.
+                                            if (landed) {
+                                                replanBodies = true;
+                                                if (fillAllowed()) {
+                                                    startBodies();
+                                                }
+                                            }
+                                        }
+                                    },
+                                    (session, collection, remote) -> {
+                                        MailEngine engine =
+                                                new MailEngine(pimdir, clients, session, accountId);
+                                        try {
+                                            engine.widen(collection, MailEngine.FILL_CHUNK);
+                                        } finally {
+                                            remote.addAndGet(engine.remoteSoFar());
+                                        }
+                                    }));
+        }
+        List<WorkerPool.Outcome> outcomes = WorkerPool.together(runs);
+        for (int index = 0; index < outcomes.size(); index++) {
+            for (WorkerPool.Failure failure : outcomes.get(index).failures) {
+                Log.w("pimalaya", "mail fill stopped: " + failure.key, failure.error);
+            }
+            Log.d(
+                    "pimalaya",
+                    "mail fill " + AccountEntry.redacted(emails.get(index)) + ": "
+                            + queues.get(index).outcome());
+        }
+        closePools(listingPools);
+        listing.set(false);
+        fillEnded();
+    }
+
+    /** Hides the dock's download once neither of the fill's loops runs. */
+    private void fillEnded() {
+        if (!bodying.get() && !listing.get()) {
+            host.postAlive(() -> screens.dock().filling(false));
+        }
+    }
+
+    /** One account's fill queue's reach: what it may do now, its mailboxes. */
+    private MailFill.Host fillHost(String accountEmail) {
         return new MailFill.Host() {
             @Override
             public boolean allowed() {
@@ -856,43 +958,18 @@ public final class SyncCoordinator implements MailSync {
             public List<MailStore.Edge> edges() {
                 // NOTE: an account that is off syncs nothing, the
                 // background fill included, nor does a mailbox the filter
-                // unticks; one stepped through account-wide (Gmail) holds
-                // what its steps brought.
+                // unticks; one stepped through account-wide (Gmail, JMAP)
+                // holds what its steps brought.
                 MergedFilter filter = MergedFilter.of(host, PimDomain.MAIL);
                 List<MailStore.Edge> edges = mail.edges();
                 edges.removeIf(
                         edge ->
-                                edge.accountWide
+                                !edge.accountEmail.equals(accountEmail)
+                                        || edge.allMail
                                         || !filter.chosen(edge.collection)
                                         || !AccountActivation.enabled(
                                                 host, edge.accountEmail));
                 return edges;
-            }
-
-            @Override
-            public int room(String accountEmail) {
-                AccountEntry account = mailAccount(accountEmail);
-                return account == null
-                        ? 1
-                        : account.server(PimDomain.MAIL).info().sessions();
-            }
-
-            @Override
-            public void widen(MailStore.Edge edge) throws Exception {
-                widen(List.of(edge));
-            }
-
-            @Override
-            public void widen(List<MailStore.Edge> edges) throws Exception {
-                Exception failure =
-                        listAll(
-                                edges,
-                                (engine, collection) ->
-                                        engine.widen(collection, MailEngine.FILL_CHUNK),
-                                "mail fill stopped: ");
-                if (failure != null) {
-                    throw failure;
-                }
             }
         };
     }
@@ -937,9 +1014,10 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Downloads some of an account's bodies on its fill pool, blocking.
+     * Downloads some of an account's bodies on its body pool, blocking.
      *
-     * <p>Rows split across the pool's sessions; answers those not landed. A
+     * <p>Rows split across the pool's sessions ({@link #bodyPool}); answers
+     * those not landed. A
      * failure closes the pool, so a retry runs on fresh sessions (renewing a
      * token); every job failing throws.
      */
@@ -949,7 +1027,7 @@ public final class SyncCoordinator implements MailSync {
         if (account == null) {
             return List.of();
         }
-        WorkerPool<MailSession> pool = fillPool(account);
+        WorkerPool<MailSession> pool = bodyPool(account);
 
         Map<String, List<MailBodies.Row>> byCollection = new java.util.LinkedHashMap<>();
         for (MailBodies.Row row : rows) {
@@ -986,7 +1064,7 @@ public final class SyncCoordinator implements MailSync {
             failed.addAll(jobs.get(failure.key));
         }
         if (!failed.isEmpty()) {
-            fillPools.remove(account.email);
+            bodyPools.remove(account.email);
             pool.close();
         }
         if (!keys.isEmpty() && outcome.failures.size() == keys.size()) {
@@ -996,81 +1074,56 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Runs {@code step} over mailboxes on the io thread, every account at once.
+     * An account's pool for the body step; on the io thread.
      *
-     * <p>Each account's on its kept {@link WorkerPool}, in the order given.
-     * Answers the first failure, each logged under {@code failed}; a failing
-     * mailbox leaves the others going.
+     * <p>One session while the fill lists, the listing jobs holding the
+     * others, else the account's whole pool; on Graph always one, whose
+     * {@code $batch} already runs its bodies side by side against the four
+     * requests a mailbox takes at once (2026-11-05: four sessions of batches
+     * were throttled). The other size, when kept, closes first, so the
+     * account never holds more sessions than it runs.
      */
-    private Exception listAll(List<MailStore.Edge> edges, MailboxStep step, String failed) {
-        Map<String, List<String>> byAccount = new java.util.LinkedHashMap<>();
-        for (MailStore.Edge edge : edges) {
-            byAccount.computeIfAbsent(edge.accountEmail, email -> new ArrayList<>())
-                    .add(edge.collection);
+    private WorkerPool<MailSession> bodyPool(AccountEntry account) {
+        org.pimalaya.client.BackendInfo info = account.server(PimDomain.MAIL).info();
+        int size =
+                listing.get() || info.protocol() == org.pimalaya.client.Protocol.GRAPH
+                        ? 1
+                        : info.sessions();
+        WorkerPool<MailSession> pool = bodyPools.get(account.email);
+        if (pool != null && pool.size() != Math.max(1, size)) {
+            bodyPools.remove(account.email);
+            pool.close();
+            pool = null;
         }
-
-        List<java.util.concurrent.Callable<WorkerPool.Outcome>> runs = new ArrayList<>();
-        for (Map.Entry<String, List<String>> entry : byAccount.entrySet()) {
-            AccountEntry account = mailAccount(entry.getKey());
-            if (account == null) {
-                continue;
-            }
-            WorkerPool<MailSession> held = fillPool(account);
-            String accountId = passes.accountIdOf(account.email);
-            runs.add(
-                    () ->
-                            held.run(
-                                    "mail pass " + account.email,
-                                    entry.getValue(),
-                                    (session, collection, remote) -> {
-                                        MailEngine engine =
-                                                new MailEngine(pimdir, clients, session, accountId);
-                                        try {
-                                            step.run(engine, collection);
-                                        } finally {
-                                            remote.addAndGet(engine.remoteSoFar());
-                                        }
-                                    }));
-        }
-
-        Exception first = null;
-        for (WorkerPool.Outcome outcome : WorkerPool.together(runs)) {
-            for (WorkerPool.Failure failure : outcome.failures) {
-                Log.w("pimalaya", failed + failure.key, failure.error);
-            }
-            if (first == null) {
-                first = outcome.failure();
-            }
-        }
-        return first;
-    }
-
-    /** What a run does to one mailbox: a pass, a widening by a chunk. */
-    private interface MailboxStep {
-        void run(MailEngine engine, String collection) throws Exception;
-    }
-
-    /** An account's pool for the fill and the body step; on the io thread. */
-    private WorkerPool<MailSession> fillPool(AccountEntry account) {
-        WorkerPool<MailSession> pool = fillPools.get(account.email);
         if (pool == null) {
-            pool =
-                    new WorkerPool<>(
-                            account.server(PimDomain.MAIL).info().sessions(),
-                            null,
-                            () -> passes.openMail(account),
-                            MailSession::join);
-            fillPools.put(account.email, pool);
+            pool = new WorkerPool<>(size, null, () -> passes.openMail(account), MailSession::join);
+            bodyPools.put(account.email, pool);
         }
         return pool;
     }
 
-    /** Closes the connections the fill and body step kept; io thread. */
-    private void closeFillPools() {
-        for (WorkerPool<MailSession> pool : fillPools.values()) {
+    /**
+     * An account's pool for the fill's listing jobs: every session of the
+     * account's but the one the body step holds, one at least.
+     */
+    private WorkerPool<MailSession> listingPool(AccountEntry account) {
+        int sessions = account.server(PimDomain.MAIL).info().sessions();
+        return listingPools.computeIfAbsent(
+                account.email,
+                email ->
+                        new WorkerPool<>(
+                                Math.max(1, sessions - 1),
+                                null,
+                                () -> passes.openMail(account),
+                                MailSession::join));
+    }
+
+    /** Closes the connections a loop's pools kept, then forgets them. */
+    private static void closePools(Map<String, WorkerPool<MailSession>> pools) {
+        for (WorkerPool<MailSession> pool : pools.values()) {
             pool.close();
         }
-        fillPools.clear();
+        pools.clear();
     }
 
     /** Whether the fill may run now: foreground, no other sync, and Wi-Fi. */
@@ -1190,6 +1243,17 @@ public final class SyncCoordinator implements MailSync {
     public void loadMore(List<MailList.Step> steps) {
         if (isSyncing() || !wifi()) {
             return;
+        }
+        // NOTE: while the fill lists the older envelopes, a step the store
+        // already holds shows at once and lists nothing; one that would list
+        // them itself, on the sessions the fill holds, waits for it instead.
+        if (listing.get()) {
+            for (MailList.Step step : steps) {
+                if (!mail.stepHeld(step.email, step.only)) {
+                    host.toast(host.getString(R.string.mail_more_filling));
+                    return;
+                }
+            }
         }
         progress.syncAccount(null);
         if (!startSync()) {

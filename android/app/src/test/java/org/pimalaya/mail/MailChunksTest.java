@@ -192,13 +192,13 @@ public class MailChunksTest {
         server.engine.sync(inbox);
         MailRequest first = server.asked.get(0);
         assertEquals(
-                "the floor is the date of the 50th newest message",
-                server.dateOf(71),
+                "the floor is the date of the 25th newest message",
+                server.dateOf(96),
                 first.scope().since());
-        assertEquals(50, stored(inbox));
+        assertEquals(25, stored(inbox));
         MailStore.Edge edge = edgeOf(inbox);
         assertTrue(edge.listed);
-        assertEquals(server.dateOf(71), edge.limit);
+        assertEquals(server.dateOf(96), edge.limit);
         assertEquals("inbox", edge.role);
 
         server.engine.sync(inbox);
@@ -210,8 +210,12 @@ public class MailChunksTest {
         assertTrue(server.engine.widen(inbox, MailEngine.FIRST_CHUNK));
         MailRequest band = server.asked.get(2);
         assertTrue("a widening lists the band alone", band.listing().band());
-        assertEquals(server.dateOf(21), band.scope().since());
-        assertEquals(server.dateOf(71), band.scope().until());
+        assertEquals(server.dateOf(71), band.scope().since());
+        assertEquals(server.dateOf(96), band.scope().until());
+        assertEquals(50, stored(inbox));
+        assertEquals(server.dateOf(71), edgeOf(inbox).limit);
+        assertTrue(server.engine.widen(inbox, MailEngine.FIRST_CHUNK));
+        assertTrue(server.engine.widen(inbox, MailEngine.FIRST_CHUNK));
         assertEquals(100, stored(inbox));
         assertEquals(server.dateOf(21), edgeOf(inbox).limit);
 
@@ -234,12 +238,12 @@ public class MailChunksTest {
 
         MailStore.Query query = store.query((account, name) -> true, false, false, "");
         String floor = store.floorOf(query, store.edges());
-        assertEquals("the inbox's floor is the more recent", inboxServer.dateOf(71), floor);
+        assertEquals("the inbox's floor is the more recent", inboxServer.dateOf(96), floor);
 
         // NOTE: the sent mail reaches further back, and its messages below
         // the inbox's floor wait for the inbox to reach them.
-        assertEquals(50 + 25, store.count(query.since(floor)));
-        assertEquals(100, store.count(query));
+        assertEquals(25 + 13, store.count(query.since(floor)));
+        assertEquals(50, store.count(query));
 
         // NOTE: a window more recent than every floor is the list's floor.
         MailWindow.set(context, accountId, inboxServer.dateOf(101));
@@ -249,13 +253,13 @@ public class MailChunksTest {
         MailOffline.setWhole(context, sent, true);
         MailStore.Query sentAlone =
                 store.query((account, collection) -> collection.equals(sent), false, false, "");
-        assertEquals(sentServer.dateOf(71), store.floorOf(sentAlone, store.edges()));
+        assertEquals(sentServer.dateOf(96), store.floorOf(sentAlone, store.edges()));
         MailOffline.setWhole(context, sent, false);
         MailWindow.set(context, accountId, null);
 
         // NOTE: a mailbox the filter hides limits nothing.
         assertEquals(
-                inboxServer.dateOf(71),
+                inboxServer.dateOf(96),
                 store.floorOf(
                         store.query(
                                 (account, collection) -> collection.equals(inbox),
@@ -272,24 +276,28 @@ public class MailChunksTest {
      * last of the mailbox says so.
      */
     @Test
-    public void aStepFromTheStoreWidensUntilFiftyLieBelowTheFrontier() throws Exception {
+    public void aStepFromTheStoreWidensUntilAStepLiesBelowTheFrontier() throws Exception {
         String accountId = new PimdirAccount(context).idOf(EMAIL);
         Server server = new Server(120, 1);
         server.engine.sync(inbox);
-        MailWindow.set(context, accountId, server.dateOf(71));
+        MailWindow.set(context, accountId, server.dateOf(96));
 
         MailStep.Outcome first =
                 new WidenStep().run(server.engine, new StepRun(EMAIL, List.of(inbox), null, false));
-        assertEquals(100, stored(inbox));
-        assertEquals(server.dateOf(21), first.frontier);
-        assertEquals(50, first.brought);
+        assertEquals(50, stored(inbox));
+        assertEquals(server.dateOf(71), first.frontier);
+        assertEquals(25, first.brought);
         assertFalse(first.exhausted);
         MailRequest band = server.asked.get(server.asked.size() - 1);
         assertTrue("the band alone", band.listing().band());
 
-        MailWindow.moveBack(context, accountId, first.frontier);
-        MailStep.Outcome last =
-                new WidenStep().run(server.engine, new StepRun(EMAIL, List.of(inbox), null, false));
+        MailStep.Outcome last = first;
+        for (int step = 0; step < 3; step++) {
+            MailWindow.moveBack(context, accountId, last.frontier);
+            last =
+                    new WidenStep()
+                            .run(server.engine, new StepRun(EMAIL, List.of(inbox), null, false));
+        }
         assertEquals(120, stored(inbox));
         assertEquals(server.dateOf(1), last.frontier);
         assertTrue("the mailbox is listed whole", last.exhausted);

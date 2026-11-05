@@ -415,25 +415,50 @@ public class MailPoolTest {
         assertFalse("the caller closes its own", mine.closed);
     }
 
-    @Test
-    public void aFillStepTakesAsManyOfAnAccountAsItsPoolRuns() {
-        List<MailStore.Edge> edges =
-                List.of(
-                        new MailStore.Edge(EMAIL, "Projets", "Projets", "", true,
-                                "2026-09-20T00:00:00Z", false),
-                        new MailStore.Edge(EMAIL, "Sent", "Sent", "sent", true,
-                                "2026-09-05T00:00:00Z", false),
-                        new MailStore.Edge(EMAIL, "INBOX", "INBOX", "inbox", true,
-                                "2026-09-08T00:00:00Z", false),
-                        new MailStore.Edge("joe@example.org", "INBOX", "joe-INBOX", "inbox",
-                                true, "2026-09-08T00:00:00Z", false),
-                        new MailStore.Edge(EMAIL, "Archive", "Archive", "", false, null, false));
+    @Test(timeout = 10_000)
+    public void aFreeWorkerTakesTheNextKeyWhileASlowOneRuns() throws Exception {
+        // NOTE: the slow key waits for the three others: it lands only if
+        // the other worker took them all while it ran, never held behind it.
+        CountDownLatch others = new CountDownLatch(3);
+        List<String> keys =
+                Collections.synchronizedList(new ArrayList<>(List.of("slow", "a", "b", "c")));
+        List<String> landed = Collections.synchronizedList(new ArrayList<>());
+        List<String> failed = Collections.synchronizedList(new ArrayList<>());
+        WorkerPool.Outcome outcome;
+        try (WorkerPool<AutoCloseable> pool = new WorkerPool<>(2, null, () -> () -> {}, null)) {
+            outcome =
+                    pool.drain(
+                            EMAIL,
+                            new WorkerPool.Source() {
+                                @Override
+                                public String next() {
+                                    synchronized (keys) {
+                                        return keys.isEmpty() ? null : keys.remove(0);
+                                    }
+                                }
 
-        List<MailStore.Edge> batch = MailFill.batch(edges, email -> email.equals(EMAIL) ? 3 : 1);
-        List<String> taken = new ArrayList<>();
-        for (MailStore.Edge edge : batch) {
-            taken.add(edge.collection);
+                                @Override
+                                public void back(String key, boolean ok) {
+                                    (ok ? landed : failed).add(key);
+                                }
+                            },
+                            (session, key, remote) -> {
+                                if (key.equals("slow")) {
+                                    assertTrue(
+                                            "the others went on meanwhile",
+                                            others.await(5, TimeUnit.SECONDS));
+                                    return;
+                                }
+                                if (key.equals("b")) {
+                                    others.countDown();
+                                    throw new IllegalStateException("the connection dropped");
+                                }
+                                others.countDown();
+                            });
         }
-        assertEquals(List.of("INBOX", "joe-INBOX", "Sent", "Archive"), taken);
+        assertEquals(List.of("a", "c", "slow"), landed);
+        assertEquals(List.of("b"), failed);
+        assertEquals(1, outcome.failures.size());
+        assertEquals("b", outcome.failures.get(0).key);
     }
 }

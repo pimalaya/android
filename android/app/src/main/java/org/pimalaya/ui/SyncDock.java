@@ -1,7 +1,5 @@
 package org.pimalaya.ui;
 
-import android.animation.ObjectAnimator;
-import android.animation.ValueAnimator;
 import android.app.Dialog;
 import android.content.res.ColorStateList;
 import android.graphics.Typeface;
@@ -75,7 +73,7 @@ public final class SyncDock {
          */
         public String count;
 
-        /** Whether the pass downloads older mail (a glyph for the spinner). */
+        /** Whether the pass downloads older mail, which the dock's description says. */
         public boolean download;
 
         /** The sheet's rows, one per account. */
@@ -118,9 +116,6 @@ public final class SyncDock {
 
     /** The open sheet, null when closed. */
     private Dialog sheet;
-
-    /** The download glyph's pulse while the background download shows. */
-    private ObjectAnimator pulse;
 
     /** The dock of {@code host}'s main layout. */
     public SyncDock(Host host) {
@@ -230,6 +225,15 @@ public final class SyncDock {
             background.done = fillShown;
             background.total = 1000;
         }
+        // NOTE: the bodies the bar counts, said; the fill's listing runs
+        // silently, out of the dock.
+        if (fillPlanned > 0) {
+            background.line =
+                    host.getString(
+                            R.string.sync_fill_bodies,
+                            Math.min(fillLanded, fillPlanned),
+                            fillPlanned);
+        }
         return background;
     }
 
@@ -238,7 +242,6 @@ public final class SyncDock {
         boolean visible = shown != null;
         boolean was = dock.getVisibility() == View.VISIBLE;
         if (!visible) {
-            pulse(false);
             if (sheet != null) {
                 sheet.dismiss();
             }
@@ -256,11 +259,6 @@ public final class SyncDock {
         TextView count = dock.findViewById(R.id.sync_dock_count);
         count.setText(shown.count);
         count.setVisibility(shown.count == null ? View.GONE : View.VISIBLE);
-        dock.findViewById(R.id.sync_dock_spinner)
-                .setVisibility(shown.download ? View.GONE : View.VISIBLE);
-        dock.findViewById(R.id.sync_dock_glyph)
-                .setVisibility(shown.download ? View.VISIBLE : View.GONE);
-        pulse(pass == null);
         dock.setContentDescription(
                 host.getString(
                         shown.download
@@ -331,27 +329,6 @@ public final class SyncDock {
                         dock.getHeight(),
                         host.getResources().getDimensionPixelSize(R.dimen.sync_dock_height));
         fab.animate().translationY(shown ? -by : 0).setDuration(200);
-    }
-
-    /** Pulses the download glyph, still when the system removes animations. */
-    private void pulse(boolean on) {
-        ImageView glyph = dock.findViewById(R.id.sync_dock_glyph);
-        boolean wanted = on && glyph.getVisibility() == View.VISIBLE;
-        if (wanted == (pulse != null)) {
-            return;
-        }
-        if (pulse != null) {
-            pulse.cancel();
-            pulse = null;
-            glyph.setAlpha(1f);
-        }
-        if (wanted && ValueAnimator.areAnimatorsEnabled()) {
-            pulse = ObjectAnimator.ofFloat(glyph, View.ALPHA, 1f, 0.3f);
-            pulse.setDuration(900);
-            pulse.setRepeatCount(ValueAnimator.INFINITE);
-            pulse.setRepeatMode(ValueAnimator.REVERSE);
-            pulse.start();
-        }
     }
 
     /** Opens the sheet over the list, closing on the scrim or its chevron. */

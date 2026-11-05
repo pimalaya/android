@@ -513,18 +513,18 @@ public final class MailList {
     /**
      * The footer under {@code wanted}, null for none, over shown accounts on.
      *
-     * <p>Gmail takes one step while {@link MailWindow#more}; others one per
-     * shown mailbox with more; junk or trash only when shown alone
-     * ({@link #moreAlone}). Whole mailboxes take no part.
+     * <p>Each account takes one step while it has more ({@link MailWindow#more}),
+     * over the one mailbox the view shows when it shows one of several; junk
+     * or trash only when shown alone ({@link #moreAlone}). Whole mailboxes
+     * take no part.
      */
     private Footer footerOf(
             MailStore.Query wanted, List<MailStore.Edge> edges, Map<String, String> roles) {
-        Map<String, List<String>> gmail = new LinkedHashMap<>();
+        Map<String, List<String>> more = new LinkedHashMap<>();
         Map<String, Integer> stepped = new HashMap<>();
         Map<String, List<MailStore.Edge>> quiet = new LinkedHashMap<>();
         Set<String> showing = new HashSet<>();
         List<Step> steps = new ArrayList<>();
-        boolean perMailbox = false;
         for (MailStore.Edge edge : edges) {
             // NOTE: an account that is off loads nothing.
             boolean held =
@@ -546,12 +546,16 @@ public final class MailList {
             if (held) {
                 showing.add(edge.accountEmail);
             }
-            if (held && whole && MailWindow.more(host, accountId)) {
-                gmail.computeIfAbsent(edge.accountEmail, email -> new ArrayList<>())
+            // NOTE: one step per account, every account stepping from its
+            // frontier (WidenStep, GmailStep), so Load more brings each a
+            // step of the merged list rather than a step of each mailbox.
+            boolean left =
+                    whole
+                            ? MailWindow.more(host, accountId)
+                            : MailWindow.more(host, accountId, edge.collection);
+            if (held && left) {
+                more.computeIfAbsent(edge.accountEmail, email -> new ArrayList<>())
                         .add(edge.collection);
-            } else if (held && !whole && MailWindow.more(host, accountId, edge.collection)) {
-                steps.add(new Step(edge.accountEmail, edge.collection));
-                perMailbox = true;
             }
         }
         for (Map.Entry<String, List<MailStore.Edge>> account : quiet.entrySet()) {
@@ -561,12 +565,12 @@ public final class MailList {
                 steps.add(new Step(email, alone.collection));
             }
         }
-        for (Map.Entry<String, List<String>> account : gmail.entrySet()) {
+        for (Map.Entry<String, List<String>> account : more.entrySet()) {
             String email = account.getKey();
             String only = null;
             if (account.getValue().size() == 1 && stepped.get(email) > 1) {
                 only = account.getValue().get(0);
-                // NOTE: a label stepped alone down to all of its mail has
+                // NOTE: a mailbox stepped alone down to all of its mail has
                 // nothing more to load, whatever its account's others hold.
                 if (!MailWindow.more(host, store.accountIdOf(email), only)) {
                     continue;
@@ -577,7 +581,7 @@ public final class MailList {
         if (steps.isEmpty()) {
             return null;
         }
-        return new Footer(steps, perMailbox);
+        return new Footer(steps, false);
     }
 
     /**

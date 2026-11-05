@@ -1242,10 +1242,15 @@ public final class MailStore {
             if (!query.holds(edge.collection)) {
                 continue;
             }
-            if (!edge.accountWide) {
+            if (!edge.allMail) {
                 floors.add(edge.limit);
             }
-            if (!MailOffline.whole(context, edge.collection)) {
+            // NOTE: no frontier before the first sync sets one: its first
+            // chunks show as they land, down to the merged floor, and the
+            // frontier then hides what lies below the account's newest.
+            String account = PimdirAccount.accountIdOf(edge.collection);
+            if (!MailOffline.whole(context, edge.collection)
+                    && MailWindow.held(context, account, edge.collection)) {
                 floors.add(mailboxWindow(edge.collection));
             }
         }
@@ -1292,6 +1297,87 @@ public final class MailStore {
     }
 
     /**
+     * Whether a Load more step of an account (or of {@code only}) lists
+     * nothing: the store holds a step below the frontier above every stepped
+     * mailbox's floor, or holds every one whole, as {@link WidenStep} reads
+     * them. Gmail steps on its own, never waiting for a fill.
+     */
+    public boolean stepHeld(String accountEmail, String only) {
+        String accountId = accounts.idOf(accountEmail);
+        if (MailPolicy.keepsAllMail(context, accountId)) {
+            return true;
+        }
+        MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
+        String outbox = outbox().outboxOf(accountEmail);
+        Map<String, String> roles = roles();
+        List<String> stepped = new ArrayList<>();
+        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
+            if (!stored.accountEmail.equals(accountEmail)
+                    || stored.id.equals(outbox)
+                    || (only != null ? !only.equals(stored.id) : !filter.chosen(stored.id))
+                    || MailOffline.whole(context, stored.id)
+                    || !MailBodies.downloads(roles.get(stored.id), false)) {
+                continue;
+            }
+            stepped.add(stored.id);
+        }
+        String window =
+                only == null
+                        ? MailWindow.since(context, accountId)
+                        : MailWindow.since(context, accountId, only);
+        Edge limiting = WidenStep.limiting(edges(), stepped);
+        if (window == null || limiting == null) {
+            return true;
+        }
+        if (!limiting.listed) {
+            return false;
+        }
+        List<String> below =
+                datesBelow(new Query(stepped, null, null, null, List.of()), window, MailStep.COUNT);
+        return WidenStep.within(below, limiting.limit) >= MailStep.COUNT;
+    }
+
+    /**
+     * The frontier an account listed mailbox by mailbox leaves its first sync
+     * at: the {@link MailStep#COUNT}th newest {@code Date} of the mailboxes it
+     * listed, once each holds its first chunk.
+     *
+     * <p>Exact: any of the account's newest is among its own mailbox's
+     * newest, which that mailbox's first chunk holds. Junk, trash and a
+     * mailbox kept whole stay out, as they do of a step; one never listed (a
+     * refusal) holds nothing yet. All mail when they hold fewer and every one
+     * is listed to its bound.
+     */
+    public MailStep.Outcome firstFrontier(List<String> listed) {
+        Map<String, String> roles = roles();
+        List<String> stepped = new ArrayList<>();
+        boolean whole = true;
+        for (String collection : listed) {
+            if (MailOffline.whole(context, collection)
+                    || !MailBodies.downloads(roles.get(collection), false)) {
+                continue;
+            }
+            stepped.add(collection);
+            Coverage coverage = coverage(collection);
+            String bound =
+                    MailScope.sinceOf(context, PimdirAccount.accountIdOf(collection), collection);
+            if (coverage.at == null || MailScope.limits(coverage.since, bound)) {
+                whole = false;
+            }
+        }
+        List<StoredMessage> newest =
+                page(new Query(stepped, null, null, null, List.of()), null, 0, MailStep.COUNT);
+        String frontier = null;
+        for (StoredMessage message : newest) {
+            if (!message.sortKey.isEmpty()) {
+                frontier = message.sortKey;
+            }
+        }
+        boolean exhausted = whole && newest.size() < MailStep.COUNT;
+        return new MailStep.Outcome(exhausted ? null : frontier, exhausted, newest.size());
+    }
+
+    /**
      * The window of an account set up before windows existed.
      *
      * <p>Its inbox's {@link MailEngine#FIRST_CHUNK}th newest stored date, else
@@ -1334,8 +1420,11 @@ public final class MailStore {
         /** The floor the list stops at for it, null where it limits nothing. */
         final String limit;
 
-        /** Whether its account is listed account-wide. */
-        public final boolean accountWide;
+        /**
+         * Whether its account steps through All Mail (Gmail): neither chunked
+         * nor filled, its steps bringing what it holds.
+         */
+        public final boolean allMail;
 
         Edge(
                 String accountEmail,
@@ -1344,14 +1433,14 @@ public final class MailStore {
                 String role,
                 boolean listed,
                 String limit,
-                boolean accountWide) {
+                boolean allMail) {
             this.accountEmail = accountEmail;
             this.mailbox = mailbox;
             this.collection = collection;
             this.role = role;
             this.listed = listed;
             this.limit = limit;
-            this.accountWide = accountWide;
+            this.allMail = allMail;
         }
     }
 
@@ -1368,10 +1457,10 @@ public final class MailStore {
                             : bounds.computeIfAbsent(
                                     stored.accountEmail,
                                     email -> MailScope.sinceOf(context, accounts.idOf(email)));
-            boolean accountWide =
+            boolean allMail =
                     wide.computeIfAbsent(
                             stored.accountEmail,
-                            email -> MailPolicy.accountWide(context, accounts.idOf(email)));
+                            email -> MailPolicy.keepsAllMail(context, accounts.idOf(email)));
             Coverage coverage = coverage(stored.id);
             edges.add(
                     new Edge(
@@ -1381,7 +1470,7 @@ public final class MailStore {
                             roles.get(stored.id),
                             coverage.at != null || coverage.filling,
                             coverage.limit(bound),
-                            accountWide));
+                            allMail));
         }
         return edges;
     }

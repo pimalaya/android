@@ -41,6 +41,17 @@ public final class MailState {
         return ((Owner) context.getApplicationContext()).mailState();
     }
 
+    /**
+     * Tells a listening list that what it shows moved with no write: a
+     * frontier a first sync or a step set, its rows shown before their bodies.
+     */
+    public static void moved(Context context) {
+        Runnable listener = of(context).onWrite;
+        if (listener != null) {
+            listener.run();
+        }
+    }
+
     /** Forgets a just-listed mailbox's {@link #failed} and {@link #gone}. */
     void relisted(String collection) {
         String prefix = MailOwed.key(collection, "");

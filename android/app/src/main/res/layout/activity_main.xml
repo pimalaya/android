@@ -478,15 +478,6 @@
                     android:importantForAccessibility="no"
                     android:indeterminateTint="?android:attr/colorAccent" />
 
-                <ImageView
-                    android:id="@+id/sync_dock_glyph"
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_download"
-                    android:tint="?android:attr/colorAccent"
-                    android:visibility="gone" />
-
             </FrameLayout>
 
             <LinearLayout

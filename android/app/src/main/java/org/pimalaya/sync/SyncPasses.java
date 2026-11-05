@@ -38,6 +38,7 @@ import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.contact.ContactPhonePass;
 import org.pimalaya.mail.MailBodies;
 import org.pimalaya.mail.MailEngine;
+import org.pimalaya.mail.MailState;
 import org.pimalaya.mail.MailStep;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.mail.MailTally;
@@ -75,6 +76,12 @@ public final class SyncPasses {
 
         /** A token refresh re-persisted the account's credentials. */
         default void accountRefreshed(AccountEntry updated) {}
+
+        /**
+         * The pass waits from now on for what it cannot count (a first sync's
+         * or a step's bodies): its bar runs indeterminate.
+         */
+        default void uncounted() {}
     }
 
     /** A pass nobody watches, the background check's. */
@@ -769,6 +776,65 @@ public final class SyncPasses {
     }
 
     /**
+     * The first sync of an account listed mailbox by mailbox (IMAP, Graph),
+     * on the calling thread.
+     *
+     * <p>Every mailbox the filter ticks lists its first chunk side by side on
+     * the account's whole pool ({@link #fetchMail}), each written as it lands
+     * so the list shows it; the frontier is then the account's {@link
+     * MailStep#COUNT}th newest ({@link MailStore#firstFrontier}), whose
+     * bodies the body step downloads behind. Answers the failure, or null.
+     */
+    private Exception firstListing(AccountEntry account, MailSession session) {
+        SyncScope ticked = SyncScope.mail(context);
+        Exception failure = fetchMail(account, session, ticked);
+        if (failure != null) {
+            return failure;
+        }
+        String outbox = mail.outbox().outboxOf(account.email);
+        List<String> listed = new ArrayList<>();
+        for (PimdirCollections.Stored stored : mail.loadMailboxes(List.of(account.email))) {
+            if (!stored.id.equals(outbox) && ticked.collection(account.email, stored.id)) {
+                listed.add(stored.id);
+            }
+        }
+        MailStep.Outcome outcome = mail.firstFrontier(listed);
+        Log.d(
+                "pimalaya",
+                "mail first sync " + account.email + ": " + outcome.brought
+                        + " newest, frontier " + outcome.frontier
+                        + (outcome.exhausted ? ", all held" : ""));
+        MailWindow.stepped(context, accountIdOf(account.email), null, outcome);
+        MailState.moved(context);
+        stepBodies(account, session, listed, outcome.frontier, null);
+        return null;
+    }
+
+    /**
+     * Downloads within the pass the bodies a first sync or a step just showed,
+     * the dock waiting on them indeterminate, so the fill lists the rest
+     * behind it silently ({@link MailEngine#downloadStep}). One that does not
+     * land is owed, and the body step tries it again; none fails the pass.
+     */
+    private void stepBodies(
+            AccountEntry account,
+            MailSession session,
+            List<String> collections,
+            String since,
+            String until) {
+        progress.step(PimDomain.MAIL, PimdirEngine.Progress.STAGE_DOWNLOAD, MailStep.COUNT);
+        progress.uncounted();
+        try {
+            int planned =
+                    new MailEngine(pimdir, clients, session, accountIdOf(account.email))
+                            .downloadStep(collections, since, until);
+            Log.d("pimalaya", "mail step bodies " + account.email + ": " + planned + " planned");
+        } catch (Exception error) {
+            Log.w("pimalaya", "mail step bodies failed: " + AccountEntry.redacted(account.email), error);
+        }
+    }
+
+    /**
      * One {@link MailStep} of an account's mail, on the calling thread.
      *
      * <p>A {@code first} one reads and stores the mailboxes; else the stored
@@ -776,6 +842,11 @@ public final class SyncPasses {
      * MailWindow}). Answers the failure, or null.
      */
     public Exception stepMail(AccountEntry account, MailSession session, String only, boolean first) {
+        if (first
+                && account.server(PimDomain.MAIL).info().mailStep()
+                        != org.pimalaya.client.MailStepKind.ACCOUNT) {
+            return firstListing(account, session);
+        }
         progress.account(account.email);
         String accountId = accountIdOf(account.email);
         try {
@@ -830,6 +901,13 @@ public final class SyncPasses {
                 collections.add(allMail);
             }
             progress.collections(PimDomain.MAIL, 0, 1);
+            boolean fromStore =
+                    account.server(PimDomain.MAIL).info().mailStep()
+                            != org.pimalaya.client.MailStepKind.ACCOUNT;
+            String before =
+                    only == null
+                            ? MailWindow.since(context, accountId)
+                            : MailWindow.since(context, accountId, only);
             MailStep.Outcome outcome =
                     MailStep.of(account.server(PimDomain.MAIL))
                             .run(engine, new StepRun(account.email, collections, only, first));
@@ -840,6 +918,12 @@ public final class SyncPasses {
                             + outcome.frontier + (outcome.exhausted ? ", all held" : ""));
 
             MailWindow.stepped(context, accountId, only, outcome);
+            MailState.moved(context);
+            // NOTE: a step from the store shows its messages without their
+            // bodies; they download within Load more, which waits on them.
+            if (fromStore && (outcome.frontier != null || outcome.exhausted)) {
+                stepBodies(account, session, collections, outcome.frontier, before);
+            }
             SyncStamps.mark(context, account.email);
             return null;
         } catch (Exception error) {

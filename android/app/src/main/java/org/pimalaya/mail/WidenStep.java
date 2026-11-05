@@ -5,11 +5,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A step taken from the store ({@link MailStep}): Graph, JMAP, later IMAP.
+ * A step taken from the store ({@link MailStep}): IMAP and Graph.
  *
  * <p>The most recent floor's mailbox widens by {@link #COUNT} until that many
  * stored messages lie below the frontier, which moves to the {@link #COUNT}th
- * one's date. A first sync lists {@link MailStore#firstWindow} instead.
+ * one's date; the fill has usually listed them, so the step lists nothing and
+ * the list shows them at once, their bodies downloading behind (the body
+ * step). The first sync is no step ({@link MailStore#firstFrontier}).
  */
 final class WidenStep implements MailStep {
     /** The most mailboxes one step widens, so short chunks cannot hold it. */
@@ -17,31 +19,10 @@ final class WidenStep implements MailStep {
 
     @Override
     public Outcome run(MailEngine engine, StepRun run) {
-        String accountEmail = run.accountEmail();
         List<String> collections = run.collections();
         String only = run.only();
-        boolean first = run.first();
 
         MailStore store = engine.mail();
-        if (first) {
-            RuntimeException refusal = null;
-            int opened = 0;
-            for (String collection : collections) {
-                try {
-                    engine.sync(collection);
-                    opened++;
-                } catch (RuntimeException failure) {
-                    MailEngine.skip(collection, failure);
-                    refusal = refusal == null ? failure : refusal;
-                }
-            }
-            if (refusal != null && opened == 0) {
-                throw refusal;
-            }
-            String frontier = store.firstWindow(accountEmail);
-            return new Outcome(frontier, frontier == null, 0);
-        }
-
         String window =
                 only == null
                         ? MailWindow.since(engine.context(), engine.accountId())

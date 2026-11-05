@@ -11,7 +11,6 @@ import org.pimalaya.client.Account;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.Description;
 import org.pimalaya.client.Flags;
-import org.pimalaya.client.GraphStepReply;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.MailPage;
 import org.pimalaya.client.MailRequest;
@@ -66,7 +65,7 @@ public final class MailEngine extends PimdirEngine {
     /**
      * Messages a mailbox's first pass lists: a count, never a time span.
      */
-    static final int FIRST_CHUNK = 50;
+    static final int FIRST_CHUNK = 25;
 
     /** Messages one step of the background fill widens a mailbox by. */
     public static final int FILL_CHUNK = 500;
@@ -221,18 +220,13 @@ public final class MailEngine extends PimdirEngine {
         if (coverage.at != null) {
             return MailScope.clamp(coverage.since, bound);
         }
-        if (accountWide()) {
+        // NOTE: Gmail's steps bring what a label holds, its round naming
+        // what the store holds; every other account lists a first chunk.
+        if (MailPolicy.keepsAllMail(pimdir.context(), accountId)) {
             return bound;
         }
         String floor = timedFloor(collection, null, FIRST_CHUNK);
         return MailScope.clamp(floor, bound);
-    }
-
-    /**
-     * A mailbox's {@code count} newest {@code Date}s, newest first, or fewer.
-     */
-    List<String> newest(String collection, int count) {
-        return clients.mail().floor(session, mailboxOf(collection), null, count).dates();
     }
 
     /**
@@ -794,6 +788,54 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
+     * Downloads, on this engine's session, the bodies a first sync or a step
+     * just showed: every listed message of {@code collections} dated from
+     * {@code since} to below {@code until} (nulls unbounded) whose body the
+     * phone lacks, newest first, one mailbox after another.
+     *
+     * <p>Junk, trash and a mailbox kept whole stay out, as they do of a step.
+     * One that does not land is owed ({@link MailOwed}), so the body step
+     * tries it again behind. Answers how many it planned.
+     */
+    public int downloadStep(List<String> collections, String since, String until) {
+        Map<String, String> roles = mail().roles();
+        List<String> stepped = new ArrayList<>();
+        for (String collection : collections) {
+            if (!MailOffline.whole(pimdir.context(), collection)
+                    && MailBodies.downloads(roles.get(collection), false)) {
+                stepped.add(collection);
+            }
+        }
+        Map<String, List<MailBodies.Row>> wanted = new java.util.LinkedHashMap<>();
+        int planned = 0;
+        for (MailBodies.Row row : mail().bodyRows(stepped, since)) {
+            if (row.bodied
+                    || (until != null && !row.sortKey.isEmpty() && row.sortKey.compareTo(until) >= 0)) {
+                continue;
+            }
+            planned++;
+            wanted.computeIfAbsent(row.collection, collection -> new ArrayList<>())
+                    .add(
+                            new MailBodies.Row(
+                                    row.collection,
+                                    row.linkId,
+                                    row.sortKey,
+                                    false,
+                                    row.size,
+                                    row.attachment,
+                                    true));
+        }
+        for (Map.Entry<String, List<MailBodies.Row>> mailbox : wanted.entrySet()) {
+            List<String> owed = new ArrayList<>();
+            for (MailBodies.Row failed : download(mailbox.getKey(), mailbox.getValue())) {
+                owed.add(failed.linkId);
+            }
+            MailOwed.owe(pimdir.context(), mailbox.getKey(), owed);
+        }
+        return planned;
+    }
+
+    /**
      * Downloads some bodies of one mailbox through the upgrade to {@code Full}.
      *
      * <p>A held body links; pending ones and those off the frontier (unless
@@ -1054,15 +1096,6 @@ public final class MailEngine extends PimdirEngine {
     NamedStep stepRead(List<String> holding, StepRequest request, File dir) {
         return counted(
                 holding, request, dir, () -> clients.mail().step(session, request, dir, this));
-    }
-
-    /** {@link #stepRead} of a Microsoft Graph account. */
-    GraphStepReply graphStepRead(List<String> holding, StepRequest request, File dir) {
-        return counted(
-                holding,
-                request,
-                dir,
-                () -> clients.mail().graphStep(session, request, dir, this));
     }
 
     /**

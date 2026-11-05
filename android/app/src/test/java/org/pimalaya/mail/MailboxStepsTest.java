@@ -5,7 +5,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
@@ -51,14 +50,16 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * An IMAP step from the engine down to the store.
+ * An account listed mailbox by mailbox (IMAP, Graph), from the engine down to
+ * the store.
  *
- * <p>The first takes the inbox's floor, lists every mailbox from it and reads
- * the bodies above it, the junk's left out; a later one widens from the store
- * and reads the bodies between the new frontier and the old.
+ * <p>The first sync lists each mailbox's first chunk and leaves the frontier
+ * at the account's step-th newest, whose bodies the body step reads, the
+ * junk's left out; a later step moves the frontier a step back from the store,
+ * listing only what the store lacks, its bodies owed to the body step.
  */
 @RunWith(RobolectricTestRunner.class)
-public class ImapStepTest {
+public class MailboxStepsTest {
     private static final String EMAIL = "jane@example.com";
     private static final Instant TOP = Instant.parse("2026-10-01T00:00:00Z");
 
@@ -98,6 +99,9 @@ public class ImapStepTest {
         final Map<String, int[]> shapes = new HashMap<>();
         final List<String> read = new ArrayList<>();
 
+        /** Every listing or floor read, by mailbox, in order. */
+        final List<String> opened = new ArrayList<>();
+
         /** Mailboxes the server refuses to open, and how. */
         final Map<String, Integer> refused = new HashMap<>();
 
@@ -128,6 +132,7 @@ public class ImapStepTest {
                         "IMAP EXAMINE failed: NO Unknown Mailbox: " + collection + " (Failure)",
                         refused.get(collection));
             }
+            opened.add(collection);
         }
 
         String dateOf(String collection, int uid) {
@@ -243,29 +248,47 @@ public class ImapStepTest {
         return new int[] {all, whole};
     }
 
+    /**
+     * The first sync as {@code SyncPasses} runs it, one mailbox after another
+     * here: each mailbox's first chunk, a refused one skipped, the frontier at
+     * the account's step-th newest, then the bodies the body step owes there.
+     */
+    private MailStep.Outcome firstSync(Server server) {
+        for (String collection : collections()) {
+            try {
+                server.engine.sync(collection);
+            } catch (RuntimeException failure) {
+                MailEngine.skip(collection, failure);
+            }
+        }
+        MailStep.Outcome outcome = store.firstFrontier(collections());
+        MailWindow.stepped(context, accountId, null, outcome);
+        server.engine.downloadStep(collections(), outcome.frontier, null);
+        return outcome;
+    }
+
     @Test
-    public void aFirstStepListsEveryMailboxFromTheAccountFloorAndReadsItsBodies()
-            throws Exception {
+    public void aFirstSyncLeavesTheFrontierAtTheAccountsNewestStep() throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
 
-        MailStep.Outcome first =
-                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
+        MailStep.Outcome first = firstSync(server);
 
         // NOTE: every three hours three inbox messages and one sent: the
-        // account's 50th newest is the sent mail 36 hours 20 minutes back.
+        // account's 25th newest is the inbox message 18 hours back, above
+        // the sent mail's 7th, 18 hours 20 minutes back.
         assertEquals(
-                "the 50th newest by date across the inbox and the sent mail",
-                server.dateOf(sent, 18),
+                "the 25th newest by date across the inbox and the sent mail",
+                server.dateOf(inbox, 102),
                 first.frontier);
         assertFalse(first.exhausted);
-        assertEquals(37, held(inbox)[0]);
-        assertEquals(37, held(inbox)[1]);
-        assertEquals(13, held(sent)[0]);
-        assertEquals(13, held(sent)[1]);
+        assertEquals("the inbox's first chunk", 25, held(inbox)[0]);
+        assertEquals(19, held(inbox)[1]);
+        assertEquals("the sent mail's first chunk", 25, held(sent)[0]);
+        assertEquals(6, held(sent)[1]);
         assertEquals("the junk is listed for its checkpoint", 10, held(junk)[0]);
         assertEquals("its bodies are not read", 0, held(junk)[1]);
-        assertEquals("about a step's worth", 50, first.brought);
-        assertEquals(50, server.read.size());
+        assertEquals("a step's worth", 25, first.brought);
+        assertEquals("the account's newest alone", 25, server.read.size());
         for (String collection : collections()) {
             assertNotNull(collection + " opened", store.coverage(collection).at);
         }
@@ -274,36 +297,38 @@ public class ImapStepTest {
 
     @Test
     public void twoMailboxesSharingUidsKeepTheirOwnBodies() throws Exception {
-        // NOTE: UIDs 1 to 120 in both, so the first step reads the same
+        // NOTE: UIDs 1 to 120 in both, so the first sync reads the same
         // UIDs in each: a UID names a message in its own mailbox alone.
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 120, 1).mailbox(junk, 0, 1);
 
-        MailStep.Outcome first =
-                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
+        MailStep.Outcome first = firstSync(server);
 
-        assertEquals(50, first.brought);
-        assertEquals(25, held(inbox)[1]);
-        assertEquals(25, held(sent)[1]);
-        for (int uid = 120; uid > 95; uid--) {
+        // NOTE: the sent mail twenty minutes below the inbox, hour by hour:
+        // the inbox's 13 newest, the sent mail's 12.
+        assertEquals(25, first.brought);
+        assertEquals(13, held(inbox)[1]);
+        assertEquals(12, held(sent)[1]);
+        for (int uid = 120; uid > 108; uid--) {
             String handle = String.valueOf(uid);
             assertEquals(server.body(inbox, handle), bodyOf(inbox, handle));
             assertEquals(server.body(sent, handle), bodyOf(sent, handle));
             assertTrue("read, not linked: " + handle, server.read.contains(sent + "/" + handle));
         }
+        assertEquals(server.body(inbox, "108"), bodyOf(inbox, "108"));
     }
 
     @Test
     public void bodiesOnceLinkedAcrossMailboxesAreReleasedOnceAndReadAgain() throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 120, 1).mailbox(junk, 0, 1);
-        new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
+        firstSync(server);
 
         crossLink("120");
         assertEquals(server.body(inbox, "120"), bodyOf(sent, "120"));
 
         assertEquals("both sides of the link", 2, store.repairLinks(accountId));
         assertEquals("once", 0, store.repairLinks(accountId));
-        assertEquals(24, held(inbox)[1]);
-        assertEquals(24, held(sent)[1]);
+        assertEquals(12, held(inbox)[1]);
+        assertEquals(11, held(sent)[1]);
 
         // NOTE: the frontier at all mail, so the download takes both bodies
         // whatever today's date and zone: with none held, its window is the
@@ -329,7 +354,7 @@ public class ImapStepTest {
     @Test
     public void theRepairKeepsABodyItsMessageStillNeeds() throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 120, 1).mailbox(junk, 0, 1);
-        new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
+        firstSync(server);
         String own = hashOf(sent, "120");
         for (String handle : List.of("117", "118", "119", "120")) {
             crossLink(handle);
@@ -396,107 +421,115 @@ public class ImapStepTest {
     }
 
     @Test
-    public void aSmallAccountIsHeldWholeAfterItsFirstStep() throws Exception {
-        Server server = new Server().mailbox(inbox, 20, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
+    public void aSmallAccountIsHeldWholeAfterItsFirstSync() throws Exception {
+        Server server = new Server().mailbox(inbox, 20, 1).mailbox(sent, 4, 3).mailbox(junk, 10, 1);
 
-        MailStep.Outcome first =
-                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
+        MailStep.Outcome first = firstSync(server);
 
         assertNull("all mail", first.frontier);
         assertTrue(first.exhausted);
         assertEquals(20, held(inbox)[1]);
-        assertEquals(30, held(sent)[1]);
+        assertEquals(4, held(sent)[1]);
     }
 
     @Test
-    public void aLaterStepReadsTheBodiesBetweenTheNewFrontierAndTheOld() throws Exception {
+    public void anAccountIsNotHeldWholeWhileAMailboxHoldsMoreThanItsFirstChunk()
+            throws Exception {
+        // NOTE: 30 sent messages, more than a first chunk: the sent mail's
+        // first chunk holds 25 of them, so the account is not held whole.
+        Server server = new Server().mailbox(inbox, 20, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
+
+        MailStep.Outcome first = firstSync(server);
+
+        assertFalse(first.exhausted);
+        assertEquals("the account's 25th newest", 25, held(inbox)[1] + held(sent)[1]);
+    }
+
+    @Test
+    public void aLaterStepMovesTheFrontierAStepBackAndOwesItsBodies() throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
-        MailStep.Outcome first =
-                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
-        MailWindow.set(context, accountId, first.frontier);
+        MailStep.Outcome first = firstSync(server);
         int readFirst = server.read.size();
 
         MailStep.Outcome next =
-                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, false));
+                new WidenStep().run(server.engine, new StepRun(EMAIL, collections(), null, false));
 
         assertTrue(next.frontier.compareTo(first.frontier) < 0);
-        assertEquals(50, next.brought);
-        assertEquals("fifty more bodies read", readFirst + 50, server.read.size());
-        for (MailBodies.Row row : store.bodyRows(List.of(inbox, sent), next.frontier)) {
-            assertTrue(row.collection + "/" + row.linkId + " whole", row.bodied);
-        }
+        assertEquals(25, next.brought);
+        assertEquals("no body read by the step", readFirst, server.read.size());
+        assertEquals(
+                "the body step owes the step's 25",
+                25,
+                MailBodies.wanted(store.bodyRows(List.of(inbox, sent), next.frontier)).size());
+
+        // NOTE: Load more then reads them within its pass, the old frontier
+        // its upper end.
+        assertEquals(25, server.engine.downloadStep(collections(), next.frontier, first.frontier));
+        assertEquals(readFirst + 25, server.read.size());
+        assertEquals(0, MailBodies.wanted(store.bodyRows(List.of(inbox, sent), next.frontier)).size());
         assertEquals(0, held(junk)[1]);
     }
 
     @Test
-    public void aStepCountsTheBodiesItsListingLeftToRead() throws Exception {
+    public void aStepAfterTheFillAsksNothingOfTheServer() throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
-        List<int[]> told = Collections.synchronizedList(new ArrayList<>());
-        server.engine.tally =
-                new MailTally((landed, planned) -> told.add(new int[] {landed, planned}));
+        MailStep.Outcome first = firstSync(server);
+        for (String collection : List.of(inbox, sent)) {
+            server.engine.widen(collection, MailEngine.FILL_CHUNK);
+        }
+        int opened = server.opened.size();
 
-        new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
+        MailStep.Outcome next =
+                new WidenStep().run(server.engine, new StepRun(EMAIL, collections(), null, false));
 
-        assertArrayEquals(
-                "planned once the mailboxes are listed", new int[] {0, 50}, told.get(0));
-        assertArrayEquals(new int[] {50, 50}, told.get(told.size() - 1));
+        // NOTE: what Load more shows the fill listed already: it shows at
+        // once, its bodies downloading behind.
+        assertEquals("nothing listed", opened, server.opened.size());
+        assertTrue(next.frontier.compareTo(first.frontier) < 0);
+        assertEquals(25, next.brought);
     }
 
     @Test
-    public void aFirstStepSkipsAMailboxTheServerRefusesToOpen() throws Exception {
+    public void aStepIsHeldOnceTheFillListedItAndNotBefore() throws Exception {
+        Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
+        firstSync(server);
+
+        // NOTE: Load more during the fill shows a step the store holds and
+        // waits, with a toast, for one it would list.
+        assertFalse("a first chunk holds no step below the frontier", store.stepHeld(EMAIL, null));
+
+        server.engine.widen(inbox, MailEngine.FILL_CHUNK);
+        server.engine.widen(sent, MailEngine.FILL_CHUNK);
+        assertTrue(store.stepHeld(EMAIL, null));
+        assertTrue("a mailbox stepped alone", store.stepHeld(EMAIL, inbox));
+    }
+
+    @Test
+    public void aFirstSyncLeavesARefusedMailboxOutOfTheFrontier() throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
         server.refused.put(sent, 404);
 
-        MailStep.Outcome first =
-                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
+        MailStep.Outcome first = firstSync(server);
 
-        assertEquals("the inbox's 50th newest", server.dateOf(inbox, 71), first.frontier);
+        assertEquals("the inbox's 25th newest", server.dateOf(inbox, 96), first.frontier);
         assertFalse(first.exhausted);
-        assertEquals(50, held(inbox)[1]);
+        assertEquals(25, held(inbox)[1]);
         assertEquals("nothing of the refused mailbox", 0, held(sent)[0]);
         assertNull("left unopened", store.coverage(sent).at);
         assertNotNull(store.coverage(junk).at);
     }
 
     @Test
-    public void aFirstStepFailsWhenEveryMailboxIsRefusedOrTheConnectionFails() {
-        Server refused = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
-        for (String collection : collections()) {
-            refused.refused.put(collection, 404);
-        }
-        PimalayaException all =
-                assertThrows(
-                        PimalayaException.class,
-                        () ->
-                                new ImapStep()
-                                        .run(
-                                                refused.engine,
-                                                new StepRun(EMAIL, collections(), null, true)));
-        assertEquals(Integer.valueOf(404), all.status);
-
-        Server dropped = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
-        dropped.refused.put(sent, null);
-        assertThrows(
-                "no refusal, no skip",
-                PimalayaException.class,
-                () ->
-                        new ImapStep()
-                                .run(dropped.engine, new StepRun(EMAIL, collections(), null, true)));
-    }
-
-    @Test
     public void aLaterStepWidensPastAMailboxTheServerRefusesToOpen() throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 120, 1).mailbox(junk, 10, 1);
-        MailStep.Outcome first =
-                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
-        MailWindow.set(context, accountId, first.frontier);
+        MailStep.Outcome first = firstSync(server);
         server.refused.put(sent, 404);
 
         MailStep.Outcome next =
-                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, false));
+                new WidenStep().run(server.engine, new StepRun(EMAIL, collections(), null, false));
 
         assertTrue(next.frontier.compareTo(first.frontier) < 0);
         assertFalse("the refused mailbox is not held whole", next.exhausted);
-        assertTrue(held(inbox)[1] > 25);
+        assertTrue("the inbox widened past its first chunk", held(inbox)[0] > 25);
     }
 }

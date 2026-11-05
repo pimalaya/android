@@ -219,6 +219,97 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
         return outcome;
     }
 
+    /** Where a {@link #drain}'s keys come from, and where they go back. */
+    public interface Source {
+        /** The next key for a free worker, null once there is none for it. */
+        String next();
+
+        /** A key run; {@code landed} false when it failed or had no session. */
+        void back(String key, boolean landed);
+    }
+
+    /**
+     * Runs {@code step} over the keys {@code source} answers on {@link #size}
+     * workers, each taking the next one as soon as it is free, so a slow key
+     * holds no other.
+     *
+     * <p>Blocks until every worker finds none. A failing key leaves the
+     * others running; every failure is answered, in the order they came. One
+     * run at a time, as {@link #run}.
+     */
+    public synchronized Outcome drain(String label, Source source, Step<S> step) {
+        Outcome outcome = new Outcome();
+        outcome.sessions = size;
+        long started = System.nanoTime();
+        long number = RUNS.incrementAndGet();
+        AtomicInteger keys = new AtomicInteger();
+        AtomicLong remote = new AtomicLong();
+        List<Failure> failures = java.util.Collections.synchronizedList(new ArrayList<>());
+
+        List<Future<?>> running = new ArrayList<>(size);
+        for (int worker = 0; worker < size; worker++) {
+            int slot = worker;
+            Runnable work =
+                    () -> {
+                        String key = source.next();
+                        if (key == null) {
+                            return;
+                        }
+                        S session;
+                        try {
+                            session = sessionAt(slot);
+                        } catch (Exception failure) {
+                            Log.w("pimalaya", "worker could not connect: " + label, failure);
+                            failures.add(new Failure(key, failure));
+                            source.back(key, false);
+                            return;
+                        }
+                        if (joiner != null) {
+                            joiner.join(session, number);
+                        }
+                        try {
+                            while (key != null) {
+                                keys.incrementAndGet();
+                                boolean landed = false;
+                                try {
+                                    step.run(session, key, remote);
+                                    landed = true;
+                                } catch (Exception failure) {
+                                    failures.add(new Failure(key, failure));
+                                } finally {
+                                    source.back(key, landed);
+                                }
+                                key = source.next();
+                            }
+                        } finally {
+                            if (joiner != null) {
+                                joiner.join(session, 0);
+                            }
+                        }
+                    };
+            if (size == 1) {
+                work.run();
+            } else {
+                running.add(WORKERS.submit(work));
+            }
+        }
+        for (Future<?> worker : running) {
+            try {
+                worker.get();
+            } catch (Exception interrupted) {
+                Log.w("pimalaya", "worker failed: " + label, interrupted);
+                failures.add(new Failure("", interrupted));
+            }
+        }
+
+        outcome.failures.addAll(failures);
+        outcome.keys = keys.get();
+        outcome.wall = System.nanoTime() - started;
+        outcome.remote = remote.get();
+        Log.d("pimalaya", label + ": " + outcome);
+        return outcome;
+    }
+
     /**
      * Runs several pools' runs at once, one per account, outcomes in order.
      *

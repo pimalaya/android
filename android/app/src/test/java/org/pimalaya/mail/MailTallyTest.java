@@ -36,12 +36,12 @@ public class MailTallyTest {
     public void aStepFillsOutOfItsCountThenClosesOnWhatItBrought() {
         tally.expect(MailStep.COUNT);
         assertEquals(0, last()[0]);
-        assertEquals(50, last()[1]);
+        assertEquals(25, last()[1]);
 
         tally.land(10);
         tally.land(10);
         assertEquals(20, last()[0]);
-        assertEquals(50, last()[1]);
+        assertEquals(25, last()[1]);
 
         // NOTE: the account held 23 more, the walk ran out.
         tally.land(3);

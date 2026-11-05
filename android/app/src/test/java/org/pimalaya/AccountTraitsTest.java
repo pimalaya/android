@@ -37,7 +37,7 @@ public class AccountTraitsTest {
         DECIDED.put(
                 "msgraph://jane@outlook.com",
                 "{appends=false, marksAnswered=false, accountWide=false, allMail=false,"
-                        + " sessions=4, step=GraphStep, submits=true, refusesTrashless=true,"
+                        + " sessions=4, step=WidenStep, submits=true, refusesTrashless=true,"
                         + " accountLevel=false, fetch=graph, primesListing=true, push=round,"
                         + " resourceName=id, readsBack=false, probesCapabilities=false,"
                         + " protocolMail=msgraph, protocolCalendar=msgraph,"
@@ -45,14 +45,14 @@ public class AccountTraitsTest {
         DECIDED.put(
                 "jmap://api.fastmail.com/jmap/session",
                 "{appends=false, marksAnswered=true, accountWide=true, allMail=false, sessions=4,"
-                        + " step=GmailStep, submits=true, refusesTrashless=true,"
+                        + " step=WidenStep, submits=true, refusesTrashless=true,"
                         + " accountLevel=true, fetch=changes, primesListing=false, push=round,"
                         + " resourceName=id, readsBack=false, probesCapabilities=true,"
                         + " protocolMail=jmap, protocolCalendar=jmap, protocolContacts=jmap}");
         DECIDED.put(
                 "imaps://imap.example.org:993",
                 "{appends=true, marksAnswered=true, accountWide=false, allMail=false, sessions=3,"
-                        + " step=ImapStep, submits=false, refusesTrashless=false,"
+                        + " step=WidenStep, submits=false, refusesTrashless=false,"
                         + " accountLevel=false, fetch=multiget, primesListing=false, push=all,"
                         + " resourceName=id.vcf, readsBack=true, probesCapabilities=false,"
                         + " protocolMail=imap, protocolCalendar=caldav,"
@@ -60,7 +60,7 @@ public class AccountTraitsTest {
         DECIDED.put(
                 "https://dav.example.org/",
                 "{appends=true, marksAnswered=true, accountWide=false, allMail=false, sessions=3,"
-                        + " step=ImapStep, submits=false, refusesTrashless=false,"
+                        + " step=WidenStep, submits=false, refusesTrashless=false,"
                         + " accountLevel=false, fetch=multiget, primesListing=false, push=all,"
                         + " resourceName=id.vcf, readsBack=true, probesCapabilities=false,"
                         + " protocolMail=imap, protocolCalendar=caldav,"
@@ -68,7 +68,7 @@ public class AccountTraitsTest {
         DECIDED.put(
                 "local://on-this-device",
                 "{appends=true, marksAnswered=true, accountWide=false, allMail=false, sessions=3,"
-                        + " step=ImapStep, submits=false, refusesTrashless=false,"
+                        + " step=WidenStep, submits=false, refusesTrashless=false,"
                         + " accountLevel=false, fetch=multiget, primesListing=false, push=all,"
                         + " resourceName=id, readsBack=false, probesCapabilities=false,"
                         + " protocolMail=imap, protocolCalendar=caldav,"
