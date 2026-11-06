@@ -150,6 +150,23 @@ impl<H: Host> JmapCalls<'_, '_, H> {
         self.jmap.run(&self.session.api_url, coroutine)
     }
 
+    /// The event already filed in `calendar_id` under `uid`, if any.
+    fn held_event(&mut self, calendar_id: &str, uid: &str) -> Result<Option<String>, BridgeError> {
+        let opts = JmapCalendarEventQueryOptions {
+            filter: Some(JmapCalendarEventFilter {
+                in_calendar: Some(calendar_id.to_string()),
+                uid: Some(uid.to_string()),
+                ..Default::default()
+            }),
+            limit: Some(1),
+            ..Default::default()
+        };
+        let coroutine = JmapCalendarEventQuery::new(&self.session, &self.auth, opts)
+            .map_err(|err| err.to_string())?;
+        let out = self.jmap.run(&self.session.api_url, coroutine)?;
+        Ok(out.events.into_iter().next().and_then(|event| event.id))
+    }
+
     /// The event `id`, [`None`] when the server holds none, and the
     /// `CalendarEvent` state it was read at.
     fn event(&mut self, id: &str) -> Result<(Option<JmapCalendarEvent>, String), BridgeError> {
@@ -212,6 +229,15 @@ impl<H: Host> JmapCalls<'_, '_, H> {
             calendar_ids: BTreeMap::from([(calendar_id.to_string(), true)]),
             ..jscalendar_event(ical).map_err(refused)?
         };
+        let uid = event.event.get("uid").and_then(|uid| uid.as_str());
+        if let Some(uid) = uid
+            && let Some(id) = self.held_event(calendar_id, uid)?
+        {
+            return Ok(EventRef {
+                etag: self.written_revision(&id),
+                id,
+            });
+        }
         let args = JmapCalendarEventSetArgs {
             create: Some(BTreeMap::from([("e0".to_string(), event)])),
             send_scheduling_messages: organized(ical, addresses),

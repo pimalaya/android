@@ -326,9 +326,33 @@ mod fake {
         /// Answers a `CalendarEvent/get` of named events and a
         /// `CalendarEvent/set`, applying it.
         fn answer(&mut self, request: &FakeRequest) -> FakeResponse {
+            let mut queried: Vec<String> = Vec::new();
             methods(request, |name, args| match name {
+                "CalendarEvent/query" => {
+                    let uid = args["filter"]["uid"].as_str().expect("a query by uid");
+                    let calendar = args["filter"]["inCalendar"].as_str().unwrap();
+                    queried = self
+                        .events
+                        .iter()
+                        .filter(|(_, event)| {
+                            event["uid"] == uid && event["calendarIds"][calendar] == true
+                        })
+                        .map(|(id, _)| id.clone())
+                        .collect();
+                    let result = json!({
+                        "accountId": "a1",
+                        "queryState": "q1",
+                        "canCalculateChanges": false,
+                        "position": 0,
+                        "ids": queried,
+                    });
+                    ("CalendarEvent/query", result)
+                }
                 "CalendarEvent/get" => {
-                    let ids: Vec<String> = from_value(args["ids"].clone()).unwrap();
+                    let ids: Vec<String> = match args.get("#ids") {
+                        Some(_) => queried.clone(),
+                        None => from_value(args["ids"].clone()).unwrap(),
+                    };
                     let (list, not_found): (Vec<&String>, Vec<&String>) =
                         ids.iter().partition(|id| self.events.contains_key(*id));
                     let list: Vec<&Value> = list.into_iter().map(|id| &self.events[id]).collect();
@@ -464,6 +488,29 @@ mod fake {
             account.listed("ev1").etag,
             "the revision is the one the next listing reads"
         );
+    }
+
+    /// A create run again after its answer was lost finds the event it filed.
+    #[test]
+    fn a_new_entry_the_calendar_holds_already_is_not_filed_twice() {
+        let mut account = events(&[json!({
+            "id": "ev1",
+            "calendarIds": { "c1": true },
+            "uid": "lunch",
+            "title": "Lunch",
+        })]);
+
+        let created = account
+            .serve(|calls| calls.create_event("c1", NEW_ENTRY, &[]))
+            .unwrap();
+
+        assert_eq!(created.id, "ev1");
+        assert!(
+            account.sets.is_empty(),
+            "nothing created: {:?}",
+            account.sets
+        );
+        assert_eq!(account.events.len(), 1);
     }
 
     #[test]

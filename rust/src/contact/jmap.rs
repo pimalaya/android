@@ -66,43 +66,7 @@ impl<H: Host> Jmap<'_, H> {
     /// Creates the vCard as a ContactCard in the AddressBook `book_id`,
     /// under the id the server assigns.
     pub fn create_card(&mut self, book_id: &str, vcard: &str) -> Result<Card, BridgeError> {
-        let card = JmapContactCard::from_vcard(vcard).map_err(|err| err.to_string())?;
-        let auth = self.auth.authorization();
-        let session = self.session()?;
-        let api_url = session.api_url.clone();
-
-        let create = BTreeMap::from([(
-            "c0".to_string(),
-            JmapContactCard {
-                address_book_ids: BTreeMap::from([(book_id.to_string(), true)]),
-                ..card
-            },
-        )]);
-        let args = JmapContactCardSetArgs {
-            create: Some(create),
-            ..Default::default()
-        };
-        let coroutine =
-            JmapContactCardSet::new(&session, &auth, args).map_err(|err| err.to_string())?;
-        let out = self.run(&api_url, coroutine)?;
-
-        if let Some(err) = out.not_created.into_values().next() {
-            return Err(format!("The server refused the new contact: {err}").into());
-        }
-        let id = out
-            .created
-            .into_values()
-            .next()
-            .and_then(|created| created.id)
-            .ok_or_else(|| "JMAP create response is missing the card id".to_string())?;
-
-        Ok(Card {
-            id: id.clone(),
-            uri: id,
-            etag: None,
-            vcard: vcard.to_string(),
-            books: vec![book_id.to_string()],
-        })
+        self.calls()?.create_card(book_id, vcard)
     }
 
     /// Reads the ContactCard `id`, converted to a vCard document.
@@ -359,6 +323,73 @@ impl<H: Host> Jmap<'_, H> {
 /// `ContactCard` state, one `ContactCard/query` page with its cards, named
 /// cards, and one `ContactCard/changes` page.
 impl<H: Host> JmapCalls<'_, '_, H> {
+    /// Creates the vCard as a ContactCard in the AddressBook `book_id`, or
+    /// answers the card the book holds under its `uid` already.
+    fn create_card(&mut self, book_id: &str, vcard: &str) -> Result<Card, BridgeError> {
+        let card = JmapContactCard::from_vcard(vcard).map_err(|err| err.to_string())?;
+        if let Some(uid) = card.card.get("uid").and_then(|uid| uid.as_str())
+            && let Some(id) = self.held_card(book_id, uid)?
+        {
+            return Ok(Card {
+                id: id.clone(),
+                uri: id,
+                etag: None,
+                vcard: vcard.to_string(),
+                books: vec![book_id.to_string()],
+            });
+        }
+
+        let create = BTreeMap::from([(
+            "c0".to_string(),
+            JmapContactCard {
+                address_book_ids: BTreeMap::from([(book_id.to_string(), true)]),
+                ..card
+            },
+        )]);
+        let args = JmapContactCardSetArgs {
+            create: Some(create),
+            ..Default::default()
+        };
+        let coroutine = JmapContactCardSet::new(&self.session, &self.auth, args)
+            .map_err(|err| err.to_string())?;
+        let out = self.jmap.run(&self.session.api_url, coroutine)?;
+
+        if let Some(err) = out.not_created.into_values().next() {
+            return Err(format!("The server refused the new contact: {err}").into());
+        }
+        let id = out
+            .created
+            .into_values()
+            .next()
+            .and_then(|created| created.id)
+            .ok_or_else(|| "JMAP create response is missing the card id".to_string())?;
+
+        Ok(Card {
+            id: id.clone(),
+            uri: id,
+            etag: None,
+            vcard: vcard.to_string(),
+            books: vec![book_id.to_string()],
+        })
+    }
+
+    /// The card the AddressBook `book_id` holds under `uid`, if any.
+    fn held_card(&mut self, book_id: &str, uid: &str) -> Result<Option<String>, BridgeError> {
+        let opts = JmapContactCardQueryOptions {
+            filter: Some(JmapContactCardFilter {
+                in_address_book: Some(book_id.to_string()),
+                uid: Some(uid.to_string()),
+                ..Default::default()
+            }),
+            limit: Some(1),
+            ..Default::default()
+        };
+        let coroutine = JmapContactCardQuery::new(&self.session, &self.auth, opts)
+            .map_err(|err| err.to_string())?;
+        let out = self.jmap.run(&self.session.api_url, coroutine)?;
+        Ok(out.cards.into_iter().next().and_then(|card| card.id))
+    }
+
     /// The account's `ContactCard` state, what a delta lists from.
     fn card_state(&mut self) -> Result<String, BridgeError> {
         let opts = JmapContactCardGetOptions {
@@ -558,6 +589,8 @@ mod tests {
         changes: Vec<Value>,
         /// Whether the server can no longer compute changes.
         expired: bool,
+        /// The cards `ContactCard/set` created.
+        created: Vec<Value>,
     }
 
     fn book(size: usize) -> FakeBook {
@@ -565,6 +598,7 @@ mod tests {
             cards: (0..size).map(card).collect(),
             changes: Vec::new(),
             expired: false,
+            created: Vec::new(),
         }
     }
 
@@ -602,6 +636,41 @@ mod tests {
                             "notFound": [],
                         });
                         ("ContactCard/get", result)
+                    }
+                    "ContactCard/query" if args["filter"]["uid"].is_string() => {
+                        let uid = &args["filter"]["uid"];
+                        queried = self
+                            .cards
+                            .iter()
+                            .filter(|card| &card["uid"] == uid)
+                            .map(|card| card["id"].as_str().unwrap().to_string())
+                            .collect();
+                        let result = json!({
+                            "accountId": "a1",
+                            "queryState": "q1",
+                            "canCalculateChanges": false,
+                            "position": 0,
+                            "ids": queried,
+                        });
+                        ("ContactCard/query", result)
+                    }
+                    "ContactCard/set" => {
+                        let mut created = serde_json::Map::new();
+                        for (key, card) in args["create"].as_object().into_iter().flatten() {
+                            let id = format!("new{}", self.created.len() + 1);
+                            let mut card = card.clone();
+                            card["id"] = Value::from(id.clone());
+                            self.cards.push(card.clone());
+                            self.created.push(card);
+                            created.insert(key.clone(), json!({ "id": id }));
+                        }
+                        let result = json!({
+                            "accountId": "a1",
+                            "oldState": "s1",
+                            "newState": "s2",
+                            "created": created,
+                        });
+                        ("ContactCard/set", result)
                     }
                     "ContactCard/query" => {
                         let position = args["position"].as_u64().unwrap_or(0);
@@ -697,6 +766,35 @@ mod tests {
 
         let delta = calls.card_delta(since, limit).unwrap();
         (delta, asked(&client.host.requests))
+    }
+
+    /// Creates `vcard` in the book `b1` of `book`.
+    fn create(book: &mut FakeBook, vcard: &str) -> Card {
+        let mut client = Client::new(FakeServer::new(|request| book.answer(request)));
+        let mut jmap = Jmap {
+            client: &mut client,
+            session_url: Url::parse("https://api.example.com/jmap/session").unwrap(),
+            auth: Auth::Bearer("token"),
+        };
+        let mut calls = JmapCalls {
+            jmap: &mut jmap,
+            session: jmap_session(json!({}), json!({"urn:ietf:params:jmap:contacts": "a1"})),
+            auth: SecretString::from("Bearer token"),
+        };
+        calls.create_card("b1", vcard).unwrap()
+    }
+
+    /// A create run again after its answer was lost finds the card it filed.
+    #[test]
+    fn a_new_card_the_book_holds_already_is_not_filed_twice() {
+        let mut held = book(1);
+        let vcard = "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:urn:uuid:0\r\nFN:Jane 0\r\nEND:VCARD\r\n";
+        assert_eq!(create(&mut held, vcard).id, "k0000");
+        assert!(held.created.is_empty(), "{:?}", held.created);
+
+        let mut fresh = book(1);
+        let other = vcard.replace("urn:uuid:0", "urn:uuid:9");
+        assert_eq!(create(&mut fresh, &other).id, "new1");
     }
 
     #[test]

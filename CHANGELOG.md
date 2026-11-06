@@ -86,6 +86,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a contact or calendar entry created on a JMAP account (Fastmail) being filed twice when the server's answer to its creation was lost: the sync now finds the one the server already holds by its UID.
 - Fixed a Google Calendar meeting you organize failing on every sync once its creation had reached Google but the answer was lost: the sync now finds the meeting Google already holds and keeps it.
 - Fixed a message Gmail or Microsoft 365 held back for a rate limit or a daily quota being kept as refused, waiting for you to send it again: it now stays in the outbox and goes out on a later sync.
 - Fixed the first sync of an IMAP mailbox on a server without SORT listing far more than its newest messages when older mail had been imported into it in date order.
