@@ -86,6 +86,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed copying or moving a message on an IMAP account copying another mailbox's message instead when both mailboxes held the same UID: the copy now comes from the mailbox holding that message, matched by its body and its Message-ID within the account.
 - Fixed a message sent to yourself from a Gmail account arriving already read: the sync pushed the read mark of the copy staged in Sent, and Gmail, which keeps one read state per message, applied it to the inbox copy too. The copy in Sent now takes Gmail's own marks when it lands.
 - Fixed a mail sync interrupted by the screen rotating, or the app closing, freeing a connection another of its workers was still using: the sync now stops between mailboxes and lets go of its connections only once every worker is done with them.
 - Fixed the drawer's empty state, shown with no account, sitting near the top of the drawer rather than centred in it.

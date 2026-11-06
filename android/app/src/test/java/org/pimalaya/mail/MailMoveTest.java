@@ -304,6 +304,22 @@ public class MailMoveTest {
         assertEquals("no body uploaded", List.of("copy INBOX 42 Sent"), server.calls);
     }
 
+    /** An IMAP UID names a message in one mailbox: a copy comes from its own. */
+    @Test
+    public void aCopyComesFromItsOwnMailboxWhereAnotherReusesItsUid() throws Exception {
+        String archive = store.collectionOf(EMAIL, "Archive");
+        file(archive, named("42", "Other").put("summary", PimdirSummary.mail(
+                "other@example.org", "Other", "", "a@example.org", null,
+                "2026-10-07T08:00:00Z", 0, false)));
+        synced(archive);
+        stager().mutateCopy(archive, "42", sent);
+
+        Server server = new Server();
+        sync(server, sent);
+
+        assertEquals(List.of("copy Archive 42 Sent"), server.calls);
+    }
+
     @Test
     public void aMoveTargetWaitsForItsSource() throws Exception {
         fixtures.putObject(inbox, "42", "Subject: Hello\r\n\r\nbody\r\n".getBytes(StandardCharsets.UTF_8));

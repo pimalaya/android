@@ -931,6 +931,8 @@ A Graph account SHALL read bodies through `$batch` calls of up to 20 `$value` GE
 ### Requirement: A link id names a message across mailboxes only where the account lists them as one
 A message's link id SHALL be its handle. Only on an account listed account-wide (Gmail, JMAP), whose id names one message across its mailboxes, SHALL a body be linked from another mailbox under the same link id, and only from the same account (pimdir STORAGE §14). On IMAP a link id is a UID, naming a message in its own mailbox alone, and on Graph a folder's copy alone: no body SHALL be linked there, every body being fetched. Once per such account, every body its mailboxes hold under a link id another collection holds with the same body SHALL be released back to its summary, both sides, unless the message still needs it (a conflict, a pending create, a local edit), so the body step reads it again.
 
+A pending create's origin, the binding its push copies from (pimdir SYNC §3), SHALL be one of the same account holding the body the create carries, when it carries one, and, for mail, the create's `Message-ID`: an IMAP copy SHALL come from the mailbox holding that message, whatever other mailbox reuses its UID.
+
 #### Scenario: Two IMAP mailboxes holding the same UIDs
 - GIVEN an IMAP account whose inbox and archive both hold UIDs 1 to 120
 - WHEN a step reads the bodies of UID 120 in both
@@ -940,6 +942,11 @@ A message's link id SHALL be its handle. Only on an account listed account-wide 
 - GIVEN an IMAP account whose sent UID 120 holds the inbox UID 120's body
 - WHEN its next pass lists its mailboxes
 - THEN both bodies are released, and the body step reads each message's own
+
+#### Scenario: A copy from a mailbox whose UID another reuses
+- GIVEN an IMAP account whose inbox and archive both hold a UID 42, two different messages
+- WHEN the archive's 42 is copied into Sent
+- THEN the sync copies the archive's 42, not the inbox's
 
 ### Requirement: No message or calendar object can overflow the bridge's stack
 The bridge SHALL walk a message's MIME tree with a stack of its own, at most 64 levels, parts nested deeper left unnumbered, and SHALL derive a message nesting deeper than that from its header alone. It SHALL refuse a calendar object whose components nest deeper than 16 levels, a folded `BEGIN` counted. Every one of these SHALL hold on a 1 MiB thread, the stack of an ordinary Java thread.

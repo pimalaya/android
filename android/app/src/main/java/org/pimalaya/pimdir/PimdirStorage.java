@@ -606,7 +606,8 @@ public final class PimdirStorage {
             // collection already holds on the same source is a membership
             // addition rather than a second upload. Naming where it comes
             // from is what lets the push adapter tell the two apart.
-            JSONObject origin = originOf(collection, linkId);
+            JSONObject origin =
+                    originOf(collection, linkId, cursor.isNull(2) ? null : cursor.getString(2));
             if (origin != null) {
                 placement.put("origin", origin);
             }
@@ -690,16 +691,15 @@ public final class PimdirStorage {
      * <p>Adding a contact to a second book is then a membership patch on
      * account-level backends, not a second card.
      */
-    private JSONObject originOf(String collection, String linkId) throws JSONException {
+    private JSONObject originOf(String collection, String linkId, String object)
+            throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
         String stored = collectionOf(collection);
-        String source = sourceOf(collection);
-        try (Cursor cursor =
-                PimdirDb.query(
-                        db,
-                        "BOUND_ELSEWHERE",
-                        PimdirSql.values(
-                                "link_id", linkId, "source", source, "collection", stored))) {
+        Map<String, Object> values =
+                PimdirSql.values("link_id", linkId, "source", sourceOf(collection), "collection", stored);
+        values.put("account", PimdirAccount.accountIdOf(stored) + PimdirAccount.SEPARATOR);
+        values.put("object", object);
+        try (Cursor cursor = PimdirDb.query(db, "BOUND_ELSEWHERE", values)) {
             if (!cursor.moveToFirst()) {
                 return null;
             }
