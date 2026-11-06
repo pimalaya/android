@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- An unread message's badge on its avatar: the accent, ringed in the
+     card's tone so it parts from the disc it overlaps. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="?android:attr/colorAccent" />
+    <stroke
+        android:width="2dp"
+        android:color="@color/surface" />
+</shape>

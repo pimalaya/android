@@ -21,31 +21,7 @@
         android:orientation="horizontal"
         android:paddingStart="14dp">
 
-        <FrameLayout
-            android:layout_width="@dimen/card_avatar"
-            android:layout_height="@dimen/card_avatar"
-            android:layout_marginTop="12dp"
-            android:layout_marginEnd="12dp">
-
-            <TextView
-                android:id="@+id/contact_avatar"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:gravity="center"
-                android:textColor="#ffffff"
-                android:textSize="17sp" />
-
-            <ImageView
-                android:id="@+id/contact_check"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:background="@drawable/selected_disc"
-                android:contentDescription="@string/selected"
-                android:padding="9dp"
-                android:src="@drawable/ic_check"
-                android:visibility="gone" />
-
-        </FrameLayout>
+        <include layout="@layout/avatar_slot" />
 
         <LinearLayout
             android:layout_width="0dp"

@@ -296,6 +296,7 @@
     <string name="files_show_message">Afficher le message</string>
     <string name="files_delete">Supprimer</string>
     <string name="files_delete_confirm">Supprimer %1$s de ce dossier ?</string>
+    <string name="files_delete_selected_confirm">Supprimer les fichiers sélectionnés de leurs dossiers ?</string>
     <string name="files_import">Importer un fichier</string>
     <string name="files_imported">Importé dans %1$s</string>
     <string name="files_rename">Renommer</string>
@@ -354,7 +355,15 @@
     </plurals>
     <string name="drawer_never_synced">Jamais synchronisé</string>
     <string name="drawer_deactivated">Désactivé</string>
+    <string name="select">Sélectionner</string>
     <string name="selected">Sélectionné</string>
+    <string name="unread">Non lu</string>
+    <string name="action_read">Lu</string>
+    <string name="action_unread">Non lu</string>
+    <string name="action_important">Important</string>
+    <string name="action_unimportant">Pas important</string>
+    <string name="action_merge">Fusionner</string>
+    <string name="action_delete">Supprimer</string>
     <plurals name="messages_deleted">
         <item quantity="one">%d message supprimé</item>
         <item quantity="other">%d messages supprimés</item>
@@ -702,6 +711,7 @@
     <!-- Les deux verbes autour de l'édition d'une entrée. -->
     <string name="event_delete">Supprimer</string>
     <string name="event_delete_confirm">Supprimer cette entrée ?</string>
+    <string name="event_delete_selected_confirm">Supprimer les entrées sélectionnées ? Une entrée qui se répète part entière, avec toutes ses occurrences.</string>
     <string name="event_delete_conflict_confirm">Cette entrée a aussi été modifiée ailleurs. La supprimer, avec la version modifiée là-bas ?</string>
     <string name="event_delete_failed">Impossible de supprimer l\'entrée</string>
     <string name="event_no_calendar">Aucun calendrier où la placer</string>

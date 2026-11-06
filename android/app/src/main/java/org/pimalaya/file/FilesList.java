@@ -26,6 +26,7 @@ import org.pimalaya.account.LocalBook;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.ui.Avatar;
+import org.pimalaya.ui.AvatarSlot;
 import org.pimalaya.ui.CardSections;
 import org.pimalaya.ui.FilterPanel;
 import org.pimalaya.ui.Host;
@@ -34,6 +35,7 @@ import org.pimalaya.ui.ListFilter;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.SectionsAdapter;
+import org.pimalaya.ui.SelectionBar;
 
 /**
  * The Files screen: device folders, then each mail account's attachments.
@@ -42,7 +44,7 @@ import org.pimalaya.ui.SectionsAdapter;
  * executor: an account's attachments in one statement with their messages,
  * newest first, a folder's files A to Z.
  */
-public final class FilesList {
+public final class FilesList implements SelectionBar.Owner {
     /** The cache prefix of an import's staged copy ({@code CacheSweep}). */
     public static final String STAGED = "import";
 
@@ -75,6 +77,12 @@ public final class FilesList {
 
     /** Every row the filter lets through, before the chips and the search. */
     private List<Row> rows = new ArrayList<>();
+
+    /** The rows the list shows once filtered, which select-all takes. */
+    private List<Row> shownRows = new ArrayList<>();
+
+    /** The files a selection holds, by folder and item. */
+    private final Map<String, Row> selected = new LinkedHashMap<>();
 
     private ListHeader header;
 
@@ -180,6 +188,13 @@ public final class FilesList {
         list.setOnItemClickListener(
                 (parent, view, position, id) -> {
                     int at = header.rowAt(position);
+                    if (isSelectionMode()) {
+                        Row row = sections.isHeader(at) ? null : sections.row(at);
+                        if (row != null && selectable(row)) {
+                            toggle(row);
+                        }
+                        return;
+                    }
                     if (sections.isHeader(at)) {
                         PimdirCollections.Stored folder = folderHeaders.get(sections.header(at));
                         if (folder != null) {
@@ -197,6 +212,134 @@ public final class FilesList {
                         fileMenu(row);
                     }
                 });
+        list.setOnItemLongClickListener(
+                (parent, view, position, id) -> {
+                    int at = header.rowAt(position);
+                    Row row = sections.isHeader(at) ? null : sections.row(at);
+                    if (row == null || !selectable(row)) {
+                        return false;
+                    }
+                    toggle(row);
+                    return true;
+                });
+    }
+
+    /**
+     * Whether a row can join a selection, whose one action deletes: a
+     * folder's file, never an attachment, which goes with its last message.
+     */
+    private static boolean selectable(Row row) {
+        return row.file != null && !row.attachment();
+    }
+
+    /** What a file is known by in the selection: its folder and its item. */
+    private static String keyOf(Row row) {
+        return row.collection.id + "\n" + row.file.linkId;
+    }
+
+    /** Whether a selection is under way. */
+    public boolean isSelectionMode() {
+        return !selected.isEmpty();
+    }
+
+    /** Adds a file to the selection, or takes it out; empty, it ends. */
+    private void toggle(Row row) {
+        if (selected.remove(keyOf(row)) == null) {
+            selected.put(keyOf(row), row);
+        }
+        adapter.notifyDataSetChanged();
+        updateSelectionUi();
+    }
+
+    /** The rows shown that a selection can hold. */
+    private List<Row> selectableShown() {
+        List<Row> taken = new ArrayList<>();
+        for (Row row : shownRows) {
+            if (selectable(row)) {
+                taken.add(row);
+            }
+        }
+        return taken;
+    }
+
+    /** Whether every row shown that can be is selected. */
+    private boolean allSelected() {
+        List<Row> taken = selectableShown();
+        for (Row row : taken) {
+            if (!selected.containsKey(keyOf(row))) {
+                return false;
+            }
+        }
+        return !taken.isEmpty();
+    }
+
+    /** Selects every file shown, or none when all already are. */
+    public void toggleSelectAll() {
+        if (allSelected()) {
+            exitSelection();
+            return;
+        }
+        for (Row row : selectableShown()) {
+            selected.put(keyOf(row), row);
+        }
+        adapter.notifyDataSetChanged();
+        updateSelectionUi();
+    }
+
+    /** Ends the selection and gives the bar and the navigation back. */
+    public void exitSelection() {
+        if (selected.isEmpty()) {
+            return;
+        }
+        selected.clear();
+        adapter.notifyDataSetChanged();
+        updateSelectionUi();
+    }
+
+    /**
+     * The chrome while a selection runs: the cross, the count and select-all
+     * in the bar; delete in the navigation's place.
+     */
+    public void updateSelectionUi() {
+        if (host.screen != Panels.FILES) {
+            return;
+        }
+        if (!isSelectionMode()) {
+            SelectionBar.ended(host, Panels.FILES);
+            return;
+        }
+        SelectionBar.show(
+                host,
+                selected.size(),
+                allSelected(),
+                List.of(
+                        new SelectionBar.Action(
+                                R.drawable.ic_delete_bar,
+                                R.string.action_delete,
+                                this::confirmDeleteSelected)));
+    }
+
+    /** Asks, then deletes every selected file from its folder. */
+    private void confirmDeleteSelected() {
+        List<Row> taken = new ArrayList<>(selected.values());
+        new AlertDialog.Builder(host)
+                .setMessage(R.string.files_delete_selected_confirm)
+                .setPositiveButton(
+                        R.string.files_delete,
+                        (dialog, which) ->
+                                host.io.execute(
+                                        () -> {
+                                            for (Row row : taken) {
+                                                files.delete(row.file);
+                                            }
+                                            host.postAlive(
+                                                    () -> {
+                                                        exitSelection();
+                                                        reload();
+                                                    });
+                                        }))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     /** The list's header. */
@@ -309,11 +452,13 @@ public final class FilesList {
             shown.add(row);
             files++;
         }
+        shownRows = shown;
         sections.fill(shown, row -> row.section);
         adapter.notifyDataSetChanged();
         header.meta(host.getResources().getQuantityString(R.plurals.files_meta, files, files));
         host.findViewById(R.id.files_empty)
                 .setVisibility(shown.isEmpty() ? View.VISIBLE : View.GONE);
+        updateSelectionUi();
     }
 
     /** Whether a media type falls under any of the types on, by key. */
@@ -684,14 +829,12 @@ public final class FilesList {
             view.findViewById(R.id.event_conflicted).setVisibility(View.GONE);
 
             Row row = sections.row(position);
-            TextView avatar = view.findViewById(R.id.event_avatar);
             TextView summary = view.findViewById(R.id.event_summary);
             TextView start = view.findViewById(R.id.event_start);
             TextView kind = view.findViewById(R.id.event_kind);
             TextView origin = view.findViewById(R.id.event_origin);
             if (row.file == null) {
-                avatar.setText("");
-                Avatar.paint(avatar, row.collection.id);
+                AvatarSlot.bind(host, view, "", row.collection.id, null, false, false);
                 summary.setText(R.string.files_folder_empty);
                 start.setText("");
                 kind.setText("");
@@ -700,8 +843,14 @@ public final class FilesList {
             }
 
             String name = fileActions.label(row.file);
-            avatar.setText(Avatar.letter(name));
-            Avatar.paint(avatar, row.file.linkId);
+            AvatarSlot.bind(
+                    host,
+                    view,
+                    Avatar.letter(name),
+                    row.file.linkId,
+                    null,
+                    selected.containsKey(keyOf(row)),
+                    false);
             summary.setText(name);
             start.setText(size(row.file.size));
             String type =

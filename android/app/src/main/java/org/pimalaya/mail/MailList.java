@@ -5,8 +5,6 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
-import android.widget.ImageButton;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -36,6 +34,7 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SyncScope;
 import org.pimalaya.client.Flags;
 import org.pimalaya.ui.Avatar;
+import org.pimalaya.ui.AvatarSlot;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.ui.FilterPanel;
 import org.pimalaya.ui.Dates;
@@ -43,6 +42,7 @@ import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListFilter;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
+import org.pimalaya.ui.SelectionBar;
 
 /**
  * The mail screen: every mailbox of every account in one list, by day cards.
@@ -51,7 +51,7 @@ import org.pimalaya.ui.Panels;
  * shown frontiers' floor ({@link MailStep}), then a footer loading more. Paged
  * lazily; search, chips and badge narrow the query, never what syncs.
  */
-public final class MailList {
+public final class MailList implements SelectionBar.Owner {
     /** How many rows one page read brings in. */
     private static final int PAGE = 50;
 
@@ -259,10 +259,6 @@ public final class MailList {
                     toggle(message);
                     return true;
                 });
-
-        host.findViewById(R.id.mail_select_seen).setOnClickListener(view -> markSelected());
-        host.findViewById(R.id.mail_select_flag).setOnClickListener(view -> flagSelected());
-        host.findViewById(R.id.mail_select_delete).setOnClickListener(view -> deleteSelected());
 
         androidx.swiperefreshlayout.widget.SwipeRefreshLayout refresh =
                 host.findViewById(R.id.mail_refresh);
@@ -1104,12 +1100,7 @@ public final class MailList {
         ((TextView) view.findViewById(R.id.message_from)).setText("");
         ((TextView) view.findViewById(R.id.message_date)).setText("");
         ((TextView) view.findViewById(R.id.message_origin)).setText("");
-        TextView avatar = view.findViewById(R.id.message_avatar);
-        avatar.setText("");
-        Avatar.paint(avatar, "");
-        avatar.setVisibility(View.VISIBLE);
-        view.findViewById(R.id.message_check).setVisibility(View.GONE);
-        view.findViewById(R.id.message_dot).setVisibility(View.GONE);
+        AvatarSlot.bind(host, view, "", "", null, false, false);
         view.findViewById(R.id.message_star).setVisibility(View.GONE);
         view.findViewById(R.id.message_attachment).setVisibility(View.GONE);
         view.findViewById(R.id.message_answered).setVisibility(View.GONE);
@@ -1179,21 +1170,15 @@ public final class MailList {
 
         // NOTE: keyed by address alone, so a sender respelling their name
         // keeps the colour the eye learned.
-        TextView avatar = view.findViewById(R.id.message_avatar);
-        avatar.setText(Avatar.letter(message.fromAddress));
-        Avatar.paint(avatar, message.fromAddress);
-        boolean checked = isSelected(message);
-        avatar.setVisibility(checked ? View.INVISIBLE : View.VISIBLE);
-        ImageView check = view.findViewById(R.id.message_check);
-        check.setVisibility(checked ? View.VISIBLE : View.GONE);
-        if (checked) {
-            check.setBackground(host.getDrawable(R.drawable.selected_disc));
-            check.setImageTintList(
-                    android.content.res.ColorStateList.valueOf(host.accentContrast()));
-        }
-
         boolean unread = !message.seen() && !message.pending();
-        view.findViewById(R.id.message_dot).setVisibility(unread ? View.VISIBLE : View.GONE);
+        AvatarSlot.bind(
+                host,
+                view,
+                Avatar.letter(message.fromAddress),
+                message.fromAddress,
+                null,
+                isSelected(message),
+                unread);
         from.setTypeface(null, unread ? Typeface.BOLD : Typeface.NORMAL);
         subject.setTypeface(null, unread ? Typeface.BOLD : Typeface.NORMAL);
         date.setTextColor(
@@ -1323,35 +1308,20 @@ public final class MailList {
     }
 
     /**
-     * The bar during a selection: the count, read, star, delete, select-all.
+     * The chrome during a selection: the count and select-all in the bar;
+     * read, important and delete in the navigation's place.
      *
      * <p>Each toggle goes the way that changes something: read while any is
-     * unread, star while any is not starred.
+     * unread, important while any is not.
      */
     void updateSelectionUi() {
         if (host.screen != Panels.MAIL) {
             return;
         }
-        boolean selecting = isSelectionMode();
-        TextView title = host.findViewById(R.id.bar_title);
-        if (selecting) {
-            title.animate().cancel();
-            title.setText(
-                    host.getString(
-                            R.string.selected_count,
-                            (int) Math.min(Integer.MAX_VALUE, selectedCount())));
-            title.setAlpha(1f);
-        } else {
-            host.showDomainTitle(Panels.MAIL);
+        if (!isSelectionMode()) {
+            SelectionBar.ended(host, Panels.MAIL);
+            return;
         }
-        host.findViewById(R.id.bar_menu).setVisibility(selecting ? View.GONE : View.VISIBLE);
-        host.findViewById(R.id.selection_close)
-                .setVisibility(selecting ? View.VISIBLE : View.GONE);
-        host.findViewById(R.id.selection_all_slot)
-                .setVisibility(selecting ? View.VISIBLE : View.GONE);
-        ((android.widget.CheckBox) host.findViewById(R.id.selection_all))
-                .setChecked(selecting && allSelected && excluded.isEmpty());
-        host.findViewById(R.id.fab_extended).setVisibility(selecting ? View.GONE : View.VISIBLE);
 
         // NOTE: a selection of everything is read from the counts: unread
         // when the store counts any, and starring rather than reading every
@@ -1362,19 +1332,23 @@ public final class MailList {
             anyUnread |= !message.seen() && !message.pending();
             anyPlain |= !message.flagged() && !message.pending();
         }
-        ImageButton seen = host.findViewById(R.id.mail_select_seen);
-        seen.setVisibility(selecting ? View.VISIBLE : View.GONE);
-        seen.setImageResource(anyUnread ? R.drawable.ic_check : R.drawable.ic_visibility_off);
-        seen.setContentDescription(
-                host.getString(
-                        anyUnread ? R.string.message_mark_read : R.string.message_mark_unread));
-        ImageButton flag = host.findViewById(R.id.mail_select_flag);
-        flag.setVisibility(selecting ? View.VISIBLE : View.GONE);
-        flag.setImageResource(anyPlain ? R.drawable.ic_star : R.drawable.ic_star_filled);
-        flag.setContentDescription(
-                host.getString(anyPlain ? R.string.message_flag : R.string.message_unflag));
-        host.findViewById(R.id.mail_select_delete)
-                .setVisibility(selecting ? View.VISIBLE : View.GONE);
+        SelectionBar.show(
+                host,
+                selectedCount(),
+                allSelected && excluded.isEmpty(),
+                List.of(
+                        new SelectionBar.Action(
+                                anyUnread ? R.drawable.ic_check : R.drawable.ic_visibility_off,
+                                anyUnread ? R.string.action_read : R.string.action_unread,
+                                this::markSelected),
+                        new SelectionBar.Action(
+                                anyPlain ? R.drawable.ic_star : R.drawable.ic_star_filled,
+                                anyPlain ? R.string.action_important : R.string.action_unimportant,
+                                this::flagSelected),
+                        new SelectionBar.Action(
+                                R.drawable.ic_delete_bar,
+                                R.string.action_delete,
+                                this::deleteSelected)));
     }
 
     /** Marks the selection read, or unread when it all already is. */

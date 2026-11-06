@@ -380,7 +380,7 @@ final class TaskBatch {
                                 if (outcome != null) {
                                     host.showError(outcome, R.string.task_save_failed);
                                 }
-                                list.endSelection();
+                                list.exitSelection();
                                 list.reload();
                             });
                 });

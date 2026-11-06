@@ -6,8 +6,9 @@
      The entry leads, ended by when it starts, since the day header
      above already says which day; then what kind of entry it is and how
      long it runs; then the calendar and account. The disc stands for
-     the calendar, initial and colour, the way a mail row's stands for
-     its sender. -->
+     the calendar, initial and its colour's hue in the palette's tones,
+     the way a mail row's stands for its sender. A long press selects the
+     row, the disc turning into a check. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -22,15 +23,7 @@
         android:orientation="horizontal"
         android:paddingStart="14dp">
 
-        <TextView
-            android:id="@+id/event_avatar"
-            android:layout_width="@dimen/card_avatar"
-            android:layout_height="@dimen/card_avatar"
-            android:layout_marginTop="12dp"
-            android:layout_marginEnd="12dp"
-            android:gravity="center"
-            android:textColor="#ffffff"
-            android:textSize="17sp" />
+        <include layout="@layout/avatar_slot" />
 
         <LinearLayout
             android:layout_width="0dp"

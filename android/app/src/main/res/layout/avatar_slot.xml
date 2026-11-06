@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A row's avatar, the same in every domain (AvatarSlot binds it): the
+     disc in the palette's tones under its letter; while the row is picked,
+     the accent disc and its check in its place, at its size; an unread
+     message's badge on its top-right edge, ringed in the card's tone so it
+     shifts nothing. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/avatar_slot"
+    android:layout_width="@dimen/card_avatar"
+    android:layout_height="@dimen/card_avatar"
+    android:layout_marginTop="12dp"
+    android:layout_marginEnd="12dp">
+
+    <TextView
+        android:id="@+id/avatar_disc"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:textSize="17sp" />
+
+    <ImageView
+        android:id="@+id/avatar_check"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/selected_disc"
+        android:contentDescription="@string/selected"
+        android:padding="9dp"
+        android:src="@drawable/ic_check"
+        android:visibility="gone" />
+
+    <View
+        android:id="@+id/avatar_badge"
+        android:layout_width="12dp"
+        android:layout_height="12dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="2dp"
+        android:layout_marginEnd="2dp"
+        android:background="@drawable/unread_badge"
+        android:contentDescription="@string/unread"
+        android:visibility="gone" />
+
+</FrameLayout>

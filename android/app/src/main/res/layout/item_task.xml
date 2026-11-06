@@ -2,7 +2,8 @@
 <!-- A Tasks row, one of its list's card, on the agenda row's shape
      (item_event.xml): a tick to close it, then the task and the line
      saying where it belongs (context, project, who it waits on), and on
-     its right what is due or how long it has waited. It blocks its
+     its right what is due or how long it has waited. A picked task shows
+     the other lists' check disc in the tick's place. It blocks its
      descendants' focus, the tick's ImageButton taking focus whatever it
      says, or the list would not hand the row its tap (TaskRowTest). -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -20,16 +21,32 @@
         android:orientation="horizontal"
         android:paddingStart="6dp">
 
-        <ImageButton
-            android:id="@+id/task_done"
+        <FrameLayout
             android:layout_width="44dp"
             android:layout_height="48dp"
-            android:layout_marginTop="2dp"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/task_mark_done"
-            android:focusable="false"
-            android:src="@drawable/ic_check_box_blank"
-            android:tint="?android:attr/textColorSecondary" />
+            android:layout_marginTop="2dp">
+
+            <ImageButton
+                android:id="@+id/task_done"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/task_mark_done"
+                android:focusable="false"
+                android:src="@drawable/ic_check_box_blank"
+                android:tint="?android:attr/textColorSecondary" />
+
+            <!-- A picked task's check, the other lists' disc at its size. -->
+            <include
+                layout="@layout/avatar_slot"
+                android:layout_width="@dimen/card_avatar"
+                android:layout_height="@dimen/card_avatar"
+                android:layout_gravity="center"
+                android:layout_marginTop="0dp"
+                android:layout_marginEnd="0dp"
+                android:visibility="gone" />
+
+        </FrameLayout>
 
         <LinearLayout
             android:layout_width="0dp"

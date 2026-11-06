@@ -473,7 +473,15 @@
     </plurals>
     <string name="drawer_never_synced">Not synced yet</string>
     <string name="drawer_deactivated">Deactivated</string>
+    <string name="select">Select</string>
     <string name="selected">Selected</string>
+    <string name="unread">Unread</string>
+    <string name="action_read">Read</string>
+    <string name="action_unread">Unread</string>
+    <string name="action_important">Important</string>
+    <string name="action_unimportant">Not important</string>
+    <string name="action_merge">Merge</string>
+    <string name="action_delete">Delete</string>
     <plurals name="messages_deleted">
         <item quantity="one">Deleted one message</item>
         <item quantity="other">Deleted %d messages</item>
@@ -581,6 +589,7 @@
     <string name="files_show_message">Show the message</string>
     <string name="files_delete">Delete</string>
     <string name="files_delete_confirm">Delete %1$s from this folder?</string>
+    <string name="files_delete_selected_confirm">Delete the selected files from their folders?</string>
     <string name="files_import">Import a file</string>
     <string name="files_imported">Imported into %1$s</string>
     <string name="files_rename">Rename</string>
@@ -767,6 +776,7 @@
     <string name="event_save_failed">Could not save the entry</string>
     <string name="event_delete">Delete</string>
     <string name="event_delete_confirm">Delete this entry?</string>
+    <string name="event_delete_selected_confirm">Delete the selected entries? A repeating one goes whole, every occurrence with it.</string>
     <string name="event_delete_conflict_confirm">This entry was also changed elsewhere. Delete it, and the version changed there with it?</string>
     <string name="event_delete_failed">Could not delete the entry</string>
     <string name="event_no_calendar">No calendar to put it in</string>

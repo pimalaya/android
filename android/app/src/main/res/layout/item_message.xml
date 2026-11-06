@@ -7,10 +7,10 @@
      subject follows, ended by its marks, read from the edge inwards: the
      paperclip of a message carrying an attachment, the star of an
      important one; then the mailbox and account a merged list has to say.
-     An unread message's dot stands in the row's leading gutter, level with
-     the sender, so it shifts nothing: read and unread rows keep their times
-     in one column. A long press selects the row, the disc turning into a
-     check. -->
+     An unread message's badge sits on the disc's top-right edge
+     (avatar_slot.xml), so it shifts nothing: read and unread rows keep
+     their discs and times in one column. A long press selects the row, the
+     disc turning into a check. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -26,30 +26,7 @@
         android:orientation="horizontal"
         android:paddingStart="14dp">
 
-        <FrameLayout
-            android:layout_width="@dimen/card_avatar"
-            android:layout_height="@dimen/card_avatar"
-            android:layout_marginTop="12dp"
-            android:layout_marginEnd="12dp">
-
-            <TextView
-                android:id="@+id/message_avatar"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:gravity="center"
-                android:textColor="#ffffff"
-                android:textSize="17sp" />
-
-            <ImageView
-                android:id="@+id/message_check"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:contentDescription="@string/selected"
-                android:padding="9dp"
-                android:src="@drawable/ic_check"
-                android:visibility="gone" />
-
-        </FrameLayout>
+        <include layout="@layout/avatar_slot" />
 
         <LinearLayout
             android:layout_width="0dp"
@@ -170,16 +147,5 @@
         </LinearLayout>
 
     </LinearLayout>
-
-    <!-- In the card's 14dp start padding, centred on the sender's 22dp line
-         (1px hairline and 12dp above it). -->
-    <View
-        android:id="@+id/message_dot"
-        android:layout_width="8dp"
-        android:layout_height="8dp"
-        android:layout_gravity="top|start"
-        android:layout_marginStart="3dp"
-        android:layout_marginTop="20dp"
-        android:background="@drawable/unread_dot" />
 
 </FrameLayout>

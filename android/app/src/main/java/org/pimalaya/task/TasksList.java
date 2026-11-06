@@ -6,8 +6,6 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageButton;
-import android.widget.ImageView;
-import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 
@@ -17,12 +15,14 @@ import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.Zones;
 import org.pimalaya.client.Task;
 import org.pimalaya.client.TaskEdit;
+import org.pimalaya.ui.AvatarSlot;
 import org.pimalaya.ui.CardSections;
 import org.pimalaya.ui.Dates;
 import org.pimalaya.ui.FilterPanel;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
+import org.pimalaya.ui.SelectionBar;
 import org.pimalaya.ui.SectionsAdapter;
 
 import java.time.LocalDate;
@@ -53,7 +53,7 @@ import java.util.concurrent.Executors;
  * closes it, or reopens it once closed; a tap opens its page ({@link
  * TaskPage}), or clarifies it from the Inbox.
  */
-public final class TasksList {
+public final class TasksList implements SelectionBar.Owner {
     /** Days after which a weekly review is due again. */
     static final long REVIEW_DAYS = 7;
 
@@ -276,68 +276,6 @@ public final class TasksList {
                 });
 
         batch = new TaskBatch(host, this, writes);
-        LinearLayout actions = host.findViewById(R.id.tasks_actions);
-        action(actions, R.drawable.ic_section_label, R.string.task_batch_category, batch::category);
-        action(actions, R.drawable.ic_task_done, R.string.task_field_status, batch::status);
-        action(actions, R.drawable.ic_domain_calendar, R.string.task_field_due, batch::due);
-        action(actions, R.drawable.ic_move_item, R.string.task_batch_move, batch::move);
-        action(actions, R.drawable.ic_content_copy, R.string.task_batch_copy, batch::copy);
-        action(actions, R.drawable.ic_delete_bar, R.string.task_batch_delete, batch::delete);
-    }
-
-    /** One action of the selection's bar: its icon over its label. */
-    private void action(
-            LinearLayout bar,
-            int icon,
-            int label,
-            java.util.function.Consumer<List<TaskStore.Stored>> act) {
-        int size = host.getResources().getDimensionPixelSize(R.dimen.item_icon);
-        ImageView glyph = new ImageView(host);
-        glyph.setImageResource(icon);
-        glyph.setImageTintList(
-                android.content.res.ColorStateList.valueOf(
-                        host.resolveColor(android.R.attr.textColorPrimary)));
-        TextView name = new TextView(host);
-        name.setText(label);
-        name.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12);
-        name.setTextColor(host.resolveColor(android.R.attr.textColorPrimary));
-        name.setSingleLine(true);
-        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        LinearLayout item = new LinearLayout(host);
-        item.setOrientation(LinearLayout.VERTICAL);
-        item.setGravity(android.view.Gravity.CENTER);
-        item.setBackgroundResource(
-                host.ui.resolveAttr(android.R.attr.selectableItemBackgroundBorderless));
-        item.setContentDescription(host.getString(label));
-        item.addView(glyph, new LinearLayout.LayoutParams(size, size));
-        LinearLayout.LayoutParams nameParams =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT);
-        nameParams.topMargin = host.dp(6);
-        item.addView(name, nameParams);
-        item.setOnClickListener(view -> act.accept(new ArrayList<>(selected.values())));
-        bar.addView(
-                item,
-                new LinearLayout.LayoutParams(
-                        0, host.getResources().getDimensionPixelSize(R.dimen.nav_height), 1f));
-    }
-
-    /** The tone of a selected row's card: the accent over the surface. */
-    private int selectedTone() {
-        int surface = host.getColor(R.color.surface);
-        int accent = host.resolveColor(android.R.attr.colorAccent);
-        float share = 0.22f;
-        return android.graphics.Color.rgb(
-                Math.round(
-                        android.graphics.Color.red(surface) * (1 - share)
-                                + android.graphics.Color.red(accent) * share),
-                Math.round(
-                        android.graphics.Color.green(surface) * (1 - share)
-                                + android.graphics.Color.green(accent) * share),
-                Math.round(
-                        android.graphics.Color.blue(surface) * (1 - share)
-                                + android.graphics.Color.blue(accent) * share));
     }
 
     /** Whether a selection is under way. */
@@ -352,23 +290,18 @@ public final class TasksList {
 
     /** Adds a task to the selection, or takes it out; empty, it ends. */
     private void toggle(TaskStore.Stored stored) {
-        boolean was = isSelectionMode();
         if (selected.remove(keyOf(stored)) == null) {
             selected.put(keyOf(stored), stored);
         }
         adapter.notifyDataSetChanged();
-        if (was && !isSelectionMode()) {
-            host.applyChrome(Panels.TASKS);
-        } else {
-            updateSelectionUi();
-        }
+        updateSelectionUi();
     }
 
     /** Selects every row listed, or none when all already are. */
     public void toggleSelectAll() {
         List<Row> rows = rowsOf();
         if (selected.size() == rows.size()) {
-            endSelection();
+            exitSelection();
             return;
         }
         for (Row row : rows) {
@@ -379,41 +312,51 @@ public final class TasksList {
     }
 
     /** Ends the selection and gives the bar and the navigation back. */
-    public void endSelection() {
+    public void exitSelection() {
         if (selected.isEmpty()) {
             return;
         }
         selected.clear();
         adapter.notifyDataSetChanged();
-        if (host.screen == Panels.TASKS) {
-            host.applyChrome(Panels.TASKS);
-        }
+        updateSelectionUi();
     }
 
     /**
-     * The bar while a selection runs: the cross, the count and select-all;
-     * the actions in the navigation's place.
+     * The chrome while a selection runs: the cross, the count and select-all
+     * in the bar; the six batch actions in the navigation's place.
      */
     public void updateSelectionUi() {
-        if (host.screen != Panels.TASKS || !isSelectionMode()) {
+        if (host.screen != Panels.TASKS) {
             return;
         }
-        TextView title = host.findViewById(R.id.bar_title);
-        title.animate().cancel();
-        title.setText(host.getString(R.string.selected_count, selected.size()));
-        title.setAlpha(1f);
-        for (int id :
-                new int[] {
-                    R.id.bar_menu, R.id.tasks_review, R.id.tasks_clarify, R.id.fab_extended,
-                    R.id.bottom_nav,
-                }) {
-            host.findViewById(id).setVisibility(View.GONE);
+        if (!isSelectionMode()) {
+            SelectionBar.ended(host, Panels.TASKS);
+            return;
         }
-        host.findViewById(R.id.selection_close).setVisibility(View.VISIBLE);
-        host.findViewById(R.id.selection_all_slot).setVisibility(View.VISIBLE);
-        ((android.widget.CheckBox) host.findViewById(R.id.selection_all))
-                .setChecked(selected.size() == rowsOf().size());
-        host.findViewById(R.id.tasks_actions).setVisibility(View.VISIBLE);
+        SelectionBar.show(
+                host,
+                selected.size(),
+                selected.size() == rowsOf().size(),
+                List.of(
+                        action(
+                                R.drawable.ic_section_label,
+                                R.string.task_batch_category,
+                                batch::category),
+                        action(R.drawable.ic_task_done, R.string.task_field_status, batch::status),
+                        action(R.drawable.ic_domain_calendar, R.string.task_field_due, batch::due),
+                        action(R.drawable.ic_move_item, R.string.task_batch_move, batch::move),
+                        action(R.drawable.ic_content_copy, R.string.task_batch_copy, batch::copy),
+                        action(
+                                R.drawable.ic_delete_bar,
+                                R.string.task_batch_delete,
+                                batch::delete)));
+    }
+
+    /** One batch action, handed the selection as it stands when tapped. */
+    private SelectionBar.Action action(
+            int icon, int label, java.util.function.Consumer<List<TaskStore.Stored>> act) {
+        return new SelectionBar.Action(
+                icon, label, () -> act.accept(new ArrayList<>(selected.values())));
     }
 
     /** Every category a task names, one per folded spelling. */
@@ -1256,39 +1199,35 @@ public final class TasksList {
             ImageButton done = view.findViewById(R.id.task_done);
             boolean capture = Task.INBOX.equals(only()) && !closed;
             boolean picked = selected.containsKey(keyOf(row.stored));
-            // NOTE: a selected row's card takes the accent over its tone, so
-            // the selection reads at a glance, not by its box alone.
-            view.findViewById(R.id.row_card)
-                    .setBackgroundTintList(
-                            picked
-                                    ? android.content.res.ColorStateList.valueOf(selectedTone())
-                                    : null);
+            // NOTE: a picked task shows the other lists' check disc in its
+            // tick's place, at full strength on a closed row too.
+            done.setVisibility(picked ? View.INVISIBLE : View.VISIBLE);
+            view.findViewById(R.id.avatar_slot).setVisibility(picked ? View.VISIBLE : View.GONE);
+            if (picked) {
+                AvatarSlot.bind(host, view, "", "", null, true, false);
+                ((View) done.getParent()).setAlpha(1f);
+            }
             done.setImageTintList(
                     android.content.res.ColorStateList.valueOf(
-                            host.resolveColor(
-                                    picked
-                                            ? android.R.attr.colorAccent
-                                            : android.R.attr.textColorSecondary)));
+                            host.resolveColor(android.R.attr.textColorSecondary)));
+            done.setImageResource(
+                    capture
+                            ? R.drawable.ic_task_inbox
+                            : !closed
+                                    ? R.drawable.ic_check_box_blank
+                                    : TaskOrder.DONE.equals(task.status())
+                                            ? R.drawable.ic_check_box
+                                            : R.drawable.ic_cancel);
             if (isSelectionMode()) {
-                // NOTE: while selecting, the box marks the selection and its
-                // tap toggles it, as the row's does.
-                done.setAlpha(1f);
+                // NOTE: while selecting, the tick's tap toggles the
+                // selection, as the row's does.
                 done.setOnClickListener(button -> toggle(row.stored));
-                done.setImageResource(
-                        picked ? R.drawable.ic_check_box : R.drawable.ic_check_box_blank);
-                done.setContentDescription(host.getString(R.string.selected_count, 1));
+                done.setContentDescription(host.getString(R.string.select));
             } else if (capture) {
                 done.setOnClickListener(button -> clarify.open(List.of(row.stored)));
-                done.setImageResource(R.drawable.ic_task_inbox);
                 done.setContentDescription(host.getString(R.string.task_clarify));
             } else {
                 done.setOnClickListener(button -> done(row.stored, !closed));
-                done.setImageResource(
-                        !closed
-                                ? R.drawable.ic_check_box_blank
-                                : TaskOrder.DONE.equals(task.status())
-                                        ? R.drawable.ic_check_box
-                                        : R.drawable.ic_cancel);
                 done.setContentDescription(
                         host.getString(closed ? R.string.task_reopen : R.string.task_mark_done));
             }

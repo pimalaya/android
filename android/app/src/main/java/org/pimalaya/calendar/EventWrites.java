@@ -219,12 +219,23 @@ final class EventWrites {
         if (left == null && settling != null) {
             engine.mutateRemove(settling.collection, settling.handle);
         } else if (left == null) {
-            engine.mutateRemove(collection.id, target.handle);
+            deleteWhole(target, collection);
         } else if (settling != null) {
             engine.mutateResolve(
                     settling.collection, settling.handle, left, null, "", settling.resolves);
         } else {
             engine.mutateEdit(collection.id, target.handle, left, null, "");
         }
+    }
+
+    /**
+     * Stages an entry's removal, whole: a series goes with every occurrence.
+     *
+     * <p>Also the list's batch delete, which never holds a conflicted entry:
+     * only its page settles one.
+     */
+    void deleteWhole(EventStore.StoredEvent target, EventStore.StoredCalendar calendar)
+            throws Exception {
+        engine.mutateRemove(calendar.id, target.handle);
     }
 }

@@ -86,6 +86,7 @@ import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
+import org.pimalaya.ui.SelectionBar;
 import org.pimalaya.ui.SyncDock;
 import org.pimalaya.ui.SyncPill;
 import org.pimalaya.ui.Ui;
@@ -384,23 +385,17 @@ public class MainActivity extends Host
         findViewById(R.id.selection_close)
                 .setOnClickListener(
                         view -> {
-                            if (screen == Panels.MAIL) {
-                                mailList.exitSelection();
-                            } else if (screen == Panels.TASKS) {
-                                tasksList.endSelection();
-                            } else {
-                                contactsList.exitSelection();
+                            SelectionBar.Owner owner = selectionOf(screen);
+                            if (owner != null) {
+                                owner.exitSelection();
                             }
                         });
         findViewById(R.id.selection_all)
                 .setOnClickListener(
                         view -> {
-                            if (screen == Panels.MAIL) {
-                                mailList.toggleSelectAll();
-                            } else if (screen == Panels.TASKS) {
-                                tasksList.toggleSelectAll();
-                            } else {
-                                contactsList.toggleSelectAll();
+                            SelectionBar.Owner owner = selectionOf(screen);
+                            if (owner != null) {
+                                owner.toggleSelectAll();
                             }
                         });
 
@@ -892,12 +887,9 @@ public class MainActivity extends Host
             drawer.closeDrawer(android.view.Gravity.START);
             return;
         }
-        if (screen == Panels.CONTACTS && contactsList.isSelectionMode()) {
-            contactsList.exitSelection();
-            return;
-        }
-        if (screen == Panels.MAIL && mailList.isSelectionMode()) {
-            mailList.exitSelection();
+        SelectionBar.Owner owner = selectionOf(screen);
+        if (owner != null && owner.isSelectionMode()) {
+            owner.exitSelection();
             return;
         }
 
@@ -1628,8 +1620,7 @@ public class MainActivity extends Host
     /** Fades the bar's title in or out as a large title leaves or returns. */
     @Override
     public void showBarTitle(boolean shown) {
-        if (screen == Panels.CONTACTS && contactsList.isSelectionMode()
-                || screen == Panels.MAIL && mailList.isSelectionMode()) {
+        if (SelectionBar.showing(this)) {
             return;
         }
         findViewById(R.id.bar_title).animate().alpha(shown ? 1f : 0f).setDuration(150);
@@ -1653,6 +1644,23 @@ public class MainActivity extends Host
             return tasksList.header();
         }
         return panel == Panels.CALENDAR ? calendarList.header() : contactsList.header();
+    }
+
+    /** The list a selection runs on, on {@code panel}; null off the lists. */
+    private SelectionBar.Owner selectionOf(int panel) {
+        if (panel == Panels.MAIL) {
+            return mailList;
+        }
+        if (panel == Panels.CONTACTS) {
+            return contactsList;
+        }
+        if (panel == Panels.CALENDAR) {
+            return calendarList;
+        }
+        if (panel == Panels.FILES) {
+            return filesList;
+        }
+        return panel == Panels.TASKS ? tasksList : null;
     }
 
     /** Raises the extended FAB as a list screen's add button. */
@@ -1857,12 +1865,65 @@ public class MainActivity extends Host
         flip(panel);
     }
 
-    /** Navigates back: the page goes at once, with no animation. */
+    /**
+     * Navigates back: the page lifts away, its drop-in played backwards, over
+     * the one it uncovers; a list left for another goes at once, a lateral
+     * move.
+     */
     @Override
     public void showBack(int panel) {
         flipper.setInAnimation(null);
-        flipper.setOutAnimation(null);
+        // NOTE: by what the flipper shows, which an overlay may cover.
+        int from = flipper.getDisplayedChild();
+        View leaving = flipper.getCurrentView();
+        boolean page = panel != from && leaving != null && !isList(from);
+        if (!page) {
+            flipper.setOutAnimation(null);
+            flip(panel);
+            return;
+        }
+        // NOTE: the flipper draws its pages in their order, which can put the
+        // one uncovered above the one leaving: lifted until it is gone.
+        android.view.animation.Animation away = liftAway();
+        leaving.setTranslationZ(1f);
+        away.setAnimationListener(
+                new android.view.animation.Animation.AnimationListener() {
+                    @Override
+                    public void onAnimationStart(android.view.animation.Animation animation) {}
+
+                    @Override
+                    public void onAnimationRepeat(android.view.animation.Animation animation) {}
+
+                    @Override
+                    public void onAnimationEnd(android.view.animation.Animation animation) {
+                        leaving.setTranslationZ(0f);
+                    }
+                });
+        flipper.setOutAnimation(away);
         flip(panel);
+    }
+
+    /** Whether a panel is one of the domains' lists. */
+    private static boolean isList(int panel) {
+        for (int list : Domains.PANELS) {
+            if (list == panel) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The drop-in (anim/fade_zoom_in.xml) played backwards, for a page or an
+     * overlay leaving: the same curve and length, run from its end to its
+     * start.
+     */
+    private android.view.animation.Animation liftAway() {
+        android.view.animation.Animation away =
+                android.view.animation.AnimationUtils.loadAnimation(this, R.anim.fade_zoom_in);
+        android.view.animation.Interpolator forward = away.getInterpolator();
+        away.setInterpolator(input -> forward.getInterpolation(1f - input));
+        return away;
     }
 
     /** Swaps the screen in place, for a lateral move with no direction. */
@@ -1892,15 +1953,20 @@ public class MainActivity extends Host
         applyChrome(panel);
     }
 
-    /** Hides the overlay at once: only arriving is animated. */
+    /** Lifts the overlay away, its drop-in played backwards. */
     @Override
     public void closeOverlay(int panel) {
         hideKeyboard();
         View overlay = overlayOf(panel);
-        // NOTE: invisible not gone, so the view stays measured; an entrance
-        // still running is cleared, an animated invisible view catching
-        // touches.
-        overlay.clearAnimation();
+        // NOTE: invisible not gone, so the view stays measured. An invisible
+        // view still draws, and catches touches, while an animation runs on
+        // it: the leaving one does, and is cleared once done, as is any
+        // entrance it cuts short.
+        if (overlay.getVisibility() == View.VISIBLE) {
+            overlay.startAnimation(liftAway());
+        } else {
+            overlay.clearAnimation();
+        }
         overlay.setVisibility(View.INVISIBLE);
     }
 
@@ -2057,14 +2123,6 @@ public class MainActivity extends Host
                     tasksList.reload();
                 };
         tasks.fab = () -> taskPage.openNew(Panels.TASKS);
-        tasks.systemBack =
-                () -> {
-                    if (tasksList.isSelectionMode()) {
-                        tasksList.endSelection();
-                    } else {
-                        MainActivity.super.onBackPressed();
-                    }
-                };
         screens.put(Panels.TASKS, tasks);
 
         Screen task = new Screen();
@@ -2233,19 +2291,14 @@ public class MainActivity extends Host
                         R.id.contacts_duplicates,
                         R.id.contacts_transfer,
                         R.id.selection_close,
-                        R.id.contacts_merge,
-                        R.id.contacts_delete,
                         R.id.selection_all_slot,
-                        R.id.mail_select_seen,
-                        R.id.mail_select_flag,
-                        R.id.mail_select_delete,
                         R.id.contact_books,
                         R.id.contact_add_field,
                         R.id.bar_delete,
                         R.id.message_actions,
                         R.id.bar_send,
                         R.id.bottom_nav,
-                        R.id.tasks_actions,
+                        R.id.selection_actions,
                     }) {
                 findViewById(id).setVisibility(View.GONE);
             }
@@ -2411,7 +2464,7 @@ public class MainActivity extends Host
         // NOTE: the bottom navigation takes the system bar's inset, never
         // the keyboard's, and the extended FAB rides above it.
         padBottom(R.id.bottom_nav, 0, bars.bottom);
-        padBottom(R.id.tasks_actions, 0, bars.bottom);
+        padBottom(R.id.selection_actions, 0, bars.bottom);
         android.view.ViewGroup.MarginLayoutParams extended =
                 (android.view.ViewGroup.MarginLayoutParams)
                         findViewById(R.id.fab_extended).getLayoutParams();

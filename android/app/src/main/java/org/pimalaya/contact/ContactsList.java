@@ -1,7 +1,6 @@
 package org.pimalaya.contact;
 
 import android.view.View;
-import android.widget.CheckBox;
 import android.widget.ListView;
 import android.widget.TextView;
 import java.util.ArrayList;
@@ -15,12 +14,14 @@ import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.ui.Avatar;
+import org.pimalaya.ui.AvatarSlot;
 import org.pimalaya.ui.CardSections;
 import org.pimalaya.ui.FilterPanel;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListFilter;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
+import org.pimalaya.ui.SelectionBar;
 import org.pimalaya.ui.SectionsAdapter;
 import org.pimalaya.ui.Ui;
 
@@ -31,7 +32,7 @@ import org.pimalaya.ui.Ui;
  * {@link ContactPool}; the host keeps the shared chrome bar (re-running
  * {@link #updateSelectionUi} on every return) and the flows leaving it.
  */
-public final class ContactsList {
+public final class ContactsList implements SelectionBar.Owner {
     private final Host host;
     private final ContactParts parts;
     private final ContactEditor editor;
@@ -149,9 +150,6 @@ public final class ContactsList {
                                 new DuplicateReview(host, parts, editor, this::reload)
                                         .find(new ArrayList<>(contacts)));
         host.findViewById(R.id.contacts_transfer).setOnClickListener(this::showTransferMenu);
-        host.findViewById(R.id.contacts_merge).setOnClickListener(view -> mergeSelected());
-        host.findViewById(R.id.contacts_delete)
-                .setOnClickListener(view -> confirmDeleteSelected());
 
         ListView list = host.findViewById(R.id.contacts_list);
         header = new ListHeader(host, list, Panels.CONTACTS);
@@ -501,16 +499,15 @@ public final class ContactsList {
             Entry entry = group.primary();
             String name = entry.displayName();
 
-            TextView avatar = row.findViewById(R.id.contact_avatar);
-            avatar.setText(Avatar.letter(name));
             // NOTE: seeded by the body's hash, as it was by the body's text.
-            Avatar.paint(avatar, entry.object());
-            boolean checked = selectedKeys.contains(group.key);
-            avatar.setVisibility(checked ? View.INVISIBLE : View.VISIBLE);
-            android.widget.ImageView check = row.findViewById(R.id.contact_check);
-            check.setVisibility(checked ? View.VISIBLE : View.GONE);
-            check.setImageTintList(
-                    android.content.res.ColorStateList.valueOf(host.accentContrast()));
+            AvatarSlot.bind(
+                    host,
+                    row,
+                    Avatar.letter(name),
+                    entry.object(),
+                    null,
+                    selectedKeys.contains(group.key),
+                    false);
 
             ((TextView) row.findViewById(R.id.contact_name)).setText(name);
 
@@ -624,12 +621,13 @@ public final class ContactsList {
 
     /** Selects every contact, or clears them when all are already selected. */
     public void toggleSelectAll() {
-        boolean all = allSelected();
-        selectedKeys.clear();
-        if (!all) {
-            for (Group group : sortedContacts) {
-                selectedKeys.add(group.key);
-            }
+        // NOTE: clearing every row ends the selection, as on the other lists.
+        if (allSelected()) {
+            exitSelection();
+            return;
+        }
+        for (Group group : sortedContacts) {
+            selectedKeys.add(group.key);
         }
         updateSelectionUi();
         adapter.notifyDataSetChanged();
@@ -677,21 +675,9 @@ public final class ContactsList {
         header.clearSearch();
     }
 
-    /** Raises or hides the contacts' own bar buttons (not the filter). */
-    private void showActions(boolean shown) {
-        int visibility = shown ? View.VISIBLE : View.GONE;
-        for (int id :
-                new int[] {
-                    R.id.contacts_birthdays,
-                    R.id.contacts_duplicates,
-                    R.id.contacts_transfer,
-                }) {
-            host.findViewById(id).setVisibility(visibility);
-        }
-    }
-
     /**
-     * The contacts screen's chrome, per selection and search state.
+     * The contacts screen's chrome, per selection state: its own buttons, or
+     * a selection's bar with merge and delete.
      *
      * <p>The bar is shared, so this runs only while the contacts screen shows;
      * the host re-runs it on every return.
@@ -700,35 +686,33 @@ public final class ContactsList {
         if (host.screen != Panels.CONTACTS) {
             return;
         }
-
-        // NOTE: a selection's count shows whatever the scroll, since
-        // navigating away mid-selection is not what the bar is for.
-        TextView title = host.findViewById(R.id.bar_title);
-        boolean navigating = !selectionMode;
-        if (navigating) {
-            host.showDomainTitle(Panels.CONTACTS);
-        } else {
-            title.setText(host.getString(R.string.selected_count, selectedKeys.size()));
-            title.setAlpha(1f);
+        if (!selectionMode) {
+            if (!SelectionBar.ended(host, Panels.CONTACTS)) {
+                for (int id :
+                        new int[] {
+                            R.id.contacts_birthdays,
+                            R.id.contacts_duplicates,
+                            R.id.contacts_transfer,
+                        }) {
+                    host.findViewById(id).setVisibility(View.VISIBLE);
+                }
+            }
+            return;
         }
-        host.findViewById(R.id.bar_menu).setVisibility(navigating ? View.VISIBLE : View.GONE);
-        showActions(navigating);
-        host.findViewById(R.id.selection_close)
-                .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
+
+        List<SelectionBar.Action> actions = new ArrayList<>();
         // NOTE: merging needs at least two physical cards.
-        host.findViewById(R.id.contacts_merge)
-                .setVisibility(
-                        selectionMode && parts.pool().distinctRefs(selectedReplicas()).size() > 1
-                                ? View.VISIBLE
-                                : View.GONE);
-        host.findViewById(R.id.contacts_delete)
-                .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
-        host.findViewById(R.id.selection_all_slot)
-                .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
-        ((CheckBox) host.findViewById(R.id.selection_all))
-                .setChecked(selectionMode && allSelected());
-        host.findViewById(R.id.fab_extended)
-                .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+        if (parts.pool().distinctRefs(selectedReplicas()).size() > 1) {
+            actions.add(
+                    new SelectionBar.Action(
+                            R.drawable.ic_merge, R.string.action_merge, this::mergeSelected));
+        }
+        actions.add(
+                new SelectionBar.Action(
+                        R.drawable.ic_delete_bar,
+                        R.string.action_delete,
+                        this::confirmDeleteSelected));
+        SelectionBar.show(host, selectedKeys.size(), allSelected(), actions);
     }
 
     /** Confirms, then stages a delete for every selected contact. */

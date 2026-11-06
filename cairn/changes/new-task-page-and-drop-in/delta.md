@@ -16,7 +16,7 @@ The Tasks tab's add button SHALL read New task and open the task page empty, wit
 - THEN a dated task is staged in the calendar shown on the page
 
 ### Requirement: Pages drop in
-A page opened from a list SHALL drop in as an account's settings do; leaving a page or an overlay SHALL NOT be animated, and no screen SHALL slide in or out, the drawer aside. A page creating or editing an item SHALL show a cross in place of the back arrow.
+A page opened from a list SHALL drop in as an account's settings do; leaving a page or an overlay SHALL play that drop-in backwards, lifting away over what it uncovers, while a list left for another goes at once; no screen SHALL slide in or out, the drawer aside. A page creating or editing an item SHALL show a cross in place of the back arrow.
 
 #### Scenario: Opening a contact
 - GIVEN the contacts list

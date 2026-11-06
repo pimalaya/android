@@ -13,12 +13,14 @@ import android.widget.ListView;
 import android.widget.TextView;
 
 import org.pimalaya.R;
+import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
 import org.pimalaya.ui.Avatar;
+import org.pimalaya.ui.AvatarSlot;
 import org.pimalaya.ui.CardSections;
 import org.pimalaya.ui.FilterPanel;
 import org.pimalaya.ui.Dates;
@@ -26,6 +28,7 @@ import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListFilter;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
+import org.pimalaya.ui.SelectionBar;
 import org.pimalaya.ui.SectionsAdapter;
 
 import java.time.Instant;
@@ -49,7 +52,7 @@ import java.util.function.BiPredicate;
  * instant in the device's zone ({@link Zones}). With no index, or one
  * refused, the bridge expands every object instead, as it did before.
  */
-public final class CalendarList {
+public final class CalendarList implements SelectionBar.Owner {
     /** Seconds in a day, the threshold a length is told in days past. */
     private static final long DAY = 86400;
 
@@ -67,6 +70,15 @@ public final class CalendarList {
 
     /** The rows on screen, one per occurrence, earliest first. */
     private final List<Row> rows = new ArrayList<>();
+
+    /** The rows the list shows once filtered, which select-all takes. */
+    private List<Row> shownRows = new ArrayList<>();
+
+    /**
+     * The entries a selection holds, by calendar and item: picking one
+     * occurrence of a series picks the series, which a delete takes whole.
+     */
+    private final Map<String, Row> selected = new LinkedHashMap<>();
 
     private ListHeader header;
 
@@ -218,6 +230,12 @@ public final class CalendarList {
                     if (row == null) {
                         return;
                     }
+                    if (isSelectionMode()) {
+                        if (selectable(row)) {
+                            toggle(row);
+                        }
+                        return;
+                    }
                     // NOTE: a conflicted to-do keeps the entry page, which
                     // alone resolves a conflict.
                     boolean todo =
@@ -225,6 +243,15 @@ public final class CalendarList {
                     if (!todo || todoOpened == null || !todoOpened.test(row.event, row.calendar)) {
                         eventView.open(opened(row), row.event, row.calendar);
                     }
+                });
+        list.setOnItemLongClickListener(
+                (parent, view, position, id) -> {
+                    Row row = sections.row(header.rowAt(position));
+                    if (row == null || !selectable(row)) {
+                        return false;
+                    }
+                    toggle(row);
+                    return true;
                 });
 
         androidx.swiperefreshlayout.widget.SwipeRefreshLayout refresh =
@@ -234,6 +261,139 @@ public final class CalendarList {
                 () -> {
                     refresh.setRefreshing(false);
                     pull.run();
+                });
+    }
+
+    /**
+     * Whether a row can join a selection, whose one action deletes: not on
+     * the phone's own calendar, which the page does not write either, and not
+     * in conflict, which only the entry's page settles.
+     */
+    private static boolean selectable(Row row) {
+        return !LocalBook.is(row.calendar.url) && !row.event.conflicted;
+    }
+
+    /** What an entry is known by in the selection: its calendar and item. */
+    private static String keyOf(Row row) {
+        return row.event.collectionId + "\n" + row.event.id;
+    }
+
+    /** Whether a selection is under way. */
+    public boolean isSelectionMode() {
+        return !selected.isEmpty();
+    }
+
+    /** Adds an entry to the selection, or takes it out; empty, it ends. */
+    private void toggle(Row row) {
+        if (selected.remove(keyOf(row)) == null) {
+            selected.put(keyOf(row), row);
+        }
+        adapter.notifyDataSetChanged();
+        updateSelectionUi();
+    }
+
+    /** The rows shown that a selection can hold. */
+    private List<Row> selectableShown() {
+        List<Row> taken = new ArrayList<>();
+        for (Row row : shownRows) {
+            if (selectable(row)) {
+                taken.add(row);
+            }
+        }
+        return taken;
+    }
+
+    /** Whether every row shown that can be is selected. */
+    private boolean allSelected() {
+        List<Row> taken = selectableShown();
+        for (Row row : taken) {
+            if (!selected.containsKey(keyOf(row))) {
+                return false;
+            }
+        }
+        return !taken.isEmpty();
+    }
+
+    /** Selects every entry shown, or none when all already are. */
+    public void toggleSelectAll() {
+        if (allSelected()) {
+            exitSelection();
+            return;
+        }
+        for (Row row : selectableShown()) {
+            selected.put(keyOf(row), row);
+        }
+        adapter.notifyDataSetChanged();
+        updateSelectionUi();
+    }
+
+    /** Ends the selection and gives the bar and the navigation back. */
+    public void exitSelection() {
+        if (selected.isEmpty()) {
+            return;
+        }
+        selected.clear();
+        adapter.notifyDataSetChanged();
+        updateSelectionUi();
+    }
+
+    /**
+     * The chrome while a selection runs: the cross, the count and select-all
+     * in the bar; delete in the navigation's place.
+     */
+    public void updateSelectionUi() {
+        if (host.screen != Panels.CALENDAR) {
+            return;
+        }
+        if (!isSelectionMode()) {
+            SelectionBar.ended(host, Panels.CALENDAR);
+            return;
+        }
+        SelectionBar.show(
+                host,
+                selected.size(),
+                allSelected(),
+                List.of(
+                        new SelectionBar.Action(
+                                R.drawable.ic_delete_bar,
+                                R.string.action_delete,
+                                this::confirmDeleteSelected)));
+    }
+
+    /** Asks, then stages the removal of every selected entry, whole. */
+    private void confirmDeleteSelected() {
+        List<Row> taken = new ArrayList<>(selected.values());
+        new android.app.AlertDialog.Builder(host)
+                .setMessage(R.string.event_delete_selected_confirm)
+                .setPositiveButton(R.string.event_delete, (dialog, which) -> delete(taken))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /** Stages each entry's removal; the next sync sends them. */
+    private void delete(List<Row> taken) {
+        host.io.execute(
+                () -> {
+                    EventWrites writes =
+                            new EventWrites(new CalendarStager(parts.pimdir(), parts.clients()));
+                    Exception failure = null;
+                    for (Row row : taken) {
+                        try {
+                            writes.deleteWhole(row.event, row.calendar);
+                        } catch (Exception error) {
+                            Log.w("pimalaya", "event delete failed: " + row.event.id, error);
+                            failure = error;
+                        }
+                    }
+                    Exception outcome = failure;
+                    host.postAlive(
+                            () -> {
+                                if (outcome != null) {
+                                    host.showError(outcome, R.string.event_delete_failed);
+                                }
+                                exitSelection();
+                                reload();
+                            });
                 });
     }
 
@@ -793,6 +953,7 @@ public final class CalendarList {
         }
         List<Row> shown = new ArrayList<>(upcoming);
         shown.addAll(over);
+        shownRows = shown;
         // NOTE: the list heads each month other than today's with its name
         // in full, the week card naming the week's own.
         String month = today.substring(0, 6);
@@ -835,6 +996,7 @@ public final class CalendarList {
         // redrawing) is no empty calendar, so the empty state waits.
         host.findViewById(R.id.calendar_empty)
                 .setVisibility(loaded && shown.isEmpty() ? View.VISIBLE : View.GONE);
+        updateSelectionUi();
     }
 
     /** The instant a row ends, its start when it states no end. */
@@ -1204,13 +1366,21 @@ public final class CalendarList {
             ((TextView) view.findViewById(R.id.event_origin))
                     .setText(row.calendar.name + " · " + row.calendar.accountEmail);
 
-            // NOTE: the colour is keyed by the calendar's id, so renaming one
-            // keeps the colour the eye learned.
-            TextView avatar = view.findViewById(R.id.event_avatar);
-            avatar.setText(Avatar.letter(row.calendar.name));
-            avatar.setTextColor(android.graphics.Color.WHITE);
-            avatar.setBackground(
-                    Avatar.disc(host, Avatar.colorOf(row.calendar.color, row.calendar.id)));
+            boolean picked = selected.containsKey(keyOf(row));
+            // NOTE: the hue is the calendar's own colour's, else keyed by its
+            // id, so renaming one keeps the colour the eye learned.
+            AvatarSlot.bind(
+                    host,
+                    view,
+                    Avatar.letter(row.calendar.name),
+                    row.calendar.id,
+                    row.calendar.color,
+                    picked,
+                    false);
+            // NOTE: a picked row's check reads at full strength, past or not.
+            if (picked) {
+                view.findViewById(R.id.avatar_slot).setAlpha(1f);
+            }
 
             return view;
         }

@@ -38,8 +38,20 @@ public final class Avatar {
      * only thing that varies.
      */
     public static void paint(TextView view, String seed) {
+        paint(view, seed, null);
+    }
+
+    /**
+     * {@link #paint(TextView, String)}, the hue taken from {@code declared}
+     * where it is a colour: a calendar keeps its colour's hue, in the
+     * palette's tones as every other disc.
+     */
+    public static void paint(TextView view, String seed, String declared) {
         Context context = view.getContext();
-        int slot = slotOf(seed);
+        int slot = declaredSlot(declared);
+        if (slot < 0) {
+            slot = slotOf(seed);
+        }
         view.setBackground(disc(context, tone(context, R.array.avatar_fills, slot)));
         view.setTextColor(tone(context, R.array.avatar_inks, slot));
     }
@@ -52,6 +64,22 @@ public final class Avatar {
         } finally {
             tones.recycle();
         }
+    }
+
+    /** The slot a declared colour's hue lands in, -1 for none or a grey. */
+    private static int declaredSlot(String declared) {
+        Integer color = parsed(declared);
+        if (color == null) {
+            return -1;
+        }
+        float[] hsv = new float[3];
+        Color.colorToHSV(color, hsv);
+        // NOTE: a grey has no hue to keep, so it falls back to the derived
+        // one.
+        if (hsv[1] < 0.15f) {
+            return -1;
+        }
+        return (int) (hsv[0] / 45f) % 8;
     }
 
     /** The slot of the eight hues a seed lands in. */
@@ -77,22 +105,29 @@ public final class Avatar {
 
     /** A named thing's colour: its declared one if it parses, else derived. */
     public static int colorOf(String declared, String name) {
-        if (declared != null && !declared.isEmpty()) {
-            try {
-                // NOTE: CalDAV writes the alpha last (#RRGGBBAA, Apple's
-                // calendar-color), the platform first.
-                String color = declared.trim();
-                if (color.length() == 9 && color.charAt(0) == '#') {
-                    color = "#" + color.substring(7) + color.substring(1, 7);
-                }
-                return Color.parseColor(color);
-            } catch (IllegalArgumentException error) {
-                // NOTE: servers send colours the platform cannot read
-                // (named CSS colours, `#rgb`, an empty element); the
-                // derived hue is a better answer than no disc at all.
-            }
+        Integer color = parsed(declared);
+        return color != null ? color : SOLID[slotOf(name)];
+    }
+
+    /** A declared colour as the platform reads it, null when it cannot. */
+    private static Integer parsed(String declared) {
+        if (declared == null || declared.isEmpty()) {
+            return null;
         }
-        return SOLID[slotOf(name)];
+        try {
+            // NOTE: CalDAV writes the alpha last (#RRGGBBAA, Apple's
+            // calendar-color), the platform first.
+            String color = declared.trim();
+            if (color.length() == 9 && color.charAt(0) == '#') {
+                color = "#" + color.substring(7) + color.substring(1, 7);
+            }
+            return Color.parseColor(color);
+        } catch (IllegalArgumentException error) {
+            // NOTE: servers send colours the platform cannot read (named CSS
+            // colours, `#rgb`, an empty element); the derived hue is a
+            // better answer than no disc at all.
+            return null;
+        }
     }
 
     /**

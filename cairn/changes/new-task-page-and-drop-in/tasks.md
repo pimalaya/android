@@ -9,6 +9,7 @@ change: new-task-page-and-drop-in
 - [x] Add button labelled New task (`task_new`), `task_add` dropped
 - [x] `MainActivity.show` / `showBack` drop in and lift away; auth steps unanimated; slide anims and `stay.xml` removed
 - [x] Leaving a page or an overlay unanimated, `fade_zoom_out` removed
+- [x] Leaving reversed (owner, 2026-11-06, "put back the reverse animation"): a page or an overlay lifts away, the drop-in played backwards (`MainActivity.liftAway`, a time-reversed interpolator over anim/fade_zoom_in.xml, which stays as it is); the page leaving drawn above the one it uncovers; a list left for another goes at once
 - [x] Task page order: calendar, Organise (with Waiting on), Details (with Due), Progress; When removed
 - [x] Organise always in sight, its Categories row too (a bar button hiding it was tried and dropped, 2026-10-30)
 - [x] Capture (the widget, the launcher shortcut) opens the New task page with Inbox set; the capture sheet keeps the share sheet and a mail's Add to tasks

@@ -224,9 +224,9 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- A selection's actions: merge or delete contacts; read or
-             unread, star or unstar, delete messages; then select or clear
-             every row, the box centred in its tool slot. -->
+        <!-- A selection's box, selecting or clearing every row, centred
+             in its tool slot; its actions sit in the navigation's place
+             (selection_actions). -->
         <org.pimalaya.ui.ToolGroup
             android:layout_width="wrap_content"
             android:layout_height="@dimen/app_bar_tools_height"
@@ -235,56 +235,6 @@
             android:orientation="horizontal"
             android:paddingStart="@dimen/app_bar_tools_padding"
             android:paddingEnd="@dimen/app_bar_tools_padding">
-
-            <ImageButton
-                android:id="@+id/contacts_merge"
-                android:layout_width="@dimen/app_bar_tool_width"
-                android:layout_height="@dimen/app_bar_tool_height"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/merge_selected"
-                android:src="@drawable/ic_merge"
-                android:tint="?android:attr/textColorPrimary"
-                android:visibility="gone" />
-
-            <ImageButton
-                android:id="@+id/contacts_delete"
-                android:layout_width="@dimen/app_bar_tool_width"
-                android:layout_height="@dimen/app_bar_tool_height"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/delete_selected"
-                android:src="@drawable/ic_delete_bar"
-                android:tint="?android:attr/textColorPrimary"
-                android:visibility="gone" />
-
-            <ImageButton
-                android:id="@+id/mail_select_seen"
-                android:layout_width="@dimen/app_bar_tool_width"
-                android:layout_height="@dimen/app_bar_tool_height"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/message_mark_read"
-                android:src="@drawable/ic_check"
-                android:tint="?android:attr/textColorPrimary"
-                android:visibility="gone" />
-
-            <ImageButton
-                android:id="@+id/mail_select_flag"
-                android:layout_width="@dimen/app_bar_tool_width"
-                android:layout_height="@dimen/app_bar_tool_height"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/message_flag"
-                android:src="@drawable/ic_star"
-                android:tint="?android:attr/textColorPrimary"
-                android:visibility="gone" />
-
-            <ImageButton
-                android:id="@+id/mail_select_delete"
-                android:layout_width="@dimen/app_bar_tool_width"
-                android:layout_height="@dimen/app_bar_tool_height"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/message_delete"
-                android:src="@drawable/ic_delete_bar"
-                android:tint="?android:attr/textColorPrimary"
-                android:visibility="gone" />
 
             <FrameLayout
                 android:id="@+id/selection_all_slot"
@@ -793,10 +743,10 @@
 
     </LinearLayout>
 
-    <!-- The Tasks selection's actions, in the bottom navigation's place
-         while a selection runs (TasksList builds the six). -->
+    <!-- A selection's actions, in the bottom navigation's place while
+         one runs, on its items' shape (SelectionBar fills it per list). -->
     <LinearLayout
-        android:id="@+id/tasks_actions"
+        android:id="@+id/selection_actions"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@color/surface"
