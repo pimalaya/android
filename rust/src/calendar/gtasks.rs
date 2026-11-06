@@ -365,11 +365,10 @@ pub fn overlay(remote: &str, local: &str) -> Result<String, BridgeError> {
     };
     let local_status = status(local_todo);
     let remote_status = status(child(&cst, index));
-    let keep_status = match (local_status.as_deref(), remote_status.as_deref()) {
-        (Some("IN-PROCESS"), None | Some("NEEDS-ACTION")) => true,
-        (Some("CANCELLED"), Some("COMPLETED")) => true,
-        _ => false,
-    };
+    let keep_status = matches!(
+        (local_status.as_deref(), remote_status.as_deref()),
+        (Some("IN-PROCESS"), None | Some("NEEDS-ACTION")) | (Some("CANCELLED"), Some("COMPLETED"))
+    );
 
     let phone: Vec<IcalItem<'static>> = local_todo
         .items
