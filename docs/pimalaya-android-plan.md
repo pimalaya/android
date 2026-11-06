@@ -620,7 +620,7 @@ Each is releasable and has an acceptance test.
 - **M6 calendar views.** Week and month, edit-scope UX. Acceptance: month view scrolls a
   year without jank; "this and following" splits a rule and round-trips byte-faithfully.
 - **M7 release.** Store listing, screenshots, paid-service hooks (push subscription, our
-  OAuth), F-Droid and Play builds.
+  OAuth), F-Droid and Play builds. Followed in cairn/changes/production-release.
 
 ## 10. Risks
 

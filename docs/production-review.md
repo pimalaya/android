@@ -1,5 +1,7 @@
 # Production review (2026-10-09)
 
+Followed since 2026-11-06 in cairn/changes/production-release, which drops the items fixed by then.
+
 > Historical: a 2026-10-09 snapshot whose file:line citations predate cairn changes rust-domain-layout and java-domain-layout (PimalayaClient, SyncRunner, OfflineEngine, MailPool are gone). Open items stand; the current layout is in android/app/src/main/java/org/pimalaya/package-info.java.
 
 Two read-only reviews run before the first public release: what is missing or risky for production, and where the code branches on the backend. Findings cite file:line as of that date. Tick items here or move them into cairn changes as they are taken up.
