@@ -13,5 +13,7 @@ change: redesign-for-the-palette
 - [x] Sync wording, every backend, English and French; the canvas's Sync wording board drawn as built; three unused CardDAV-era strings dropped
 - [x] Badges on the wash (`tag_wash`, accent ink)
 - [x] Build, unit tests (864, 5 skipped), installed on the device
+- [x] Dark theme reviewed frame by frame (owner, 2026-11-06, "the app does not fully follow the design"): the palette's tokens already hold every view; what strayed were the platform widgets DeviceDefault colours from the wallpaper since Android 12. Popups and menus take the dialog ground, ripples the ink, links and selections the accent, checkboxes, radios and spinners palette styles, and each switch its tints in code (`Switches`, DeviceDefault's switch style being private); the launcher's Capture shortcut takes the brand magenta for the old teal. An HTML mail keeps its white page by choice (MessageView: inverting one turns some fully black)
+- [x] The unread dot moved to the row's leading gutter, level with the sender (owner, 2026-11-06: at the end of the line it shifted the time); canvas version 109
 - [ ] Device check (owner): avatars light and dark, the toolboxes on Contacts, Tasks, selections and the contact page, the selection disc, the dock's wording, a task In progress
 - [ ] Fold the delta into the spec and log

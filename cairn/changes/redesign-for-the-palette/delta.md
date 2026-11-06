@@ -31,6 +31,14 @@ The sync dock and its log SHALL name each step of a pass with one phrase whateve
 - WHEN the dock shows each one's step
 - THEN both read "Downloading envelopes" and their mailboxes counted, as "3 of 12 mailboxes"
 
+### Requirement: An unread message is marked in its row's leading gutter
+A mail row SHALL mark an unread message with an accent dot in the row's leading gutter, before its avatar and level with the sender's line, so a read row and an unread one keep their times in one column.
+
+#### Scenario: Two rows, one unread
+- GIVEN a list holding a read and an unread message
+- WHEN it shows
+- THEN the unread row's dot stands left of its avatar, and both times end at the same edge
+
 ## MODIFIED Requirements
 
 ## REMOVED Requirements

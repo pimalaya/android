@@ -53,6 +53,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Changed the sync dock to say each step in one wording on every backend: Connecting, Fetching changes, Downloading envelopes with the mailboxes counted, Downloading messages, contacts or events, Sending changes, Updating the phone's contacts or calendar, Resolving conflicts; the other accounts read Up next or Up to date.
 - Changed a task's In progress and Reply received marks to show on the accent's wash, where they sat unseen on the card's own tone.
 - Changed the platform's own widgets to the palette, which Android 12 and later colour from the wallpaper: popups and menus, ripples, links and selected text, checkboxes, radio buttons, spinners and switches, so the dark theme holds the design; the launcher's Capture shortcut takes the brand magenta.
+- Changed an unread message's dot to the row's leading gutter, before its avatar and level with the sender, so it no longer shifts the time: read and unread rows keep their times in one column.
 - Changed an account's settings to read as the setup's settings: an Account card, then one card of its domains, each led by its tile, the setup's rows first, then where it signs in. The phone's contacts and calendar take one switch per domain, and the addressbooks are picked in a dialog, each with its server sync.
 - Changed a list's add button to shrink away while its filters or the sync dock show, rather than ride over the dock, and come back after.
 - Changed every spinner to one size, so they all draw the same stroke.
