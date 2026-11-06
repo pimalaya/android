@@ -94,6 +94,9 @@ public class CalendarMirrorTest {
         final Map<String, String[]> members = new LinkedHashMap<>();
         private int revision;
 
+        /** Whether the next create is taken and its answer lost. */
+        boolean loseNext;
+
         Server(PimdirDb pimdir) {
             super(pimdir, Clients.real());
         }
@@ -160,6 +163,10 @@ public class CalendarMirrorTest {
                     continue;
                 }
                 put(name, offline.loadRow(COLLECTION, handle).getString("vcard"));
+                if (loseNext && "add".equals(change.getString("op"))) {
+                    loseNext = false;
+                    throw new IllegalStateException("taken, the answer lost");
+                }
                 results.put(
                         result(handle, true, "add".equals(change.getString("op")) ? name : null,
                                 members.get(name)[0]));
@@ -329,6 +336,31 @@ public class CalendarMirrorTest {
         int writes = provider.writes;
         phonePass();
         assertEquals("content-quiet once both sides agree", writes, provider.writes);
+    }
+
+    /** A create the server took whose answer was lost is filed once. */
+    @Test
+    public void aCreateWhoseAnswerWasLostIsFiledOnce() {
+        ContentValues values = new ContentValues();
+        values.put(Events.CALENDAR_ID, calendar);
+        values.put(Events.TITLE, "Lunch");
+        values.put(Events.DTSTART, at("2026-10-12T12:00", PARIS));
+        values.put(Events.DTEND, at("2026-10-12T13:00", PARIS));
+        values.put(Events.EVENT_TIMEZONE, "Europe/Paris");
+        resolver.insert(Events.CONTENT_URI, values);
+        phonePass();
+
+        server.loseNext = true;
+        try {
+            server.sync();
+        } catch (RuntimeException lost) {
+            // the answer never came
+        }
+        assertFalse("the answer was lost", server.loseNext);
+        server.sync();
+        server.sync();
+
+        assertEquals(1, server.members.size());
     }
 
     @Test
