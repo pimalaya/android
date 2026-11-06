@@ -37,7 +37,6 @@ import org.pimalaya.client.OauthRequest;
 import org.pimalaya.client.OauthTokens;
 import org.pimalaya.client.ServiceConfig;
 import org.pimalaya.client.Transport;
-import org.pimalaya.mail.MailScope;
 import org.pimalaya.mail.SenderName;
 import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
@@ -198,9 +197,6 @@ public final class OnboardingFlow {
     /** How many addressbooks the last listing held. */
     private int booksTotal;
 
-    /** The months of mail Mail's page keeps, 0 for all of it. */
-    private int chosenMonths;
-
     /** The name mail goes out under, from the sending page; empty for none. */
     private String chosenName = "";
 
@@ -295,7 +291,6 @@ public final class OnboardingFlow {
         chosenCalendars = null;
         listedCalendars = null;
         pickingCalendars = false;
-        chosenMonths = 0;
         chosenName = "";
         pickingMailboxes = false;
         ((EditText) host.findViewById(R.id.email_input)).setText("");
@@ -2626,13 +2621,6 @@ public final class OnboardingFlow {
                                             mailboxesTotal),
                             chevron(),
                             () -> pickMailboxes(page)));
-            String[] scopes = host.getResources().getStringArray(R.array.mail_scopes);
-            rows.add(
-                    sections.row(
-                            host.getString(R.string.mail_scope_title),
-                            scopes[scopeIndex(chosenMonths)],
-                            chevron(),
-                            this::pickMonths));
         } else if (page.domain == PimDomain.CONTACTS) {
             rows.add(
                     switchRow(
@@ -2769,33 +2757,6 @@ public final class OnboardingFlow {
                             granted -> toggle.setChecked(switches.mirror(mirror, true, granted)));
                 });
         return toggle;
-    }
-
-    /** Where a number of months stands in the period choices. */
-    private static int scopeIndex(int months) {
-        for (int index = 0; index < MailScope.MONTHS.length; index++) {
-            if (MailScope.MONTHS[index] == months) {
-                return index;
-            }
-        }
-        return 0;
-    }
-
-    /** Picks how many months of mail the account keeps. */
-    private void pickMonths() {
-        String[] scopes = host.getResources().getStringArray(R.array.mail_scopes);
-        new AlertDialog.Builder(host)
-                .setTitle(R.string.mail_scope_title)
-                .setSingleChoiceItems(
-                        scopes,
-                        scopeIndex(chosenMonths),
-                        (dialog, which) -> {
-                            chosenMonths = MailScope.MONTHS[which];
-                            dialog.dismiss();
-                            showPage();
-                        })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
     }
 
     /** Asks for the name the account's mail goes out under. */
@@ -4079,12 +4040,6 @@ public final class OnboardingFlow {
         if (stored.server(PimDomain.MAIL) != null) {
             if (!chosenName.isEmpty()) {
                 SenderName.set(host, stored.email, chosenName);
-            }
-            // NOTE: a fresh account keeps all of its mail; a narrower period
-            // is set before its first sync, which it bounds.
-            if (chosenMonths != 0) {
-                int months = chosenMonths;
-                host.io.execute(() -> parts.mail().bound(stored.email, months));
             }
         }
         accounts.removeIf(entry -> entry.email.equals(stored.email));
