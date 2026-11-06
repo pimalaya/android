@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A task's box, at the avatar's size and inset. -->
+<!-- A task's round box, at the avatar's size and inset. -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
     android:color="?android:attr/colorControlHighlight">
     <item>
         <inset android:inset="@dimen/item_avatar_inset">
-            <shape android:shape="rectangle">
-                <corners android:radius="@dimen/task_box_radius" />
+            <shape android:shape="oval">
                 <stroke
                     android:width="@dimen/task_box_stroke"
                     android:color="@color/ink_secondary" />
@@ -14,8 +13,7 @@
     </item>
     <item android:id="@android:id/mask">
         <inset android:inset="@dimen/item_avatar_inset">
-            <shape android:shape="rectangle">
-                <corners android:radius="@dimen/task_box_radius" />
+            <shape android:shape="oval">
                 <solid android:color="#FFFFFF" />
             </shape>
         </inset>

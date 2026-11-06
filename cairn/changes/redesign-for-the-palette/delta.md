@@ -40,7 +40,7 @@ A mail row SHALL mark an unread message with an accent badge on its avatar's top
 - THEN the unread row's avatar carries the badge, and both avatars and both times line up
 
 ### Requirement: Every list draws its avatar with one slot
-Mail, contacts, the agenda, files and tasks SHALL draw a row's avatar with one layout and one binding: the disc in the palette's tones, a calendar's disc taking its own colour's hue (a grey or an unreadable colour falling back to the seed's), the accent check disc at the avatar's size while the row is picked, and the unread badge. A task's box SHALL stand in the avatar's place at its size, a rounded square outlined in the secondary ink, empty while open, a check once done, a cross once cancelled, the Inbox glyph for a capture; a picked task SHALL show the same check disc in the box's place, its card untinted.
+Mail, contacts, the agenda, files and tasks SHALL draw a row's avatar with one layout and one binding: the disc in the palette's tones, a calendar's disc taking its own colour's hue (a grey or an unreadable colour falling back to the seed's), the accent check disc at the avatar's size while the row is picked, and the unread badge. A task's box SHALL stand in the avatar's place at its size, a circle outlined in the secondary ink, empty while open, a check once done, a cross once cancelled, the Inbox glyph for a capture; a picked task SHALL show the same check disc in the box's place, its card untinted.
 
 #### Scenario: A calendar coloured red
 - GIVEN a calendar the server colours #D50000

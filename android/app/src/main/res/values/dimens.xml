@@ -53,7 +53,6 @@
     <dimen name="card_radius">22dp</dimen>
     <dimen name="card_gutter">12dp</dimen>
     <dimen name="card_avatar">42dp</dimen>
-    <dimen name="task_box_radius">12dp</dimen>
     <dimen name="task_box_stroke">2dp</dimen>
     <dimen name="large_title">32sp</dimen>
 

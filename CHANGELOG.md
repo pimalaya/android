@@ -52,7 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Changed the week card: today sits on an accent disc, and each day shows a dot per calendar holding an entry, in its colour.
 - Changed every page, from the reader and the composer to an entry, a contact or a task, to drop in and lift away with its own bar, as the account settings do.
 - Changed the reader: Reply, Forward, Move and Delete moved to a bottom bar, Add to tasks, Copy and the flags staying at the top.
-- Changed a task's box to the avatar's size and place, and an unread message's time back to the usual grey.
+- Changed a task's box to a circle at the avatar's size and place, and an unread message's time back to the usual grey.
 - Changed the app's colours to its own palette, the logo's magenta over warm greys, light and dark, the same on every phone rather than the phone maker's: the page, the cards, the text, the controls, the dialogs and the pickers.
 - Changed the avatars to the palette: a soft fill with the letter in its own hue, eight hues at one lightness, deep fills and pale letters at night, where they were mid-tone discs of any hue under a white letter; a picked row's check now takes the avatar's size, and an agenda row's disc, drawn as every other list's, takes its calendar's colour as its hue.
 - Changed every group of actions at the end of the bar to the message reader's toolbox, one tonal pill: the contacts' birthday, duplicates and import or export, Clarify and the weekly review, a selection's select-all, the contact page's, the calendar's modes and the sync chooser's Reset; a selection's close and an editor's delete are round tonal buttons as the other leading ones.
