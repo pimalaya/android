@@ -6,7 +6,10 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.SyncReport;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -14,7 +17,9 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <p>The server pass's shape: bodies the round brought hydrated, settleable
  * conflicts settled ({@link #settle}) and pushed in a second exchange.
- * Skipped when the spoke is unavailable, and on the quiet path.
+ * Skipped when the spoke is unavailable, and on the quiet path. A mass
+ * deletion on the phone is held from the store ({@link HeldDeletions}), and
+ * the deleted rows are erased only once the store took their deletion.
  */
 public abstract class PhonePass extends PimdirEngine {
     /** The phone provider this pass reconciles with. */
@@ -26,11 +31,18 @@ public abstract class PhonePass extends PimdirEngine {
     /** Whether a phone pass of this driver wrote anything into the store. */
     private boolean ingested;
 
+    /** The deletions held back from the server, the user to settle. */
+    private final HeldDeletions held;
+
+    /** The members the last enumerate let go, their rows erased after it. */
+    private final List<String> gone = new ArrayList<>();
+
     /** A phone pass of {@code kind} (the hub media type) over {@code spoke}. */
     protected PhonePass(PimdirDb pimdir, Clients clients, PhoneSpoke spoke, String kind) {
         super(pimdir, clients);
         this.spoke = spoke;
         this.kind = kind;
+        this.held = pimdir.held();
     }
 
     /** Runs the pass under the hub's collection lock; answers if it wrote. */
@@ -43,6 +55,13 @@ public abstract class PhonePass extends PimdirEngine {
         ReentrantLock lock = locks.collection(kind, hub);
         lock.lock();
         try {
+            HeldDeletions.Held restore = held.restoring(collection);
+            if (restore != null) {
+                // NOTE: unbound before erased, so a crash between loses none.
+                offline.forget(collection, restore.handles());
+                spoke.purge(collection, restore.handles());
+            }
+
             // NOTE: quiet path; nothing dirty/staged on either side and
             // matching member counts means the engine pass would reconcile
             // nothing. Neither provider has a per-account changes token, so
@@ -54,22 +73,26 @@ public abstract class PhonePass extends PimdirEngine {
             }
 
             step(Progress.STAGE_PHONE, 0);
-            Log.d(
-                    "pimalaya",
-                    "phone sync "
-                            + hub
-                            + ": "
-                            + clients.offline().sync(this, collection, false));
-            hydrate(collection);
-
+            Log.d("pimalaya", "phone sync " + hub + ": " + exchange(collection));
             if (settle(collection)) {
-                clients.offline().sync(this, collection, false);
-                hydrate(collection);
+                exchange(collection);
             }
         } finally {
             lock.unlock();
         }
         return ingested;
+    }
+
+    /** One engine run over the spoke, then the rows of what it let go erased. */
+    private SyncReport exchange(String collection) throws JSONException {
+        gone.clear();
+        SyncReport report = clients.offline().sync(this, collection, false);
+        hydrate(collection);
+        if (!gone.isEmpty()) {
+            spoke.purge(collection, new ArrayList<>(gone));
+            gone.clear();
+        }
+        return report;
     }
 
     /** Whether a pass of this driver wrote anything into the store so far. */
@@ -104,7 +127,23 @@ public abstract class PhonePass extends PimdirEngine {
 
     @Override
     protected final JSONObject enumerate(JSONObject yielded) throws JSONException {
-        return spoke.enumerate(yielded.getString("collection"));
+        String collection = yielded.getString("collection");
+        JSONObject reply = spoke.enumerate(collection);
+        JSONArray vanished = reply.getJSONArray("vanished");
+        List<String> handles = new ArrayList<>(vanished.length());
+        for (int index = 0; index < vanished.length(); index++) {
+            handles.add(vanished.getString(index));
+        }
+        int members = offline.memberCount(collection);
+        boolean hold =
+                HeldDeletions.massive(handles.size(), members) && !held.releases(collection);
+        held.passed(collection, hold ? new HeldDeletions.Held(collection, handles, members) : null);
+        if (hold) {
+            reply.put("vanished", new JSONArray());
+        } else {
+            gone.addAll(handles);
+        }
+        return reply;
     }
 
     @Override

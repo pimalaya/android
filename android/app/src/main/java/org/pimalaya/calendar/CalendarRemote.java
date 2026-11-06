@@ -355,10 +355,8 @@ final class CalendarRemote implements PhoneSpoke {
             }
 
             if (deleted) {
-                // NOTE: a sync-adapter delete removes that row alone, so the
-                // purge names the master's exception rows too.
+                // NOTE: erased once the store took it ({@link #purge}).
                 vanished.put(handle);
-                purge(target, rows, exceptions);
                 continue;
             }
             if (!dirty && !created && offline.loadRow(collection, handle) == null) {
@@ -384,6 +382,33 @@ final class CalendarRemote implements PhoneSpoke {
         reply.put("vanished", vanished);
         reply.put("complete", false);
         return reply;
+    }
+
+    /**
+     * Erases the objects of {@code handles} deleted on the phone.
+     *
+     * <p>A sync-adapter delete removes that row alone, so the purge names the
+     * master's exception rows too.
+     */
+    @Override
+    public void purge(String collection, List<String> handles) {
+        Target target = requireTarget(collection);
+        for (String handle : handles) {
+            List<State> tops = new ArrayList<>();
+            List<State> exceptions = new ArrayList<>();
+            boolean deleted = true;
+            for (State state : states(target, handle)) {
+                if (state.top()) {
+                    tops.add(state);
+                    deleted &= state.deleted;
+                } else {
+                    exceptions.add(state);
+                }
+            }
+            if (!tops.isEmpty() && deleted) {
+                purge(target, tops, exceptions);
+            }
+        }
     }
 
     private static JSONObject listed(String handle, String revision) throws JSONException {

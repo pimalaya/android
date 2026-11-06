@@ -457,6 +457,11 @@
     <string name="sync_parked_row">%1$s, %2$s : %3$d sur %4$d</string>
     <string name="sync_parked_remove">Les supprimer</string>
     <string name="sync_parked_keep">Les garder</string>
+    <string name="sync_held_title">Supprimés sur ce téléphone</string>
+    <string name="sync_held_body">Une autre application ou une suppression groupée les a supprimés du téléphone. Ils sont toujours sur le serveur.</string>
+    <string name="sync_held_delete">Supprimer sur le serveur</string>
+    <string name="sync_held_restore">Les remettre</string>
+    <string name="sync_held_later">Plus tard</string>
     <string name="conflict_auto_resolved">Conflit résolu automatiquement ; les modifications partent à la prochaine synchronisation</string>
     <string name="contact_diverged_pending">Des champs divergents attendent une revue</string>
     <string name="sync_busy">Attendez la fin de la synchronisation</string>

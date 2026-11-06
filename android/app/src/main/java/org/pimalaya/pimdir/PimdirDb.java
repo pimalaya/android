@@ -60,6 +60,9 @@ public final class PimdirDb extends SQLiteOpenHelper {
     /** The rounds its syncs parked, for the user to settle (SYNC §5). */
     private final ParkedRounds parked = new ParkedRounds();
 
+    /** The deletions its phone passes held back, for the user to settle. */
+    private final HeldDeletions held = new HeldDeletions();
+
     /**
      * The per-domain databases this store replaced, deleted on open.
      *
@@ -268,6 +271,11 @@ public final class PimdirDb extends SQLiteOpenHelper {
     /** The rounds this store's syncs parked, process-wide. */
     public ParkedRounds parked() {
         return parked;
+    }
+
+    /** The deletions this store's phone passes held back, process-wide. */
+    public HeldDeletions held() {
+        return held;
     }
 
     /** The content-addressed blob directory beside the database. */

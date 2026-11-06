@@ -36,6 +36,7 @@ import org.junit.runner.RunWith;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Clients;
 import org.pimalaya.phone.Accounts;
+import org.pimalaya.pimdir.HeldDeletions;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
 import org.pimalaya.pimdir.PimdirItems;
@@ -483,6 +484,98 @@ public class CalendarMirrorTest {
         assertFalse(server.members.containsKey("ev-1.ics"));
         phonePass();
         assertTrue("never handed back", events().isEmpty());
+    }
+
+    /** Twenty events through the store onto the phone. */
+    private void twentyProjected() {
+        for (int index = 0; index < 20; index++) {
+            server.put(
+                    "w-" + index + ".ics",
+                    object("BEGIN:VEVENT\r\nUID:w-" + index + "\r\nDTSTAMP:20260101T000000Z\r\n"
+                            + "DTSTART;TZID=Europe/Paris:20261012T090000\r\n"
+                            + "DTEND;TZID=Europe/Paris:20261012T100000\r\n"
+                            + "SUMMARY:Event " + index + "\r\nEND:VEVENT\r\n"));
+        }
+        server.sync();
+        phonePass();
+        assertEquals(20, events().size());
+    }
+
+    private int live() {
+        int live = 0;
+        for (Map<String, Object> event : events()) {
+            live += "0".equals(event.get(Events.DELETED)) ? 1 : 0;
+        }
+        return live;
+    }
+
+    /** Another app emptying a calendar deletes nothing upstream until asked. */
+    @Test
+    public void aCalendarWipedOnThePhoneIsHeldFromTheServer() {
+        twentyProjected();
+        resolver.delete(Events.CONTENT_URI, null, null);
+
+        phonePass();
+        server.sync();
+
+        assertEquals(20, server.members.size());
+        assertEquals(20, stored().size());
+        assertEquals("the rows wait, deleted", 20, events().size());
+        assertEquals(0, live());
+        List<HeldDeletions.Held> held = pimdir.held().unoffered();
+        assertEquals(1, held.size());
+        assertEquals(SPOKE, held.get(0).collection());
+        assertEquals(20, held.get(0).handles().size());
+        assertEquals(20, held.get(0).members());
+    }
+
+    @Test
+    public void heldDeletionsGoUpstreamOnceReleased() {
+        twentyProjected();
+        resolver.delete(Events.CONTENT_URI, null, null);
+        phonePass();
+
+        pimdir.held().release(List.of(SPOKE));
+        phonePass();
+        server.sync();
+
+        assertTrue(server.members.isEmpty());
+        assertTrue(events().isEmpty());
+        assertTrue(pimdir.held().unoffered().isEmpty());
+    }
+
+    @Test
+    public void heldDeletionsComeBackOnThePhoneWhenRestored() {
+        twentyProjected();
+        resolver.delete(Events.CONTENT_URI, null, null);
+        phonePass();
+
+        pimdir.held().restore(List.of(SPOKE));
+        phonePass();
+        server.sync();
+
+        assertEquals(20, server.members.size());
+        assertEquals(20, events().size());
+        assertEquals(20, live());
+    }
+
+    @Test
+    public void aFewDeletionsGoThroughUnasked() {
+        twentyProjected();
+        List<Long> ids = new ArrayList<>();
+        for (Map<String, Object> event : events().subList(0, 3)) {
+            ids.add(id(event));
+        }
+        for (long id : ids) {
+            resolver.delete(ContentUris.withAppendedId(Events.CONTENT_URI, id), null, null);
+        }
+
+        phonePass();
+        server.sync();
+
+        assertEquals(17, server.members.size());
+        assertEquals(17, events().size());
+        assertTrue(pimdir.held().unoffered().isEmpty());
     }
 
     @Test

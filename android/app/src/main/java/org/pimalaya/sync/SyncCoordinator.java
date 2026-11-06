@@ -32,6 +32,7 @@ import org.pimalaya.mail.MailSync;
 import org.pimalaya.mail.MailTally;
 import org.pimalaya.mail.MailWindow;
 import org.pimalaya.phone.Accounts;
+import org.pimalaya.pimdir.HeldDeletions;
 import org.pimalaya.pimdir.ParkedRounds;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -232,6 +233,7 @@ public final class SyncCoordinator implements MailSync {
         }
         if (ended) {
             offerParked();
+            offerHeld();
         }
     }
 
@@ -251,14 +253,7 @@ public final class SyncCoordinator implements MailSync {
         if (parked.isEmpty()) {
             return;
         }
-        Map<String, PimdirCollections.Stored> stored = new HashMap<>();
-        PimdirCollections collections = new PimdirCollections(pimdir, host);
-        for (String kind :
-                new String[] {PimdirSummary.MAIL, PimdirSummary.CONTACT, PimdirSummary.CALENDAR}) {
-            for (PimdirCollections.Stored one : collections.listAll(kind)) {
-                stored.put(one.id, one);
-            }
-        }
+        Map<String, PimdirCollections.Stored> stored = storedCollections();
         StringBuilder rows = new StringBuilder(host.getString(R.string.sync_parked_body));
         List<String> engines = new ArrayList<>();
         for (ParkedRounds.Parked round : parked) {
@@ -286,6 +281,64 @@ public final class SyncCoordinator implements MailSync {
                         })
                 .setNegativeButton(R.string.sync_parked_keep, null)
                 .show();
+    }
+
+    /**
+     * Asks about the deletions phone passes held back: most of a book or a
+     * calendar deleted on the phone at once. Deleting them on the server, or
+     * putting them back on the phone, runs the drawer's sync; asking later
+     * leaves them held.
+     */
+    private void offerHeld() {
+        List<HeldDeletions.Held> held = pimdir.held().unoffered();
+        if (held.isEmpty()) {
+            return;
+        }
+        Map<String, PimdirCollections.Stored> stored = storedCollections();
+        StringBuilder rows = new StringBuilder(host.getString(R.string.sync_held_body));
+        List<String> engines = new ArrayList<>();
+        for (HeldDeletions.Held round : held) {
+            engines.add(round.collection());
+            PimdirCollections.Stored one =
+                    stored.get(PimdirStorage.collectionOf(round.collection()));
+            rows.append("\n\n")
+                    .append(host.getString(
+                            R.string.sync_parked_row,
+                            one == null ? round.collection() : one.name,
+                            one == null ? "" : one.accountEmail,
+                            round.handles().size(),
+                            round.members()));
+        }
+        new AlertDialog.Builder(host)
+                .setTitle(R.string.sync_held_title)
+                .setMessage(rows.toString())
+                .setPositiveButton(
+                        R.string.sync_held_delete,
+                        (dialog, which) -> {
+                            pimdir.held().release(engines);
+                            syncAll();
+                        })
+                .setNegativeButton(
+                        R.string.sync_held_restore,
+                        (dialog, which) -> {
+                            pimdir.held().restore(engines);
+                            syncAll();
+                        })
+                .setNeutralButton(R.string.sync_held_later, null)
+                .show();
+    }
+
+    /** Every stored collection, by id. */
+    private Map<String, PimdirCollections.Stored> storedCollections() {
+        Map<String, PimdirCollections.Stored> stored = new HashMap<>();
+        PimdirCollections collections = new PimdirCollections(pimdir, host);
+        for (String kind :
+                new String[] {PimdirSummary.MAIL, PimdirSummary.CONTACT, PimdirSummary.CALENDAR}) {
+            for (PimdirCollections.Stored one : collections.listAll(kind)) {
+                stored.put(one.id, one);
+            }
+        }
+        return stored;
     }
 
     /** Whether a sync pass is running. */

@@ -1835,11 +1835,17 @@ public final class PimdirStorage {
      * calendar).
      */
     public void forget(String engineCollection) throws JSONException {
+        forget(engineCollection, null);
+    }
+
+    /** Forgets the bindings of {@code handles} alone, every one when null. */
+    public void forget(String engineCollection, java.util.Collection<String> handles)
+            throws JSONException {
         JSONArray placements = loadCollection(engineCollection, null).optJSONArray("placements");
         JSONArray drops = new JSONArray();
         for (int index = 0; placements != null && index < placements.length(); index++) {
             String handle = placements.getJSONObject(index).getString("handle");
-            if (!handle.startsWith(PROVISIONAL)) {
+            if (!handle.startsWith(PROVISIONAL) && (handles == null || handles.contains(handle))) {
                 drops.put(
                         new JSONObject()
                                 .put("op", "drop")

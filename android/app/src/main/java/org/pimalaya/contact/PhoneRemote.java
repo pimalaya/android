@@ -152,12 +152,14 @@ final class PhoneRemote implements PhoneSpoke {
                 boolean deleted = cursor.getInt(3) == 1;
 
                 if (deleted) {
-                    // NOTE: only a DELETED row propagates as a delete, then
-                    // is finalized; mere absence never does (see below).
+                    // NOTE: only a DELETED row propagates as a delete, erased
+                    // once the store took it ({@link #purge}); mere absence
+                    // never does (see below).
                     if (sourceId != null && !sourceId.isEmpty()) {
                         vanished.put(sourceId);
+                    } else {
+                        resolver.delete(rawContactUri(account, rawId), null, null);
                     }
-                    resolver.delete(rawContactUri(account, rawId), null, null);
                     continue;
                 }
 
@@ -196,6 +198,19 @@ final class PhoneRemote implements PhoneSpoke {
         reply.put("vanished", vanished);
         reply.put("complete", false);
         return reply;
+    }
+
+    /** Erases the raw contacts of {@code handles} deleted on the phone. */
+    @Override
+    public void purge(String collection, List<String> handles) {
+        Account account = requireAccount(CardStore.serverUrl(collection));
+        ContentResolver resolver = context.getContentResolver();
+        for (String handle : handles) {
+            resolver.delete(
+                    rawContactsUri(account),
+                    RawContacts.SOURCE_ID + " = ? AND " + RawContacts.DELETED + " = 1",
+                    new String[] {handle});
+        }
     }
 
     /**

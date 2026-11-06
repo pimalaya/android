@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Added a guard on the phone's contacts and calendars: when most of a mirrored book or calendar of 20 or more is deleted on the phone at once, by another app or a bulk action, nothing is deleted on the server until you say so. The app asks once its sync ends, naming each book or calendar and how many went: delete them on the server, put them back on the phone, or decide later. A deleted contact or entry also stays on the phone, marked deleted, until the store has recorded its deletion, so a crash in between no longer loses it.
 - Added a Settings page to the drawer, its first setting the week's first day, Monday or Sunday, the phone's language deciding until one is picked.
 - Added selecting several agenda entries or files, by a long press, to delete them together after asking: an entry goes whole, every occurrence of a series with it, and an attachment stays, going with its last message.
 - Added a List mode to the calendar beside the week, switched from the bar: entries by day from now on, under month headings, with a Timeframe of Upcoming or Past in its filter, over three months that the From and To dates narrow or widen; the From, To and Due date rows of the filters lead with a calendar icon.

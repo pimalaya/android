@@ -3,7 +3,7 @@ cairn: delta
 change: audit-s1-residuals
 ---
 
-Folds into spec/onboarding.md (the first two ADDED) and spec/carddav-sync.md (the last two).
+Folds into spec/onboarding.md (the first two ADDED) and spec/carddav-sync.md (the last). The deletion guard moved to phone-deletions-held.
 
 ## ADDED Requirements
 
@@ -22,14 +22,6 @@ The app SHALL offer a setting "Hide in recents", off by default, which keeps the
 - GIVEN "Hide in recents" on and a message open
 - WHEN the user opens the recents screen
 - THEN the app's card shows no content
-
-### Requirement: A phone pass deleting too much asks first
-A phone pass that would delete more than a share of a book's or a calendar's rows SHALL stop before pushing the deletions and ask the user, through the platform's too-many-deletions prompt, whether to carry them out or restore the rows.
-
-#### Scenario: Another app wipes the contacts
-- GIVEN a book of 500 contacts mirrored on the phone
-- WHEN another app deletes all 500 raw rows
-- THEN the next pass deletes nothing upstream until the user confirms
 
 ### Requirement: A book the user does not own stays apart
 Raw contacts of a book the user does not own SHALL NOT be aggregated with the phone's other contacts.

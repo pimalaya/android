@@ -4,6 +4,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.List;
 import java.util.function.IntConsumer;
 
 /** A phone provider as a pass's remote, keyed by the spoke collection id. */
@@ -29,4 +30,10 @@ public interface PhoneSpoke {
      * <p>{@code pushed} is told how many are through.
      */
     JSONObject push(String spoke, JSONArray changes, IntConsumer pushed) throws JSONException;
+
+    /**
+     * Erases the rows of {@code handles} deleted on the phone, once the store
+     * took their deletion or the user put them back.
+     */
+    void purge(String spoke, List<String> handles) throws JSONException;
 }
