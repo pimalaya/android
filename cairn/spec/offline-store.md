@@ -610,14 +610,6 @@ A load scoped to some handles or link ids SHALL read those rows alone, whatever 
 - WHEN a round's page of 1000 members is loaded by handle
 - THEN 1000 placements come back, read by key, and the page costs what it holds rather than the mailbox
 
-### Requirement: A JMAP create is not filed twice
-Before a JMAP account files a new event or contact, it SHALL look the calendar or the address book up for the object's `uid` (`CalendarEvent/query`, `ContactCard/query`) and bind the one the server holds rather than create a second: a create whose answer was lost stays staged and runs again. Google Calendar reads a duplicate insert back instead (A Google calendar can run over the Calendar API); Google People, Google Tasks, Microsoft To Do and Graph contacts look nothing up yet.
-
-#### Scenario: A create whose answer was lost
-- GIVEN a contact created on the phone whose `ContactCard/set` reached the server but whose answer did not
-- WHEN the next sync pushes it again
-- THEN the server's card is bound and no second card is created
-
 ### Requirement: A delta loads what owes a push
 A delta's load (`owing`, pimdir SYNC §10) SHALL read the rows of the handles it names, of the bindings `list_owing_bindings` names and of the items `list_lacking_items` names, by link id, never the whole collection, so a delta costs what moved rather than the mailbox; a round's last page and a rekey still read the whole collection.
 
