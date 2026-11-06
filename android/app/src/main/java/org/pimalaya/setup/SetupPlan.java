@@ -326,7 +326,12 @@ final class SetupPlan {
      * kept whole. Any scheme, the {@code jmap://} marker included.
      */
     static String serverName(SetupOption option) {
-        String base = option.baseUrl == null ? "" : option.baseUrl;
+        return serverName(option.baseUrl);
+    }
+
+    /** The server at {@code url}, named as {@link #serverName(SetupOption)}. */
+    static String serverName(String url) {
+        String base = url == null ? "" : url;
         String host;
         try {
             host = java.net.URI.create(base).getHost();
@@ -360,9 +365,21 @@ final class SetupPlan {
         return google ? "Google" : "Microsoft";
     }
 
+    /**
+     * The host an endpoint names, or the endpoint itself when it names none.
+     *
+     * <p>Read from the URI: java.net.URL knows no imaps or smtps, and would
+     * answer the whole endpoint for a mail server. A provider API's marker
+     * names the account, not a host.
+     */
     static String hostOf(String url) {
+        String scheme = org.pimalaya.account.Endpoints.scheme(url);
+        if ("google".equals(scheme) || "msgraph".equals(scheme)) {
+            return url;
+        }
         try {
-            return new java.net.URL(url).getHost();
+            String host = java.net.URI.create(url).getHost();
+            return host == null ? url : host;
         } catch (Exception error) {
             return url;
         }

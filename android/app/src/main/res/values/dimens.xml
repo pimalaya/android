@@ -15,6 +15,11 @@
     <dimen name="app_bar_toggle_padding">2dp</dimen>
     <dimen name="app_bar_toggle_margin">4dp</dimen>
 
+    <!-- Every spinner's size: the platform's draws its stroke in
+         proportion to its size, so one size keeps one thickness. The
+         icon grid's. -->
+    <dimen name="spinner">24dp</dimen>
+
     <dimen name="fab">56dp</dimen>
     <dimen name="fab_margin">16dp</dimen>
     <dimen name="fab_elevation">6dp</dimen>
@@ -41,6 +46,17 @@
     <dimen name="card_gutter">12dp</dimen>
     <dimen name="card_avatar">42dp</dimen>
     <dimen name="large_title">32sp</dimen>
+
+    <!-- A domain's tile on the setup's servers page: its glyph on a
+         rounded square, filled with the accent while the domain is
+         picked, a check badge overhanging its corner. -->
+    <dimen name="domain_tile">36dp</dimen>
+    <dimen name="domain_tile_radius">12dp</dimen>
+    <dimen name="domain_tile_glyph">20dp</dimen>
+    <dimen name="domain_tile_ring">1.5dp</dimen>
+    <dimen name="domain_tile_badge">20dp</dimen>
+    <dimen name="domain_tile_badge_glyph">16dp</dimen>
+    <dimen name="domain_tile_overhang">6dp</dimen>
 
     <!-- The bottom navigation: an icon on its indicator pill over a
          label, per item. -->

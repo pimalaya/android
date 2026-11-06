@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Domain pages: Mail</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,600..700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.app{--bg:#FFFFFF;--surface:#F9F1F3;--divl:#ECD9E1;--fg:#301F2A;--fg2:#6F5464;--track:#D9BFCB;--wash:#F7D9EA;--accent-ink:#97156A;--err:#B3261E;width:390px;height:844px;overflow:hidden;position:relative;background:var(--bg);color:var(--fg);font-family:Roboto,system-ui,sans-serif;display:flex;flex-direction:column}
+.app.dark{--bg:#1A0D15;--surface:#23121C;--divl:rgba(247,233,240,.1);--fg:#F7E9F0;--fg2:#BB9CAD;--track:#5A4351;--wash:#422032;--accent-ink:#F193B6;--err:#F2B8B5}
+.app.rosy{--bg:#F9F1F3;--surface:#FDF9FA}
+.app.rosy.dark{--bg:#1A0D15;--surface:#23121C}
+.app.rosy .card,.app.rosy .sec,.app.rosy .tbtn{box-shadow:inset 0 0 0 1px var(--divl)}
+.app .text{color:var(--accent-ink)}
+.app.serif .h{font-family:'Source Serif 4',Georgia,serif;font-weight:600;letter-spacing:-.01em}
+.app *{box-sizing:border-box}
+.ico{width:24px;height:24px;fill:currentColor;flex:none}
+.bar{min-height:60px;padding:0 8px;display:flex;align-items:center;flex:none}
+.tbtn{width:40px;height:40px;margin:4px;border-radius:999px;background:var(--surface);color:var(--fg);display:flex;align-items:center;justify-content:center;flex:none;text-decoration:none}
+.body{flex:1;min-height:0;overflow:hidden;padding:8px 24px 0;display:flex;flex-direction:column}
+.who{display:flex;align-items:center;gap:6px;min-height:20px;font-size:14px;color:var(--fg2)}
+.h{margin-top:8px;font-size:28px;font-weight:700;line-height:34px}
+.stack{margin-top:20px;display:flex;flex-direction:column;gap:12px}
+.card,.sec{background:var(--surface);border-radius:22px;overflow:hidden;flex:none}
+.ch{display:flex;align-items:center;gap:14px;min-height:64px;padding:8px 14px}
+.tile{width:32px;height:32px;border-radius:10px;background:var(--bg);display:flex;align-items:center;justify-content:center;flex:none}
+.tile .ico{width:20px;height:20px}
+.ct{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.n{font-size:16px;font-weight:700}
+.s{font-size:14px;line-height:19px;color:var(--fg2)}
+.cb{padding:0 14px 16px;display:flex;flex-direction:column;gap:10px}
+.pill{height:56px;border-radius:999px;background:var(--bg);border:2px solid transparent;display:flex;align-items:center;padding:0 4px 0 24px}
+.pill.focus{border-color:var(--accent)}
+.pill .k{width:84px;flex:none;font-size:15px;color:var(--fg2)}
+.pill input{flex:1;min-width:0;height:48px;border:0;background:none;font:inherit;font-size:17px;color:var(--fg);outline:none}
+.eye{width:48px;height:48px;border:0;background:none;color:var(--fg2);display:flex;align-items:center;justify-content:center;padding:0;border-radius:999px;flex:none}
+.sech{min-height:40px;display:flex;align-items:center;padding:6px 16px 0;color:var(--fg2);font-size:13px;font-weight:700;letter-spacing:.02em;text-transform:uppercase}
+.prow{display:flex;align-items:center;gap:12px;min-height:56px;padding:10px 16px;position:relative;width:100%;border:0;background:none;font:inherit;color:inherit;text-align:left;text-decoration:none}
+.prow+.prow::before{content:"";position:absolute;top:0;left:16px;right:0;height:1px;background:var(--divl)}
+.grow{flex:1;min-width:0;display:block}
+.pt{display:block;font-size:16px;line-height:20px}
+.ps{display:block;font-size:13px;line-height:17px;color:var(--fg2)}
+.chev{width:20px;height:20px;color:var(--fg2)}
+.tg{width:44px;height:24px;border-radius:12px;background:color-mix(in srgb,var(--accent) 45%,transparent);position:relative;flex:none}
+.tg::after{content:"";position:absolute;right:0;top:0;width:24px;height:24px;border-radius:50%;background:var(--accent);box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.tg.off{background:var(--track)}
+.tg.off::after{left:0;right:auto;background:#FAFAFA}
+.foot{padding:12px 24px 16px;flex:none;background:var(--bg);display:flex;flex-direction:column;gap:4px}
+.primary{height:56px;border-radius:999px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;gap:8px;font-size:16px;font-weight:700;text-decoration:none}
+</style>
+</helmet>
+<div class="{{theme}}" style="{{vars}}">
+  <div class="bar"><a class="tbtn" href="OnbConnect.dc.html" aria-label="Back"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"/></svg></a></div>
+  <div class="body">
+    <div class="who">alex@example.org</div>
+    <div class="h">Mail</div>
+    <div class="stack">
+      <div class="card">
+        <div class="ch"><span class="tile"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M240-80q-33 0-56.5-23.5T160-160v-400q0-33 23.5-56.5T240-640h40v-80q0-83 58.5-141.5T480-920q83 0 141.5 58.5T680-720v80h40q33 0 56.5 23.5T800-560v400q0 33-23.5 56.5T720-80H240Zm0-80h480v-400H240v400Zm240-120q33 0 56.5-23.5T560-360q0-33-23.5-56.5T480-440q-33 0-56.5 23.5T400-360q0 33 23.5 56.5T480-280ZM360-640h240v-80q0-50-35-85t-85-35q-50 0-85 35t-35 85v80ZM240-160v-400 400Z"/></svg></span><span class="ct"><span class="n">imap.example.org</span><span class="s">With your password</span></span></div>
+        <div class="cb">
+          <label class="pill"><span class="k">Login</span><input id="mail-login" value="alex@example.org"></label>
+          <label class="pill focus"><span class="k">Password</span><input id="mail-password" type="password" value="correcthorse"><button class="eye" type="button" aria-label="Show password"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="m644-428-58-58q9-47-27-88t-93-32l-58-58q17-8 34.5-12t37.5-4q75 0 127.5 52.5T660-500q0 20-4 37.5T644-428Zm128 126-58-56q38-29 67.5-63.5T832-500q-50-101-143.5-160.5T480-720q-29 0-57 4t-55 12l-62-62q41-17 84-25.5t90-8.5q151 0 269 83.5T920-500q-23 59-60.5 109.5T772-302Zm20 246L624-222q-35 11-70.5 16.5T480-200q-151 0-269-83.5T40-500q21-53 53-98.5t73-81.5L56-792l56-56 736 736-56 56ZM222-624q-29 26-53 57t-41 67q50 101 143.5 160.5T480-280q20 0 39-2.5t39-5.5l-36-38q-11 3-21 4.5t-21 1.5q-75 0-127.5-52.5T300-500q0-11 1.5-21t4.5-21l-84-82Zm319 93Zm-151 75Z"/></svg></button></label>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sech">Options</div>
+        <button class="prow" type="button" role="switch" aria-checked="false"><span class="grow"><span class="pt">Notify new mail</span></span><span class="tg off" aria-hidden="true"></span></button>
+        <button class="prow" type="button"><span class="grow"><span class="pt">Subscribed mailboxes</span><span class="ps">All but Junk and Trash</span></span><svg class="ico chev" viewBox="0 -960 960 960" aria-hidden="true"><path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z"/></svg></button>
+        <button class="prow" type="button"><span class="grow"><span class="pt">Sync period</span><span class="ps">The last 3 months</span></span><svg class="ico chev" viewBox="0 -960 960 960" aria-hidden="true"><path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z"/></svg></button>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <a class="primary" href="OnbSending.dc.html">Continue</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"layering":{"editor":"enum","options":["app","website"],"default":"app"},"serif":{"editor":"boolean","default":true},"accent":{"editor":"color","default":"#BF1E83","options":["#BF1E83","#97156A","#E267A3","#00696F"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var rosy = (this.props.layering ?? 'app') === 'website';
+    var serif = this.props.serif ?? true;
+    var accent = this.props.accent ?? '#BF1E83';
+    if (dark && accent.toUpperCase() === '#BF1E83') accent = '#E267A3';
+    var h = accent.replace('#', '');
+    var lin = function (v) { v = v / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    var l = 0.2126 * lin(parseInt(h.substr(0, 2), 16)) + 0.7152 * lin(parseInt(h.substr(2, 2), 16)) + 0.0722 * lin(parseInt(h.substr(4, 2), 16));
+    var onAccent = l > 0.179 ? '#1A0D15' : '#FFFFFF';
+    return { theme: 'app' + (dark ? ' dark' : '') + (rosy ? ' rosy' : '') + (serif ? ' serif' : ''), vars: '--accent:' + accent + ';--on-accent:' + onAccent };
+  }
+}
+</script>
+</body>
+</html>

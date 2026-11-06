@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A domain's tile on the setup's servers page while not picked: the
+     page tone, ringed. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="?android:attr/colorBackground" />
+    <stroke
+        android:width="@dimen/domain_tile_ring"
+        android:color="@color/divider" />
+    <corners android:radius="@dimen/domain_tile_radius" />
+</shape>

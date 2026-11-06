@@ -84,6 +84,99 @@ public final class CardRows {
         return row;
     }
 
+    /**
+     * One domain's row on the setup's servers page: the domain's glyph on a
+     * tile that is the row's tick, then its name over a status line and a
+     * trailing view.
+     *
+     * <p>Picked, the tile fills with the accent and a check badge overhangs
+     * its corner; not picked, it is the page tone, ringed. The row toggles
+     * it.
+     */
+    public static LinearLayout tileRow(
+            Host host, boolean picked, int icon, String label, String status, View trailing) {
+        android.content.res.Resources res = host.getResources();
+        int tile = res.getDimensionPixelSize(R.dimen.domain_tile);
+        int glyphSize = res.getDimensionPixelSize(R.dimen.domain_tile_glyph);
+        int badge = res.getDimensionPixelSize(R.dimen.domain_tile_badge);
+        int badgeGlyph = res.getDimensionPixelSize(R.dimen.domain_tile_badge_glyph);
+        int overhang = res.getDimensionPixelSize(R.dimen.domain_tile_overhang);
+
+        LinearLayout row = new LinearLayout(host);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(host.ui.dp(68));
+        // NOTE: the tile's box reaches past the tile by the badge's
+        // overhang on every side, so the tile sits 14dp in, 14dp before the
+        // text.
+        row.setPadding(host.ui.dp(14) - overhang, host.ui.dp(10), host.ui.dp(6), host.ui.dp(10));
+        TypedValue ripple = new TypedValue();
+        host.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
+        row.setForeground(host.getDrawable(ripple.resourceId));
+
+        android.widget.FrameLayout box = new android.widget.FrameLayout(host);
+        android.widget.ImageView glyph = new android.widget.ImageView(host);
+        glyph.setImageResource(icon);
+        glyph.setBackgroundResource(picked ? R.drawable.tile_picked : R.drawable.tile_unpicked);
+        glyph.setScaleType(android.widget.ImageView.ScaleType.CENTER_INSIDE);
+        int inset = (tile - glyphSize) / 2;
+        glyph.setPadding(inset, inset, inset, inset);
+        glyph.setImageTintList(
+                android.content.res.ColorStateList.valueOf(
+                        picked
+                                ? host.accentContrast()
+                                : host.ui.resolveColor(android.R.attr.textColorSecondary)));
+        box.addView(
+                glyph,
+                new android.widget.FrameLayout.LayoutParams(
+                        tile, tile, android.view.Gravity.CENTER));
+        if (picked) {
+            android.widget.ImageView check = new android.widget.ImageView(host);
+            check.setImageResource(R.drawable.ic_check);
+            check.setBackgroundResource(R.drawable.tile_badge);
+            check.setScaleType(android.widget.ImageView.ScaleType.CENTER_INSIDE);
+            int badgeInset = (badge - badgeGlyph) / 2;
+            check.setPadding(badgeInset, badgeInset, badgeInset, badgeInset);
+            check.setImageTintList(
+                    android.content.res.ColorStateList.valueOf(
+                            host.ui.resolveColor(android.R.attr.colorAccent)));
+            box.addView(
+                    check,
+                    new android.widget.FrameLayout.LayoutParams(
+                            badge,
+                            badge,
+                            android.view.Gravity.BOTTOM | android.view.Gravity.END));
+        }
+        LinearLayout.LayoutParams boxParams =
+                new LinearLayout.LayoutParams(tile + 2 * overhang, tile + 2 * overhang);
+        boxParams.setMarginEnd(host.ui.dp(14) - overhang);
+        row.addView(box, boxParams);
+
+        LinearLayout text = new LinearLayout(host);
+        text.setOrientation(LinearLayout.VERTICAL);
+        TextView name = new TextView(host);
+        name.setText(label);
+        name.setTextSize(16);
+        name.setTypeface(name.getTypeface(), android.graphics.Typeface.BOLD);
+        name.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
+        text.addView(name);
+        if (status != null) {
+            TextView line = new TextView(host);
+            line.setText(status);
+            line.setTextSize(14);
+            line.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
+            text.addView(line);
+        }
+        row.addView(
+                text,
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        if (trailing != null) {
+            row.addView(trailing);
+        }
+        return row;
+    }
+
     /** An option's row under a hairline: title over its line, then its tick. */
     public static View tickRow(Host host, int titleText, int lineText, CheckBox toggle) {
         LinearLayout item = new LinearLayout(host);
@@ -155,11 +248,16 @@ public final class CardRows {
 
     /** The line between two rows of a card, inset past the glyph. */
     public static View rowDivider(Host host) {
+        return rowDivider(host, host.ui.dp(60));
+    }
+
+    /** The line between two rows of a card, {@code inset} pixels in. */
+    public static View rowDivider(Host host, int inset) {
         View divider = new View(host);
         divider.setBackgroundResource(R.color.divider_light);
         LinearLayout.LayoutParams params =
                 new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1);
-        params.setMarginStart(host.ui.dp(60));
+        params.setMarginStart(inset);
         divider.setLayoutParams(params);
         return divider;
     }

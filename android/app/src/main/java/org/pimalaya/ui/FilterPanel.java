@@ -46,6 +46,7 @@ public final class FilterPanel {
     }
 
     private final Host host;
+    private final ListHeader header;
     private final ImageButton button;
     private final LinearLayout panel;
     private final View pillsRow;
@@ -70,6 +71,7 @@ public final class FilterPanel {
     /** The panel of {@code header}'s list, {@code redraw} its render. */
     public FilterPanel(Host host, ListHeader header, Runnable redraw) {
         this.host = host;
+        this.header = header;
         this.redraw = redraw;
         button = header.filterButton();
         panel = header.filterPanel();
@@ -477,6 +479,7 @@ public final class FilterPanel {
             return;
         }
         unfolded = true;
+        header.filtersShown(true);
         redraw.run();
         folding = slide(panel, 0, heightOf(panel), () -> folding = null);
     }
@@ -495,6 +498,7 @@ public final class FilterPanel {
                             folding = null;
                             unfolded = false;
                             open = null;
+                            header.filtersShown(false);
                             redraw.run();
                         });
     }

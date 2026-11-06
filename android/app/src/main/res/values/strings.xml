@@ -12,12 +12,63 @@
     <string name="cancel_auth">Cancel</string>
     <string name="welcome_title">Your mail, contacts and calendars, offline.</string>
     <string name="welcome_description">Enter your email address. Pimalaya finds your server settings for you.</string>
-    <string name="setup_advanced_link">Advanced setup</string>
     <string name="setup_via_account">With your %1$s account, in the browser</string>
     <string name="setup_via_browser">In the browser, at %1$s</string>
     <string name="setup_via_password">With your password, at %1$s</string>
     <string name="setup_via_token">With an API token, at %1$s</string>
-    <string name="domain_title_simple">What do you want on this phone?</string>
+    <string name="domain_title_simple">Select your domains</string>
+    <string name="servers_title">Review your domains</string>
+    <string name="servers_found">Found for %1$s.</string>
+    <string name="setup_unfound">Nothing could be discovered for %1$s. Set it up manually.</string>
+    <string name="server_required">Enter a server</string>
+    <string name="signin_with_password">With your password</string>
+    <string name="signin_with_token">With an API token</string>
+    <string name="signin_with_label">Auth</string>
+    <string name="choice_auto">Auto</string>
+    <string name="servers_nothing">Nothing found</string>
+    <string name="field_application">Application</string>
+    <string name="application_custom">Custom</string>
+    <string name="application_unavailable">Pimalaya has no application at this server. Pick Custom.</string>
+    <string name="field_security">Security</string>
+    <string name="security_starttls" translatable="false">STARTTLS</string>
+    <string name="security_tls" translatable="false">SSL/TLS</string>
+    <string name="signin_through">Same sign-in as %1$s</string>
+    <string name="signin_done">Signed in</string>
+    <string name="signin_not_allowed">Not allowed on the sign-in page. Continue asks again.</string>
+    <string name="signin_not_allowed_for">%1$s not allowed on the sign-in page. Continue asks again.</string>
+    <string name="signin_problem_for">%1$s for %2$s</string>
+    <string name="signin_browser_opens">Continue opens the sign-in page of %1$s.</string>
+    <string name="identity_for">For %1$s.</string>
+    <string name="subscribed_calendars">Subscribed calendars</string>
+    <string name="settings_account_label">Account</string>
+    <string name="settings_domains_label">Domains</string>
+    <string name="settings_signin_label">Sign-in</string>
+    <string name="notify_needs_background">Needs background sync.</string>
+    <string name="account_tasks_in">In %1$s</string>
+    <string name="calendars_title">Which calendars?</string>
+    <string name="calendars_description">The ones you pick sync to this phone. You can change this later in the calendar\'s filter.</string>
+    <string name="calendars_none">This account has no calendar</string>
+    <string name="field_url">URL</string>
+    <string name="field_token">Token</string>
+    <string name="field_client_id">Client ID</string>
+    <string name="field_client_secret">Secret</string>
+    <string name="field_auth_url">Auth URL</string>
+    <string name="field_token_url">Token URL</string>
+    <string name="field_scope">Scope</string>
+    <string name="field_issuer">Issuer</string>
+    <string name="field_redirect">Redirect</string>
+    <string name="field_optional">Optional</string>
+    <string name="client_required">Enter a client ID</string>
+    <string name="endpoints_required">Enter the auth and token URLs</string>
+    <string name="issuer_required">Enter an issuer</string>
+    <string name="client_through_mail">Through Mail\'s sign-in</string>
+    <string name="settings_review_title">Review your settings</string>
+    <string name="settings_review_message">You can change them later in the account settings.</string>
+    <string name="subscribed_mailboxes">Subscribed mailboxes</string>
+    <string name="subscribed_addressbooks">Subscribed addressbooks</string>
+    <string name="mailboxes_default">All but Junk and Trash</string>
+    <string name="subscribed_all">All</string>
+    <string name="subscribed_of">%1$d of %2$d</string>
     <string name="password_show">Show password</string>
     <string name="password_hide">Hide password</string>
     <string name="password_shared">Used for everything you picked above.</string>
@@ -27,7 +78,6 @@
     <string name="result_title">Almost there</string>
     <string name="result_message">Not connected: %1$s.</string>
     <string name="result_connected">Connected</string>
-    <string name="result_refused">Password not accepted</string>
     <string name="result_not_served">Not offered by this server</string>
     <string name="domains_not_served">Not offered by this server, left out: %1$s</string>
     <string name="result_later">You can connect the rest later by adding this address again.</string>
@@ -51,21 +101,15 @@
     <string name="email_invalid">Enter a valid email address</string>
     <string name="discover_failed">Could not find your server settings</string>
 
-    <string name="domain_title">How should each one connect?</string>
     <string name="domain_message">Pick a server and a sign-in for each. Switch off what you do not want on this phone.</string>
-    <string name="domain_none">Nothing was found for this address. You can enter the server settings yourself.</string>
     <string name="domain_manual">Enter settings manually</string>
     <string name="domain_connected">Already connected</string>
     <string name="send_mail">Send mail</string>
     <string name="send_mail_advanced">Sending</string>
-    <string name="send_mail_none">Do not send from this account</string>
 
-    <string name="manual_dav_url">Server URL</string>
     <string name="manual_submit_server">Sending server (host or host:port)</string>
     <string name="manual_submit_message">Where this account sends through. Implicit TLS, port 465 unless you say otherwise.</string>
 
-    <string name="setup_advanced">Advanced</string>
-    <string name="setup_simple_unavailable">This address signs in a way the standard setup does not cover. The advanced setup can connect it.</string>
 
     <string name="config_title">Choose a configuration</string>
     <string name="config_carddav" translatable="false">CardDAV</string>
@@ -107,30 +151,16 @@
     <string name="books_description">The ones you pick sync to this phone. You can change this later in the account\'s settings.</string>
     <string name="books_signed">Signed in · %1$s</string>
     <string name="books_finish">Finish</string>
-    <string name="domain_manual_detail">Server, login and password</string>
-    <string name="signin_message">One sign-in per server. Domains sharing a server share it.</string>
     <string name="signin_same">Same login and password as %1$s</string>
     <string name="signin_sending">Mail (sending)</string>
     <string name="signin_tune">Change how this signs in</string>
     <string name="signin_custom">Custom settings</string>
-    <string name="signin_custom_for">Custom settings for %1$s</string>
-    <string name="signin_discovered">Use discovered settings</string>
     <string name="custom_server">Server</string>
     <string name="custom_port">Port</string>
-    <string name="custom_starttls">STARTTLS</string>
-    <string name="custom_token">Sign in with an API token</string>
-    <string name="signin_browser">Sign in with browser</string>
-    <string name="signin_own_client">Use my own OAuth client</string>
-    <string name="signin_check">Sign in</string>
-    <string name="signin_again">Sign in again</string>
-    <string name="signin_manual">Entered manually</string>
-    <string name="signin_sends">%1$s, sends through %2$s</string>
     <string name="server_insecure">Only encrypted servers are accepted: imaps:// for mail, https:// for contacts and calendars, smtps:// or smtp:// for sending.</string>
-    <string name="hint_token">Paste your API token</string>
     <string name="token_refused">Token not accepted</string>
     <string name="oauth_title">Your OAuth client</string>
     <string name="oauth_message">The server does not register apps on its own. Enter the client you registered there.</string>
-    <string name="oauth_message_own">Enter the client you registered with this server.</string>
     <string name="books_none">This account has no addressbook</string>
     <string name="subscriptions_title">Accounts</string>
     <string name="add_account">Add account</string>
@@ -931,15 +961,10 @@
     <string name="account_window_since">Since %1$s</string>
     <string name="account_send">Send through</string>
     <string name="account_send_none">No server</string>
-    <string name="account_books">Addressbooks</string>
     <string name="book_remote_sync">Sync with the server</string>
-    <string name="book_off">Off: not synced, not shown</string>
-    <string name="calendar_synced">Synced</string>
-    <string name="calendar_not_synced">Not synced</string>
     <string name="sync_mailboxes">Mailboxes that sync</string>
     <string name="sync_calendars">Calendars that sync</string>
     <string name="sync_books">Address books that sync</string>
-    <string name="account_servers">Servers</string>
     <string name="server_oauth" translatable="false">OAuth</string>
     <string name="server_token">Token</string>
     <string name="delete_account">Remove this account</string>
@@ -948,7 +973,6 @@
     <string name="delete_account_all">Its contacts move to this phone. Its mail and events are removed.</string>
     <string name="delete_account_phone_failed">Contacts edited on this phone could not be saved, so nothing was removed. Try again.</string>
     <!-- Background check (BackgroundCheck, BackgroundJob). -->
-    <string name="account_background">Background</string>
     <string name="background_sync">Sync in the background</string>
     <string name="background_sync_note">Roughly, as Android allows: an idle phone checks less often. A pull in the app syncs at once.</string>
     <string-array name="background_intervals">
@@ -1058,8 +1082,6 @@
     <string name="capture_empty">Write the task</string>
     <string name="capture_no_calendar">No calendar takes tasks yet: tasks need a CalDAV calendar</string>
     <string name="onboarding_no_tasks">Tasks are not available with this calendar yet: they need a CalDAV server.</string>
-    <string name="account_tasks_takes">Takes tasks</string>
-    <string name="account_tasks_events_only">Events only: this calendar is read only</string>
     <string name="account_tasks_none">Not available on this account yet: Pimalaya keeps tasks in CalDAV calendars only. Your tasks can live in another account meanwhile.</string>
     <string name="account_tasks_none_microsoft">Not available on this account yet. Microsoft keeps tasks in its own service rather than in the calendar, and Pimalaya does not read it yet. Your tasks can live in another account meanwhile.</string>
     <string name="account_tasks_none_google">Not available on this account yet. Google keeps tasks in its own service rather than in the calendar, and Pimalaya does not read it yet. Your tasks can live in another account meanwhile.</string>

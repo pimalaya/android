@@ -25,6 +25,28 @@ public final class PillField {
         this.input = input;
     }
 
+    /**
+     * A pill named by a label inside it, before its value, as a form's row
+     * reading "Server  imap.example.org"; on a card or a page.
+     */
+    public static PillField labeled(
+            Host host, int label, String value, boolean secret, boolean onCard) {
+        PillField field = of(host, label, value, secret, onCard);
+        field.input.setHint(null);
+        android.widget.TextView name = new android.widget.TextView(host);
+        name.setText(label);
+        name.setTextSize(15);
+        name.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
+        name.setMinWidth(host.ui.dp(72));
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.setMarginEnd(host.ui.dp(12));
+        field.view.addView(name, 0, params);
+        return field;
+    }
+
     /** A pill named {@code hint} holding {@code value}, on a card or a page. */
     public static PillField of(Host host, int hint, String value, boolean secret, boolean onCard) {
         LinearLayout pill = new LinearLayout(host);
@@ -58,6 +80,15 @@ public final class PillField {
         pill.addView(
                 input,
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        // NOTE: a tap on the pill outside the field, its label or its ends,
+        // types in the field as a tap on the field does.
+        pill.setOnClickListener(
+                view -> {
+                    if (input.isEnabled() && input.requestFocus()) {
+                        input.setSelection(input.getText().length());
+                        host.showKeyboard();
+                    }
+                });
 
         if (secret) {
             ImageButton toggle = new ImageButton(host);

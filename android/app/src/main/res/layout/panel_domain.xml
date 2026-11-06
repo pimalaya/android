@@ -52,14 +52,6 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
-                <ImageView
-                    android:layout_width="18dp"
-                    android:layout_height="18dp"
-                    android:layout_marginEnd="6dp"
-                    android:importantForAccessibility="no"
-                    android:src="@drawable/ic_check"
-                    android:tint="?android:attr/colorAccent" />
-
                 <TextView
                     android:id="@+id/domain_email"
                     android:layout_width="0dp"
@@ -181,8 +173,8 @@
 
             <ProgressBar
                 android:id="@+id/domain_progress"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
+                android:layout_width="@dimen/spinner"
+                android:layout_height="@dimen/spinner"
                 android:layout_gravity="end|center_vertical"
                 android:layout_marginEnd="16dp"
                 android:elevation="4dp"

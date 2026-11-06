@@ -37,6 +37,15 @@ public class SetupPlanTest {
     private static final String SESSION = "https://api.example.org/jmap/session";
 
     @Test
+    public void aMailOrSubmissionEndpointNamesItsHost() {
+        // NOTE: imaps and smtps are no schemes java.net.URL knows, so the
+        // host is read from the URI, as for https.
+        assertEquals("imap.example.org", SetupPlan.hostOf("imaps://imap.example.org:993"));
+        assertEquals("smtp.example.org", SetupPlan.hostOf("smtps://smtp.example.org:465"));
+        assertEquals("dav.example.org", SetupPlan.hostOf("https://dav.example.org/dav/"));
+    }
+
+    @Test
     public void oauthPicksBehindOneServerAndAudienceShareOneSignIn() {
         SetupOption mail = option("jmap", SESSION, oauth(AUTHORIZE, "mail"));
         SetupOption calendar = option("caldav", SESSION, oauth(AUTHORIZE, "calendar"));

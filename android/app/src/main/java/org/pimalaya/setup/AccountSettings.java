@@ -47,6 +47,7 @@ import org.pimalaya.sync.SyncPasses;
 import org.pimalaya.sync.SyncStamps;
 import org.pimalaya.task.TaskStore;
 import org.pimalaya.ui.Avatar;
+import org.pimalaya.ui.CardRows;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.PillField;
@@ -169,7 +170,11 @@ public final class AccountSettings {
                 });
     }
 
-    /** Rebuilds the page from what the account holds now. */
+    /**
+     * Rebuilds the page from what the account holds now, drawn as the setup's
+     * settings page: the account's own card, one card of its domains each led
+     * by its tile, then where it signs in.
+     */
     private void render() {
         String email = settingsEmail;
         AccountEntry account = AccountEntry.find(accounts, email);
@@ -178,18 +183,14 @@ public final class AccountSettings {
         }
         renderIdentity(account);
 
-        Sections sections = new Sections(host, host.findViewById(R.id.account_content));
+        LinearLayout content = host.findViewById(R.id.account_content);
+        Sections sections = new Sections(host, content);
         sections.clear();
-        addActivation(sections, email);
-        if (account.covers(PimDomain.MAIL)) {
-            addMail(sections, account);
-        }
-        addBackground(sections, account);
-        addBooks(sections, email);
-        if (account.covers(PimDomain.CALENDAR)) {
-            addCalendars(sections, email);
-            addTasks(sections, email);
-        }
+        label(content, R.string.settings_account_label);
+        addAccount(sections, account);
+        label(content, R.string.settings_domains_label);
+        addDomains(sections, content, account);
+        label(content, R.string.settings_signin_label);
         addServers(sections, account);
 
         boolean contactsOnly =
@@ -199,6 +200,26 @@ public final class AccountSettings {
                         contactsOnly
                                 ? R.string.delete_account_contacts
                                 : R.string.delete_account_all);
+    }
+
+    /** A label over the next card, naming what it holds. */
+    private void label(LinearLayout content, int text) {
+        TextView label = new TextView(host);
+        label.setText(text);
+        label.setTextColor(host.resolveColor(android.R.attr.textColorSecondary));
+        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        label.setTypeface(null, android.graphics.Typeface.BOLD);
+        label.setAllCaps(true);
+        label.setLetterSpacing(0.02f);
+        int gutter = host.getResources().getDimensionPixelSize(R.dimen.card_gutter);
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.setMarginStart(gutter + host.dp(4));
+        params.setMarginEnd(gutter + host.dp(4));
+        params.topMargin = host.dp(content.getChildCount() == 0 ? 8 : 20);
+        content.addView(label, params);
     }
 
     /** The disc, the address, what it covers and where it stands. */
@@ -232,11 +253,15 @@ public final class AccountSettings {
     }
 
     /**
-     * The account switch: off, the account syncs nothing.
+     * The account's own card: whether it is used at all, and how often it
+     * syncs while the app is closed ({@link BackgroundCheck}).
      *
-     * <p>The lists and their filters leave it out ({@link AccountActivation}).
+     * <p>Off, the account syncs nothing; the lists and their filters leave it
+     * out ({@link AccountActivation}).
      */
-    private void addActivation(Sections sections, String email) {
+    private void addAccount(Sections sections, AccountEntry account) {
+        String email = account.email;
+        List<View> rows = new ArrayList<>();
         Switch toggle = new Switch(host);
         toggle.setChecked(AccountActivation.enabled(host, email));
         toggle.setOnCheckedChangeListener(
@@ -246,48 +271,155 @@ public final class AccountSettings {
                     shell.filterChanged();
                     render();
                 });
-        sections.section(
-                0,
-                0,
-                List.of(
-                        switchRow(
-                                sections,
-                                host.getString(R.string.account_enable),
-                                host.getString(R.string.account_enable_note),
-                                toggle)),
-                null,
-                false);
+        rows.add(
+                switchRow(
+                        sections,
+                        host.getString(R.string.account_enable),
+                        host.getString(R.string.account_enable_note),
+                        toggle));
+
+        int current = 0;
+        for (int index = 0; index < BackgroundCheck.INTERVALS.length; index++) {
+            if (BackgroundCheck.INTERVALS[index] == BackgroundCheck.interval(host, email)) {
+                current = index;
+            }
+        }
+        int shown = current;
+        String[] intervals = host.getResources().getStringArray(R.array.background_intervals);
+        rows.add(
+                sections.row(
+                        host.getString(R.string.background_sync),
+                        intervals[shown],
+                        chevron(),
+                        () ->
+                                choose(
+                                        R.string.background_sync,
+                                        R.string.background_sync_note,
+                                        R.array.background_intervals,
+                                        shown,
+                                        picked -> {
+                                            BackgroundCheck.setInterval(
+                                                    host, email, BackgroundCheck.INTERVALS[picked]);
+                                            render();
+                                        })));
+        sections.section(0, 0, rows, null, false);
     }
 
     /**
-     * The mail card: sender name, rich by default, sync bound, window and
-     * submission server.
+     * The domains card, as the setup's settings page: a section per domain
+     * the account covers, led by its tile, its rows the setup's first.
+     */
+    private void addDomains(Sections sections, LinearLayout content, AccountEntry account) {
+        String email = account.email;
+        LinearLayout card = CardRows.card(host);
+        if (account.covers(PimDomain.MAIL)) {
+            domainSection(
+                    card,
+                    PimDomain.MAIL.icon,
+                    host.getString(PimDomain.MAIL.label),
+                    mailRows(sections, account));
+            domainSection(
+                    card,
+                    R.drawable.ic_send,
+                    host.getString(R.string.signin_sending),
+                    sendingRows(sections, account));
+        }
+        if (account.covers(PimDomain.CONTACTS)) {
+            domainSection(
+                    card,
+                    PimDomain.CONTACTS.icon,
+                    host.getString(PimDomain.CONTACTS.label),
+                    contactsRows(sections, email));
+        }
+        if (account.covers(PimDomain.CALENDAR)) {
+            domainSection(
+                    card,
+                    PimDomain.CALENDAR.icon,
+                    host.getString(PimDomain.CALENDAR.label),
+                    calendarRows(sections, email));
+        }
+        if (card.getChildCount() == 0) {
+            return;
+        }
+        int gutter = host.getResources().getDimensionPixelSize(R.dimen.card_gutter);
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.setMarginStart(gutter);
+        params.setMarginEnd(gutter);
+        params.topMargin = gutter;
+        content.addView(card, params);
+    }
+
+    /**
+     * A domain's section of the domains card: its tile, picked, and its name,
+     * then its rows, under a hairline inset past the tiles.
+     */
+    private void domainSection(LinearLayout card, int glyph, String name, List<View> rows) {
+        if (card.getChildCount() > 0) {
+            int inset =
+                    host.dp(28) + host.getResources().getDimensionPixelSize(R.dimen.domain_tile);
+            card.addView(CardRows.rowDivider(host, inset));
+        }
+        LinearLayout header = CardRows.tileRow(host, true, glyph, name, null, null);
+        header.setForeground(null);
+        card.addView(header);
+        for (int index = 0; index < rows.size(); index++) {
+            if (index > 0) {
+                View line = new View(host);
+                line.setBackgroundColor(host.getColor(R.color.divider_light));
+                LinearLayout.LayoutParams lineParams =
+                        new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1);
+                lineParams.setMarginStart(host.dp(16));
+                card.addView(line, lineParams);
+            }
+            card.addView(rows.get(index));
+        }
+    }
+
+    /**
+     * Mail's rows: the setup's (notifications, subscribed mailboxes, sync
+     * period), then the window of mail on the phone and rich writing.
      *
      * <p>The window is since when its mail is on the phone ({@link
      * org.pimalaya.mail.MailWindow}).
      */
-    private void addMail(Sections sections, AccountEntry account) {
+    private List<View> mailRows(Sections sections, AccountEntry account) {
         String email = account.email;
         List<View> rows = new ArrayList<>();
 
-        String name = SenderName.of(host, email);
-        rows.add(
-                sections.row(
-                        host.getString(R.string.sender_name),
-                        name.isEmpty() ? host.getString(R.string.sender_name_none) : name,
-                        chevron(),
-                        () -> promptSenderName(email)));
-
-        Switch rich = new Switch(host);
-        rich.setChecked(ComposeFormat.rich(host, email));
-        rich.setOnCheckedChangeListener(
-                (view, checked) -> ComposeFormat.set(host, email, checked));
-        rows.add(
+        // NOTE: off while the permission is missing, revoked in the system
+        // settings included, so turning it on asks again; idle while the
+        // account does not sync in the background, which it needs.
+        boolean syncs = BackgroundCheck.syncs(host, email);
+        Switch notify = new Switch(host);
+        notify.setChecked(BackgroundCheck.notifies(host, email) && BackgroundCheck.permitted(host));
+        notify.setEnabled(syncs);
+        notify.setOnCheckedChangeListener(
+                (view, checked) -> {
+                    if (!checked) {
+                        BackgroundCheck.setNotifies(host, email, false);
+                        return;
+                    }
+                    shell.askNotifications(
+                            granted -> {
+                                BackgroundCheck.setNotifies(host, email, granted);
+                                notify.setChecked(granted);
+                            });
+                });
+        View notifyRow =
                 switchRow(
                         sections,
-                        host.getString(R.string.compose_rich_default),
-                        host.getString(R.string.compose_rich_default_line),
-                        rich));
+                        host.getString(R.string.background_notify),
+                        host.getString(
+                                syncs ? R.string.notify_mail_note : R.string.notify_needs_background),
+                        notify);
+        notifyRow.setEnabled(syncs);
+        notifyRow.setAlpha(syncs ? 1f : 0.5f);
+        rows.add(notifyRow);
+
+        rows.add(subscribedRow(sections, PimDomain.MAIL, R.string.subscribed_mailboxes, email));
 
         String[] scopes = host.getResources().getStringArray(R.array.mail_scopes);
         int scope = scopeIndex(parts.mail().monthsOf(email));
@@ -331,6 +463,31 @@ public final class AccountSettings {
                                         List.of(email),
                                         () -> renderIfOpen(email))));
 
+        Switch rich = new Switch(host);
+        rich.setChecked(ComposeFormat.rich(host, email));
+        rich.setOnCheckedChangeListener(
+                (view, checked) -> ComposeFormat.set(host, email, checked));
+        rows.add(
+                switchRow(
+                        sections,
+                        host.getString(R.string.compose_rich_default),
+                        host.getString(R.string.compose_rich_default_line),
+                        rich));
+        return rows;
+    }
+
+    /** Sending's rows: the name mail goes out under, and where it goes. */
+    private List<View> sendingRows(Sections sections, AccountEntry account) {
+        String email = account.email;
+        List<View> rows = new ArrayList<>();
+        String name = SenderName.of(host, email);
+        rows.add(
+                sections.row(
+                        host.getString(R.string.sender_name),
+                        name.isEmpty() ? host.getString(R.string.sender_name_none) : name,
+                        chevron(),
+                        () -> promptSenderName(email)));
+
         // NOTE: JMAP, Graph and Gmail submit through the account they read
         // from, so there is no server of its own to change.
         Account mail = account.server(PimDomain.MAIL);
@@ -344,9 +501,30 @@ public final class AccountSettings {
                             chevron(),
                             () -> promptSubmission(none ? null : current)));
         }
+        return rows;
+    }
 
-        rows.add(syncRow(sections, PimDomain.MAIL, account.email, true));
-        sections.section(PimDomain.MAIL.label, R.drawable.ic_section_mail, rows, null, false);
+    /**
+     * A row counting the collections of a domain the account syncs, opening
+     * the chooser of what it takes ({@link #chooseSync}).
+     */
+    private View subscribedRow(Sections sections, PimDomain domain, int title, String email) {
+        MergedFilter filter = MergedFilter.of(host, domain);
+        int all = 0;
+        int taken = 0;
+        for (PimdirCollections.Stored collection : sync.passes().collectionsOf(domain)) {
+            if (collection.accountEmail.equals(email)) {
+                all++;
+                taken += filter.ticked(email, collection.id) ? 1 : 0;
+            }
+        }
+        return sections.row(
+                host.getString(title),
+                taken == all
+                        ? host.getString(R.string.subscribed_all)
+                        : host.getString(R.string.subscribed_of, taken, all),
+                chevron(),
+                () -> chooseSync.accept(domain, email));
     }
 
     /** Where a number of months stands in the period choices. */
@@ -400,161 +578,174 @@ public final class AccountSettings {
         }
     }
 
-    /**
-     * The background card ({@link BackgroundCheck}).
-     *
-     * <p>How often the account syncs while the app is closed, and whether its
-     * new mail notifies, which needs the first.
-     */
-    private void addBackground(Sections sections, AccountEntry account) {
-        String email = account.email;
-        boolean syncs = BackgroundCheck.syncs(host, email);
-        List<View> rows = new ArrayList<>();
-
-        int current = 0;
-        for (int index = 0; index < BackgroundCheck.INTERVALS.length; index++) {
-            if (BackgroundCheck.INTERVALS[index] == BackgroundCheck.interval(host, email)) {
-                current = index;
-            }
-        }
-        int shown = current;
-        String[] intervals = host.getResources().getStringArray(R.array.background_intervals);
-        rows.add(
-                sections.row(
-                        host.getString(R.string.background_sync),
-                        intervals[shown],
-                        chevron(),
-                        () ->
-                                choose(
-                                        R.string.background_sync,
-                                        R.string.background_sync_note,
-                                        R.array.background_intervals,
-                                        shown,
-                                        picked -> {
-                                            BackgroundCheck.setInterval(
-                                                    host, email, BackgroundCheck.INTERVALS[picked]);
-                                            render();
-                                        })));
-
-        if (account.covers(PimDomain.MAIL)) {
-            Switch notify = new Switch(host);
-            // NOTE: off while the permission is missing, revoked in the
-            // system settings included, so turning it on asks again.
-            notify.setChecked(
-                    BackgroundCheck.notifies(host, email) && BackgroundCheck.permitted(host));
-            notify.setEnabled(syncs);
-            notify.setOnCheckedChangeListener(
-                    (view, checked) -> {
-                        if (!checked) {
-                            BackgroundCheck.setNotifies(host, email, false);
-                            return;
-                        }
-                        shell.askNotifications(
-                                granted -> {
-                                    BackgroundCheck.setNotifies(host, email, granted);
-                                    notify.setChecked(granted);
-                                });
-                    });
-            View row =
-                    switchRow(sections, host.getString(R.string.background_notify), null, notify);
-            row.setEnabled(syncs);
-            row.setAlpha(syncs ? 1f : 0.5f);
-            rows.add(row);
-        }
-
-        sections.section(R.string.account_background, R.drawable.ic_sync, rows, null, false);
-    }
-
-    /**
-     * The addressbooks card: a switch per book, then its sync and phone rows.
-     *
-     * <p>Led by a line when another app fills the phone's Contacts app. A book
-     * reads as off the phone while the contacts permission is missing; one
-     * turned on joins the phone when the account's other books are there.
-     */
-    private void addBooks(Sections sections, String email) {
-        List<View> rows = new ArrayList<>();
-        if (elsewhere) {
-            rows.add(note(R.string.phone_elsewhere));
-        }
-        boolean permitted = PhoneMirror.CONTACTS.granted(host);
+    /** The account's addressbooks, as the card store lists them. */
+    private List<BookEntry> booksOf(String email) {
         List<BookEntry> entries = new ArrayList<>();
-        boolean accountOnPhone = false;
         for (BookEntry entry : parts.cards().loadAllAddressbooks()) {
             if (entry.accountEmail.equals(email)) {
                 entries.add(entry);
-                accountOnPhone |= entry.subscribed && entry.phoneSynced;
             }
         }
-        boolean joins = accountOnPhone && permitted && !elsewhere;
-        for (BookEntry entry : entries) {
-            boolean onPhone = entry.phoneSynced && permitted;
-
-            LinearLayout item = new LinearLayout(host);
-            item.setOrientation(LinearLayout.VERTICAL);
-
-            Switch enable = new Switch(host);
-            enable.setChecked(entry.subscribed);
-            enable.setOnCheckedChangeListener(
-                    (view, checked) -> setBook(entry, checked, checked, checked && joins));
-            item.addView(
-                    switchRow(
-                            sections,
-                            entry.book.name(),
-                            entry.subscribed ? null : host.getString(R.string.book_off),
-                            enable));
-
-            if (entry.subscribed) {
-                item.addView(
-                        bookOption(
-                                R.string.book_remote_sync,
-                                entry.remoteSynced,
-                                checked ->
-                                        writeBook(
-                                                entry.book.url(),
-                                                true,
-                                                checked,
-                                                entry.phoneSynced)));
-                View local =
-                        bookOption(
-                                R.string.phone_contacts,
-                                onPhone,
-                                checked -> setBook(entry, true, entry.remoteSynced, checked));
-                local.setPadding(
-                        local.getPaddingLeft(), 0, local.getPaddingRight(), host.dp(6));
-                item.addView(local);
-            }
-            rows.add(item);
-        }
-        // NOTE: no count: the contacts filter keys a book by its address,
-        // not by the collection the store lists.
-        rows.add(syncRow(sections, PimDomain.CONTACTS, email, false));
-        sections.section(R.string.account_books, R.drawable.ic_addressbooks, rows, null, false);
+        return entries;
     }
 
     /**
-     * The row opening what {@code email} syncs of {@code domain}, counting
-     * the collections it takes when {@code counted}.
+     * Contacts' rows, the setup's: the phone's Contacts app, one switch for
+     * the account, then which addressbooks are subscribed.
+     *
+     * <p>The switch reads as off while the contacts permission is missing, and
+     * says so when another app fills the phone's Contacts app already.
      */
-    private View syncRow(Sections sections, PimDomain domain, String email, boolean counted) {
-        String count = null;
-        if (counted) {
-            MergedFilter filter = MergedFilter.of(host, domain);
-            int all = 0;
-            int taken = 0;
-            for (PimdirCollections.Stored collection : sync.passes().collectionsOf(domain)) {
-                if (collection.accountEmail.equals(email)) {
-                    all++;
-                    taken += filter.ticked(email, collection.id) ? 1 : 0;
+    private List<View> contactsRows(Sections sections, String email) {
+        List<View> rows = new ArrayList<>();
+        List<BookEntry> entries = booksOf(email);
+        boolean onPhone = false;
+        int subscribed = 0;
+        for (BookEntry entry : entries) {
+            if (entry.subscribed) {
+                subscribed++;
+                onPhone |= entry.phoneSynced;
+            }
+        }
+        Switch phone = new Switch(host);
+        phone.setChecked(onPhone && PhoneMirror.CONTACTS.granted(host));
+        phone.setOnCheckedChangeListener((view, checked) -> setBooksOnPhone(email, checked));
+        rows.add(
+                switchRow(
+                        sections,
+                        host.getString(R.string.phone_contacts),
+                        host.getString(
+                                elsewhere ? R.string.phone_elsewhere : R.string.phone_contacts_note),
+                        phone));
+        rows.add(
+                sections.row(
+                        host.getString(R.string.subscribed_addressbooks),
+                        subscribed == entries.size()
+                                ? host.getString(R.string.subscribed_all)
+                                : host.getString(
+                                        R.string.subscribed_of, subscribed, entries.size()),
+                        chevron(),
+                        () -> chooseBooks(email)));
+        return rows;
+    }
+
+    /**
+     * Shows the account's subscribed addressbooks in the phone's Contacts
+     * app, or takes them off it; on asks the contacts permission first, a
+     * refusal leaving them off.
+     */
+    private void setBooksOnPhone(String email, boolean on) {
+        List<BookEntry> subscribed = new ArrayList<>();
+        for (BookEntry entry : booksOf(email)) {
+            if (entry.subscribed) {
+                subscribed.add(entry);
+            }
+        }
+        if (!on) {
+            for (BookEntry entry : subscribed) {
+                if (entry.phoneSynced) {
+                    parts.cards()
+                            .setBookState(entry.book.url(), true, entry.remoteSynced, false);
+                    sync.hideFromPhone(entry.book.url());
                 }
             }
-            count = host.getString(R.string.filter_count_of, taken, all);
+            shell.reload(PimDomain.CONTACTS);
+            shell.filterChanged();
+            render();
+            return;
         }
-        return sections.row(
-                host.getString(domain.syncLabel()),
-                count,
-                chevron(),
-                () -> chooseSync.accept(domain, email));
+        shell.askMirrors(
+                java.util.EnumSet.of(PhoneMirror.CONTACTS),
+                granted -> {
+                    if (granted.contains(PhoneMirror.CONTACTS)) {
+                        for (BookEntry entry : subscribed) {
+                            parts.cards()
+                                    .setBookState(
+                                            entry.book.url(), true, entry.remoteSynced, true);
+                            sync.showOnPhone(entry.book.url());
+                        }
+                        shell.reload(PimDomain.CONTACTS);
+                        shell.filterChanged();
+                    }
+                    render();
+                });
+    }
+
+    /**
+     * The subscribed addressbooks, a box per book and, under a ticked one,
+     * whether it syncs with the server; each change applies as made.
+     *
+     * <p>A book ticked joins the phone's Contacts app when the account's others
+     * are there.
+     */
+    private void chooseBooks(String email) {
+        LinearLayout list = new LinearLayout(host);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(0, host.dp(4), 0, host.dp(8));
+        ScrollView scroll = new ScrollView(host);
+        scroll.addView(list);
+        Runnable[] fill = new Runnable[1];
+        fill[0] =
+                () -> {
+                    list.removeAllViews();
+                    List<BookEntry> entries = booksOf(email);
+                    if (entries.isEmpty()) {
+                        TextView none = new TextView(host);
+                        none.setText(R.string.books_none);
+                        none.setTextColor(host.resolveColor(android.R.attr.textColorSecondary));
+                        none.setPadding(host.dp(24), host.dp(8), host.dp(24), host.dp(8));
+                        list.addView(none);
+                        return;
+                    }
+                    boolean onPhone = false;
+                    for (BookEntry entry : entries) {
+                        onPhone |= entry.subscribed && entry.phoneSynced;
+                    }
+                    boolean joins = onPhone && PhoneMirror.CONTACTS.granted(host) && !elsewhere;
+                    for (BookEntry entry : entries) {
+                        CheckBox box = new CheckBox(host);
+                        box.setText(entry.book.name());
+                        box.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+                        box.setTextColor(host.resolveColor(android.R.attr.textColorPrimary));
+                        box.setChecked(entry.subscribed);
+                        box.setMinHeight(host.dp(52));
+                        box.setOnCheckedChangeListener(
+                                (view, checked) -> {
+                                    setBook(entry, checked, checked, checked && joins);
+                                    fill[0].run();
+                                });
+                        LinearLayout.LayoutParams params =
+                                new LinearLayout.LayoutParams(
+                                        LinearLayout.LayoutParams.MATCH_PARENT,
+                                        LinearLayout.LayoutParams.WRAP_CONTENT);
+                        params.setMarginStart(host.dp(20));
+                        params.setMarginEnd(host.dp(24));
+                        list.addView(box, params);
+                        if (entry.subscribed) {
+                            View remote =
+                                    bookOption(
+                                            R.string.book_remote_sync,
+                                            entry.remoteSynced,
+                                            checked -> {
+                                                writeBook(
+                                                        entry.book.url(),
+                                                        true,
+                                                        checked,
+                                                        entry.phoneSynced);
+                                                fill[0].run();
+                                            });
+                            remote.setPadding(
+                                    host.dp(52), 0, remote.getPaddingRight(), host.dp(4));
+                            list.addView(remote);
+                        }
+                    }
+                };
+        fill[0].run();
+        new AlertDialog.Builder(host)
+                .setTitle(R.string.subscribed_addressbooks)
+                .setView(scroll)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
     }
 
     /** One of a book's two options, a checkbox indented under it. */
@@ -613,91 +804,72 @@ public final class AccountSettings {
     }
 
     /**
-     * The calendars card: a row per calendar, its filter and phone switches.
+     * Calendar's rows, the setup's: the phone's calendar, one switch for the
+     * account, then which calendars are subscribed, then where tasks go.
      *
-     * <p>Led by a line when another app fills the phone's calendar with the
-     * address; the switch still shows it there then, and reads as off while the
-     * calendar permission is missing.
+     * <p>The switch reads as off while the calendar permission is missing, and
+     * says so when another app fills the phone's calendar already.
      */
-    private void addCalendars(Sections sections, String email) {
+    private List<View> calendarRows(Sections sections, String email) {
         List<View> rows = new ArrayList<>();
-        if (calendarsElsewhere) {
-            rows.add(note(R.string.phone_calendar_elsewhere));
-        }
         List<String> ids = new ArrayList<>();
-        List<PimdirCollections.Stored> calendars = new ArrayList<>();
         for (PimdirCollections.Stored calendar : sync.passes().collectionsOf(PimDomain.CALENDAR)) {
             if (calendar.accountEmail.equals(email)) {
                 ids.add(calendar.id);
-                calendars.add(calendar);
             }
         }
-        MergedFilter filter = MergedFilter.of(host, PimDomain.CALENDAR);
-        boolean permitted = PhoneMirror.CALENDAR.granted(host);
-        for (PimdirCollections.Stored calendar : calendars) {
-            LinearLayout item = new LinearLayout(host);
-            item.setOrientation(LinearLayout.VERTICAL);
-            item.addView(
-                    sections.row(
-                            calendar.name,
-                            host.getString(
-                                    filter.ticked(email, calendar.id)
-                                            ? R.string.calendar_synced
-                                            : R.string.calendar_not_synced),
-                            null,
-                            null));
-            View phone =
-                    bookOption(
-                            R.string.phone_calendar,
-                            PhoneCalendars.shown(host, email, calendar.id) && permitted,
-                            checked -> setCalendar(email, calendar.id, checked, ids));
-            phone.setPadding(phone.getPaddingLeft(), 0, phone.getPaddingRight(), host.dp(6));
-            item.addView(phone);
-            rows.add(item);
+        Switch phone = new Switch(host);
+        phone.setChecked(
+                PhoneCalendars.shown(host, email) && PhoneMirror.CALENDAR.granted(host));
+        phone.setOnCheckedChangeListener(
+                (view, checked) -> setCalendarsOnPhone(email, checked, ids));
+        rows.add(
+                switchRow(
+                        sections,
+                        host.getString(R.string.phone_calendar),
+                        host.getString(
+                                calendarsElsewhere
+                                        ? R.string.phone_calendar_elsewhere
+                                        : R.string.phone_calendar_note),
+                        phone));
+        rows.add(subscribedRow(sections, PimDomain.CALENDAR, R.string.subscribed_calendars, email));
+        View tasks = tasksRow(sections, email);
+        if (tasks != null) {
+            rows.add(tasks);
         }
-        rows.add(syncRow(sections, PimDomain.CALENDAR, email, true));
-        sections.section(R.string.calendar_title, R.drawable.ic_domain_calendar, rows, null, false);
+        return rows;
     }
 
     /**
-     * The tasks card: which of the account's calendars take tasks.
+     * Where the account's tasks go: the calendars that take them, or why none
+     * does (cairn/changes/gtd: the point of use, besides the capture sheet and
+     * onboarding). Null for an account without calendars yet.
      *
      * <p>Where a capture goes is picked in the capture sheet, which keeps the
      * last one: there is no default to set here
-     * (cairn/changes/gtd-by-categories). An account none of whose calendars
-     * take tasks gets the line saying why instead (cairn/changes/gtd: the
-     * point of use, besides the capture sheet and onboarding).
+     * (cairn/changes/gtd-by-categories).
      */
-    private void addTasks(Sections sections, String email) {
+    private View tasksRow(Sections sections, String email) {
         List<EventStore.StoredCalendar> calendars = new ArrayList<>();
-        boolean any = false;
+        List<String> taking = new ArrayList<>();
         for (EventStore.StoredCalendar calendar : parts.events().loadCalendars()) {
             if (calendar.accountEmail.equals(email)) {
                 calendars.add(calendar);
-                any |= TaskStore.takesTasks(calendar);
+                if (TaskStore.takesTasks(calendar)) {
+                    taking.add(calendar.name);
+                }
             }
         }
         if (calendars.isEmpty()) {
-            return;
+            return null;
         }
-        List<View> rows = new ArrayList<>();
-        if (!any) {
-            rows.add(note(noTasksReason(calendars.get(0).url)));
-            sections.section(R.string.tasks_title, R.drawable.ic_component_todo, rows, null, false);
-            return;
-        }
-        for (EventStore.StoredCalendar calendar : calendars) {
-            rows.add(
-                    sections.row(
-                            calendar.name,
-                            host.getString(
-                                    TaskStore.takesTasks(calendar)
-                                            ? R.string.account_tasks_takes
-                                            : R.string.account_tasks_events_only),
-                            null,
-                            null));
-        }
-        sections.section(R.string.tasks_title, R.drawable.ic_component_todo, rows, null, false);
+        return sections.row(
+                host.getString(R.string.tasks_title),
+                taking.isEmpty()
+                        ? host.getString(noTasksReason(calendars.get(0).url))
+                        : host.getString(R.string.account_tasks_in, String.join(", ", taking)),
+                null,
+                null);
     }
 
     /** Why an account's calendars take no tasks, by the service they are on. */
@@ -713,36 +885,26 @@ public final class AccountSettings {
     }
 
     /**
-     * A calendar's phone switch; the phone's calendars follow either way.
-     *
-     * <p>On, the calendar permission is asked first and a refusal leaves it off
-     * the phone. Off, its row goes after one last pass.
+     * Shows every calendar of the account on the phone, or takes them all off
+     * it; on asks the calendar permission first, a refusal leaving them off.
+     * The phone's calendars follow either way.
      */
-    private void setCalendar(String email, String calendar, boolean on, List<String> siblings) {
+    private void setCalendarsOnPhone(String email, boolean on, List<String> calendars) {
         if (!on) {
-            PhoneCalendars.set(host, email, calendar, false, siblings);
+            PhoneCalendars.setAccount(host, email, false);
             sync.reconcileCalendars();
+            render();
             return;
         }
         shell.askMirrors(
                 java.util.EnumSet.of(PhoneMirror.CALENDAR),
                 granted -> {
                     if (granted.contains(PhoneMirror.CALENDAR)) {
-                        PhoneCalendars.set(host, email, calendar, true, siblings);
+                        PhoneCalendars.showAll(host, email, calendars);
                         sync.reconcileCalendars();
                     }
                     render();
                 });
-    }
-
-    /** A line leading a card, saying another app already shows the address. */
-    private TextView note(int text) {
-        TextView note = new TextView(host);
-        note.setText(text);
-        note.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        note.setTextColor(host.resolveColor(android.R.attr.textColorSecondary));
-        note.setPadding(host.dp(16), host.dp(12), host.dp(16), host.dp(12));
-        return note;
     }
 
     /**
@@ -784,7 +946,7 @@ public final class AccountSettings {
                             + " · " + String.join(", ", named.methods);
             rows.add(sections.row(server.getKey(), line, null, null));
         }
-        sections.section(R.string.account_servers, R.drawable.ic_section_work, rows, null, false);
+        sections.section(0, 0, rows, null, false);
     }
 
     /** One server row's pieces, in the order the domains came. */

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>One path: address</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,600..700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.app{--bg:#FFFFFF;--surface:#F9F1F3;--divl:#ECD9E1;--fg:#301F2A;--fg2:#6F5464;--track:#D9BFCB;--wash:#F7D9EA;--accent-ink:#97156A;width:390px;height:844px;overflow:hidden;position:relative;background:var(--bg);color:var(--fg);font-family:Roboto,system-ui,sans-serif;display:flex;flex-direction:column}
+.app.dark{--bg:#1A0D15;--surface:#23121C;--divl:rgba(247,233,240,.1);--fg:#F7E9F0;--fg2:#BB9CAD;--track:#5A4351;--wash:#422032;--accent-ink:#F193B6}
+.app.rosy{--bg:#F9F1F3;--surface:#FDF9FA}
+.app.rosy.dark{--bg:#1A0D15;--surface:#23121C}
+.app.rosy .card,.app.rosy .sec,.app.rosy .tbtn{box-shadow:inset 0 0 0 1px var(--divl)}
+.app .tonal{background:var(--wash);color:var(--accent-ink)}
+.app .text{color:var(--accent-ink)}
+.hd{font-weight:700}
+.app.serif .h,.app.serif .hd{font-family:'Source Serif 4',Georgia,serif;font-weight:600;letter-spacing:-.01em}
+.app *{box-sizing:border-box}
+.inp{height:56px;border-radius:999px;background:var(--surface);border:2px solid var(--accent);padding:0 24px;font:inherit;font-size:17px;color:var(--fg);outline:none;width:100%}
+.foot{padding:12px 24px 16px;flex:none;background:var(--bg);display:flex;flex-direction:column;gap:4px}
+.primary{height:56px;border-radius:999px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;gap:8px;font-size:16px;font-weight:700;text-decoration:none}
+</style>
+</helmet>
+<div class="{{theme}}" style="{{vars}}">
+  <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 24px">
+    <svg width="56" height="56" viewBox="0 0 1000 1000" role="img" aria-label="Pimalaya"><defs><linearGradient id="onb-lg" gradientUnits="userSpaceOnUse" x1="254.18" y1="564.76" x2="254.18" y2="141.44"><stop offset="0" stop-color="#f193b6"/><stop offset="0.59" stop-color="#e267a3"/><stop offset="1" stop-color="#bf1e83"/></linearGradient></defs><g transform="translate(0.1 0) scale(1.5787)" fill="url(#onb-lg)"><path d="M445.013 229.29c0-34.01-27.57-61.58-61.58-61.58h-163.14c-66.54 0-120.47 53.94-120.47 120.47v286.6c0 32.33 26.21 58.54 58.54 58.54h6.06c32.33 0 58.54-26.21 58.54-58.54V351.67c0-33.58 27.22-60.81 60.81-60.81h99.66c34.01 0 61.58-27.570 61.58-61.58z"/><path d="M487.373 208.71h126.66c.61 0 1.1-.53 1.04-1.14C604.453 91.35 506.503 0 387.553 0H78.993c-33.55 0-60.75 27.2-60.75 60.75v6.17c0 33.55 27.2 60.75 60.75 60.75h308.56c48.51 0 89.11 34.43 98.71 80.13.11.53.57.91 1.12.91z"/><path d="M486.453 249.54c-.15 0-.28.11-.31.25-9.79 45.45-50.26 79.630-98.59 79.63h-62.34c-33.73 0-61.08 27.35-61.08 61.08v5.51c0 33.73 27.35 61.08 61.08 61.08h62.34c118.82 0 216.7-91.15 227.51-207.19a.334.334 0 0 0-.33-.36h-128.27z"/></g></svg>
+    <div class="hd" style="margin-top: 24px; font-size: 32px; line-height: 38px">Your mail, contacts and calendars, offline.</div>
+    <div style="margin-top: 12px; font-size: 16px; line-height: 24px; color: var(--fg2)">Enter your email address. Pimalaya finds your server settings for you.</div>
+    <input class="inp" id="onb-address" type="email" aria-label="Email address" placeholder="Email address" value="alex@example.org" style="margin-top: 32px">
+  </div>
+  <div class="foot">
+    <a class="primary" href="OnbDomains.dc.html">Continue</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"layering":{"editor":"enum","options":["app","website"],"default":"app"},"serif":{"editor":"boolean","default":true},"accent":{"editor":"color","default":"#BF1E83","options":["#BF1E83","#97156A","#E267A3","#00696F"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var rosy = (this.props.layering ?? 'app') === 'website';
+    var serif = this.props.serif ?? true;
+    var accent = this.props.accent ?? '#BF1E83';
+    if (dark && accent.toUpperCase() === '#BF1E83') accent = '#E267A3';
+    var h = accent.replace('#', '');
+    var lin = function (v) { v = v / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    var l = 0.2126 * lin(parseInt(h.substr(0, 2), 16)) + 0.7152 * lin(parseInt(h.substr(2, 2), 16)) + 0.0722 * lin(parseInt(h.substr(4, 2), 16));
+    var onAccent = l > 0.179 ? '#1A0D15' : '#FFFFFF';
+    return { theme: 'app' + (dark ? ' dark' : '') + (rosy ? ' rosy' : '') + (serif ? ' serif' : ''), vars: '--accent:' + accent + ';--on-accent:' + onAccent };
+  }
+}
+</script>
+</body>
+</html>

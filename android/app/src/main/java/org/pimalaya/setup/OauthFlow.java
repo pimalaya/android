@@ -46,15 +46,6 @@ public final class OauthFlow {
     /** The two endpoints of the authorization server one grant runs against. */
     record AuthServer(String authEndpoint, String tokenEndpoint) {}
 
-    /**
-     * What the OAuth client page says.
-     *
-     * @param heading what the client is for, the page's first line
-     * @param own whether the user asked for it, rather than the server
-     *     refusing to register one
-     */
-    record Prompt(String heading, boolean own) {}
-
     private final Host host;
     private final AccountClient client;
     private final SetupShell shell;
@@ -315,21 +306,19 @@ public final class OauthFlow {
     }
 
     /**
-     * Opens the OAuth client page, endpoints, scope and redirect prefilled.
+     * Opens the OAuth client page, endpoints, scope and redirect prefilled,
+     * for a server that registers no client and none was typed.
      *
      * <p>Continue runs the custom grant: an http loopback redirect is served on
      * a local listener, the app's org.pimalaya:/oauth2redirect scheme rides the
      * OS route (servers rejecting loopback). Back returns to the sign-in page.
      */
-    void promptOauthClient(Target target, AuthServer authServer, String scope, Prompt prompt) {
+    void promptOauthClient(Target target, AuthServer authServer, String scope, String heading) {
         String authEndpoint = authServer.authEndpoint();
         String tokenEndpoint = authServer.tokenEndpoint();
-        String heading = prompt.heading();
-        boolean own = prompt.own();
 
         ((TextView) host.findViewById(R.id.oauth_line)).setText(heading);
-        ((TextView) host.findViewById(R.id.oauth_message))
-                .setText(own ? R.string.oauth_message_own : R.string.oauth_message);
+        ((TextView) host.findViewById(R.id.oauth_message)).setText(R.string.oauth_message);
 
         PillField clientId = PillField.of(host, R.string.oauth_client_id, "", false, false);
         PillField clientSecret =
@@ -410,12 +399,15 @@ public final class OauthFlow {
      * Runs the zero-configuration OAuth path from a bare issuer.
      *
      * <p>RFC 8414 metadata, RFC 7591 registration, a code grant on the app
-     * scheme (Fastmail and Stalwart refuse loopback, RFC 8252 §7.1). With no
-     * registration endpoint, or {@code own}, opens the client page prefilled.
+     * scheme (Fastmail and Stalwart refuse loopback, RFC 8252 §7.1). With the
+     * user's {@code own} client, its grant at the metadata's endpoints instead;
+     * with no registration endpoint, the client page prefilled.
+     *
+     * @param own the client typed on the servers page, its scope unused; null
+     *     to register one
      */
-    void startIssuerOauth(Target target, String issuer, String domains, Prompt prompt) {
-        boolean own = prompt.own();
-
+    void startIssuerOauth(
+            Target target, String issuer, String domains, String heading, OauthRequest own) {
         onBusy.run();
 
         host.io.execute(
@@ -430,18 +422,33 @@ public final class OauthFlow {
                             throw new IllegalStateException(
                                     host.getString(R.string.oauth_metadata_incomplete));
                         }
+                        AuthServer server =
+                                new AuthServer(
+                                        metadata.authorizationEndpoint(), metadata.tokenEndpoint());
 
-                        if (own || !metadata.supportsDynamicRegistration()) {
+                        if (own != null) {
+                            OauthRequest request =
+                                    new OauthRequest(
+                                            own.clientId(),
+                                            own.clientSecret(),
+                                            own.redirectUri(),
+                                            metadata.domainScope(domains));
+                            host.postAlive(
+                                    () ->
+                                            startClientOauth(
+                                                    target, server, request, metadata.issuer()));
+                            return;
+                        }
+
+                        if (!metadata.supportsDynamicRegistration()) {
                             host.postAlive(
                                     () -> {
                                         onAborted.run();
                                         promptOauthClient(
                                                 target,
-                                                new AuthServer(
-                                                        metadata.authorizationEndpoint(),
-                                                        metadata.tokenEndpoint()),
+                                                server,
                                                 metadata.domainScope(domains),
-                                                prompt);
+                                                heading);
                                     });
                             return;
                         }
@@ -479,9 +486,7 @@ public final class OauthFlow {
                                 () ->
                                         launchSchemeGrant(
                                                 target,
-                                                new AuthServer(
-                                                        metadata.authorizationEndpoint(),
-                                                        metadata.tokenEndpoint()),
+                                                server,
                                                 new OauthRequest(
                                                         clientId, null, Oauth.REDIRECT_URI, scope),
                                                 metadata.issuer()));
@@ -509,11 +514,41 @@ public final class OauthFlow {
     }
 
     /**
-     * Opens the browser for a grant over the app's own redirect scheme.
+     * Runs a grant with the user's own client, typed on the servers page: an
+     * http loopback redirect served on a local listener, else one of the
+     * app's schemes.
+     *
+     * @param issuer the issuer the redirect must name (RFC 9207), null for
+     *     none
+     */
+    void startClientOauth(
+            Target target, AuthServer authServer, OauthRequest request, String issuer) {
+        String secret = request.clientSecret() == null ? "" : request.clientSecret();
+        if (request.redirectUri().startsWith("http://")) {
+            startLoopbackOauth(
+                    target,
+                    authServer,
+                    new OauthRequest(
+                            request.clientId(), secret, request.redirectUri(), request.scope()));
+            return;
+        }
+        launchSchemeGrant(
+                target,
+                authServer,
+                new OauthRequest(
+                        request.clientId(),
+                        secret.isEmpty() ? null : secret,
+                        request.redirectUri(),
+                        request.scope()),
+                issuer);
+    }
+
+    /**
+     * Opens the browser for a grant over one of the app's redirect schemes.
      *
      * <p>Persisted to survive the process, redeemed in {@link #handleRedirect}:
      * the issuer flow (no secret) and custom clients on
-     * org.pimalaya:/oauth2redirect.
+     * org.pimalaya:/oauth2redirect or a provider's scheme.
      */
     void launchSchemeGrant(
             Target target, AuthServer authServer, OauthRequest request, String issuer) {
@@ -547,7 +582,7 @@ public final class OauthFlow {
         try {
             String url = pendingOauth.authorizeUrl(authEndpoint, extras);
             Log.d("pimalaya", "scheme grant authorize url: " + url);
-            persistPendingOauth(clientId, Oauth.REDIRECT_URI);
+            persistPendingOauth(clientId, request.redirectUri());
             onBusy.run();
             browse(url);
         } catch (Exception error) {
@@ -768,7 +803,7 @@ public final class OauthFlow {
     }
 
     /** A free loopback TCP port, for the redirect prefill. */
-    private static int freePort() {
+    static int freePort() {
         try (java.net.ServerSocket probe =
                 new java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
             return probe.getLocalPort();

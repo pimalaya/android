@@ -17,9 +17,8 @@
 
         <ProgressBar
             android:id="@+id/sync_row_spinner"
-            style="?android:attr/progressBarStyleSmall"
-            android:layout_width="22dp"
-            android:layout_height="22dp"
+            android:layout_width="@dimen/spinner"
+            android:layout_height="@dimen/spinner"
             android:importantForAccessibility="no"
             android:indeterminateTint="?android:attr/colorAccent"
             android:visibility="gone" />

@@ -18,6 +18,10 @@ The rows are raw: Spinners showing an array item as their own label, CheckBoxes 
 
 The contact and entry pages already have a vocabulary for this (`Sections`: a label over one rounded card, rows of title and value); the settings page should speak it.
 
+## Rework (2026-11-05)
+
+Reworked with the owner on 2026-11-05 so the page reads as the setup's settings page (one-onboarding-path), designed on the Pimalaya Android canvas, row "Account settings, drawn as the setup's settings", the frames copied in designs/ as `AccSet*.dc.html`. Under the identity: an *Account* card (Use this account, Sync in the background), a *Domains* card, one card with a section per domain the account covers led by its tile, picked, holding the setup's rows first (Mail: Notify new mail, Subscribed mailboxes, Sync period, then Mail on this phone and Write rich messages; Mail (sending): Your name, Send through; Contacts: Show in phone contacts, Subscribed addressbooks; Calendar: Show in phone calendar, Subscribed calendars, Tasks), then a *Sign-in* card, the servers, and Remove. The phone's contacts and calendar become one switch per domain, as in the setup, where they were a box per addressbook and per calendar (owner, 2026-11-05: one switch per domain); an addressbook's box and its server sync move to the dialog *Subscribed addressbooks* opens; the mailboxes and calendars synced open the filter page's per-account choice, as their rows did. The sections below describe the first version.
+
 ## What
 
 ### Top of the page

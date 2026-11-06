@@ -31,6 +31,9 @@ public final class ListHeader {
     /** Whether the large title is scrolled out of sight. */
     private boolean scrolled;
 
+    /** Whether the filter panel shows, the FAB kept away meanwhile. */
+    private boolean filtersShown;
+
     /** Where the list last stood, to tell the scroll's direction. */
     private int lastFirst;
 
@@ -168,6 +171,19 @@ public final class ListHeader {
     /** The filter panel under the search field, its visibility the caller's. */
     LinearLayout filterPanel() {
         return view.findViewById(R.id.header_filter);
+    }
+
+    /** The filter panel shown or folded: the FAB goes or comes back. */
+    void filtersShown(boolean shown) {
+        filtersShown = shown;
+        if (host.screen == panel) {
+            host.refreshFab();
+        }
+    }
+
+    /** Whether the filter panel shows, the list's FAB kept away. */
+    public boolean filtersShown() {
+        return filtersShown;
     }
 
     /** The chip row's scroll, its visibility the caller's. */

@@ -27,8 +27,9 @@ import org.pimalaya.R;
  * The sync dock over the bottom navigation: the pass, or the mail fill.
  *
  * <p>Shown on lists while something runs: a bar, the account over the domain's
- * step, the pass's account count; the add button rises over it. A tap opens the
- * sheet (progress, a row per account, last lines, in memory for this pass).
+ * step, the pass's account count; the add button goes while it shows. A tap
+ * opens the sheet (progress, a row per account, last lines, in memory for this
+ * pass).
  */
 public final class SyncDock {
     /** One account of the pass, as the sheet lists it. */
@@ -247,7 +248,8 @@ public final class SyncDock {
             }
             if (was) {
                 dock.setVisibility(View.GONE);
-                rise(false);
+                host.dockShown = false;
+                host.refreshFab();
             }
             return;
         }
@@ -269,7 +271,10 @@ public final class SyncDock {
         if (!was) {
             keepEnd();
             dock.setVisibility(View.VISIBLE);
-            rise(true);
+            // NOTE: the add button goes while the dock shows, rather than
+            // riding over it.
+            host.dockShown = true;
+            host.refreshFab();
         }
         if (sheet != null) {
             renderSheet();
@@ -319,16 +324,6 @@ public final class SyncDock {
                         }
                     }
                 });
-    }
-
-    /** Raises the extended add button by the dock's height, or lowers it. */
-    private void rise(boolean shown) {
-        View fab = host.findViewById(R.id.fab_extended);
-        int by =
-                Math.max(
-                        dock.getHeight(),
-                        host.getResources().getDimensionPixelSize(R.dimen.sync_dock_height));
-        fab.animate().translationY(shown ? -by : 0).setDuration(200);
     }
 
     /** Opens the sheet over the list, closing on the scrim or its chevron. */

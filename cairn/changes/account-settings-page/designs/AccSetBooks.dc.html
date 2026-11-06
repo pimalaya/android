@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Account settings, subscribed addressbooks</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,600..700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}a:hover{color:inherit}
+.app{--bg:#FFFFFF;--surface:#F9F1F3;--menu:#FFFFFF;--divl:#ECD9E1;--fg:#301F2A;--fg2:#6F5464;--track:#D9BFCB;--wash:#F7D9EA;--accent-ink:#97156A;width:390px;height:844px;overflow:hidden;position:relative;background:var(--bg);color:var(--fg);font-family:Roboto,system-ui,sans-serif;display:flex;flex-direction:column}
+.app.dark{--bg:#1A0D15;--surface:#23121C;--menu:#33202B;--divl:rgba(247,233,240,.1);--fg:#F7E9F0;--fg2:#BB9CAD;--track:#5A4351;--wash:#422032;--accent-ink:#F193B6}
+.app.rosy{--bg:#F9F1F3;--surface:#FDF9FA}
+.app.rosy.dark{--bg:#1A0D15;--surface:#23121C}
+.app.rosy .card,.app.rosy .tbtn{box-shadow:inset 0 0 0 1px var(--divl)}
+.app.serif .h{font-family:'Source Serif 4',Georgia,serif;font-weight:600;letter-spacing:-.01em}
+.app *{box-sizing:border-box}
+.ico{width:24px;height:24px;fill:currentColor;flex:none}
+.bar{min-height:60px;padding:0 8px;display:flex;align-items:center;flex:none}
+.tbtn{width:40px;height:40px;margin:4px;border-radius:999px;background:var(--surface);color:var(--fg);display:flex;align-items:center;justify-content:center;flex:none}
+.body{flex:1;min-height:0;overflow:hidden;padding:8px 24px 0;display:flex;flex-direction:column}
+.who{display:flex;align-items:center;gap:6px;min-height:20px;font-size:14px;color:var(--fg2)}
+.who .ico{width:18px;height:18px;color:var(--accent)}
+.h{margin-top:8px;font-size:28px;font-weight:700;line-height:34px}
+.sub{margin-top:8px;font-size:14px;line-height:20px;color:var(--fg2)}
+.card{margin-top:20px;background:var(--surface);border-radius:22px;overflow:hidden;flex:none}
+.sec{position:relative}
+.sec.div::before{content:"";position:absolute;top:0;left:64px;right:0;height:1px;background:var(--divl)}
+.card.c .sec.div::before{left:62px}
+.srow{display:flex;align-items:center;min-height:68px;padding:10px 6px 10px 14px}
+.tap{flex:1;min-width:0;min-height:48px;display:flex;align-items:center;gap:14px;border:0;background:none;padding:0;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.ct{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.n{font-size:16px;font-weight:700}
+.s{font-size:14px;line-height:19px;color:var(--fg2)}
+.tune{width:48px;height:48px;border:0;background:none;color:var(--fg2);display:flex;align-items:center;justify-content:center;border-radius:999px;padding:0;flex:none;cursor:pointer}
+.tk{width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex:none;position:relative;background:var(--bg);color:var(--fg2);box-shadow:inset 0 0 0 1.5px var(--track)}
+.tk>.ico{width:20px;height:20px}
+.tk.on{background:var(--accent);color:var(--on-accent);box-shadow:none}
+.badge{display:none;position:absolute;right:-6px;bottom:-6px;width:20px;height:20px;border-radius:999px;background:var(--surface);color:var(--accent);align-items:center;justify-content:center}
+.tk.on .badge{display:flex}
+.badge .ico{width:16px;height:16px}
+.tile{width:36px;height:36px;border-radius:12px;background:var(--bg);display:flex;align-items:center;justify-content:center;flex:none;color:var(--fg)}
+.tile .ico{width:20px;height:20px}
+.srow.split{padding-right:0}
+.how{display:flex;align-items:center;gap:2px}
+.how .ico{width:18px;height:18px;color:var(--fg2)}
+.vr{width:1px;height:36px;background:var(--divl);flex:none}
+.swb{width:78px;height:56px;display:flex;align-items:center;justify-content:center;border:0;background:none;padding:0;cursor:pointer;flex:none}
+.sw{width:52px;height:32px;border-radius:999px;background:var(--bg);box-shadow:inset 0 0 0 2px var(--track);position:relative;flex:none}
+.sw i{position:absolute;top:8px;left:8px;width:16px;height:16px;border-radius:999px;background:var(--fg2)}
+.sw.on{background:var(--accent);box-shadow:none}
+.sw.on i{top:4px;left:24px;width:24px;height:24px;background:var(--on-accent)}
+.cbx{width:24px;height:24px;flex:none;color:var(--accent);margin:0 4px 0 6px}
+.cbx.off{color:var(--fg2)}
+.cb{padding:0 14px 16px;display:flex;flex-direction:column;gap:10px}
+.note{font-size:13px;line-height:18px;color:var(--fg2);padding:0 4px}
+.pill{height:56px;border-radius:999px;background:var(--bg);border:2px solid transparent;display:flex;align-items:center;gap:12px;padding:0 14px 0 22px}
+.pill.focus{border-color:var(--accent)}
+.pill .k{min-width:72px;flex:none;font-size:15px;color:var(--fg2)}
+.pill input,.pill .v{flex:1;min-width:0;border:0;background:none;font:inherit;font-size:17px;color:var(--fg);outline:none;padding:0}
+.pill input::placeholder{color:var(--fg2)}
+.pill .chev{width:22px;height:22px;color:var(--fg2)}
+.menu{position:absolute;z-index:5;width:236px;background:var(--menu);border-radius:16px;padding:8px 0;box-shadow:0 10px 28px rgba(48,31,42,.22),0 2px 6px rgba(48,31,42,.12)}
+.mi{display:flex;align-items:center;min-height:48px;padding:0 20px;font-size:15px;color:var(--fg)}
+.foot{padding:12px 24px 16px;flex:none;background:var(--bg);display:flex;flex-direction:column;gap:4px}
+.primary{height:56px;border-radius:999px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;gap:8px;font-size:16px;font-weight:700}
+.primary.dis{opacity:.4;pointer-events:none}
+.tune.dis{opacity:.38;pointer-events:none}
+.sec.locked .srow{opacity:.38;pointer-events:none}
+.acc{display:flex;align-items:center;gap:14px;margin-top:4px}.disc{width:52px;height:52px;border-radius:999px;background:#5B8DEF;color:#FFFFFF;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;flex:none}.acc .an{font-size:20px;font-weight:700;line-height:26px}.app.serif .acc .an{font-family:'Source Serif 4',Georgia,serif;font-weight:600}.acc .ad{font-size:14px;line-height:19px;color:var(--fg2)}.pill2{margin-top:12px;align-self:flex-start;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;background:var(--wash);color:var(--accent-ink);font-size:13px;font-weight:500}.pill2 .ico{width:16px;height:16px}.lbl{margin:22px 4px 8px;font-size:13px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--fg2)}.card.flat{margin-top:0}.sechead{display:flex;align-items:center;gap:14px;min-height:60px;padding:10px 14px 4px}.row{display:flex;align-items:center;gap:12px;min-height:56px;padding:8px 14px 8px 16px;position:relative}.row+.row::before{content:"";position:absolute;top:0;left:16px;right:0;height:1px;background:var(--divl)}.rt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.rn{font-size:16px}.rv{font-size:14px;line-height:19px;color:var(--fg2)}.rchev{width:22px;height:22px;color:var(--fg2)}.danger{color:#BA1A1A;font-weight:500}.app.dark .danger{color:#FFB4AB}.fnote{margin:8px 4px 0;font-size:13px;line-height:18px;color:var(--fg2)}.bk{display:flex;align-items:center;gap:14px;min-height:56px;padding:8px 14px 8px 16px;position:relative}.bk+.bk::before{content:"";position:absolute;top:0;left:54px;right:0;height:1px;background:var(--divl)}.bk .cbx2{width:24px;height:24px;color:var(--accent);flex:none}.bk .cbx2.off{color:var(--fg2)}.sub2{display:flex;align-items:center;gap:12px;min-height:44px;padding:0 14px 8px 54px;font-size:14px;color:var(--fg2)}.sub2 .sw{transform:scale(.8);transform-origin:right center}</style>
+</helmet>
+<div class="{{theme}}" style="{{vars}}">
+  <div class="bar"><a class="tbtn" href="AccSetMiddle.dc.html" aria-label="Back"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"/></svg></a></div>
+  <div class="body">
+    <div class="who">alex@example.org</div>
+    <div class="h">Which addressbooks?</div>
+    <div class="sub">The ones you pick sync to this phone.</div>
+    <div class="card">
+      <div class="bk"><span class="cbx2"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="m424-312 282-282-56-56-226 226-114-114-56 56 170 170ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h560v-560H200v560Zm0-560v560-560Z"/></svg></span><span class="rt"><span class="rn">Personal</span></span></div>
+<div class="sub2"><span style="flex:1">Sync with the server</span><span class="sw on"><i></i></span></div>
+      <div class="bk"><span class="cbx2"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="m424-312 282-282-56-56-226 226-114-114-56 56 170 170ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h560v-560H200v560Zm0-560v560-560Z"/></svg></span><span class="rt"><span class="rn">Work</span></span></div>
+<div class="sub2"><span style="flex:1">Sync with the server</span><span class="sw"><i></i></span></div>
+      <div class="bk"><span class="cbx2 off"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h560v-560H200v560Z"/></svg></span><span class="rt"><span class="rn">Shared with family</span></span></div>
+    </div>
+  </div>
+  <div class="foot"><a class="primary" href="AccSetMiddle.dc.html">Done</a></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"layering":{"editor":"enum","options":["app","website"],"default":"app"},"serif":{"editor":"boolean","default":true},"accent":{"editor":"color","default":"#BF1E83","options":["#BF1E83","#97156A","#E267A3","#00696F"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var rosy = (this.props.layering ?? 'app') === 'website';
+    var serif = this.props.serif ?? true;
+    var accent = this.props.accent ?? '#BF1E83';
+    if (dark && accent.toUpperCase() === '#BF1E83') accent = '#E267A3';
+    var h = accent.replace('#', '');
+    var lin = function (v) { v = v / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    var l = 0.2126 * lin(parseInt(h.substr(0, 2), 16)) + 0.7152 * lin(parseInt(h.substr(2, 2), 16)) + 0.0722 * lin(parseInt(h.substr(4, 2), 16));
+    var onAccent = l > 0.179 ? '#1A0D15' : '#FFFFFF';
+    var theme = 'app' + (dark ? ' dark' : '') + (rosy ? ' rosy' : '') + (serif ? ' serif' : '');
+    var vars = '--accent:' + accent + ';--on-accent:' + onAccent;
+    return { theme: theme, vars: vars };
+  }
+}
+</script>
+</body>
+</html>

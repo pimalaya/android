@@ -14,6 +14,9 @@ public class StubHost extends Host {
     public void foldFab(boolean folded) {}
 
     @Override
+    public void refreshFab() {}
+
+    @Override
     public int titleOf(int panel) {
         return 0;
     }

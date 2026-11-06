@@ -38,6 +38,23 @@ public final class PhoneCalendars {
         return read(context, ACCOUNTS).contains(account) && !read(context, OFF).contains(calendar);
     }
 
+    /** Whether the phone shows the account's calendars, some or all. */
+    public static boolean shown(Context context, String account) {
+        return read(context, ACCOUNTS).contains(account);
+    }
+
+    /**
+     * The account's switch in its settings: on, every one of its calendars
+     * shows on the phone, those kept off before included.
+     */
+    public static void showAll(Context context, String account, Collection<String> calendars) {
+        Set<String> accounts = read(context, ACCOUNTS);
+        Set<String> off = read(context, OFF);
+        accounts.add(account);
+        off.removeAll(calendars);
+        prefs(context).edit().putStringSet(ACCOUNTS, accounts).putStringSet(OFF, off).apply();
+    }
+
     /**
      * The setup's choice for the account.
      *

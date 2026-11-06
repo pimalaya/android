@@ -187,8 +187,8 @@
          content that failed to be content. -->
     <ProgressBar
         android:id="@+id/message_view_loading"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:layout_width="@dimen/spinner"
+        android:layout_height="@dimen/spinner"
         android:layout_gravity="center_horizontal"
         android:layout_marginTop="48dp"
         android:indeterminateTint="?android:attr/colorAccent"

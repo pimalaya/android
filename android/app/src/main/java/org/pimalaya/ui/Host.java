@@ -48,6 +48,16 @@ public abstract class Host extends Activity {
     /** Folds the extended FAB to its square glyph, or unfolds its label. */
     public abstract void foldFab(boolean folded);
 
+    /** Whether the sync dock shows over a list, the FAB away meanwhile. */
+    public boolean dockShown;
+
+    /**
+     * Brings the extended FAB in line with what covers its list: away while
+     * the list's filters or the sync dock show, over what they leave to read,
+     * else back.
+     */
+    public abstract void refreshFab();
+
     /** The name of a list domain's panel, a string resource. */
     public abstract int titleOf(int panel);
 

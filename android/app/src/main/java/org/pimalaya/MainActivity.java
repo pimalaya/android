@@ -777,6 +777,7 @@ public class MainActivity extends Host
     /** Leaves the auth flow unfinished, onto the root, the drawer closed. */
     private void cancelAuth() {
         oauth.cancel();
+        onboarding.leave();
         closeOverlay(PANEL_AUTH);
         screen = PANEL_ROOT;
         applyChrome(PANEL_ROOT);
@@ -1663,6 +1664,12 @@ public class MainActivity extends Host
         fab.setContentDescription(getString(label));
         fab.setVisibility(View.VISIBLE);
         findViewById(R.id.fab).setVisibility(View.GONE);
+        // NOTE: away while the screen's filters or the sync dock show, as
+        // they were left.
+        float scale = fabAway() ? 0f : 1f;
+        fab.animate().cancel();
+        fab.setScaleX(scale);
+        fab.setScaleY(scale);
 
         // NOTE: unfolded at once, a new screen's button saying what it
         // adds before the list is scrolled.
@@ -1744,6 +1751,41 @@ public class MainActivity extends Host
         label.animate().cancel();
         label.animate().alpha(folded ? 0f : 1f).setDuration(folded ? 120 : 220);
         fabFold.start();
+    }
+
+    /**
+     * Whether the extended FAB stays away: while the list's filters or the
+     * sync dock show.
+     */
+    private boolean fabAway() {
+        switch (screen) {
+            case Panels.MAIL:
+            case Panels.CONTACTS:
+            case Panels.CALENDAR:
+            case Panels.FILES:
+            case Panels.TASKS:
+                return dockShown || headerOf(screen).filtersShown();
+            default:
+                return dockShown;
+        }
+    }
+
+    /**
+     * Shrinks the extended FAB to nothing, or grows it back: away, it takes
+     * no touch, its bounds gone with its size.
+     */
+    @Override
+    public void refreshFab() {
+        boolean away = fabAway();
+        View fab = findViewById(R.id.fab_extended);
+        fab.animate().cancel();
+        fab.animate()
+                .scaleX(away ? 0f : 1f)
+                .scaleY(away ? 0f : 1f)
+                .setDuration(150)
+                .setInterpolator(
+                        android.view.animation.AnimationUtils.loadInterpolator(
+                                this, android.R.interpolator.fast_out_slow_in));
     }
 
     /** The mail item's unread count, hidden at zero. */

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The check badge on a picked domain's tile: a disc of the card's
+     surface, so it reads as cut out of the tile's corner. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@color/surface" />
+</shape>

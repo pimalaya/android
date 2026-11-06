@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>One path: nothing found for calendar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,600..700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.app{--bg:#FFFFFF;--surface:#F9F1F3;--divl:#ECD9E1;--fg:#301F2A;--fg2:#6F5464;--track:#D9BFCB;--wash:#F7D9EA;--accent-ink:#97156A;width:390px;height:844px;overflow:hidden;position:relative;background:var(--bg);color:var(--fg);font-family:Roboto,system-ui,sans-serif;display:flex;flex-direction:column}
+.app.dark{--bg:#1A0D15;--surface:#23121C;--divl:rgba(247,233,240,.1);--fg:#F7E9F0;--fg2:#BB9CAD;--track:#5A4351;--wash:#422032;--accent-ink:#F193B6}
+.app.rosy{--bg:#F9F1F3;--surface:#FDF9FA}
+.app.rosy.dark{--bg:#1A0D15;--surface:#23121C}
+.app.rosy .card,.app.rosy .sec,.app.rosy .tbtn{box-shadow:inset 0 0 0 1px var(--divl)}
+.app .tonal{background:var(--wash);color:var(--accent-ink)}
+.app .text{color:var(--accent-ink)}
+.hd{font-weight:700}
+.app.serif .h,.app.serif .hd{font-family:'Source Serif 4',Georgia,serif;font-weight:600;letter-spacing:-.01em}
+.app *{box-sizing:border-box}
+.ico{width:24px;height:24px;fill:currentColor;flex:none}
+.bar{min-height:60px;padding:0 8px;display:flex;align-items:center;flex:none}
+.tbtn{width:40px;height:40px;margin:4px;border-radius:999px;background:var(--surface);color:var(--fg);display:flex;align-items:center;justify-content:center;flex:none;text-decoration:none}
+.body{flex:1;min-height:0;overflow:hidden;padding:8px 24px 0;display:flex;flex-direction:column}
+.who{display:flex;align-items:center;gap:6px;min-height:20px;font-size:14px;color:var(--fg2)}
+.who .ico{width:18px;height:18px;color:var(--accent)}
+.h{margin-top:8px;font-size:28px;font-weight:700;line-height:34px}
+.sub{margin-top:8px;font-size:14px;line-height:20px;color:var(--fg2)}
+.stack{margin-top:20px;display:flex;flex-direction:column;gap:12px}
+.card{background:var(--surface);border-radius:22px;overflow:hidden;flex:none}
+.ch{display:flex;align-items:center;gap:14px;min-height:64px;padding:8px 6px 8px 14px}
+.ch.solo{padding-right:14px}
+.tile{width:32px;height:32px;border-radius:10px;background:var(--bg);display:flex;align-items:center;justify-content:center;flex:none}
+.tile .ico{width:20px;height:20px}
+.ct{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.n{font-size:16px;font-weight:700}
+.t{font-size:15px}
+.s{font-size:14px;line-height:19px;color:var(--fg2)}
+.tune{width:48px;height:48px;border:0;background:none;color:var(--fg2);display:flex;align-items:center;justify-content:center;border-radius:999px;padding:0;flex:none;text-decoration:none}
+.cb{padding:0 14px 16px;display:flex;flex-direction:column;gap:10px}
+.pill{height:56px;border-radius:999px;background:var(--bg);border:2px solid transparent;display:flex;align-items:center;padding:0 4px 0 24px}
+.pill.focus{border-color:var(--accent)}
+.pill .k{width:84px;flex:none;font-size:15px;color:var(--fg2)}
+.pill input{flex:1;min-width:0;height:48px;border:0;background:none;font:inherit;font-size:17px;color:var(--fg);outline:none}
+.pill input::placeholder{color:var(--fg2)}
+.pick{display:flex;align-items:center;gap:12px;min-height:56px;padding:6px 14px 6px 24px;border-radius:28px;background:var(--bg);border:0;font:inherit;color:inherit;text-align:left;width:100%}
+.chev{width:20px;height:20px;color:var(--fg2)}
+.note{font-size:13px;line-height:18px;color:var(--fg2);padding:0 4px}
+.text{min-height:44px;display:flex;align-items:center;justify-content:center;padding:0 12px;border-radius:999px;color:var(--accent);font-size:15px;font-weight:500;text-decoration:none;flex:none}
+.foot{padding:12px 24px 16px;flex:none;background:var(--bg);display:flex;flex-direction:column;gap:4px}
+.primary{height:56px;border-radius:999px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;gap:8px;font-size:16px;font-weight:700;text-decoration:none}
+</style>
+</helmet>
+<div class="{{theme}}" style="{{vars}}">
+  <div class="bar"><a class="tbtn" href="OnbDomains.dc.html" aria-label="Back"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"/></svg></a></div>
+  <div class="body">
+    <div class="who"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/></svg>alex@mailhost.example</div>
+    <div class="h">Check your servers</div>
+    <div class="sub">Found for mailhost.example.</div>
+    <div class="stack">
+      <div class="card"><div class="ch"><span class="tile"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm320-280L160-640v400h640v-400L480-440Zm0-80 320-200H160l320 200ZM160-640v-80 480-400Z"/></svg></span><span class="ct"><span class="n">Mail</span><span class="s">With your password, at mailhost.example</span></span><button class="tune" type="button" aria-label="Mail settings"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z"/></svg></button></div></div>
+      <div class="card"><div class="ch"><span class="tile"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M120-160v-640l760 320-760 320Zm80-120 474-200-474-200v140l240 60-240 60v140Zm0 0v-400 400Z"/></svg></span><span class="ct"><span class="n">Mail (sending)</span><span class="s">With your password, at mailhost.example</span></span><button class="tune" type="button" aria-label="Mail (sending) settings"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z"/></svg></button></div></div>
+      <div class="card">
+        <div class="ch solo"><span class="tile"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M180-80q-24 0-42-18t-18-42v-620q0-24 18-42t42-18h65v-60h65v60h340v-60h65v60h65q24 0 42 18t18 42v620q0 24-18 42t-42 18H180Zm0-60h600v-430H180v430Zm0-490h600v-130H180v130Z"/></svg></span><span class="ct"><span class="n">Calendar</span></span></div>
+        <div class="cb">
+          <div class="note">Nothing could be discovered for mailhost.example. Set it up manually.</div>
+          <label class="pill focus"><span class="k">Server</span><input id="nf-server" placeholder="https://dav.example.net"></label>
+          <button class="pick" type="button"><span class="ct"><span class="t">Sign in with</span><span class="s">Password</span></span><svg class="ico chev" viewBox="0 -960 960 960" aria-hidden="true"><path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z"/></svg></button>        </div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <a class="primary" href="OnbSignInMixed.dc.html">Continue</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"layering":{"editor":"enum","options":["app","website"],"default":"app"},"serif":{"editor":"boolean","default":true},"accent":{"editor":"color","default":"#BF1E83","options":["#BF1E83","#97156A","#E267A3","#00696F"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var rosy = (this.props.layering ?? 'app') === 'website';
+    var serif = this.props.serif ?? true;
+    var accent = this.props.accent ?? '#BF1E83';
+    if (dark && accent.toUpperCase() === '#BF1E83') accent = '#E267A3';
+    var h = accent.replace('#', '');
+    var lin = function (v) { v = v / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    var l = 0.2126 * lin(parseInt(h.substr(0, 2), 16)) + 0.7152 * lin(parseInt(h.substr(2, 2), 16)) + 0.0722 * lin(parseInt(h.substr(4, 2), 16));
+    var onAccent = l > 0.179 ? '#1A0D15' : '#FFFFFF';
+    return { theme: 'app' + (dark ? ' dark' : '') + (rosy ? ' rosy' : '') + (serif ? ' serif' : ''), vars: '--accent:' + accent + ';--on-accent:' + onAccent };
+  }
+}
+</script>
+</body>
+</html>

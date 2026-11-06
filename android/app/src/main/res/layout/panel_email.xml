@@ -87,8 +87,8 @@
 
             <ProgressBar
                 android:id="@+id/email_progress"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
+                android:layout_width="@dimen/spinner"
+                android:layout_height="@dimen/spinner"
                 android:layout_gravity="end|center_vertical"
                 android:layout_marginEnd="16dp"
                 android:elevation="4dp"
