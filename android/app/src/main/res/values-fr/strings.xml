@@ -39,6 +39,9 @@
     <string name="settings_signin_label">Connexion</string>
     <string name="notify_needs_background">Demande la synchronisation en arrière-plan.</string>
     <string name="account_tasks_in">Dans %1$s</string>
+    <string name="account_tasks_in_google">Dans %1$s · États et catégories restent sur ce téléphone</string>
+    <string name="task_google_local_title">Sur ce téléphone seulement</string>
+    <string name="task_google_local">Google Tasks n\'a pas de place pour l\'état d\'une tâche, ses catégories ni la personne attendue : ils restent sur ce téléphone.</string>
     <string name="calendars_title">Quels agendas ?</string>
     <string name="calendars_description">Ceux que vous choisissez se synchronisent sur ce téléphone. Vous pourrez changer cela plus tard dans le filtre de l\'agenda.</string>
     <string name="calendars_none">Ce compte n\'a aucun agenda.</string>
@@ -1039,11 +1042,11 @@
     <string name="capture_save">Enregistrer</string>
     <string name="capture_saved">Capturé</string>
     <string name="capture_empty">Écrivez la tâche</string>
-    <string name="capture_no_calendar">Aucun agenda n\'accepte encore les tâches : il faut un agenda CalDAV</string>
+    <string name="capture_no_calendar">Aucune liste n\'accepte encore les tâches : il faut un agenda CalDAV, une liste To Do ou une liste Google Tasks</string>
     <string name="onboarding_no_tasks">Les tâches ne sont pas encore disponibles avec cet agenda : elles demandent un serveur CalDAV.</string>
     <string name="account_tasks_none">Pas encore disponible sur ce compte : Pimalaya ne garde les tâches que dans des agendas CalDAV. Vos tâches peuvent vivre dans un autre compte en attendant.</string>
-    <string name="account_tasks_none_microsoft">Pas encore disponible sur ce compte. Microsoft garde les tâches dans un service à part plutôt que dans l\'agenda, et Pimalaya ne le lit pas encore. Vos tâches peuvent vivre dans un autre compte en attendant.</string>
-    <string name="account_tasks_none_google">Pas encore disponible sur ce compte. Google garde les tâches dans un service à part plutôt que dans l\'agenda, et Pimalaya ne le lit pas encore. Vos tâches peuvent vivre dans un autre compte en attendant.</string>
+    <string name="account_tasks_none_microsoft">Ses listes To Do se synchronisent une fois ce compte ajouté de nouveau, pour que Pimalaya les demande à Microsoft.</string>
+    <string name="account_tasks_none_google">Ses listes Google Tasks se synchronisent une fois ce compte ajouté de nouveau, pour que Pimalaya les demande à Google.</string>
     <string name="compose_send_wait">Envoyer et attendre une réponse</string>
     <string name="clarify_actionable">Est-ce actionnable ?</string>
     <string name="clarify_actionable_hint">Quelque chose à faire, pas seulement à savoir.</string>

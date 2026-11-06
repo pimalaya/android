@@ -394,6 +394,8 @@ public final class EventView {
         }
         List<PimdirCollections.Stored> collections =
                 new PimdirCollections(parts.pimdir(), host).list(PimdirSummary.CALENDAR);
+        // NOTE: a task list takes tasks alone, never an event.
+        collections.removeIf(collection -> EventStore.isTaskList(collection.id));
         // NOTE: a local calendar takes no event write and lists as read only,
         // and the line for no calendar at all would leave its owner guessing
         // why.

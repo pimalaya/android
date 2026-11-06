@@ -395,6 +395,16 @@ public final class TaskPage {
                             null,
                             this::pickParent));
         }
+        // NOTE: said where they are set: a Google task list keeps none of
+        // them, so they stay on the phone.
+        if (EventStore.isGoogleTaskList(target.url)) {
+            rows.add(
+                    sections.row(
+                            host.getString(R.string.task_google_local_title),
+                            host.getString(R.string.task_google_local),
+                            null,
+                            null));
+        }
         sections.section(
                 R.string.task_section_organise,
                 R.drawable.ic_folder_open,

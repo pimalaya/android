@@ -45,6 +45,9 @@
     <string name="settings_signin_label">Sign-in</string>
     <string name="notify_needs_background">Needs background sync.</string>
     <string name="account_tasks_in">In %1$s</string>
+    <string name="account_tasks_in_google">In %1$s · States and categories stay on this phone</string>
+    <string name="task_google_local_title">On this phone only</string>
+    <string name="task_google_local">Google Tasks has no place for a task\'s state, categories or who it waits on, so they stay on this phone.</string>
     <string name="calendars_title">Which calendars?</string>
     <string name="calendars_description">The ones you pick sync to this phone. You can change this later in the calendar\'s filter.</string>
     <string name="calendars_none">This account has no calendar</string>
@@ -1077,11 +1080,11 @@
     <string name="capture_save">Save</string>
     <string name="capture_saved">Captured</string>
     <string name="capture_empty">Write the task</string>
-    <string name="capture_no_calendar">No calendar takes tasks yet: tasks need a CalDAV calendar</string>
+    <string name="capture_no_calendar">No list takes tasks yet: tasks need a CalDAV calendar, a To Do list or a Google task list</string>
     <string name="onboarding_no_tasks">Tasks are not available with this calendar yet: they need a CalDAV server.</string>
     <string name="account_tasks_none">Not available on this account yet: Pimalaya keeps tasks in CalDAV calendars only. Your tasks can live in another account meanwhile.</string>
-    <string name="account_tasks_none_microsoft">Not available on this account yet. Microsoft keeps tasks in its own service rather than in the calendar, and Pimalaya does not read it yet. Your tasks can live in another account meanwhile.</string>
-    <string name="account_tasks_none_google">Not available on this account yet. Google keeps tasks in its own service rather than in the calendar, and Pimalaya does not read it yet. Your tasks can live in another account meanwhile.</string>
+    <string name="account_tasks_none_microsoft">Its To Do lists sync once this account is added again, for Pimalaya to ask Microsoft for them.</string>
+    <string name="account_tasks_none_google">Its Google Tasks lists sync once this account is added again, for Pimalaya to ask Google for them.</string>
     <string name="compose_send_wait">Send and wait for a reply</string>
     <string name="clarify_actionable">Is it actionable?</string>
     <string name="clarify_actionable_hint">Something you can do, not only something to know.</string>

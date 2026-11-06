@@ -28,6 +28,7 @@ ical-rs = { version = "0.7", default-features = false, features = ["jscalendar",
 io-gcal = { version = "0.3", default-features = false, features = ["ical"] }
 io-gmail = { version = "0.6", default-features = false }
 io-gpeople = { version = "0.6", default-features = false, features = ["vcard"] }
+io-gtasks = { git = "https://github.com/pimalaya/io-gtasks", rev = "f4c4aeda1e26f56c2a3783511199019c16be69ef", default-features = false, features = ["ical"] }
 io-http = { version = "0.6", default-features = false }
 io-imap = { version = "0.8", default-features = false }
 io-jmap = { version = "0.7", default-features = false, features = ["ical", "vcard"] }
@@ -56,3 +57,4 @@ vcard-rs = { version = "0.6", default-features = false, features = ["parser", "j
 
 [patch.crates-io]
 io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "b25523df5360a363133e058f34495484b60cb5a2" }
+io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "01105a5f9d1f1104a3ff6034be466150d773a5e0" }

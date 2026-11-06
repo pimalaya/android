@@ -159,6 +159,28 @@ public final class EventStore {
         return address.startsWith("https://") || address.startsWith("http://");
     }
 
+    /** The address of a To Do or Google task list: its base, then this. */
+    private static final java.util.regex.Pattern TASK_LIST =
+            java.util.regex.Pattern.compile("(msgraph|google)://[^/]+/tasks/[^/]+");
+
+    /**
+     * Whether an address, or a collection id ending in one, names a To Do or
+     * Google task list: a collection taking tasks alone, never an event, and
+     * no calendar of the phone's (the bridge's {@code <base>/tasks/<list>}).
+     */
+    public static boolean isTaskList(String address) {
+        return address != null && TASK_LIST.matcher(address).find();
+    }
+
+    /**
+     * Whether an address names a Google task list, whose tasks keep only a
+     * title, notes, a due day and a done flag: their state, categories and
+     * the rest stay on the phone (CalendarEngine lays them back).
+     */
+    public static boolean isGoogleTaskList(String address) {
+        return isTaskList(address) && address.contains("google://");
+    }
+
     /**
      * Whether a source syncing the collection states {@code x-vtodo}
      * {@code none} there, or source-wide (pimdir STORAGE §15.6).

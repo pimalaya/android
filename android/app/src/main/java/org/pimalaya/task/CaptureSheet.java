@@ -129,6 +129,16 @@ public final class CaptureSheet {
         }
         ChipField categories = dialog.findViewById(R.id.capture_categories);
         categories.tags(R.string.task_remove_category);
+        // NOTE: said where the state and categories are set, for the list
+        // picked: Google keeps neither.
+        TextView local = dialog.findViewById(R.id.capture_local);
+        Runnable placed =
+                () ->
+                        local.setVisibility(
+                                target[0] != null && EventStore.isGoogleTaskList(target[0].url)
+                                        ? View.VISIBLE
+                                        : View.GONE);
+        placed.run();
 
         Spinner where = dialog.findViewById(R.id.capture_target);
         if (targets.size() > 1) {
@@ -150,6 +160,7 @@ public final class CaptureSheet {
                         public void onItemSelected(
                                 AdapterView<?> parent, View view, int position, long id) {
                             target[0] = targets.get(position);
+                            placed.run();
                         }
 
                         @Override

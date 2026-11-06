@@ -80,8 +80,9 @@ public final class Account {
      * {@code AccountJson}).
      *
      * <p>{@code {address?, baseUrl, login, secret, submitUrl?, submitLogin?,
-     * submitSecret?}}; a null
-     * component is an absent key, which the bridge reads empty.
+     * submitSecret?, zone}}; a null component is an absent key, which the
+     * bridge reads empty. The zone is the device's, read at each call: the
+     * day a dateless task is due in, on a backend storing it as a midnight.
      */
     JSONObject toJson() {
         try {
@@ -93,6 +94,7 @@ public final class Account {
             account.put("submitUrl", submitUrl);
             account.put("submitLogin", submitLogin);
             account.put("submitSecret", submitSecret);
+            account.put("zone", java.util.TimeZone.getDefault().getID());
             return account;
         } catch (JSONException error) {
             throw new PimalayaException("Unwritable account");

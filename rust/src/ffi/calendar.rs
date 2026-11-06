@@ -23,6 +23,7 @@ use crate::{
         conflict::{merge, resolve},
         edit::{EventDraft, create, write},
         expand::expand,
+        gtasks::overlay,
         phone,
         read::read,
         series::{remove, split},
@@ -515,6 +516,32 @@ pub extern "system" fn Java_org_pimalaya_client_Native_mergeEvent<'local>(
 
         let json = match merge(&base, &local, &remote) {
             Ok(merged) => to_string(&merged).unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.overlayTask`: a Google task as the phone holds it.
+///
+/// `remote`, the task Google answered, with the lines of `local`, the
+/// phone's copy, that Google has nowhere to keep (its state, categories,
+/// who it waits on, the mail it came from); pure. Returns `{ical}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_overlayTask<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    remote: JString<'local>,
+    local: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let remote = read_string(env, &remote);
+        let local = read_string(env, &local);
+
+        let json = match overlay(&remote, &local) {
+            Ok(ical) => serde_json::json!({ "ical": ical }).to_string(),
             Err(err) => error_json(err),
         };
 

@@ -542,6 +542,14 @@ final class Native {
     static native String mergeEvent(String base, String local, String remote);
 
     /**
+     * A Google task as the phone holds it: {@code remote} with the lines of
+     * {@code local} Google has nowhere to keep.
+     *
+     * <p>Returns {@code {ical}}.
+     */
+    static native String overlayTask(String remote, String local);
+
+    /**
      * Resolves a conflicted calendar object with {@code picks}' sides.
      *
      * <p>{@code picks}: side by conflict id. Returns {@code {ical}}, the

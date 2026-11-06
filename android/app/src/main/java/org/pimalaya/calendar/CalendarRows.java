@@ -57,6 +57,10 @@ public final class CalendarRows {
                 new PimdirCollections(pimdir, context).list(PimdirSummary.CALENDAR);
         Map<String, List<PimdirCollections.Stored>> shown = new LinkedHashMap<>();
         for (PimdirCollections.Stored calendar : all) {
+            // NOTE: a task list holds no event for the phone's calendar.
+            if (EventStore.isTaskList(calendar.id)) {
+                continue;
+            }
             if (PhoneCalendars.shown(context, calendar.accountEmail, calendar.id)) {
                 shown.computeIfAbsent(calendar.accountEmail, key -> new ArrayList<>())
                         .add(calendar);

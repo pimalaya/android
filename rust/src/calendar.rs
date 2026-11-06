@@ -19,6 +19,7 @@ pub mod conflict;
 pub mod edit;
 pub mod expand;
 pub mod gcal;
+pub mod gtasks;
 mod jmap;
 mod msgraph;
 mod occurrence;
@@ -26,6 +27,7 @@ pub mod phone;
 pub mod read;
 pub mod series;
 pub mod task;
+mod todo;
 #[cfg(test)]
 mod vectors;
 mod zone;
@@ -45,7 +47,7 @@ use serde::Serialize;
 
 use crate::{
     account::{self, Account, Backend},
-    calendar::{gcal::Gcal, zone::EventTime},
+    calendar::{gcal::Gcal, gtasks::Gtasks, zone::EventTime},
     client::{
         Client, Host,
         jmap::Jmap,
@@ -235,6 +237,12 @@ impl<H: Host> Calendars<'_, H> {
                 for calendar in &mut calendars {
                     calendar.url = format!("{}/{}", account.base_url, calendar.id);
                 }
+                let lists = Msgraph {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .list_task_lists();
+                calendars.extend(task_lists(account, lists)?);
                 Ok(calendars)
             }
             Backend::Google => {
@@ -246,6 +254,12 @@ impl<H: Host> Calendars<'_, H> {
                 for calendar in &mut calendars {
                     calendar.url = format!("{}/{}", account.base_url, calendar.id);
                 }
+                let lists = Gtasks {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .list_task_lists();
+                calendars.extend(task_lists(account, lists)?);
                 Ok(calendars)
             }
             // NOTE: a calendar account with no sentinel is a CalDAV context
@@ -297,6 +311,21 @@ impl<H: Host> Calendars<'_, H> {
         cursor: Option<&str>,
     ) -> Result<Option<EventDelta>, BridgeError> {
         let account = self.account;
+
+        if let Some(list) = task_list_of(account, calendar_url) {
+            return match account.backend {
+                Backend::Graph => Msgraph {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .sync_tasks(list, cursor),
+                _ => Gtasks {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .sync_tasks(list, cursor),
+            };
+        }
 
         match account.backend {
             Backend::Jmap => {
@@ -359,6 +388,21 @@ impl<H: Host> Calendars<'_, H> {
     ) -> Result<Vec<Event>, BridgeError> {
         let account = self.account;
 
+        if let Some(list) = task_list_of(account, calendar_url) {
+            return match account.backend {
+                Backend::Graph => Msgraph {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .read_tasks(list, ids, zone_of(account)),
+                _ => Gtasks {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .read_tasks(list, ids),
+            };
+        }
+
         match account.backend {
             Backend::Jmap => {
                 let session_url = account::jmap_session_url(account.base_url)?;
@@ -406,6 +450,21 @@ impl<H: Host> Calendars<'_, H> {
     ) -> Result<EventRef, BridgeError> {
         let account = self.account;
 
+        if let Some(list) = task_list_of(account, calendar_url) {
+            return match account.backend {
+                Backend::Graph => Msgraph {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .create_task(list, event.ical, zone_of(account)),
+                _ => Gtasks {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .create_task(list, event.ical),
+            };
+        }
+
         match account.backend {
             Backend::Jmap => Jmap {
                 client: self.client,
@@ -450,6 +509,27 @@ impl<H: Host> Calendars<'_, H> {
         event: &EventUpdate,
     ) -> Result<Option<String>, BridgeError> {
         let account = self.account;
+
+        if let Some(list) = task_list_of(account, calendar_url) {
+            return match account.backend {
+                Backend::Graph => Msgraph {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .update_task(
+                    list,
+                    event.id,
+                    event.ical,
+                    event.etag,
+                    zone_of(account),
+                ),
+                _ => Gtasks {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .update_task(list, event.id, event.ical, event.etag),
+            };
+        }
 
         match account.backend {
             Backend::Jmap => Jmap {
@@ -515,6 +595,21 @@ impl<H: Host> Calendars<'_, H> {
     ) -> Result<(), BridgeError> {
         let account = self.account;
 
+        if let Some(list) = task_list_of(account, calendar_url) {
+            return match account.backend {
+                Backend::Graph => Msgraph {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .delete_task(list, event.id, event.etag),
+                _ => Gtasks {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .delete_task(list, event.id, event.etag),
+            };
+        }
+
         match account.backend {
             Backend::Jmap => Jmap {
                 client: self.client,
@@ -543,6 +638,57 @@ impl<H: Host> Calendars<'_, H> {
             }
             .delete_event(&parse_url(calendar_url)?, event.id, event.etag),
         }
+    }
+}
+
+/// The segment a task list's collection URL takes after the account's base.
+const TASKS_SEGMENT: &str = "/tasks/";
+
+/// The list a collection URL names, when it is a To Do or Google task list
+/// (`<base>/tasks/<list id>`) rather than a calendar.
+fn task_list_of<'u>(account: &Account, url: &'u str) -> Option<&'u str> {
+    if !matches!(account.backend, Backend::Graph | Backend::Google) {
+        return None;
+    }
+    url.strip_prefix(account.base_url)?
+        .strip_prefix(TASKS_SEGMENT)
+        .filter(|list| !list.is_empty())
+}
+
+/// The zone a task's dates read and write in: the device's, UTC unknown.
+fn zone_of<'a>(account: &Account<'a>) -> &'a str {
+    if account.zone.is_empty() {
+        "UTC"
+    } else {
+        account.zone
+    }
+}
+
+/// An account's task lists as collections, at `<base>/tasks/<list id>`.
+///
+/// An account signed in before the app asked for tasks holds a token
+/// without that scope (401, 403): it lists its calendars alone, its task
+/// lists coming once it signs in again. Any other failure fails the
+/// listing, which would otherwise read as every list deleted.
+fn task_lists(
+    account: &Account,
+    listed: Result<Vec<Calendar>, BridgeError>,
+) -> Result<Vec<Calendar>, BridgeError> {
+    match listed {
+        Ok(mut lists) => {
+            for list in &mut lists {
+                list.url = format!("{}{TASKS_SEGMENT}{}", account.base_url, list.id);
+            }
+            Ok(lists)
+        }
+        Err(err) if matches!(err.status, Some(401 | 403)) => {
+            log::warn!(
+                "task lists not granted, listed without them: {}",
+                err.message
+            );
+            Ok(Vec::new())
+        }
+        Err(err) => Err(err),
     }
 }
 

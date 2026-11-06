@@ -852,22 +852,27 @@ public final class AccountSettings {
     private View tasksRow(Sections sections, String email) {
         List<EventStore.StoredCalendar> calendars = new ArrayList<>();
         List<String> taking = new ArrayList<>();
+        boolean google = false;
         for (EventStore.StoredCalendar calendar : parts.events().loadCalendars()) {
             if (calendar.accountEmail.equals(email)) {
                 calendars.add(calendar);
                 if (TaskStore.takesTasks(calendar)) {
                     taking.add(calendar.name);
+                    google |= EventStore.isGoogleTaskList(calendar.url);
                 }
             }
         }
         if (calendars.isEmpty()) {
             return null;
         }
+        // NOTE: a Google list keeps no state or category, which stay on the
+        // phone; said here, where the account's tasks are told.
+        int taken = google ? R.string.account_tasks_in_google : R.string.account_tasks_in;
         return sections.row(
                 host.getString(R.string.tasks_title),
                 taking.isEmpty()
                         ? host.getString(noTasksReason(calendars.get(0).url))
-                        : host.getString(R.string.account_tasks_in, String.join(", ", taking)),
+                        : host.getString(taken, String.join(", ", taking)),
                 null,
                 null);
     }

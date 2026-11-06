@@ -474,6 +474,49 @@ fn set_state(component: &mut IcalCst<'static>, state: Option<&'static str>) {
     rewrite_categories(component, rewritten);
 }
 
+/// Drops one reserved state from a to-do's `CATEGORIES`, answering whether
+/// it carried it: every other value stays in order, a line left empty goes.
+///
+/// A backend keeping the state in a field of its own (To Do's statuses)
+/// takes it out of the categories it writes.
+pub fn take_state(component: &mut IcalCst<'static>, state: &str) -> bool {
+    let lines = categories(component);
+    let rewritten: Vec<(usize, Vec<String>)> = lines
+        .iter()
+        .filter(|(_, values)| {
+            values
+                .iter()
+                .any(|value| task::state_of(value) == Some(state))
+        })
+        .map(|(index, values)| {
+            let kept = values
+                .iter()
+                .filter(|value| task::state_of(value) != Some(state))
+                .cloned()
+                .collect();
+            (*index, kept)
+        })
+        .collect();
+    let carried = !rewritten.is_empty();
+    rewrite_categories(component, rewritten);
+    carried
+}
+
+/// Adds a reserved state to a to-do's `CATEGORIES`, beside any it carries
+/// (a to-do is in the list of each state it carries): a line of its own
+/// after the last `CATEGORIES` line, nothing when it carries it already.
+pub fn give_state(component: &mut IcalCst<'static>, state: &'static str) {
+    let lines = categories(component);
+    if lines
+        .iter()
+        .flat_map(|(_, values)| values)
+        .any(|value| task::state_of(value) == Some(state))
+    {
+        return;
+    }
+    insert_categories(component, &lines, vec![state.to_string()]);
+}
+
 /// Sets the person's own categories of a to-do to the comma-separated
 /// `wanted`, its state kept where it stands (pimdir GUIDE §17).
 ///

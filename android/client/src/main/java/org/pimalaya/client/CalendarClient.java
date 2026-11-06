@@ -167,6 +167,16 @@ public class CalendarClient {
     }
 
     /**
+     * A Google task as the phone holds it: the task Google answered, with the
+     * lines of the phone's copy Google has nowhere to keep (its state,
+     * categories, who it waits on, the mail it came from), so a read never
+     * takes them away. Pure computation.
+     */
+    public static String overlayTask(String remote, String local) {
+        return Replies.object(Native.overlayTask(remote, local)).optString("ical", remote);
+    }
+
+    /**
      * The resolution of a conflicted calendar object: its merge, sides picked.
      *
      * <p>Each conflict {@code picks} names by id takes that side, every other

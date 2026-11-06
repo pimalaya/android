@@ -9,6 +9,7 @@ use core::{error::Error as StdError, fmt};
 use io_gcal::v3::send::GcalSendError;
 use io_gmail::v1::send::GmailSendError;
 use io_gpeople::v1::{rest::people::vcard::GpeoplePersonVcardError, send::GpeopleSendError};
+use io_gtasks::v1::send::GtasksSendError;
 use io_jmap::rfc8620::{
     blob_download::JmapBlobDownloadError, blob_upload::JmapBlobUploadError, send::JmapSendError,
     session_get::JmapSessionGetError,
@@ -115,6 +116,9 @@ fn http_status(err: &(dyn StdError + 'static)) -> Option<u16> {
             return send.status();
         }
         if let Some(send) = err.downcast_ref::<GcalSendError>() {
+            return send.status();
+        }
+        if let Some(send) = err.downcast_ref::<GtasksSendError>() {
             return send.status();
         }
         if let Some(send) = err.downcast_ref::<GmailSendError>() {

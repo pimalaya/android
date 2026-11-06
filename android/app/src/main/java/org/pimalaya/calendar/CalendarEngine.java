@@ -7,6 +7,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.Derived;
 import org.pimalaya.client.Event;
@@ -163,7 +164,7 @@ public final class CalendarEngine extends PimdirEngine {
         JSONArray items = new JSONArray();
         for (EventRef event : delta.changed()) {
             Event body = bodies.get(event.id());
-            JSONObject item = body != null ? entry(body) : new JSONObject();
+            JSONObject item = body != null ? entry(overlaid(collection, body)) : new JSONObject();
             item.put("handle", event.id());
             if (event.etag() != null) {
                 item.put("revision", event.etag());
@@ -201,12 +202,35 @@ public final class CalendarEngine extends PimdirEngine {
 
         JSONArray items = new JSONArray();
         for (Event event : read) {
-            items.put(entry(event));
+            items.put(entry(overlaid(collection, event)));
         }
 
         JSONObject reply = new JSONObject();
         reply.put("items", items);
         return keepBoundNames(collection, reply);
+    }
+
+    /**
+     * A Google task as the phone holds it: what Google has nowhere to keep
+     * (its state, categories, who it waits on, the mail it came from) laid
+     * back from the phone's copy, so a read never takes it away. Any other
+     * entry as it came.
+     */
+    private Event overlaid(String collection, Event event) {
+        if (!EventStore.isGoogleTaskList(collection)) {
+            return event;
+        }
+        try {
+            JSONObject row = offline.loadRow(collection, event.id());
+            if (row == null || row.isNull("vcard")) {
+                return event;
+            }
+            String ical = CalendarClient.overlayTask(event.ical(), row.getString("vcard"));
+            return new Event(event.id(), event.etag(), ical);
+        } catch (RuntimeException | JSONException failure) {
+            Log.w("pimalaya", "task overlay failed: " + event.id(), failure);
+            return event;
+        }
     }
 
     /** One entry at full tier, as a read or a whole listing hands it over. */

@@ -125,15 +125,16 @@ public final class TaskStore {
     /**
      * Whether a calendar can hold tasks.
      *
-     * <p>CalDAV only (VTODO, RFC 4791): Graph and Google keep tasks in a
-     * service of their own, JMAP calendar writes are not wired, and the phone's
-     * local calendar takes no write. And not one whose server states it takes
-     * none ({@code x-vtodo} {@code none}, pimdir STORAGE §15.6), as a Google
-     * CalDAV calendar does.
+     * <p>A CalDAV calendar (VTODO, RFC 4791), or a To Do or Google task list,
+     * the services Microsoft and Google keep tasks in apart from their
+     * calendars; JMAP calendar writes are not wired, and the phone's local
+     * calendar takes no write. And not one whose server states it takes none
+     * ({@code x-vtodo} {@code none}, pimdir STORAGE §15.6), as a Google CalDAV
+     * calendar does.
      */
     public static boolean takesTasks(EventStore.StoredCalendar calendar) {
         return calendar.writable
-                && EventStore.isCaldav(calendar.url)
+                && (EventStore.isCaldav(calendar.url) || EventStore.isTaskList(calendar.url))
                 && !LocalBook.is(calendar.url)
                 && !calendar.refusesTasks;
     }

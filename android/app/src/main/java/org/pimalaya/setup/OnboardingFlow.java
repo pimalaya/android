@@ -514,15 +514,19 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Whether a calendar server holds tasks: CalDAV alone in this first
-     * draft, as the Tasks tab writes VTODOs (cairn/changes/gtd).
+     * Whether a calendar server holds tasks: CalDAV, and Google and
+     * Microsoft through their task services (Google Tasks, To Do), which
+     * their sign-in grants beside the calendar.
      *
-     * <p>Google, Microsoft and JMAP calendars are told by their base, a
-     * marker scheme rather than https.
+     * <p>JMAP is told by its base, a marker scheme its calendar writes are
+     * not wired for.
      */
     private static boolean takesTasks(String url) {
         String base = url == null ? "" : url;
-        return base.startsWith("https://") || base.startsWith("http://");
+        return base.startsWith("https://")
+                || base.startsWith("http://")
+                || base.startsWith("google://")
+                || base.startsWith("msgraph://");
     }
 
     /** One domain's row: glyph, name over a status line, trailing view. */
@@ -3109,7 +3113,7 @@ public final class OnboardingFlow {
             if (existing != null) {
                 scope = Oauth.union(existing.grantedScope(Oauth.GOOGLE_CLIENT_ID), scope);
             }
-            String asked = Oauth.fixedScope(shipped, scope);
+            String asked = Oauth.fixedScope(shipped, Oauth.withTasks(shipped, scope));
             // NOTE: Google's consent page lets each permission be unticked,
             // so a domain is signed in only when its scopes come back.
             Set<String> fixed = scopeSet(asked);
@@ -3122,7 +3126,8 @@ public final class OnboardingFlow {
             return;
         }
         if (shipped == Oauth.Shipped.MICROSOFT) {
-            oauth.startMicrosoftOauth(pendingEmail, Oauth.fixedScope(shipped, scope));
+            oauth.startMicrosoftOauth(
+                    pendingEmail, Oauth.fixedScope(shipped, Oauth.withTasks(shipped, scope)));
             return;
         }
         if (option.method.type() == AuthMethod.Type.OAUTH_ISSUER) {

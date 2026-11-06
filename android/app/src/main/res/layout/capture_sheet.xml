@@ -79,6 +79,19 @@
         android:layout_marginTop="8dp"
         android:hint="@string/task_field_categories" />
 
+    <!-- A Google task list's: its state and categories have no place on
+         Google, so they stay on the phone (CaptureSheet). -->
+    <TextView
+        android:id="@+id/capture_local"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp"
+        android:text="@string/task_google_local"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
     <TextView
         android:id="@+id/capture_source"
         android:layout_width="match_parent"

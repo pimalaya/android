@@ -347,6 +347,9 @@ pub struct Account<'a> {
     pub backend: Backend,
     /// The account's credential.
     pub auth: Auth<'a>,
+    /// The device's time zone, an IANA name (empty when unknown): the day
+    /// a dateless task is due in, on a backend storing it as a midnight.
+    pub zone: &'a str,
 }
 
 /// One account as Java's `Account` writes it, the argument of every
@@ -374,6 +377,8 @@ pub struct AccountJson {
     /// in as the account reads: SMTP is a second server, which may take
     /// another login.
     pub submit_secret: SecretString,
+    /// The device's time zone, as [`Account::zone`].
+    pub zone: String,
 }
 
 impl AccountJson {
@@ -383,6 +388,7 @@ impl AccountJson {
             base_url: &self.base_url,
             backend: Backend::of(&self.base_url),
             auth: Auth::new(&self.login, self.secret.expose_secret()),
+            zone: &self.zone,
         }
     }
 

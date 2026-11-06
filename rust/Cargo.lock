@@ -606,6 +606,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "io-gtasks"
+version = "0.1.0"
+source = "git+https://github.com/pimalaya/io-gtasks?rev=f4c4aeda1e26f56c2a3783511199019c16be69ef#f4c4aeda1e26f56c2a3783511199019c16be69ef"
+dependencies = [
+ "ical-rs",
+ "io-http",
+ "jiff",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "url",
+]
+
+[[package]]
 name = "io-http"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -654,8 +669,7 @@ dependencies = [
 [[package]]
 name = "io-msgraph"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89da8753e70f7f48c32d2816162c69b3f146629a559045ad5f321a638f8b6698"
+source = "git+https://github.com/pimalaya/io-msgraph?rev=01105a5f9d1f1104a3ff6034be466150d773a5e0#01105a5f9d1f1104a3ff6034be466150d773a5e0"
 dependencies = [
  "base64-codec",
  "ical-rs",
@@ -981,6 +995,7 @@ dependencies = [
  "io-gcal",
  "io-gmail",
  "io-gpeople",
+ "io-gtasks",
  "io-http",
  "io-imap",
  "io-jmap",

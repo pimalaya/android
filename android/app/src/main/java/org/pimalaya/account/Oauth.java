@@ -72,6 +72,9 @@ public final class Oauth {
                     "people.googleapis.com",
                     "apidata.googleusercontent.com");
 
+    /** Google Tasks, the task lists Google keeps apart from its calendars. */
+    static final String GOOGLE_TASKS_SCOPE = "https://www.googleapis.com/auth/tasks";
+
     /**
      * The scopes Google's own client asks for: mail, calendars and contacts.
      */
@@ -79,6 +82,7 @@ public final class Oauth {
             java.util.Set.of(
                     "https://mail.google.com/",
                     "https://www.googleapis.com/auth/calendar",
+                    GOOGLE_TASKS_SCOPE,
                     "https://www.googleapis.com/auth/carddav",
                     GOOGLE_PEOPLE_SCOPE);
 
@@ -102,11 +106,33 @@ public final class Oauth {
                     "Mail.ReadWrite",
                     "Mail.Send",
                     "Calendars.ReadWrite",
+                    "Tasks.ReadWrite",
                     "Contacts.ReadWrite",
                     "https://graph.microsoft.com/Mail.ReadWrite",
                     "https://graph.microsoft.com/Mail.Send",
                     "https://graph.microsoft.com/Calendars.ReadWrite",
+                    "https://graph.microsoft.com/Tasks.ReadWrite",
                     "https://graph.microsoft.com/Contacts.ReadWrite");
+
+    /**
+     * A grant's scope with the task service beside the calendar's: Google
+     * Tasks and Microsoft To Do keep an account's tasks apart from its
+     * calendars, which the Tasks tab reads with them. Optional: a token
+     * without it lists the calendars alone.
+     */
+    public static String withTasks(Shipped client, String scope) {
+        java.util.Set<String> parts = new java.util.LinkedHashSet<>(scopes(scope));
+        if (client == Shipped.GOOGLE) {
+            if (parts.contains("https://www.googleapis.com/auth/calendar")) {
+                parts.add(GOOGLE_TASKS_SCOPE);
+            }
+        } else if (parts.contains("Calendars.ReadWrite")) {
+            parts.add("Tasks.ReadWrite");
+        } else if (parts.contains("https://graph.microsoft.com/Calendars.ReadWrite")) {
+            parts.add("https://graph.microsoft.com/Tasks.ReadWrite");
+        }
+        return parts.isEmpty() ? scope : String.join(" ", parts);
+    }
 
     /** Which of the app's own clients a grant runs with. */
     public enum Shipped {
