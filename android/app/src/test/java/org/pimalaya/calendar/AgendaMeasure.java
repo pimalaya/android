@@ -97,7 +97,8 @@ public class AgendaMeasure {
         index.refresh();
         long refreshed = (System.nanoTime() - built) / 1_000_000;
 
-        String first = CalendarList.firstOfWeek(today.format(basic));
+        String first = CalendarList.firstOfWeek(
+                today.format(basic), java.util.Calendar.getInstance().getFirstDayOfWeek());
         LocalDate monday = LocalDate.parse(first, basic);
         // NOTE: the week card's window, then the list's, each with its day
         // of slack either side, as reload reads them.

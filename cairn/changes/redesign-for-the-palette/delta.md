@@ -32,7 +32,7 @@ The sync dock and its log SHALL name each step of a pass with one phrase whateve
 - THEN both read "Downloading envelopes" and their mailboxes counted, as "3 of 12 mailboxes"
 
 ### Requirement: An unread message is marked on its avatar
-A mail row SHALL mark an unread message with an accent badge on its avatar's top-right edge, ringed in the card's tone, so a read row and an unread one keep their avatars and their times in one column.
+A mail row SHALL mark an unread message with an accent badge on its avatar's top-right edge, ringed in the card's tone, so a read row and an unread one keep their avatars and their times in one column. The time SHALL keep the secondary ink, unread or not.
 
 #### Scenario: Two rows, one unread
 - GIVEN a list holding a read and an unread message
@@ -40,7 +40,7 @@ A mail row SHALL mark an unread message with an accent badge on its avatar's top
 - THEN the unread row's avatar carries the badge, and both avatars and both times line up
 
 ### Requirement: Every list draws its avatar with one slot
-Mail, contacts, the agenda, files and tasks SHALL draw a row's avatar with one layout and one binding: the disc in the palette's tones, a calendar's disc taking its own colour's hue (a grey or an unreadable colour falling back to the seed's), the accent check disc at the avatar's size while the row is picked, and the unread badge. A picked task SHALL show the same check disc in its tick's place, its card untinted.
+Mail, contacts, the agenda, files and tasks SHALL draw a row's avatar with one layout and one binding: the disc in the palette's tones, a calendar's disc taking its own colour's hue (a grey or an unreadable colour falling back to the seed's), the accent check disc at the avatar's size while the row is picked, and the unread badge. A task's box SHALL stand in the avatar's place at its size, a rounded square outlined in the secondary ink, empty while open, a check once done, a cross once cancelled, the Inbox glyph for a capture; a picked task SHALL show the same check disc in the box's place, its card untinted.
 
 #### Scenario: A calendar coloured red
 - GIVEN a calendar the server colours #D50000
@@ -68,6 +68,30 @@ Delete on a selection of agenda entries SHALL ask first, saying a repeating entr
 - WHEN Delete is confirmed
 - THEN every occurrence leaves the agenda and the series' removal is staged
 
+### Requirement: The week card marks today and each day's calendars
+In spec/calendar.md. The week card SHALL show today's number on the accent's disc, a pressed day on the ink's and today pressed ringed, and under each day one dot per calendar holding an entry that day, up to three, in that calendar's disc ink, each ringed in the card's tone and overlapping the one before. A pressed day SHALL narrow the list, not the dots.
+
+#### Scenario: A day of two calendars
+- GIVEN Thursday holding a Work entry and a Personal one
+- WHEN the week shows
+- THEN two overlapping dots stand under Thursday, Work's blue and Personal's green
+
+### Requirement: The week starts on the day picked
+In spec/calendar.md. A Settings page, raised from the drawer, SHALL offer the week's first day, Monday or Sunday; until one is picked the phone's language SHALL decide. The week card, its days and its number SHALL follow it.
+
+#### Scenario: Sunday picked on a French phone
+- GIVEN a phone in French, whose weeks start on Monday
+- WHEN Sunday is picked in Settings
+- THEN the week card runs from Sunday to Saturday
+
+### Requirement: A page arrives and leaves with its bar
+Every page (the reader, the composer, an entry, a contact, a task, Clarify, the weekly review) SHALL carry its own bar and drop in whole, bar included, as the account settings do, and lift away whole on back, its entrance played backwards; a list SHALL swap in place under the lists' shared bar.
+
+#### Scenario: Opening a message
+- GIVEN the mail list
+- WHEN a message is opened
+- THEN the reader, its bar included, drops in over the list
+
 ## MODIFIED Requirements
 
 ### Requirement: The mail list selects
@@ -85,5 +109,13 @@ In spec/offline-store.md. A long press on a contact SHALL start a selection, its
 - GIVEN the contacts list
 - WHEN a contact is long pressed
 - THEN its disc shows a check, the bar shows the count, and Delete stands where the navigation was
+
+### Requirement: The reader's actions
+In spec/mail.md. The reader's bar SHALL keep Add to tasks, Copy and the flags in its toolbox, and Reply (Send again for a message that may have gone), Forward, Move and Delete SHALL stand in a bottom bar on the selection bar's items; a message still in the outbox SHALL offer Delete alone there.
+
+#### Scenario: A message waiting in the outbox
+- GIVEN a message waiting to be sent
+- WHEN it is opened
+- THEN the bottom bar holds Delete alone
 
 ## REMOVED Requirements

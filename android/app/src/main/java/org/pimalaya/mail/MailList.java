@@ -1181,9 +1181,6 @@ public final class MailList implements SelectionBar.Owner {
                 unread);
         from.setTypeface(null, unread ? Typeface.BOLD : Typeface.NORMAL);
         subject.setTypeface(null, unread ? Typeface.BOLD : Typeface.NORMAL);
-        date.setTextColor(
-                host.ui.resolveColor(
-                        unread ? android.R.attr.colorAccent : android.R.attr.textColorSecondary));
 
         bindMarks(view, message);
     }

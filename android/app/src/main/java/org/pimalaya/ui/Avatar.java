@@ -56,6 +56,12 @@ public final class Avatar {
         view.setTextColor(tone(context, R.array.avatar_inks, slot));
     }
 
+    /** The ink of the disc {@link #paint(TextView, String, String)} draws. */
+    public static int ink(Context context, String seed, String declared) {
+        int slot = declaredSlot(declared);
+        return tone(context, R.array.avatar_inks, slot < 0 ? slotOf(seed) : slot);
+    }
+
     /** One slot's colour from an array of the eight, in the theme's tones. */
     private static int tone(Context context, int array, int slot) {
         TypedArray tones = context.getResources().obtainTypedArray(array);

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A page's bar start: back (or cross) and title. -->
+<merge xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <ImageButton
+        android:id="@+id/page_back"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_margin="4dp"
+        android:background="@drawable/button_tonal"
+        android:contentDescription="@string/back"
+        android:src="@drawable/ic_arrow_back"
+        android:tint="?android:attr/textColorPrimary" />
+
+    <TextView
+        android:id="@+id/page_title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:paddingStart="@dimen/app_bar_title_padding"
+        android:paddingEnd="@dimen/app_bar_title_padding"
+        android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
+        android:textColor="?android:attr/textColorPrimary" />
+
+</merge>

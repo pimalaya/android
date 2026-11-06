@@ -294,6 +294,7 @@ public final class AccountSettings {
                         chevron(),
                         () ->
                                 choose(
+                                        host,
                                         R.string.background_sync,
                                         R.string.background_sync_note,
                                         R.array.background_intervals,
@@ -431,6 +432,7 @@ public final class AccountSettings {
                         chevron(),
                         () ->
                                 choose(
+                                        host,
                                         R.string.mail_scope_title,
                                         R.string.mail_scope_message,
                                         R.array.mail_scopes,
@@ -1027,7 +1029,8 @@ public final class AccountSettings {
      *
      * <p>A tap applies and closes; Cancel leaves it as it was.
      */
-    private void choose(int title, int message, int choices, int current, IntConsumer picked) {
+    static void choose(
+            Host host, int title, int message, int choices, int current, IntConsumer picked) {
         LinearLayout content = new LinearLayout(host);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(0, host.dp(4), 0, 0);

@@ -29,13 +29,12 @@ public class SyncDockLayoutTest {
                                 new ContextThemeWrapper(
                                         RuntimeEnvironment.getApplication(), R.style.AppTheme))
                         .inflate(R.layout.activity_main, null);
-        // NOTE: the main column alone, the drawer around it laying out only
-        // once attached to a window.
-        View root = (View) activity.findViewById(R.id.flipper).getParent();
+        // NOTE: the drawer lays out only once attached to a window.
+        View root = activity.findViewById(R.id.lists_column);
         ((TextView) root.findViewById(R.id.bar_title)).setText("Mail");
         View appBar = root.findViewById(R.id.app_bar);
         View title = root.findViewById(R.id.bar_title);
-        View content = root.findViewById(R.id.flipper);
+        View content = root.findViewById(R.id.lists);
         View nav = root.findViewById(R.id.bottom_nav);
         View dock = root.findViewById(R.id.sync_dock);
 

@@ -123,6 +123,9 @@ public final class CalendarList implements SelectionBar.Owner {
     /** How many days the list reaches from today, in its timeframe's direction. */
     static final int LIST_DAYS = 92;
 
+    /** The most dots a day of the week card shows, one per calendar. */
+    private static final int DOTS = 3;
+
     /** Where the mode is kept, the list being the default. */
     private static final String MODE_PREFERENCES = "calendar-mode";
 
@@ -905,6 +908,9 @@ public final class CalendarList implements SelectionBar.Owner {
         long now = System.currentTimeMillis();
         List<Row> upcoming = new ArrayList<>();
         List<Row> over = new ArrayList<>();
+        // NOTE: the dots ignore a picked day.
+        Map<String, Map<String, EventStore.StoredCalendar>> marks = new HashMap<>();
+        String after = plusDays(first, 7);
         for (Row row : rows) {
             Occurrence occurrence = row.occurrence;
             boolean ended = endOf(row) <= now;
@@ -922,6 +928,10 @@ public final class CalendarList implements SelectionBar.Owner {
                 continue;
             }
             String day = dayOf(row);
+            if (!listing && day.compareTo(first) >= 0 && day.compareTo(after) < 0) {
+                marks.computeIfAbsent(day, key -> new LinkedHashMap<>())
+                        .putIfAbsent(row.calendar.id, row.calendar);
+            }
             if (listing) {
                 // NOTE: now parts the two sides, so a meeting running is
                 // still upcoming and one over this morning is past.
@@ -990,7 +1000,7 @@ public final class CalendarList implements SelectionBar.Owner {
         if (listing) {
             header.noWeek();
         } else {
-            week(today);
+            week(today, marks);
         }
         // NOTE: a render before the first load (the search or the panel
         // redrawing) is no empty calendar, so the empty state waits.
@@ -1060,17 +1070,16 @@ public final class CalendarList implements SelectionBar.Owner {
     }
 
     /**
-     * Fills the week card: seven days under month, year and week number.
-     *
-     * <p>Today takes the accent; a pressed day takes a filled disc and narrows
-     * the agenda to itself, pressed again widening it back.
+     * Fills the week card: today on the accent's disc, a pressed day on the
+     * ink's (today's ringed) narrowing the agenda, a dot per calendar.
      */
-    private void week(String today) {
+    private void week(String today, Map<String, Map<String, EventStore.StoredCalendar>> marks) {
         String first = shownWeek(today);
         // NOTE: the week's Thursday names its month and its number, which
         // is how ISO 8601 assigns a week straddling two of either.
         String middle = plusDays(first, 3);
         java.util.Calendar thursday = calendarOf(middle);
+        thursday.setFirstDayOfWeek(WeekStart.of(host));
         thursday.setMinimalDaysInFirstWeek(4);
 
         LinearLayout days =
@@ -1101,21 +1110,17 @@ public final class CalendarList implements SelectionBar.Owner {
             number.setTextSize(17);
             number.setTypeface(null, android.graphics.Typeface.BOLD);
             number.setGravity(android.view.Gravity.CENTER);
-            if (selected) {
-                android.graphics.drawable.GradientDrawable disc =
-                        new android.graphics.drawable.GradientDrawable();
-                disc.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-                disc.setColor(isToday ? accent : primary);
-                number.setBackground(disc);
+            if (isToday || selected) {
+                number.setBackground(dayDisc(isToday ? accent : primary, isToday && selected));
                 number.setTextColor(
                         isToday
                                 ? host.accentContrast()
                                 : host.ui.resolveColor(android.R.attr.colorBackground));
             } else {
-                number.setTextColor(isToday ? accent : primary);
+                number.setTextColor(primary);
             }
-            LinearLayout.LayoutParams numberParams =
-                    new LinearLayout.LayoutParams(host.dp(38), host.dp(38));
+            int size = host.getResources().getDimensionPixelSize(R.dimen.week_day);
+            LinearLayout.LayoutParams numberParams = new LinearLayout.LayoutParams(size, size);
             numberParams.topMargin = host.dp(8);
 
             LinearLayout cell = new LinearLayout(host);
@@ -1127,6 +1132,7 @@ public final class CalendarList implements SelectionBar.Owner {
                             LinearLayout.LayoutParams.MATCH_PARENT,
                             LinearLayout.LayoutParams.WRAP_CONTENT));
             cell.addView(number, numberParams);
+            cell.addView(dots(marks.get(day)));
             cell.setOnClickListener(
                     view -> {
                         selectedDay = selected ? null : day;
@@ -1141,9 +1147,63 @@ public final class CalendarList implements SelectionBar.Owner {
         }
     }
 
+    /** A day number's disc, ringed for today pressed. */
+    private android.graphics.drawable.Drawable dayDisc(int color, boolean ringed) {
+        android.graphics.drawable.GradientDrawable disc =
+                new android.graphics.drawable.GradientDrawable();
+        disc.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        disc.setColor(color);
+        if (!ringed) {
+            return disc;
+        }
+        android.graphics.drawable.GradientDrawable ring =
+                new android.graphics.drawable.GradientDrawable();
+        ring.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        ring.setStroke(host.getResources().getDimensionPixelSize(R.dimen.week_dot_ring), color);
+        int gap = host.getResources().getDimensionPixelSize(R.dimen.week_day_ring_gap);
+        return new android.graphics.drawable.LayerDrawable(
+                new android.graphics.drawable.Drawable[] {
+                    ring, new android.graphics.drawable.InsetDrawable(disc, gap)
+                });
+    }
+
+    /** A day's dots, one per calendar in its disc's ink, overlapping. */
+    private View dots(Map<String, EventStore.StoredCalendar> calendars) {
+        LinearLayout row = new LinearLayout(host);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+        int size = host.getResources().getDimensionPixelSize(R.dimen.week_dot);
+        int ring = host.getResources().getDimensionPixelSize(R.dimen.week_dot_ring);
+        int overlap = host.getResources().getDimensionPixelSize(R.dimen.week_dot_overlap);
+        int count = 0;
+        if (calendars != null) {
+            for (EventStore.StoredCalendar calendar : calendars.values()) {
+                if (count == DOTS) {
+                    break;
+                }
+                android.graphics.drawable.GradientDrawable dot =
+                        new android.graphics.drawable.GradientDrawable();
+                dot.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+                dot.setColor(Avatar.ink(host, calendar.id, calendar.color));
+                dot.setStroke(ring, host.getColor(R.color.surface));
+                View view = new View(host);
+                view.setBackground(dot);
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(size, size);
+                params.setMarginStart(count == 0 ? 0 : -overlap);
+                row.addView(view, params);
+                count++;
+            }
+        }
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, size);
+        params.topMargin = host.getResources().getDimensionPixelSize(R.dimen.week_dots_gap);
+        row.setLayoutParams(params);
+        return row;
+    }
+
     /** The first day of the week the card shows. */
     private String shownWeek(String today) {
-        return plusDays(firstOfWeek(today), 7 * weekOffset);
+        return plusDays(firstOfWeek(today, WeekStart.of(host)), 7 * weekOffset);
     }
 
     /** Moves the card by whole weeks, back to this one with zero. */
@@ -1155,11 +1215,10 @@ public final class CalendarList implements SelectionBar.Owner {
         list.setSelection(0);
     }
 
-    /** The first day of the week a day falls in, by the device's locale. */
-    static String firstOfWeek(String day) {
+    /** The first day of the week a day falls in, from {@code firstDay}. */
+    static String firstOfWeek(String day, int firstDay) {
         java.util.Calendar moment = calendarOf(day);
-        int back =
-                (moment.get(java.util.Calendar.DAY_OF_WEEK) - moment.getFirstDayOfWeek() + 7) % 7;
+        int back = (moment.get(java.util.Calendar.DAY_OF_WEEK) - firstDay + 7) % 7;
         return plusDays(day, -back);
     }
 

@@ -75,6 +75,26 @@
         <item name="android:textSize">28sp</item>
         <item name="android:textStyle">bold</item>
     </style>
+    <!-- A page in the main flipper, with its own bar. -->
+    <style name="Page">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:background">?android:attr/colorBackground</item>
+        <item name="android:orientation">vertical</item>
+    </style>
+
+    <!-- A page's own bar, on the shared bar's shape (app_bar). -->
+    <style name="PageBar">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:background">?android:attr/colorBackground</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:minHeight">@dimen/app_bar_height</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:paddingStart">@dimen/app_bar_padding</item>
+        <item name="android:paddingEnd">@dimen/app_bar_padding</item>
+    </style>
+
     <!-- The platform's widgets with their DeviceDefault shapes, in the
          palette (cairn/changes/redesign-for-the-palette): a box or a radio
          the accent ticked. A switch is tinted in code (Switches), its

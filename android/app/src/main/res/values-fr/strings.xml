@@ -37,6 +37,15 @@
     <string name="settings_account_label">Compte</string>
     <string name="settings_domains_label">Domaines</string>
     <string name="settings_signin_label">Connexion</string>
+    <!-- Les réglages de l'app (AppSettings). -->
+    <string name="settings_title">Réglages</string>
+    <string name="settings_calendar_label">Agenda</string>
+    <string name="week_start">Premier jour de la semaine</string>
+    <string name="week_start_note">La vue semaine commence par lui. Tant que vous n\'en choisissez pas, il suit la langue du téléphone.</string>
+    <string-array name="week_start_days">
+        <item>Lundi</item>
+        <item>Dimanche</item>
+    </string-array>
     <string name="notify_needs_background">Demande la synchronisation en arrière-plan.</string>
     <string name="account_tasks_in">Dans %1$s</string>
     <string name="account_tasks_in_google">Dans %1$s · États et catégories restent sur ce téléphone</string>

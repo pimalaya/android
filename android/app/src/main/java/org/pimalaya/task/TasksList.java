@@ -1210,14 +1210,16 @@ public final class TasksList implements SelectionBar.Owner {
             done.setImageTintList(
                     android.content.res.ColorStateList.valueOf(
                             host.resolveColor(android.R.attr.textColorSecondary)));
-            done.setImageResource(
-                    capture
-                            ? R.drawable.ic_task_inbox
-                            : !closed
-                                    ? R.drawable.ic_check_box_blank
-                                    : TaskOrder.DONE.equals(task.status())
-                                            ? R.drawable.ic_check_box
-                                            : R.drawable.ic_cancel);
+            if (capture) {
+                done.setImageResource(R.drawable.ic_task_inbox);
+            } else if (!closed) {
+                done.setImageDrawable(null);
+            } else {
+                done.setImageResource(
+                        TaskOrder.DONE.equals(task.status())
+                                ? R.drawable.ic_check
+                                : R.drawable.ic_close);
+            }
             if (isSelectionMode()) {
                 // NOTE: while selecting, the tick's tap toggles the
                 // selection, as the row's does.

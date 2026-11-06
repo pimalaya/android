@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The main column (one persistent app bar over the content flipper:
-     navigating flips only the inner content) plus the whole-frame
-     overlays, bar included. The auth sheet and the shared FAB live in
+<!-- The main flipper (the lists' column, then each page with its own
+     bar) plus the whole-frame overlays, bar included. The auth sheet and the shared FAB live in
      the drawer's content; the account settings overlay sits after the
      DrawerLayout so it draws above the open drawer: an account row
      raises it without closing the drawer, and closing it lands back on
@@ -18,8 +17,8 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <!-- Main content: the persistent app bar over the content flipper,
-         the auth sheet overlay and the FAB, all under the drawer. It does
+    <!-- Main content: the main flipper, the auth sheet overlay and the
+         FAB, all under the drawer. It does
          not clip, so the FAB's elevation shadow (which spills past the
          snug fab_frame) renders in full. -->
     <FrameLayout
@@ -28,9 +27,16 @@
         android:clipChildren="false"
         android:clipToPadding="false">
 
+    <ViewFlipper
+        android:id="@+id/flipper"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
     <LinearLayout
+        android:id="@+id/lists_column"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:background="?android:attr/colorBackground"
         android:orientation="vertical">
 
     <LinearLayout
@@ -43,18 +49,6 @@
         android:orientation="horizontal"
         android:paddingStart="@dimen/app_bar_padding"
         android:paddingEnd="@dimen/app_bar_padding">
-
-        <!-- Editor, addressbooks and auth screens. -->
-        <ImageButton
-            android:id="@+id/bar_back"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_margin="4dp"
-            android:background="@drawable/button_tonal"
-            android:contentDescription="@string/back"
-            android:src="@drawable/ic_arrow_back"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
 
         <!-- The accounts drawer, behind the burger that says so. The
              app's mark stood here for a while; a logo is identity and
@@ -83,9 +77,8 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- The screen's title: the domain's name on the lists, the
-             contact's name on the editor, the selected count during a
-             selection. It ellipsizes rather than pushing the trailing
+        <!-- The list's title: the domain's name, once the large one has
+             scrolled away, or the selected count during a selection. It ellipsizes rather than pushing the trailing
              buttons off a narrow bar. -->
         <TextView
             android:id="@+id/bar_title"
@@ -256,183 +249,23 @@
 
         </org.pimalaya.ui.ToolGroup>
 
-        <!-- Editor: the addressbooks the contact belongs to, the one
-             placement gesture (docs/merged-view.md), and more fields; the
-             FAB is the validate (check) action. Add field hides in
-             conflict mode, where nothing can be added. -->
-        <org.pimalaya.ui.ToolGroup
-            android:layout_width="wrap_content"
-            android:layout_height="@dimen/app_bar_tools_height"
-            android:background="@drawable/tool_group"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="@dimen/app_bar_tools_padding"
-            android:paddingEnd="@dimen/app_bar_tools_padding">
-
-            <ImageButton
-                android:id="@+id/contact_books"
-                android:layout_width="@dimen/app_bar_tool_width"
-                android:layout_height="@dimen/app_bar_tool_height"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/manage_books_title"
-                android:src="@drawable/ic_account"
-                android:tint="?android:attr/textColorPrimary"
-                android:visibility="gone" />
-
-            <ImageButton
-                android:id="@+id/contact_add_field"
-                android:layout_width="@dimen/app_bar_tool_width"
-                android:layout_height="@dimen/app_bar_tool_height"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/contact_add_field"
-                android:src="@drawable/ic_add_entry"
-                android:tint="?android:attr/textColorPrimary"
-                android:visibility="gone" />
-
-        </org.pimalaya.ui.ToolGroup>
-
-        <!-- Reader: what is done to the open message, one tonal pill:
-             the destructive end first, the answers last, under the
-             thumb. -->
-        <LinearLayout
-            android:id="@+id/message_actions"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            android:layout_marginEnd="4dp"
-            android:background="@drawable/button_tonal"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
-            android:visibility="gone">
-
-            <ImageButton
-                android:id="@+id/message_view_task"
-                android:layout_width="38dp"
-                android:layout_height="36dp"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/task_add_from_mail"
-                android:src="@drawable/ic_component_todo"
-                android:tint="?android:attr/textColorPrimary" />
-
-            <ImageButton
-                android:id="@+id/message_view_delete"
-                android:layout_width="38dp"
-                android:layout_height="36dp"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/message_delete"
-                android:src="@drawable/ic_delete_bar"
-                android:tint="?android:attr/textColorPrimary" />
-
-            <ImageButton
-                android:id="@+id/message_view_move"
-                android:layout_width="38dp"
-                android:layout_height="36dp"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/message_move"
-                android:src="@drawable/ic_move_item"
-                android:tint="?android:attr/textColorPrimary" />
-
-            <ImageButton
-                android:id="@+id/message_view_copy"
-                android:layout_width="38dp"
-                android:layout_height="36dp"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/message_copy"
-                android:src="@drawable/ic_content_copy"
-                android:tint="?android:attr/textColorPrimary" />
-
-            <ImageButton
-                android:id="@+id/message_view_flags"
-                android:layout_width="38dp"
-                android:layout_height="36dp"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/message_flags"
-                android:src="@drawable/ic_flag"
-                android:tint="?android:attr/textColorPrimary" />
-
-            <ImageButton
-                android:id="@+id/message_view_forward"
-                android:layout_width="38dp"
-                android:layout_height="36dp"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/message_forward"
-                android:src="@drawable/ic_forward"
-                android:tint="?android:attr/textColorPrimary" />
-
-            <ImageButton
-                android:id="@+id/message_view_reply"
-                android:layout_width="38dp"
-                android:layout_height="36dp"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/message_reply"
-                android:src="@drawable/ic_reply"
-                android:tint="?android:attr/textColorPrimary" />
-
-        </LinearLayout>
-
-        <!-- Composer: send, an accent pill naming what it does. -->
-        <TextView
-            android:id="@+id/bar_send"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            android:layout_marginEnd="4dp"
-            android:background="@drawable/button_pill"
-            android:drawableStart="@drawable/ic_send"
-            android:drawablePadding="6dp"
-            android:gravity="center_vertical"
-            android:paddingStart="12dp"
-            android:paddingEnd="16dp"
-            android:text="@string/compose_send"
-            android:textSize="15sp"
-            android:textStyle="bold"
-            android:visibility="gone" />
-
-        <!-- Editor: remove what is open. In the bar rather than on the
-             page, because it acts on the whole of what the page shows
-             and not on any one row of it. -->
-        <ImageButton
-            android:id="@+id/bar_delete"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_margin="4dp"
-            android:background="@drawable/button_tonal"
-            android:contentDescription="@string/event_delete"
-            android:src="@drawable/ic_delete_bar"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
-
     </LinearLayout>
 
     <ViewFlipper
-        android:id="@+id/flipper"
+        android:id="@+id/lists"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
 
         <include layout="@layout/panel_contacts" />
 
-        <include layout="@layout/panel_contact" />
-
         <include layout="@layout/panel_mail" />
 
         <include layout="@layout/panel_calendar" />
 
-        <include layout="@layout/panel_compose" />
-
-        <include layout="@layout/panel_message" />
-
-        <include layout="@layout/panel_event_view" />
-
         <include layout="@layout/panel_files" />
 
         <include layout="@layout/panel_tasks" />
-
-        <include layout="@layout/panel_task" />
-
-        <include layout="@layout/panel_clarify" />
-
-        <include layout="@layout/panel_review" />
 
     </ViewFlipper>
 
@@ -754,6 +587,260 @@
         android:visibility="gone" />
 
     </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/page_contact"
+            style="@style/Page">
+
+            <LinearLayout
+                android:id="@+id/contact_bar"
+                style="@style/PageBar">
+
+                <include layout="@layout/page_bar_lead" />
+
+                <!-- The addressbooks the contact belongs to, the one
+                     placement gesture (docs/merged-view.md), and more fields; the
+                     FAB is the validate (check) action. Add field hides in
+                     conflict mode, where nothing can be added. -->
+                <org.pimalaya.ui.ToolGroup
+                    android:layout_width="wrap_content"
+                    android:layout_height="@dimen/app_bar_tools_height"
+                    android:background="@drawable/tool_group"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="@dimen/app_bar_tools_padding"
+                    android:paddingEnd="@dimen/app_bar_tools_padding">
+
+                    <ImageButton
+                        android:id="@+id/contact_books"
+                        android:layout_width="@dimen/app_bar_tool_width"
+                        android:layout_height="@dimen/app_bar_tool_height"
+                        android:background="@drawable/ripple_circle"
+                        android:contentDescription="@string/manage_books_title"
+                        android:src="@drawable/ic_account"
+                        android:tint="?android:attr/textColorPrimary"
+                        android:visibility="gone" />
+
+                    <ImageButton
+                        android:id="@+id/contact_add_field"
+                        android:layout_width="@dimen/app_bar_tool_width"
+                        android:layout_height="@dimen/app_bar_tool_height"
+                        android:background="@drawable/ripple_circle"
+                        android:contentDescription="@string/contact_add_field"
+                        android:src="@drawable/ic_add_entry"
+                        android:tint="?android:attr/textColorPrimary"
+                        android:visibility="gone" />
+
+                </org.pimalaya.ui.ToolGroup>
+
+            </LinearLayout>
+
+            <include
+                layout="@layout/panel_contact"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/page_compose"
+            style="@style/Page">
+
+            <LinearLayout
+                android:id="@+id/compose_bar"
+                style="@style/PageBar">
+
+                <include layout="@layout/page_bar_lead" />
+
+                <!-- Send, an accent pill naming what it does. -->
+                <TextView
+                    android:id="@+id/bar_send"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="4dp"
+                    android:background="@drawable/button_pill"
+                    android:drawableStart="@drawable/ic_send"
+                    android:drawablePadding="6dp"
+                    android:gravity="center_vertical"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="16dp"
+                    android:text="@string/compose_send"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+            </LinearLayout>
+
+            <include
+                layout="@layout/panel_compose"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/page_message"
+            style="@style/Page">
+
+            <LinearLayout
+                android:id="@+id/message_bar"
+                style="@style/PageBar">
+
+                <include layout="@layout/page_bar_lead" />
+
+                <LinearLayout
+                    android:id="@+id/message_actions"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="4dp"
+                    android:background="@drawable/button_tonal"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="2dp"
+                    android:paddingEnd="2dp">
+
+                    <ImageButton
+                        android:id="@+id/message_view_task"
+                        android:layout_width="38dp"
+                        android:layout_height="36dp"
+                        android:background="@drawable/ripple_circle"
+                        android:contentDescription="@string/task_add_from_mail"
+                        android:src="@drawable/ic_component_todo"
+                        android:tint="?android:attr/textColorPrimary" />
+
+                    <ImageButton
+                        android:id="@+id/message_view_copy"
+                        android:layout_width="38dp"
+                        android:layout_height="36dp"
+                        android:background="@drawable/ripple_circle"
+                        android:contentDescription="@string/message_copy"
+                        android:src="@drawable/ic_content_copy"
+                        android:tint="?android:attr/textColorPrimary" />
+
+                    <ImageButton
+                        android:id="@+id/message_view_flags"
+                        android:layout_width="38dp"
+                        android:layout_height="36dp"
+                        android:background="@drawable/ripple_circle"
+                        android:contentDescription="@string/message_flags"
+                        android:src="@drawable/ic_flag"
+                        android:tint="?android:attr/textColorPrimary" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <include
+                layout="@layout/panel_message"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <LinearLayout
+                android:id="@+id/message_bottom"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/surface"
+                android:orientation="horizontal" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/page_event"
+            style="@style/Page">
+
+            <LinearLayout
+                android:id="@+id/event_bar"
+                style="@style/PageBar">
+
+                <include layout="@layout/page_bar_lead" />
+
+                <!-- Remove what is open. In the bar rather than on the
+                     page, because it acts on the whole of what the page shows
+                     and not on any one row of it. -->
+                <ImageButton
+                    android:id="@+id/bar_delete"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_margin="4dp"
+                    android:background="@drawable/button_tonal"
+                    android:contentDescription="@string/event_delete"
+                    android:src="@drawable/ic_delete_bar"
+                    android:tint="?android:attr/textColorPrimary"
+                    android:visibility="gone" />
+
+            </LinearLayout>
+
+            <include
+                layout="@layout/panel_event_view"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/page_task"
+            style="@style/Page">
+
+            <LinearLayout
+                android:id="@+id/task_bar"
+                style="@style/PageBar">
+
+                <include layout="@layout/page_bar_lead" />
+
+            </LinearLayout>
+
+            <include
+                layout="@layout/panel_task"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/page_clarify"
+            style="@style/Page">
+
+            <LinearLayout
+                android:id="@+id/clarify_bar"
+                style="@style/PageBar">
+
+                <include layout="@layout/page_bar_lead" />
+
+            </LinearLayout>
+
+            <include
+                layout="@layout/panel_clarify"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/page_review"
+            style="@style/Page">
+
+            <LinearLayout
+                android:id="@+id/review_bar"
+                style="@style/PageBar">
+
+                <include layout="@layout/page_bar_lead" />
+
+            </LinearLayout>
+
+            <include
+                layout="@layout/panel_review"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+        </LinearLayout>
+
+    </ViewFlipper>
 
     <!-- The auth sheet: a whole-frame overlay with its own bar, fading
          in over the content (the drawer is closed while it runs). -->
@@ -1104,6 +1191,51 @@
             </LinearLayout>
 
             <LinearLayout
+                android:id="@+id/drawer_settings"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:background="@drawable/drawer_row"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingEnd="14dp">
+
+                <FrameLayout
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:background="@drawable/drawer_tile">
+
+                    <ImageView
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_gravity="center"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_settings"
+                        android:tint="?android:attr/textColorPrimary" />
+
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:layout_weight="1"
+                    android:text="@string/settings_title"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="15sp" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_chevron_right"
+                    android:tint="?android:attr/textColorSecondary" />
+
+            </LinearLayout>
+
+            <LinearLayout
                 android:id="@+id/drawer_about"
                 android:layout_width="match_parent"
                 android:layout_height="50dp"
@@ -1167,5 +1299,7 @@
     <!-- Deleted items: the same treatment, raised from the drawer's row
          and closing back onto the drawer. -->
     <include layout="@layout/panel_deleted" />
+
+    <include layout="@layout/panel_settings" />
 
 </FrameLayout>

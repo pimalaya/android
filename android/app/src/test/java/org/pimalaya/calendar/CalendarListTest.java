@@ -5,7 +5,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-import java.util.Locale;
+import java.util.Calendar;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -65,17 +65,12 @@ public class CalendarListTest {
     }
 
     @Test
-    public void aWeekStartsOnTheLocalesFirstDay() {
-        Locale before = Locale.getDefault();
-        try {
-            // NOTE: Wednesday 7 October 2026.
-            Locale.setDefault(Locale.FRANCE);
-            assertEquals("20261005", CalendarList.firstOfWeek("20261007"));
-            Locale.setDefault(Locale.US);
-            assertEquals("20261004", CalendarList.firstOfWeek("20261007"));
-        } finally {
-            Locale.setDefault(before);
-        }
+    public void aWeekStartsOnItsFirstDay() {
+        // NOTE: Wednesday 7 then Sunday 11 October 2026.
+        assertEquals("20261005", CalendarList.firstOfWeek("20261007", Calendar.MONDAY));
+        assertEquals("20261004", CalendarList.firstOfWeek("20261007", Calendar.SUNDAY));
+        assertEquals("20261011", CalendarList.firstOfWeek("20261011", Calendar.SUNDAY));
+        assertEquals("20261005", CalendarList.firstOfWeek("20261011", Calendar.MONDAY));
     }
 
     @Test

@@ -39,6 +39,7 @@ import org.pimalaya.ui.Dates;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Linked;
 import org.pimalaya.ui.Panels;
+import org.pimalaya.ui.SelectionBar;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -448,10 +449,7 @@ public final class MessageView implements FilesList.Origins {
                 });
     }
 
-    /**
-     * The bar's icons, as the message stands: delete, move, copy, flags,
-     * forward, reply.
-     */
+    /** The message's actions: copy and flags on top, the rest at the bottom. */
     private void actions() {
         // NOTE: a message still in the outbox has no markers to move and is
         // filed nowhere. It has never been anywhere that keeps any, and
@@ -460,12 +458,6 @@ public final class MessageView implements FilesList.Origins {
         // NOTE: a waiting message has nothing to answer yet; one that may
         // have gone is sent again only when the user says so.
         boolean uncertain = current != null && current.uncertain;
-
-        host.findViewById(R.id.message_view_delete).setOnClickListener(view -> confirmDelete());
-
-        View move = host.findViewById(R.id.message_view_move);
-        move.setVisibility(pending ? View.GONE : View.VISIBLE);
-        move.setOnClickListener(view -> chooseMailbox(false));
 
         View copy = host.findViewById(R.id.message_view_copy);
         copy.setVisibility(pending ? View.GONE : View.VISIBLE);
@@ -480,23 +472,36 @@ public final class MessageView implements FilesList.Origins {
                                 : host.ui.resolveColor(android.R.attr.textColorPrimary)));
         flags.setOnClickListener(view -> chooseFlags());
 
-        View forward = host.findViewById(R.id.message_view_forward);
-        forward.setVisibility(pending ? View.GONE : View.VISIBLE);
-        forward.setOnClickListener(view -> compose.open(forward(current, loaded)));
-
-        ImageButton reply = host.findViewById(R.id.message_view_reply);
-        reply.setVisibility(pending && !uncertain ? View.GONE : View.VISIBLE);
-        reply.setImageResource(uncertain ? R.drawable.ic_send : R.drawable.ic_reply);
-        reply.setContentDescription(
-                host.getString(uncertain ? R.string.message_send_again : R.string.message_reply));
-        reply.setOnClickListener(
-                view -> {
-                    if (uncertain) {
-                        sendAgain(current);
-                    } else {
-                        compose.open(reply(current, loaded));
-                    }
-                });
+        List<SelectionBar.Action> bottom = new ArrayList<>();
+        if (uncertain) {
+            bottom.add(
+                    new SelectionBar.Action(
+                            R.drawable.ic_send,
+                            R.string.message_send_again,
+                            () -> sendAgain(current)));
+        } else if (!pending) {
+            bottom.add(
+                    new SelectionBar.Action(
+                            R.drawable.ic_reply,
+                            R.string.message_reply,
+                            () -> compose.open(reply(current, loaded))));
+        }
+        if (!pending) {
+            bottom.add(
+                    new SelectionBar.Action(
+                            R.drawable.ic_forward,
+                            R.string.message_forward,
+                            () -> compose.open(forward(current, loaded))));
+            bottom.add(
+                    new SelectionBar.Action(
+                            R.drawable.ic_move_item,
+                            R.string.message_move,
+                            () -> chooseMailbox(false)));
+        }
+        bottom.add(
+                new SelectionBar.Action(
+                        R.drawable.ic_delete_bar, R.string.message_delete, this::confirmDelete));
+        SelectionBar.fill(host, host.findViewById(R.id.message_bottom), bottom);
     }
 
     /**

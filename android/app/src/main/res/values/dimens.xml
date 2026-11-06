@@ -53,7 +53,17 @@
     <dimen name="card_radius">22dp</dimen>
     <dimen name="card_gutter">12dp</dimen>
     <dimen name="card_avatar">42dp</dimen>
+    <dimen name="task_box_radius">12dp</dimen>
+    <dimen name="task_box_stroke">2dp</dimen>
     <dimen name="large_title">32sp</dimen>
+
+    <!-- The week card's day discs and calendar dots. -->
+    <dimen name="week_day">38dp</dimen>
+    <dimen name="week_day_ring_gap">4dp</dimen>
+    <dimen name="week_dot">12dp</dimen>
+    <dimen name="week_dot_ring">2dp</dimen>
+    <dimen name="week_dot_overlap">6dp</dimen>
+    <dimen name="week_dots_gap">4dp</dimen>
 
     <!-- A domain's tile on the setup's servers page: its glyph on a
          rounded square, filled with the accent while the domain is

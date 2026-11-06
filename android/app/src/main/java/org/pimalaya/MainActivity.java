@@ -24,7 +24,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import org.pimalaya.account.AccountActivation;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.LocalBook;
@@ -137,6 +136,7 @@ public class MainActivity extends Host
     /** Every remote and phone pass, behind the sync dock. */
     SyncPasses passes;
     private ViewFlipper flipper;
+    private ViewFlipper lists;
     private ViewFlipper authFlipper;
     ContactForm form;
 
@@ -151,6 +151,7 @@ public class MainActivity extends Host
 
     /** The deleted items page, raised from the drawer (built in onCreate). */
     private DeletedItemsPage deletedPage;
+    private org.pimalaya.setup.AppSettings appSettings;
 
     /** The calendar side of the store, and the agenda over it. */
     EventStore events;
@@ -332,6 +333,7 @@ public class MainActivity extends Host
                         filterPage.openSync(domain, email, () -> accountSettings.refresh(email));
         // NOTE: a restore reloads the lists, so the page is built after them.
         deletedPage = new DeletedItemsPage(this, syncParts, passes, accounts, this::reload);
+        appSettings = new org.pimalaya.setup.AppSettings(this);
         // NOTE: the two flows reference each other (grants land back in
         // the wizard), so one side binds late.
         oauth = new OauthFlow(this, clients.account(), this);
@@ -340,6 +342,7 @@ public class MainActivity extends Host
         oauth.onAborted = onboarding::grantAborted;
         oauth.onBusy = onboarding::busy;
         flipper = findViewById(R.id.flipper);
+        lists = findViewById(R.id.lists);
         authFlipper = findViewById(R.id.auth_flipper);
         form.setOnRender(this::updateSaveEnabled);
         // NOTE: a card being composed or a conflict being resolved has no
@@ -381,6 +384,7 @@ public class MainActivity extends Host
         setUpHomePanel();
         filterPage.setUp();
         deletedPage.setUp();
+        appSettings.setUp();
 
         findViewById(R.id.selection_close)
                 .setOnClickListener(
@@ -410,7 +414,9 @@ public class MainActivity extends Host
                 .setCompoundDrawableTintList(ColorStateList.valueOf(accentContrast()));
         findViewById(R.id.bar_send).setOnClickListener(view -> compose.send());
         findViewById(R.id.bar_send).setOnLongClickListener(view -> sendMenu(view));
-        findViewById(R.id.bar_back).setOnClickListener(view -> onBarBack());
+        for (int page : PAGES) {
+            pageBack(page).setOnClickListener(view -> onBarBack());
+        }
         findViewById(R.id.bar_menu).setOnClickListener(view -> openAccountsDrawer());
         for (int panel : Domains.PANELS) {
             findViewById(Domains.buttonOf(panel)).setOnClickListener(view -> switchDomain(panel));
@@ -883,6 +889,10 @@ public class MainActivity extends Host
             deletedPage.leave();
             return;
         }
+        if (screen == Panels.SETTINGS) {
+            appSettings.leave();
+            return;
+        }
         if (drawer.isDrawerOpen(android.view.Gravity.START)) {
             drawer.closeDrawer(android.view.Gravity.START);
             return;
@@ -923,7 +933,7 @@ public class MainActivity extends Host
             // there (say the agenda) is not the one the account lands on.
             flipper.setInAnimation(null);
             flipper.setOutAnimation(null);
-            flipper.setDisplayedChild(panel);
+            place(panel);
             closeOverlay(PANEL_AUTH);
             screen = panel;
             applyChrome(panel);
@@ -1140,6 +1150,7 @@ public class MainActivity extends Host
                         });
         findViewById(R.id.drawer_add).setOnClickListener(view -> startAuth());
         findViewById(R.id.drawer_deleted).setOnClickListener(view -> deletedPage.open());
+        findViewById(R.id.drawer_settings).setOnClickListener(view -> appSettings.open());
         findViewById(R.id.drawer_about).setOnClickListener(view -> showAbout());
 
         accountSettings.bind();
@@ -1601,10 +1612,12 @@ public class MainActivity extends Host
         dock.onList(true);
     }
 
-    /** Retitles the bar, for a page whose own edits change its title. */
+    /** Retitles the page on screen. */
     @Override
     public void updateBarTitle(String title) {
-        ((TextView) findViewById(R.id.bar_title)).setText(title);
+        if (!isList(screen) && slotOf(screen) > 0) {
+            pageTitle(screen).setText(title);
+        }
     }
 
     /** The bar's title for a list, shown once its large title scrolls away. */
@@ -1854,36 +1867,33 @@ public class MainActivity extends Host
         tasksList.reload();
     }
 
-    /**
-     * Navigates forward: the page drops in, as an account's settings do; the
-     * one under it goes at once.
-     */
+    /** Navigates forward: the screen drops in whole, bar included. */
     @Override
     public void show(int panel) {
         flipper.setInAnimation(this, R.anim.fade_zoom_in);
         flipper.setOutAnimation(null);
+        boolean moves = flipper.getDisplayedChild() != slotOf(panel);
         flip(panel);
+        if (moves && findViewById(R.id.fab).getVisibility() == View.VISIBLE) {
+            findViewById(R.id.fab_frame)
+                    .startAnimation(
+                            android.view.animation.AnimationUtils.loadAnimation(
+                                    this, R.anim.fade_zoom_in));
+        }
     }
 
-    /**
-     * Navigates back: the page lifts away, its drop-in played backwards, over
-     * the one it uncovers; a list left for another goes at once, a lateral
-     * move.
-     */
+    /** Navigates back: the page lifts away whole; a list swaps in place. */
     @Override
     public void showBack(int panel) {
         flipper.setInAnimation(null);
         // NOTE: by what the flipper shows, which an overlay may cover.
-        int from = flipper.getDisplayedChild();
         View leaving = flipper.getCurrentView();
-        boolean page = panel != from && leaving != null && !isList(from);
-        if (!page) {
+        if (flipper.getDisplayedChild() == slotOf(panel) || leaving == null) {
             flipper.setOutAnimation(null);
             flip(panel);
             return;
         }
-        // NOTE: the flipper draws its pages in their order, which can put the
-        // one uncovered above the one leaving: lifted until it is gone.
+        // NOTE: raised, or a later page would draw over it.
         android.view.animation.Animation away = liftAway();
         leaving.setTranslationZ(1f);
         away.setAnimationListener(
@@ -1903,16 +1913,6 @@ public class MainActivity extends Host
         flip(panel);
     }
 
-    /** Whether a panel is one of the domains' lists. */
-    private static boolean isList(int panel) {
-        for (int list : Domains.PANELS) {
-            if (list == panel) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     /**
      * The drop-in (anim/fade_zoom_in.xml) played backwards, for a page or an
      * overlay leaving: the same curve and length, run from its end to its
@@ -1926,6 +1926,62 @@ public class MainActivity extends Host
         return away;
     }
 
+    /** Whether a panel is one of the domains' lists. */
+    private static boolean isList(int panel) {
+        return listSlotOf(panel) >= 0;
+    }
+
+    /** The lists, in their flipper's order (activity_main.xml). */
+    private static final int[] LISTS = {
+        Panels.CONTACTS, Panels.MAIL, Panels.CALENDAR, Panels.FILES, Panels.TASKS,
+    };
+
+    /** The pages, in the main flipper's order, after the lists' column. */
+    private static final int[] PAGES = {
+        Panels.CONTACT,
+        Panels.COMPOSE,
+        Panels.MESSAGE,
+        Panels.EVENT_VIEW,
+        Panels.TASK,
+        Panels.CLARIFY,
+        Panels.REVIEW,
+    };
+
+    /** A list's place in the lists' flipper, -1 for a page. */
+    private static int listSlotOf(int panel) {
+        for (int index = 0; index < LISTS.length; index++) {
+            if (LISTS[index] == panel) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    /** A panel's place in the main flipper: the lists' column for a list. */
+    private static int slotOf(int panel) {
+        for (int index = 0; index < PAGES.length; index++) {
+            if (PAGES[index] == panel) {
+                return index + 1;
+            }
+        }
+        return 0;
+    }
+
+    /** A page's own bar, its first child (activity_main.xml). */
+    private View barOf(int panel) {
+        return ((android.view.ViewGroup) flipper.getChildAt(slotOf(panel))).getChildAt(0);
+    }
+
+    /** A page's title, in its own bar. */
+    private TextView pageTitle(int panel) {
+        return barOf(panel).findViewById(R.id.page_title);
+    }
+
+    /** A page's back arrow, or closing cross, in its own bar. */
+    private android.widget.ImageButton pageBack(int panel) {
+        return barOf(panel).findViewById(R.id.page_back);
+    }
+
     /** Swaps the screen in place, for a lateral move with no direction. */
     @Override
     public void showInstant(int panel) {
@@ -1936,9 +1992,21 @@ public class MainActivity extends Host
 
     private void flip(int panel) {
         hideKeyboard();
-        flipper.setDisplayedChild(panel);
+        place(panel);
         screen = panel;
         applyChrome(panel);
+    }
+
+    /** Puts a panel on screen, chrome aside. */
+    private void place(int panel) {
+        int list = listSlotOf(panel);
+        if (list >= 0) {
+            lists.setDisplayedChild(list);
+        }
+        // NOTE: showing the shown child again replays its entrance.
+        if (flipper.getDisplayedChild() != slotOf(panel)) {
+            flipper.setDisplayedChild(slotOf(panel));
+        }
     }
 
     /** Raises a whole-frame overlay, its own bar included, over the screen. */
@@ -1979,6 +2047,8 @@ public class MainActivity extends Host
                 return findViewById(R.id.overlay_filter);
             case Panels.DELETED:
                 return findViewById(R.id.overlay_deleted);
+            case Panels.SETTINGS:
+                return findViewById(R.id.overlay_settings);
             default:
                 return findViewById(R.id.overlay_auth);
         }
@@ -2015,44 +2085,6 @@ public class MainActivity extends Host
         fab.setImageResource(icon);
         fab.setContentDescription(getString(description));
         fab.setVisibility(View.VISIBLE);
-    }
-
-    /**
-     * An editor that is still a frame: titled, a back arrow, no FAB.
-     *
-     * <p>A screen rather than nothing, so the navigation around it works
-     * before what goes inside it exists.
-     */
-    private Screen frame(int title, int list) {
-        Screen frame = new Screen();
-        frame.chrome =
-                () -> {
-                    ((TextView) findViewById(R.id.bar_title)).setText(title);
-                    findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
-                    findViewById(R.id.fab).setVisibility(View.GONE);
-                };
-        frame.barBack = () -> showBack(list);
-        frame.systemBack = () -> showBack(list);
-        return frame;
-    }
-
-    /**
-     * A reader: one item whole, titled by it, a back arrow onto its list.
-     *
-     * <p>The title is a supplier: the chrome is applied after the reader is
-     * handed its item.
-     */
-    private Screen reader(Supplier<String> title, int list) {
-        Screen reader = new Screen();
-        reader.chrome =
-                () -> {
-                    ((TextView) findViewById(R.id.bar_title)).setText(title.get());
-                    findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
-                    findViewById(R.id.fab).setVisibility(View.GONE);
-                };
-        reader.barBack = () -> showBack(list);
-        reader.systemBack = () -> showBack(list);
-        return reader;
     }
 
     /** Fills the screen table; every entry reads like one screen's card. */
@@ -2128,8 +2160,8 @@ public class MainActivity extends Host
         Screen task = new Screen();
         task.chrome =
                 () -> {
-                    ((TextView) findViewById(R.id.bar_title)).setText(taskPage.title());
-                    closingBack();
+                    pageTitle(Panels.TASK).setText(taskPage.title());
+                    closingBack(Panels.TASK);
                     addFab(R.drawable.ic_check, R.string.event_save);
                 };
         task.fab = () -> taskPage.save();
@@ -2140,8 +2172,7 @@ public class MainActivity extends Host
         Screen clarifying = new Screen();
         clarifying.chrome =
                 () -> {
-                    ((TextView) findViewById(R.id.bar_title)).setText(clarify.title());
-                    findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
+                    pageTitle(Panels.CLARIFY).setText(clarify.title());
                     findViewById(R.id.fab).setVisibility(View.GONE);
                 };
         clarifying.barBack = this::leaveClarify;
@@ -2152,8 +2183,7 @@ public class MainActivity extends Host
         reviewing.chrome =
                 () -> {
                     // NOTE: the page carries its own large title.
-                    ((TextView) findViewById(R.id.bar_title)).setText("");
-                    findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
+                    pageTitle(Panels.REVIEW).setText("");
                     findViewById(R.id.fab).setVisibility(View.GONE);
                     review.refresh();
                 };
@@ -2164,9 +2194,8 @@ public class MainActivity extends Host
         Screen composer = new Screen();
         composer.chrome =
                 () -> {
-                    ((TextView) findViewById(R.id.bar_title)).setText(R.string.compose_new);
-                    closingBack();
-                    findViewById(R.id.bar_send).setVisibility(View.VISIBLE);
+                    pageTitle(Panels.COMPOSE).setText(R.string.compose_new);
+                    closingBack(Panels.COMPOSE);
                     setSending(false);
                 };
         composer.barBack = () -> compose.close();
@@ -2175,27 +2204,25 @@ public class MainActivity extends Host
 
         // NOTE: the message reader is untitled: the page leads with the
         // subject itself.
-        Screen message = reader(() -> "", Panels.MAIL);
-        Runnable readerChrome = message.chrome;
-        message.chrome =
-                () -> {
-                    readerChrome.run();
-                    findViewById(R.id.message_actions).setVisibility(View.VISIBLE);
-                };
+        Screen message = new Screen();
+        message.chrome = () -> findViewById(R.id.fab).setVisibility(View.GONE);
+        message.barBack = () -> showBack(Panels.MAIL);
+        message.systemBack = () -> showBack(Panels.MAIL);
         screens.put(Panels.MESSAGE, message);
 
         Screen entry = new Screen();
         entry.chrome =
                 () -> {
-                    ((TextView) findViewById(R.id.bar_title)).setText(eventView.title());
-                    findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
+                    pageTitle(Panels.EVENT_VIEW).setText(eventView.title());
+                    // NOTE: a new entry has nothing to delete: back leaves
+                    // it unsaved.
+                    findViewById(R.id.bar_delete)
+                            .setVisibility(
+                                    eventView.editable() && !eventView.creating()
+                                            ? View.VISIBLE
+                                            : View.GONE);
                     if (eventView.editable()) {
-                        closingBack();
-                        // NOTE: a new entry has nothing to delete: back
-                        // leaves it unsaved.
-                        if (!eventView.creating()) {
-                            findViewById(R.id.bar_delete).setVisibility(View.VISIBLE);
-                        }
+                        closingBack(Panels.EVENT_VIEW);
                         addFab(R.drawable.ic_check, R.string.event_save);
                         eventView.gate();
                     } else {
@@ -2210,8 +2237,8 @@ public class MainActivity extends Host
         Screen contact = new Screen();
         contact.chrome =
                 () -> {
-                    ((TextView) findViewById(R.id.bar_title)).setText(editor.edit().title);
-                    closingBack();
+                    pageTitle(Panels.CONTACT).setText(editor.edit().title);
+                    closingBack(Panels.CONTACT);
                     // NOTE: the books are placed from the form's Address book
                     // section, as an entry's calendar is picked on its page.
                     findViewById(R.id.contact_add_field).setVisibility(View.VISIBLE);
@@ -2253,6 +2280,11 @@ public class MainActivity extends Host
         deleted.ownBar = true;
         deleted.chrome = () -> findViewById(R.id.fab).setVisibility(View.GONE);
         screens.put(Panels.DELETED, deleted);
+
+        Screen settings = new Screen();
+        settings.ownBar = true;
+        settings.chrome = () -> findViewById(R.id.fab).setVisibility(View.GONE);
+        screens.put(Panels.SETTINGS, settings);
     }
 
     /** Configures the bar and FAB for a screen: all off, then its own set. */
@@ -2281,7 +2313,6 @@ public class MainActivity extends Host
         if (!entry.ownBar) {
             for (int id :
                     new int[] {
-                        R.id.bar_back,
                         R.id.bar_menu,
                         R.id.bar_filter,
                         R.id.tasks_clarify,
@@ -2292,36 +2323,29 @@ public class MainActivity extends Host
                         R.id.contacts_transfer,
                         R.id.selection_close,
                         R.id.selection_all_slot,
-                        R.id.contact_books,
-                        R.id.contact_add_field,
-                        R.id.bar_delete,
-                        R.id.message_actions,
-                        R.id.bar_send,
                         R.id.bottom_nav,
                         R.id.selection_actions,
                     }) {
                 findViewById(id).setVisibility(View.GONE);
             }
-            android.widget.ImageButton back = findViewById(R.id.bar_back);
-            back.setImageResource(R.drawable.ic_arrow_back);
-            back.setContentDescription(getString(R.string.back));
             dock.onList(false);
             TextView title = findViewById(R.id.bar_title);
             title.setVisibility(View.VISIBLE);
             title.animate().cancel();
             title.setAlpha(1f);
+            if (!isList(panel)) {
+                android.widget.ImageButton back = pageBack(panel);
+                back.setImageResource(R.drawable.ic_arrow_back);
+                back.setContentDescription(getString(R.string.back));
+            }
         }
 
         entry.chrome.run();
     }
 
-    /**
-     * The bar's back as a cross, on a page creating or editing an item: it
-     * drops in and leaves without saving.
-     */
-    private void closingBack() {
-        android.widget.ImageButton back = findViewById(R.id.bar_back);
-        back.setVisibility(View.VISIBLE);
+    /** A page's back as a cross, on a create or edit page. */
+    private void closingBack(int panel) {
+        android.widget.ImageButton back = pageBack(panel);
         back.setImageResource(R.drawable.ic_close);
         back.setContentDescription(getString(R.string.close));
     }
@@ -2441,6 +2465,14 @@ public class MainActivity extends Host
         for (int bar :
                 new int[] {
                     R.id.app_bar,
+                    R.id.contact_bar,
+                    R.id.compose_bar,
+                    R.id.message_bar,
+                    R.id.event_bar,
+                    R.id.task_bar,
+                    R.id.clarify_bar,
+                    R.id.review_bar,
+                    R.id.settings_bar,
                     R.id.drawer_header,
                     R.id.auth_bar,
                     R.id.account_bar,
@@ -2483,7 +2515,7 @@ public class MainActivity extends Host
         padBottom(R.id.signin_actions, 16, bottom);
         padBottom(R.id.oauth_actions, 16, bottom);
         padBottom(R.id.books_actions, 16, bottom);
-        padBottom(R.id.message_view_body, 0, bottom);
+        padBottom(R.id.message_bottom, 0, bars.bottom);
         // NOTE: the composer hides the bottom navigation, so its page takes
         // the whole inset, its formatting bar riding above the keyboard.
         padBottom(R.id.compose_page, 0, bottom);

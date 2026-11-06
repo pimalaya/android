@@ -1,12 +1,8 @@
 package org.pimalaya.ui;
 
-/** The host's screens: the content flipper's panels and the overlays. */
+/** The host's screens: the lists, the pages and the overlays. */
 public final class Panels {
-    // NOTE: everything from contacts to the review is the content flipper's
-    // child indexes, in the order activity_main.xml includes them; auth
-    // and account are whole-frame overlays sliding over it, bar included
-    // (only the FAB stays above them), so their ids only have to miss
-    // the flipper's range.
+    // NOTE: ids, not places (MainActivity.slotOf).
     /** The contacts list. */
     public static final int CONTACTS = 0;
     /** A contact's page. */
@@ -37,6 +33,8 @@ public final class Panels {
     public static final int FILTER = 22;
     /** The deleted items overlay. */
     public static final int DELETED = 23;
+    /** The app's settings overlay. */
+    public static final int SETTINGS = 24;
 
     private Panels() {}
 }

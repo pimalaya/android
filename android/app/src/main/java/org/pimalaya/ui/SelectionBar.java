@@ -72,6 +72,12 @@ public final class SelectionBar {
         ((CheckBox) host.findViewById(R.id.selection_all)).setChecked(all);
 
         LinearLayout bar = host.findViewById(R.id.selection_actions);
+        fill(host, bar, actions);
+        bar.setVisibility(View.VISIBLE);
+    }
+
+    /** Fills a bar in the navigation's place with {@code actions}. */
+    public static void fill(Host host, LinearLayout bar, List<Action> actions) {
         bar.removeAllViews();
         for (Action action : actions) {
             bar.addView(
@@ -81,7 +87,6 @@ public final class SelectionBar {
                             host.getResources().getDimensionPixelSize(R.dimen.nav_height),
                             1f));
         }
-        bar.setVisibility(View.VISIBLE);
     }
 
     /**
