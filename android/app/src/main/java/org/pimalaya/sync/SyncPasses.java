@@ -537,6 +537,7 @@ public final class SyncPasses {
         int sent = 0;
         for (Outbox.Outgoing waiting : mail.outbox().outgoing(account.email)) {
             String filed;
+            mail.outbox().handing(waiting.id);
             try {
                 filed = clients.mail().submit(session, waiting.source, waiting.payload);
             } catch (SubmissionRefused refused) {

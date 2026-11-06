@@ -42,6 +42,9 @@ public final class Outbox {
     /** A parked reason's prefix when the message may have gone, not refused. */
     static final String UNCERTAIN = "uncertain: ";
 
+    /** The rows being handed over, kept on disk so a crash mid-way shows. */
+    private static final String HANDING = "handing";
+
 
     private final Context context;
     private final PimdirItems items;
@@ -306,6 +309,10 @@ public final class Outbox {
             if (!anchoredIn(accountEmail, action)) {
                 continue;
             }
+            if (handingSet().contains(String.valueOf(action.id()))) {
+                parkUncertain(action.id(), "the app stopped while sending it");
+                continue;
+            }
             if (!PimdirQueue.SUBMIT.equals(action.kind())) {
                 // NOTE: skipped, not parked, and not the end of the drain
                 // either: an action of a kind this app does not carry out
@@ -349,11 +356,13 @@ public final class Outbox {
      */
     public void acknowledge(long queued) {
         queue.acknowledge(queued);
+        handed(queued);
     }
 
     /** Records why a submission will not be tried again. */
     public void parkOutgoing(long queued, String reason) {
         queue.park(queued, reason);
+        handed(queued);
     }
 
     /**
@@ -364,6 +373,7 @@ public final class Outbox {
      */
     public void parkUncertain(long queued, String reason) {
         queue.park(queued, UNCERTAIN + reason);
+        handed(queued);
     }
 
     /**
@@ -393,9 +403,40 @@ public final class Outbox {
         }
     }
 
+    /**
+     * Notes that {@code queued} is about to be handed over, until its verdict
+     * is recorded: a row still noted at the next drain may have gone, and is
+     * parked uncertain rather than sent again.
+     */
+    public void handing(long queued) {
+        synchronized (HANDING) {
+            java.util.Set<String> handing = new java.util.HashSet<>(handingSet());
+            handing.add(String.valueOf(queued));
+            prefs().edit().putStringSet(HANDING, handing).commit();
+        }
+    }
+
+    private void handed(long queued) {
+        synchronized (HANDING) {
+            java.util.Set<String> handing = new java.util.HashSet<>(handingSet());
+            if (handing.remove(String.valueOf(queued))) {
+                prefs().edit().putStringSet(HANDING, handing).commit();
+            }
+        }
+    }
+
+    private java.util.Set<String> handingSet() {
+        return prefs().getStringSet(HANDING, java.util.Set.of());
+    }
+
+    private android.content.SharedPreferences prefs() {
+        return context.getSharedPreferences("outbox", Context.MODE_PRIVATE);
+    }
+
     /** Counts one failed attempt, leaving the message where it is. */
     public void retryOutgoing(long queued) {
         queue.bumpAttempts(queued);
+        handed(queued);
     }
 
     /**

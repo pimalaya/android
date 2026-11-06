@@ -187,6 +187,36 @@ public class SubmissionTest {
         assertEquals("m1@example.org", store.outbox().outgoing(ONE).get(0).messageId);
     }
 
+    /** A hand-over the app died in may have gone: parked, never handed over again. */
+    @Test
+    public void aHandOverTheAppDiedInIsParkedUncertain() {
+        MailFixtures.queue(store, ONE, "m1@example.org", "Hello", DATE);
+        MailFixtures.queue(store, ONE, "m2@example.org", "Next", DATE);
+        store.outbox().handing(store.outbox().outgoing(ONE).get(0).id);
+
+        Context context = RuntimeEnvironment.getApplication();
+        MailStore restarted = new MailStore(context, new PimdirDb(context));
+        List<String> waiting = new ArrayList<>();
+        for (Outbox.Outgoing outgoing : restarted.outbox().outgoing(ONE)) {
+            waiting.add(outgoing.messageId);
+        }
+
+        assertEquals(List.of("m2@example.org"), waiting);
+        assertTrue(column("SELECT error FROM queue ORDER BY id").get(0).startsWith(Outbox.UNCERTAIN));
+    }
+
+    /** A hand-over with a verdict leaves nothing to park. */
+    @Test
+    public void aHandOverWithAVerdictIsNotParked() {
+        MailFixtures.queue(store, ONE, "m1@example.org", "Hello", DATE);
+        long id = store.outbox().outgoing(ONE).get(0).id;
+        store.outbox().handing(id);
+        store.outbox().retryOutgoing(id);
+
+        assertEquals(1, store.outbox().outgoing(ONE).size());
+        assertNull(column("SELECT error FROM queue").get(0));
+    }
+
     private static List<String> strings(JSONArray array) throws Exception {
         List<String> values = new ArrayList<>();
         for (int index = 0; index < array.length(); index++) {

@@ -253,7 +253,7 @@ A sync draining the queue SHALL take an account's pending actions in append orde
 
 The submission SHALL file no copy itself: the copy is the create staged in the sent mailbox beside it (A sent message is in Sent at once), carried out by a push of its own. On IMAP that push SHALL `APPEND` the message as composed, already `\Seen`, its `Bcc` kept as the sender's record of whom it went to, and SHALL wait while the submission is queued or parked: a copy filed for a message that was not sent is a lie the sender reads as a sent message. A copy that could not be filed SHALL stay pending for the next sync and SHALL NOT be a reason to submit again. An account marking no sent mailbox SHALL send anyway, with no copy staged.
 
-The row SHALL be removed by cancelling it once the message has been handed over, and never claimed before: a submission's effect is not a store mutation, so there is nothing to apply, and a claim that deleted the row before the server accepted the message would lose the message. A drain interrupted between the handover and the cancel SHALL send the message again; a failure after the handover SHALL NOT (A send that may have gone waits for the user), and an SMTP `QUIT` failing after the message was accepted SHALL NOT fail the send.
+The row SHALL be removed by cancelling it once the message has been handed over, and never claimed before: a submission's effect is not a store mutation, so there is nothing to apply, and a claim that deleted the row before the server accepted the message would lose the message. A row SHALL be noted on the device as being handed over before the handover and until its verdict is recorded: a drain finding a row still noted, the app having stopped between the two, SHALL park it as uncertain rather than send it again, and a failure after the handover SHALL NOT send it again either (A send that may have gone waits for the user), and an SMTP `QUIT` failing after the message was accepted SHALL NOT fail the send.
 
 A submission the server refuses for good, which is a 5yz reply (RFC 5321 section 4.2.1), SHALL park the row with what the server said, counted as one attempt, shown as failed to send and never retried on its own; the drain SHALL carry on to the rows behind it. An uncertain one SHALL be parked as such and stop the drain. Any other failure SHALL count an attempt, leave the row pending and stop the drain, the usual cause being that there is no network and the next message would fail too. An action of a kind this app does not carry out SHALL be left pending and untouched, its attempts unbumped.
 
@@ -995,6 +995,11 @@ A submission that fails after the whole message was handed over and before any v
 - GIVEN an SMTP server that closes the connection after the message's final `.`
 - WHEN the sync drains the queue
 - THEN the row is parked, reads *May have been sent*, and the next sync hands nothing over
+
+#### Scenario: The app stops while sending
+- GIVEN a message the drain is handing over
+- WHEN the app is killed before the server's answer is recorded
+- THEN the next sync parks it as *May have been sent* and sends the messages behind it
 
 #### Scenario: The user sends it again
 - GIVEN a message parked as *May have been sent* that the recipient never got
