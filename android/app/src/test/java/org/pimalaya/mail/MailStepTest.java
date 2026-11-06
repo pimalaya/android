@@ -255,9 +255,10 @@ public class MailStepTest {
         assertArrayEquals(
                 "linked, not read again", labelled.source(), store.storedSource(clients, "m1"));
         assertArrayEquals(imported.source(), store.storedSource(inbox, "m3"));
-        for (String collection : List.of(inbox, clients, trash)) {
+        for (String collection : List.of(inbox, clients)) {
             assertNotNull(collection + " opened", store.coverage(collection).at);
         }
+        assertNull("the trash left to a round of its own", store.coverage(trash).at);
         assertEquals("the import is held, not the frontier", older.date, first.frontier);
         assertEquals(3, first.brought);
         assertFalse(first.exhausted);

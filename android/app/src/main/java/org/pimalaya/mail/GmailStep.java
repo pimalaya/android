@@ -75,13 +75,16 @@ final class GmailStep implements MailStep {
                 }
             }
 
-            // NOTE: the first step opens every mailbox, the trash and the
-            // junk included, so the next pass is a delta in each. A mailbox
-            // keeps its members as they landed: a sent copy under its
-            // create's link id, which its body downloads under.
+            // NOTE: the first step opens every mailbox it fills, so the next
+            // pass is a delta in each; the trash and the junk, which no step
+            // fills, are left to a round of their own. A mailbox keeps its
+            // members as they landed: a sent copy under its create's link id,
+            // which its body downloads under.
             String checkpoint = step.historyId();
+            Map<String, String> roles = engine.mail().roles();
             for (Map.Entry<String, List<Named>> mailbox : members.entrySet()) {
-                if (first || !mailbox.getValue().isEmpty()) {
+                boolean opens = first && MailBodies.downloads(roles.get(mailbox.getKey()), false);
+                if (opens || !mailbox.getValue().isEmpty()) {
                     mailbox.setValue(engine.land(mailbox.getKey(), mailbox.getValue(), checkpoint));
                 }
             }

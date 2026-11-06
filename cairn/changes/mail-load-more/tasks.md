@@ -44,6 +44,6 @@ Java paths are relative to android/app/src/main/java/org/pimalaya/, tests to and
 - [x] Fold the delta into spec/mail.md, log entry
 - [ ] Device test (the user): a fresh Gmail account on Wi-Fi (first step time, logcat for `gmail` batches and refusals), *Load more* twice, a label view's *Load more*, mobile data (strip, footer, opening one message), an arrival dated in the past
 - [x] IMAP, Graph and JMAP steps and body batching (B.13, their own agents)
-- [ ] Junk and trash listed on demand when opened (B.13 rule 7)
+- [x] Junk and trash listed on demand when opened (B.13 rule 7): dropped from the spec on 2026-10-12 (mail-filter-scope); a pull under the chip or ticking them lists them by a round (cairn/log/2026-11-06-gmail-trash-opens-by-a-round.md)
 - [ ] Archive once the device test passes
 - [x] A step by reception (Gmail, JMAP without sentAt) never leaves a frontier older than its oldest reception (`byReception` in the step reply, `MailWindow.frontier`)
