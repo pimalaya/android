@@ -831,6 +831,32 @@ fn a_new_meeting_is_inserted_with_its_guests_invited() {
     }
 }
 
+/// A meeting inserted again after a lost answer, which Google refuses as a
+/// duplicate (409, checked live 2026-11-06), is the event already there.
+#[test]
+fn a_meeting_inserted_twice_is_the_event_already_there() {
+    let mut calendar = FakeCalendar {
+        events: vec![GcalEvent {
+            ical_uid: Some("lunch".into()),
+            ..event("earlier", "\"7\"", None)
+        }],
+        failing: Some((
+            "new".into(),
+            409,
+            "The requested identifier already exists.",
+        )),
+        ..Default::default()
+    };
+    let people = "ATTENDEE:mailto:ada@example.com\r\n";
+
+    let created = calendar
+        .serve(|mut gcal| gcal.create_entry("jane@example.com", &lunch(people), &jane()))
+        .unwrap();
+
+    assert_eq!(created.id, "earlier");
+    assert_eq!(calendar.listings, [(Some("lunch".into()), None)]);
+}
+
 #[test]
 fn a_new_event_nobody_is_invited_to_is_imported() {
     for people in [

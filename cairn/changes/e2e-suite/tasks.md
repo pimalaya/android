@@ -54,6 +54,8 @@ Java paths are relative to android/app/src/main/java/org/pimalaya/, the suite's 
 - [x] Gmail self-send: the staged sent copy, landed on Gmail's copy, pushed `\Seen`, so the copy delivered to the inbox was marked read. Fixed 2026-11-06 (cairn/log/2026-11-06-sent-copy-takes-provider-markers.md): the create takes the arrival's markers before landing.
 - [x] A fresh device never lists a Gmail account's trash or junk: as specified since 2026-10-12 (mail-filter-scope); shown ones now open by a round (cairn/log/2026-11-06-gmail-trash-opens-by-a-round.md).
 
+- [ ] E2eDevice.owes transcribes draft-08 SQL (`i.flags`, bindings by `link_id`), so every test reading it fails on storage-draft-09 (`no such column: i.flags`, google-gcal round trip, 2026-11-06): read it through the store instead
+
 ## Land
 
 - [x] Build: `:app:assembleDebug`, `:app:testDebugUnitTest`; cairn/verify.sh

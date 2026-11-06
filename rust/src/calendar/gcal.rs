@@ -403,13 +403,25 @@ impl<H: Host> Gcal<'_, H> {
     ) -> Result<EventRef, BridgeError> {
         let event = GcalEvent::from_ical(ical.as_bytes()).map_err(|err| err.to_string())?;
         let created = match organized(ical, addresses) {
-            true => self.insert(calendar, &event, GcalSendUpdates::All)?,
+            true => match self.insert(calendar, &event, GcalSendUpdates::All) {
+                Err(err) if err.status == Some(409) => self.held(calendar, &event).ok_or(err)?,
+                inserted => inserted?,
+            },
             false => self.import(calendar, &event)?,
         };
 
         Ok(EventRef {
             etag: revision(&created, &[]),
             id: created.id.unwrap_or_default(),
+        })
+    }
+
+    /// The live event already filed under `event`'s `iCalUID`, if any.
+    fn held(&mut self, calendar: &str, event: &GcalEvent) -> Option<GcalEvent> {
+        let uid = event.ical_uid.as_deref()?;
+        let (events, _) = self.listing(calendar, Some(uid), None).ok()?.ok()?;
+        events.into_iter().find(|held| {
+            held.recurring_event_id.is_none() && held.status != Some(GcalEventStatus::Cancelled)
         })
     }
 }
