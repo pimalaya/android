@@ -340,3 +340,11 @@ The agenda SHALL list the occurrences the search index wrote of every live entry
 - GIVEN an entry of this week
 - WHEN it is deleted from its page
 - THEN it leaves the agenda before the index has folded the delete
+
+### Requirement: A calendar wiped on the phone waits for the user
+A phone pass finding more than half of at least 20 of a calendar's entries deleted on the phone SHALL push none of those deletions and SHALL leave their rows deleted on the phone, asking as for a book. Putting them back SHALL project them again from the store.
+
+#### Scenario: Another app empties a calendar
+- GIVEN a calendar of 20 entries mirrored on the phone
+- WHEN another app deletes all 20
+- THEN the server keeps the 20, and putting them back shows the 20 again in the phone's calendar app

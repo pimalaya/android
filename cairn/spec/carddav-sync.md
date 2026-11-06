@@ -38,3 +38,16 @@ An Android account SHALL be removed only after its phone pass brought every phon
 - GIVEN a contact added in the Contacts app under a book's account, not yet in the store
 - WHEN the account is deleted in the app
 - THEN the contact is brought into the store first and moves to the on-device book with the others
+
+### Requirement: A book wiped on the phone waits for the user
+A phone pass finding more than half of at least 20 of a book's members deleted on the phone SHALL push none of those deletions and SHALL leave their rows deleted on the phone. When the app's sync ends, it SHALL ask whether to delete them on the server, put them back on the phone, or decide later. A deleted row SHALL be erased only after the store recorded its deletion.
+
+#### Scenario: Another app wipes the contacts
+- GIVEN a book of 500 contacts mirrored on the phone
+- WHEN another app deletes all 500 raw contacts
+- THEN the next pass deletes nothing on the server, and the app asks what to do with the 500
+
+#### Scenario: A few deletions
+- GIVEN a book of 500 contacts mirrored on the phone
+- WHEN the user deletes 3 of them in the Contacts app
+- THEN the next pass deletes the 3 on the server without asking

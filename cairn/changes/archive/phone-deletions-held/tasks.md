@@ -13,5 +13,5 @@ Java paths are relative to android/app/src/main/java/org/pimalaya/.
 - [x] sync/SyncCoordinator.java `offerHeld`: the dialog, en and fr
 - [x] Tests: CalendarMirrorTest (a wipe held, released, restored, a few deletions unasked)
 - [ ] Contacts: no fake ContactsContract provider yet, so the contacts spoke's deferred purge and restore are checked on the device only
-- [ ] Device check: mirror a book or calendar of 20 or more, delete them all in another app, sync: the dialog, then each of its three answers
-- [ ] Fold, log, archive
+- [x] Device check: mirror a book or calendar of 20 or more, delete them all in another app, sync: the dialog, then each of its three answers (owner, 2026-11-06)
+- [x] Fold, log, archive

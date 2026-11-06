@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: phone-deletions-held
-status: active
+status: landed
 created: 2026-11-06
 ---
 
