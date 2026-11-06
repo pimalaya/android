@@ -27,6 +27,6 @@ change: fill-from-two-queues
 - [x] Fourth device run (2026-11-05 12:50 to 12:57): Fastmail first chunks 1.96 s on 4 sessions, 25 JMAP bodies 5.0 s, fill 1.3 s; Microsoft first chunks 5.65 s, 25 bodies 2.2 s on one session, fill 31.5 s with no throttle; Gmail step 9 s; no throttle, failure or on-demand fetch
 - [x] Gmail kept as it is, its costs recorded (proposal, Per backend)
 - [ ] Device run on JMAP (Fastmail test account) and IMAP
-- [ ] The Rust bridge's Graph step (the account walk behind `MailClient.graphStep`) and the footer's per-mailbox wording, both unused now, removed
+- [ ] The Rust bridge's Graph step (the account walk behind `MailClient.graphStep`) and the footer's per-mailbox wording, both unused now, removed; the JMAP step too. Dropping the two arms of `MailSession::step` (rust/src/mail/session.rs) leaves dead, by rustc on 2026-11-06: `MailSession::jmap_step` and `graph_step`, `MailStepReply::Graph`, `GraphStepItem`, most of rust/src/mail/jmap_step.rs (the walk, `StepRequest` and its fields), `Jmap::step`, `email_state`, `step_query`, `STEP_PROPERTIES` in jmap.rs, `Msgraph::step`, `list_step`, `walk`, `dated`, `StepAsk`, `StepMessage`, `Stepped`, `STEP_SELECT`, `STEP_SLACK`, `inefficient`, `with_ties`, `placed` in msgraph.rs, and on the Java side `MailClient.graphStep`, GraphStepReply.java, GraphStepItem.java, with their tests
 - [ ] Decide the open point on a session waiting for its own write from the device numbers
 - [ ] Fold into cairn/spec/mail.md, log, CHANGELOG

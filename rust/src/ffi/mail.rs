@@ -317,7 +317,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_parseMessage<'local>(
     source: JByteArray<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let raw = env.convert_byte_array(&source).unwrap_or_default();
+        let raw = env.convert_byte_array(&source)?;
         let json = match read::parse(&raw) {
             Ok(message) => to_string(&message).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
@@ -584,7 +584,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_appendMessage<'local>(
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let mailbox = read_string(env, &mailbox);
-        let raw = env.convert_byte_array(&source).unwrap_or_default();
+        let raw = env.convert_byte_array(&source)?;
         let flags = read_string(env, &flags);
 
         let mut client = Client::new(JniHost::new(env, &transport, None));
@@ -676,7 +676,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_submitMessage<'local>(
     payload: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let raw = env.convert_byte_array(&source).unwrap_or_default();
+        let raw = env.convert_byte_array(&source)?;
         let payload = read_string(env, &payload);
 
         let mut client = Client::new(JniHost::new(env, &transport, None));

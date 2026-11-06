@@ -8,7 +8,7 @@ change: production-release
 ## 0. Started now: what waits on others
 
 - [ ] Privacy policy on pimalaya.org, matching PRIVACY.md (Google's verification and Play's Data safety form both ask for it)
-- [ ] Google: restricted-scope verification for `https://mail.google.com/` submitted (privacy policy, demo video, Search Console for pimalaya.org, yearly renewal); until then 100 users and 7-day refresh tokens in Testing
+- [ ] Google: restricted-scope verification for `https://mail.google.com/` submitted (privacy policy, demo video, Search Console for pimalaya.org, yearly renewal); until then 100 users and 7-day refresh tokens in Testing (oauth-verification)
 - [ ] Play developer account: a personal account created after 2023-11-13 needs a closed test of at least 12 testers for 14 days in a row before production access, an organisation account a D-U-N-S number; the pre-v1 builds run that test
 
 ## 1. Data loss and correctness
@@ -22,9 +22,8 @@ Restated against the code on 2026-11-06. Gone since the 2026-10-09 review: the I
 - [ ] IMAP: attachment stand-ins are keyed `part:<link id>#<section>` and listed by account and link id (pimdir STORAGE §14.3, `list_attachments`), and an IMAP link id is a bare UID every mailbox reuses, so the reader can badge another mailbox's parts. A decision first: an account-unique IMAP link id (mailbox, UIDVALIDITY and UID, or the `Message-ID`), which pimdir's model assumes, at the cost of a reinstall while the store is a draft
 - [ ] Repeated writes left after M6: done, a send the app stopped in parked uncertain (cairn/log/2026-11-06-a-send-the-app-stopped-in-waits.md) and a copy skipped when its target holds the message (cairn/log/2026-11-06-a-copy-is-not-made-twice.md); left, creates without an idempotency key rerun after a lost answer (Graph contacts, Google People, Google Tasks, Microsoft To Do, JMAP cards and events) (network-trust-hardening, whose Open M6 and L1 are stale)
 - [x] Gmail: trash or junk ticked at the first step landed empty as a closed round (mail/GmailStep.java:84) and no later step fills it; the first step leaves them to a round of their own (cairn/log/2026-11-06-gmail-trash-opens-by-a-round.md)
-- [ ] Gmail: a message under a label the roster does not know yet stays in All Mail alone, unreported, its body downloaded twice; the roster re-read once and the rest counted as unfiled. The Graph and JMAP steps it also names are dead code since 3d999f8, to delete (a-message-is-filed-somewhere, restated; fill-from-two-queues)
 - [ ] IMAP without SORT: the floor sample stops early on imports appended in rising date order (rust/src/mail/imap.rs:572) and lists every envelope back to their dates; counted with `UID SEARCH SENTSINCE` instead. mail.md still says 50 and one account floor while the code follows fill-from-two-queues (fold owed)
-- [ ] A null byte array or string from Java turns into an empty one at the bridge (`unwrap_or_default` in rust/src/ffi/offline.rs and ffi/mail.rs, `read_string`): unreachable today, an empty SMTP send if it ever is; an error reply instead
+- [x] A null byte array from Java turned into an empty one at the bridge (`unwrap_or_default` in rust/src/ffi/offline.rs and ffi/mail.rs): unreachable today, an empty SMTP send if it ever was; now an error reply, and `PimdirSql.hash` throws on it. `read_string` still reads a null string as empty
 - [ ] To check: a Gmail 403 rate limit is parked as refused for good (`refused_by_api`, rust/src/mail/session.rs); a Google Calendar insert rerun under the same iCalUID answers 409 on every pass
 
 ## 2. Device checks, then fold and archive (owner)
@@ -50,7 +49,7 @@ Restated against the code on 2026-11-06. Gone since the 2026-10-09 review: the I
 ## 4. Sign-in for real users
 
 - [ ] Google: an Android OAuth client per signing key (Play App Signing, GitHub APK, F-Droid unless reproducible), the redirect scheme in AndroidManifest.xml following
-- [ ] Microsoft: the production Entra client in place of the testing one; publisher verification for tenants that require it
+- [ ] Microsoft: the production Entra client in place of the testing one; publisher verification for tenants that require it (oauth-verification)
 - [ ] Re-sign-in: an account whose grant or password stopped working signs in again from its settings, keeping its outbox and staged edits
 - [ ] Fastmail: one consent for IMAP, JMAP and DAV (one-fastmail-consent)
 
@@ -68,6 +67,7 @@ Restated against the code on 2026-11-06. Gone since the 2026-10-09 review: the I
 - [ ] Drafts: a message being written is kept and reopened
 - [ ] Attachments added in the composer, and kept on a forward
 - [ ] Restoring a deleted message on every backend, not IMAP alone (DeletedItemsPage)
+- [ ] Gmail: a message under a label the store does not hold yet has its body read twice, the next pass's round over the new label filing it; not a loss (a-message-is-filed-somewhere, whose Graph and JMAP halves are dead code since 3d999f8, listed for deletion in fill-from-two-queues)
 - [ ] Store performance follow-ups: agenda prefilter, contacts rows from summaries, refcounts, large attachments streamed (store-performance-followups)
 - [ ] The filter panel's leftovers: mail Starred, Answered and Received date, the Files filter (one-filter-panel)
 

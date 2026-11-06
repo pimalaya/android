@@ -70,7 +70,11 @@ public final class PimdirSql {
      * characters of lowercase base32, computed by io-pimdir.
      */
     public static String hash(byte[] body) {
-        return Native.pimdirHash(body);
+        String hash = Native.pimdirHash(body);
+        if (hash.startsWith("{")) {
+            throw new PimalayaException(Replies.read(hash).optString("error"));
+        }
+        return hash;
     }
 
     /**

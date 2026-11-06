@@ -278,7 +278,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirDerive<'local>(
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let kind = read_string(env, &kind);
-        let body = env.convert_byte_array(&body).unwrap_or_default();
+        let body = env.convert_byte_array(&body)?;
 
         // NOTE: a mail too deep for the library's walk is derived from
         // its header alone (`mail::derivable`).
@@ -310,7 +310,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirHash<'local>(
     body: JByteArray<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let body = env.convert_byte_array(&body).unwrap_or_default();
+        let body = env.convert_byte_array(&body)?;
         Ok(env.new_string(hash::hash(&body).0)?.into())
     })
     .resolve::<ErrorReply>()
@@ -421,7 +421,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirSubmit<'local>(
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let source = read_string(env, &source);
         let from = read_string(env, &from);
-        let message = env.convert_byte_array(&message).unwrap_or_default();
+        let message = env.convert_byte_array(&message)?;
         let json = match store::submit_payload(&source, &from, &message) {
             Ok(payload) => serde_json::json!({ "payload": payload }).to_string(),
             Err(err) => error_json(err),

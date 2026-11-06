@@ -66,6 +66,17 @@ public class PimdirSqlTest {
         }
     }
 
+    /** A body that did not cross the bridge has no name, not the empty one's. */
+    @Test
+    public void aNullBodyIsRefusedRatherThanHashedEmpty() {
+        try {
+            String name = PimdirSql.hash(null);
+            fail("hashed as " + name);
+        } catch (PimalayaException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains("Internal error"));
+        }
+    }
+
     @Test
     public void anUnknownStatementFailsLoudly() {
         try {
