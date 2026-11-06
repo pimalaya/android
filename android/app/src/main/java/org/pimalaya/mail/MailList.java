@@ -1106,7 +1106,7 @@ public final class MailList {
         ((TextView) view.findViewById(R.id.message_origin)).setText("");
         TextView avatar = view.findViewById(R.id.message_avatar);
         avatar.setText("");
-        avatar.setBackground(Avatar.circle(host, ""));
+        Avatar.paint(avatar, "");
         avatar.setVisibility(View.VISIBLE);
         view.findViewById(R.id.message_check).setVisibility(View.GONE);
         view.findViewById(R.id.message_dot).setVisibility(View.GONE);
@@ -1181,13 +1181,13 @@ public final class MailList {
         // keeps the colour the eye learned.
         TextView avatar = view.findViewById(R.id.message_avatar);
         avatar.setText(Avatar.letter(message.fromAddress));
-        avatar.setBackground(Avatar.circle(host, message.fromAddress));
+        Avatar.paint(avatar, message.fromAddress);
         boolean checked = isSelected(message);
         avatar.setVisibility(checked ? View.INVISIBLE : View.VISIBLE);
         ImageView check = view.findViewById(R.id.message_check);
         check.setVisibility(checked ? View.VISIBLE : View.GONE);
         if (checked) {
-            check.setBackground(host.getDrawable(R.drawable.unread_dot));
+            check.setBackground(host.getDrawable(R.drawable.selected_disc));
             check.setImageTintList(
                     android.content.res.ColorStateList.valueOf(host.accentContrast()));
         }

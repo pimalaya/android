@@ -1,10 +1,12 @@
 package org.pimalaya.ui;
 
 import android.content.Context;
+import android.content.res.TypedArray;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.InsetDrawable;
+import android.widget.TextView;
 import org.pimalaya.R;
 
 /**
@@ -16,13 +18,45 @@ import org.pimalaya.R;
  */
 public final class Avatar {
     /**
-     * A muted round background, its hue mapped from {@code seed}.
-     *
-     * <p>Saturation and value are fixed, so every disc in the app sits at
-     * one weight and the hue is the only thing that varies.
+     * The derived colours of a named thing with none of its own, the
+     * avatars' eight hues as solid discs under a white letter: OKLCH 0.55
+     * 0.09, 4.6:1 or more against white, in either theme.
      */
-    public static Drawable circle(Context context, String seed) {
-        return disc(context, Color.HSVToColor(new float[] {hueOf(seed), 0.4f, 0.55f}));
+    private static final int[] SOLID = {
+        0xFFA05C57, 0xFF936831, 0xFF6B7939, 0xFF3B825F,
+        0xFF118186, 0xFF5272A6, 0xFF7A659E, 0xFF975B7E,
+    };
+
+    /**
+     * Paints a row's disc and letter in the palette's tones, from
+     * {@code seed}.
+     *
+     * <p>Eight hues at one lightness, the seed's slot of 45 degrees: a soft
+     * fill under the letter in a deep tone of its hue by day, a deep fill
+     * under a pale one by night (the avatar colours of res/values and
+     * res/values-night), so every disc sits at one weight and the hue is the
+     * only thing that varies.
+     */
+    public static void paint(TextView view, String seed) {
+        Context context = view.getContext();
+        int slot = slotOf(seed);
+        view.setBackground(disc(context, tone(context, R.array.avatar_fills, slot)));
+        view.setTextColor(tone(context, R.array.avatar_inks, slot));
+    }
+
+    /** One slot's colour from an array of the eight, in the theme's tones. */
+    private static int tone(Context context, int array, int slot) {
+        TypedArray tones = context.getResources().obtainTypedArray(array);
+        try {
+            return tones.getColor(slot, Color.GRAY);
+        } finally {
+            tones.recycle();
+        }
+    }
+
+    /** The slot of the eight hues a seed lands in. */
+    private static int slotOf(String seed) {
+        return (int) (hueOf(seed) / 45f) % 8;
     }
 
     /**
@@ -58,7 +92,7 @@ public final class Avatar {
                 // derived hue is a better answer than no disc at all.
             }
         }
-        return Color.HSVToColor(new float[] {hueOf(name), 0.4f, 0.55f});
+        return SOLID[slotOf(name)];
     }
 
     /**

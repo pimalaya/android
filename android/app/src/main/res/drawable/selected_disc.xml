@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A picked row's disc: the accent, inset as the avatar it stands in for
+     (Avatar.disc), so the check takes the avatar's size. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:inset="@dimen/item_avatar_inset">
+    <shape android:shape="oval">
+        <solid android:color="?android:attr/colorAccent" />
+    </shape>
+</inset>

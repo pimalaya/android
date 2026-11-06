@@ -32,4 +32,47 @@
     <color name="widget_text">#301F2A</color>
     <color name="widget_text_secondary">#6F5464</color>
 
+    <!-- The avatars (cairn/changes/redesign-for-the-palette): eight hues,
+         a seed's slot of 45 degrees, at one OKLCH lightness, so no hue
+         reads heavier than another. A soft fill (0.91 0.045) under the
+         letter in a deep tone of its hue (0.42 0.09), 6.3:1 or more; the
+         night's in values-night/. -->
+    <color name="avatar_fill_0">#FED6D2</color>
+    <color name="avatar_fill_1">#F5DDC2</color>
+    <color name="avatar_fill_2">#DDE6C5</color>
+    <color name="avatar_fill_3">#C9EBD7</color>
+    <color name="avatar_fill_4">#BFEBED</color>
+    <color name="avatar_fill_5">#D1E2FF</color>
+    <color name="avatar_fill_6">#E5DBFC</color>
+    <color name="avatar_fill_7">#F8D6E8</color>
+    <color name="avatar_ink_0">#773733</color>
+    <color name="avatar_ink_1">#6C4302</color>
+    <color name="avatar_ink_2">#475411</color>
+    <color name="avatar_ink_3">#0C5C3C</color>
+    <color name="avatar_ink_4">#04585C</color>
+    <color name="avatar_ink_5">#2F4C7E</color>
+    <color name="avatar_ink_6">#554077</color>
+    <color name="avatar_ink_7">#6F3758</color>
+
+    <array name="avatar_fills">
+        <item>@color/avatar_fill_0</item>
+        <item>@color/avatar_fill_1</item>
+        <item>@color/avatar_fill_2</item>
+        <item>@color/avatar_fill_3</item>
+        <item>@color/avatar_fill_4</item>
+        <item>@color/avatar_fill_5</item>
+        <item>@color/avatar_fill_6</item>
+        <item>@color/avatar_fill_7</item>
+    </array>
+    <array name="avatar_inks">
+        <item>@color/avatar_ink_0</item>
+        <item>@color/avatar_ink_1</item>
+        <item>@color/avatar_ink_2</item>
+        <item>@color/avatar_ink_3</item>
+        <item>@color/avatar_ink_4</item>
+        <item>@color/avatar_ink_5</item>
+        <item>@color/avatar_ink_6</item>
+        <item>@color/avatar_ink_7</item>
+    </array>
+
 </resources>

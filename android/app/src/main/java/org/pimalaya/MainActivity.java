@@ -1218,9 +1218,8 @@ public class MainActivity extends Host
 
         TextView avatar = new TextView(this);
         avatar.setText(Avatar.letter(email));
-        avatar.setBackground(Avatar.circle(this, email));
+        Avatar.paint(avatar, email);
         avatar.setGravity(Gravity.CENTER);
-        avatar.setTextColor(android.graphics.Color.WHITE);
         avatar.setTextSize(18);
 
         TextView address = new TextView(this);

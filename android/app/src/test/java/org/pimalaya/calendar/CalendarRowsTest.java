@@ -7,9 +7,6 @@ import static org.junit.Assert.assertTrue;
 
 import android.accounts.Account;
 import android.content.ContentValues;
-import android.content.Context;
-import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.InsetDrawable;
 import android.provider.CalendarContract.Calendars;
 import android.provider.CalendarContract.Colors;
 
@@ -19,7 +16,6 @@ import org.pimalaya.phone.Accounts;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.ui.Avatar;
 import org.robolectric.RobolectricTestRunner;
-import org.robolectric.RuntimeEnvironment;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -101,15 +97,14 @@ public class CalendarRowsTest {
     }
 
     @Test
-    public void aCalendarWithoutColourTakesItsAccountsAvatarHue() {
-        Context context = RuntimeEnvironment.getApplication();
-        InsetDrawable avatar = (InsetDrawable) Avatar.circle(context, EMAIL);
-        int hue = ((GradientDrawable) avatar.getDrawable()).getColor().getDefaultColor();
-
+    public void aCalendarWithoutColourTakesItsAccountsDerivedColour() {
         ContentValues values =
                 CalendarRows.insert(ACCOUNT, calendar("Work", null, null, true), false, null);
 
-        assertEquals(hue, (int) values.getAsInteger(Calendars.CALENDAR_COLOR));
+        // NOTE: the solid tone of the account avatar's hue, not the avatar's
+        // own soft fill, which other apps' white event text would not read on.
+        assertEquals(
+                Avatar.colorOf(null, EMAIL), (int) values.getAsInteger(Calendars.CALENDAR_COLOR));
     }
 
     @Test

@@ -24,7 +24,7 @@
             android:id="@+id/filter_bar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@color/surface"
+            android:background="?android:attr/colorBackground"
             android:gravity="center_vertical"
             android:minHeight="@dimen/app_bar_height"
             android:orientation="horizontal"
@@ -52,14 +52,22 @@
                 android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
                 android:textColor="?android:attr/textColorPrimary" />
 
+            <!-- The toolbox's shape, holding a word rather than icons. -->
             <Button
                 android:id="@+id/filter_reset"
-                style="?android:attr/borderlessButtonStyle"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:layout_height="40dp"
+                android:layout_margin="4dp"
+                android:background="@drawable/button_tonal"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="18dp"
+                android:paddingEnd="18dp"
+                android:stateListAnimator="@null"
                 android:text="@string/filter_reset"
                 android:textAllCaps="false"
-                android:textColor="?android:attr/colorAccent" />
+                android:textColor="?android:attr/colorAccent"
+                android:textSize="14sp" />
 
         </LinearLayout>
 

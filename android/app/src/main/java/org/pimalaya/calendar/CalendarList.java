@@ -1208,6 +1208,7 @@ public final class CalendarList {
             // keeps the colour the eye learned.
             TextView avatar = view.findViewById(R.id.event_avatar);
             avatar.setText(Avatar.letter(row.calendar.name));
+            avatar.setTextColor(android.graphics.Color.WHITE);
             avatar.setBackground(
                     Avatar.disc(host, Avatar.colorOf(row.calendar.color, row.calendar.id)));
 

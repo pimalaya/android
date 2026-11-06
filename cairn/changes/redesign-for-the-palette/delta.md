@@ -24,12 +24,12 @@ A screen's actions at the top end of the bar SHALL sit in one surface pill of ic
 - THEN Next birthday, Find duplicates and Import or export sit in one pill
 
 ### Requirement: A sync step reads the same on every backend
-The sync dock and its log SHALL name each step of a pass with one phrase whatever the backend: Connecting, Fetching changes, Downloading envelopes, Downloading messages, Downloading contacts, Downloading events, Sending changes, Updating the phone's contacts or calendar, Resolving conflicts, Loading older mail, Waiting for Wi-Fi and Up to date, a count reading "N of M" after its step. A backend without a step SHALL skip it rather than name it otherwise.
+The sync dock and its log SHALL name each step of a pass with one phrase whatever the backend, a verb first: Connecting; Fetching changes; Downloading envelopes, then " · N of M mailboxes"; Downloading N messages, or " · N of M" for older mail downloading behind; Downloading contacts or events, " · N of M" address books or calendars, then Downloading N contacts or events; Sending N changes; Updating the phone's contacts or calendar, then Updating N contacts or events on the phone; Resolving N conflicts; Loading older mail, then its step; Waiting for Wi-Fi. The sheet's other accounts SHALL read Up next or Up to date. A backend without a step SHALL skip it rather than name it otherwise.
 
 #### Scenario: IMAP and Gmail
 - GIVEN an IMAP account and a Gmail account syncing their mail headers
 - WHEN the dock shows each one's step
-- THEN both read "Downloading envelopes"
+- THEN both read "Downloading envelopes" and their mailboxes counted, as "3 of 12 mailboxes"
 
 ## MODIFIED Requirements
 

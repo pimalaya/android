@@ -691,7 +691,7 @@ public final class FilesList {
             TextView origin = view.findViewById(R.id.event_origin);
             if (row.file == null) {
                 avatar.setText("");
-                avatar.setBackground(Avatar.circle(host, row.collection.id));
+                Avatar.paint(avatar, row.collection.id);
                 summary.setText(R.string.files_folder_empty);
                 start.setText("");
                 kind.setText("");
@@ -701,7 +701,7 @@ public final class FilesList {
 
             String name = fileActions.label(row.file);
             avatar.setText(Avatar.letter(name));
-            avatar.setBackground(Avatar.circle(host, row.file.linkId));
+            Avatar.paint(avatar, row.file.linkId);
             summary.setText(name);
             start.setText(size(row.file.size));
             String type =

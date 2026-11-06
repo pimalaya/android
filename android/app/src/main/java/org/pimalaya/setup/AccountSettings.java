@@ -227,7 +227,7 @@ public final class AccountSettings {
         String email = account.email;
         TextView avatar = host.findViewById(R.id.account_avatar);
         avatar.setText(Avatar.letter(email));
-        avatar.setBackground(Avatar.circle(host, email));
+        Avatar.paint(avatar, email);
         ((TextView) host.findViewById(R.id.account_address)).setText(email);
 
         List<String> covered = new ArrayList<>();

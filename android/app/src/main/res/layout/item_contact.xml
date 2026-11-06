@@ -39,7 +39,7 @@
                 android:id="@+id/contact_check"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:background="@drawable/unread_dot"
+                android:background="@drawable/selected_disc"
                 android:contentDescription="@string/selected"
                 android:padding="9dp"
                 android:src="@drawable/ic_check"

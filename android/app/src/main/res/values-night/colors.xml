@@ -24,4 +24,23 @@
     <color name="widget_text">#F7E9F0</color>
     <color name="widget_text_secondary">#BB9CAD</color>
 
+    <!-- The avatars at night: a deep fill (OKLCH 0.36 0.05) under a pale
+         letter of its hue (0.88 0.06), 7.5:1. -->
+    <color name="avatar_fill_0">#553330</color>
+    <color name="avatar_fill_1">#4E381F</color>
+    <color name="avatar_fill_2">#3A4122</color>
+    <color name="avatar_fill_3">#244534</color>
+    <color name="avatar_fill_4">#164547</color>
+    <color name="avatar_fill_5">#2E3D57</color>
+    <color name="avatar_fill_6">#413754</color>
+    <color name="avatar_fill_7">#503243</color>
+    <color name="avatar_ink_0">#FDC9C4</color>
+    <color name="avatar_ink_1">#F2D1AD</color>
+    <color name="avatar_ink_2">#D2DEB2</color>
+    <color name="avatar_ink_3">#B6E4CA</color>
+    <color name="avatar_ink_4">#A9E4E7</color>
+    <color name="avatar_ink_5">#C2D9FF</color>
+    <color name="avatar_ink_6">#DDCFFA</color>
+    <color name="avatar_ink_7">#F6C8E1</color>
+
 </resources>

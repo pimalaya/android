@@ -176,9 +176,6 @@
     <string name="home_empty">No account yet. Add one to get started.</string>
 
     <string name="sync_title">Synchronizing</string>
-    <string name="sync_addressbooks">Fetching addressbooks</string>
-    <string name="sync_push">Pushing changes of %1$s</string>
-    <string name="sync_cards">Fetching contacts of %1$s</string>
     <string name="sync_no_addressbook">No addressbook found</string>
     <string name="sync_failed">Could not synchronize</string>
     <string name="sync_parked_title">Missing on the server</string>
@@ -189,7 +186,7 @@
     <string name="conflict_auto_resolved">Conflict resolved automatically; changes push on the next sync</string>
     <string name="contact_diverged_pending">Diverged fields await review</string>
     <string name="sync_busy">Wait for the sync to finish</string>
-    <string name="sync_line_starting">Starting the sync</string>
+    <string name="sync_line_starting">Connecting</string>
     <!-- Two parts of a dock line: the domain then the step, or the account then the step. -->
     <string name="sync_line_account">%1$s · %2$s</string>
     <string name="sync_line_wifi">Waiting for Wi-Fi</string>
@@ -198,7 +195,7 @@
     <string name="sync_line_calendars">Syncing calendars</string>
     <string name="mail_filling">Loading older mail</string>
     <!-- The dock's second line: the domain, then the engine's step. -->
-    <string name="sync_step_server">Checking the server for changes</string>
+    <string name="sync_step_server">Fetching changes</string>
     <!-- A counted step names what the domain being synced holds. -->
     <plurals name="sync_step_download_mail">
         <item quantity="one">Downloading %1$d message</item>
@@ -213,35 +210,35 @@
         <item quantity="other">Downloading %1$d contacts</item>
     </plurals>
     <plurals name="sync_step_upload">
-        <item quantity="one">Sending %1$d change to the server</item>
-        <item quantity="other">Sending %1$d changes to the server</item>
+        <item quantity="one">Sending %1$d change</item>
+        <item quantity="other">Sending %1$d changes</item>
     </plurals>
-    <string name="sync_step_phone">Reconciling with the phone contacts</string>
+    <string name="sync_step_phone">Updating the phone\'s contacts</string>
     <plurals name="sync_step_project">
-        <item quantity="one">Writing %1$d contact to the phone</item>
-        <item quantity="other">Writing %1$d contacts to the phone</item>
+        <item quantity="one">Updating %1$d contact on the phone</item>
+        <item quantity="other">Updating %1$d contacts on the phone</item>
     </plurals>
-    <string name="sync_step_phone_calendar">Reconciling with the phone calendar</string>
+    <string name="sync_step_phone_calendar">Updating the phone\'s calendar</string>
     <plurals name="sync_step_project_events">
-        <item quantity="one">Writing %1$d event to the phone</item>
-        <item quantity="other">Writing %1$d events to the phone</item>
+        <item quantity="one">Updating %1$d event on the phone</item>
+        <item quantity="other">Updating %1$d events on the phone</item>
     </plurals>
     <plurals name="sync_step_resolve">
         <item quantity="one">Resolving %1$d conflict</item>
         <item quantity="other">Resolving %1$d conflicts</item>
     </plurals>
-    <string name="sync_step_mailboxes">Mailboxes synced: %1$d of %2$d</string>
-    <string name="sync_step_books">Address books synced: %1$d of %2$d</string>
-    <string name="sync_step_calendars">Calendars synced: %1$d of %2$d</string>
+    <string name="sync_step_mailboxes">Downloading envelopes · %1$d of %2$d mailboxes</string>
+    <string name="sync_step_books">Downloading contacts · %1$d of %2$d address books</string>
+    <string name="sync_step_calendars">Downloading events · %1$d of %2$d calendars</string>
     <string name="sync_dock_details">Sync in progress, show details</string>
     <string name="sync_dock_fill_details">Loading older mail, show details</string>
-    <string name="sync_fill_bodies">Downloading messages: %1$d of %2$d</string>
+    <string name="sync_fill_bodies">Downloading messages · %1$d of %2$d</string>
     <string name="sync_dock_count">%1$d of %2$d</string>
     <string name="sync_dock_title">Syncing</string>
     <string name="sync_dock_percent">%1$d%%</string>
     <string name="sync_dock_collapse">Collapse</string>
-    <string name="sync_dock_next">Next</string>
-    <string name="sync_dock_done">Done</string>
+    <string name="sync_dock_next">Up next</string>
+    <string name="sync_dock_done">Up to date</string>
     <string name="sync_dock_recent">Recent</string>
 
     <string name="contacts_sync">Sync</string>

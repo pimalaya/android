@@ -70,12 +70,14 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- A selection, of contacts or mail: cancel it. -->
+        <!-- A selection, of contacts, mail or tasks: cancel it, a round
+             tonal button as the other leading ones. -->
         <ImageButton
             android:id="@+id/selection_close"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_margin="4dp"
+            android:background="@drawable/button_tonal"
             android:contentDescription="@string/cancel_selection"
             android:src="@drawable/ic_close"
             android:tint="?android:attr/textColorPrimary"
@@ -97,60 +99,85 @@
             android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
             android:textColor="?android:attr/textColorPrimary" />
 
-        <!-- Contacts: the next-birthday dialog. -->
-        <ImageButton
-            android:id="@+id/contacts_birthdays"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/birthdays_title"
-            android:src="@drawable/ic_birthday"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
+        <!-- Every group of actions at the bar's end is a toolbox, the
+             reader's tonal pill (ToolGroup), whatever the screen; it
+             folds away while none of its buttons shows. -->
 
-        <!-- Contacts: the duplicate remover. -->
-        <ImageButton
-            android:id="@+id/contacts_duplicates"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/dup_find"
-            android:src="@drawable/ic_find_duplicates"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
+        <!-- Contacts: the next-birthday dialog, the duplicate remover,
+             import and export (one menu of the two). -->
+        <org.pimalaya.ui.ToolGroup
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/app_bar_tools_height"
+            android:background="@drawable/tool_group"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/app_bar_tools_padding"
+            android:paddingEnd="@dimen/app_bar_tools_padding">
 
-        <!-- Contacts: import and export, one menu of the two. -->
-        <ImageButton
-            android:id="@+id/contacts_transfer"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/contacts_transfer"
-            android:src="@drawable/ic_import_export"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
+            <ImageButton
+                android:id="@+id/contacts_birthdays"
+                android:layout_width="@dimen/app_bar_tool_width"
+                android:layout_height="@dimen/app_bar_tool_height"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/birthdays_title"
+                android:src="@drawable/ic_birthday"
+                android:tint="?android:attr/textColorPrimary"
+                android:visibility="gone" />
 
-        <!-- Tasks: clarify the Inbox, shown while it holds an item. -->
-        <ImageButton
-            android:id="@+id/tasks_clarify"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/task_clarify"
-            android:src="@drawable/ic_task_clarify"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
+            <ImageButton
+                android:id="@+id/contacts_duplicates"
+                android:layout_width="@dimen/app_bar_tool_width"
+                android:layout_height="@dimen/app_bar_tool_height"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/dup_find"
+                android:src="@drawable/ic_find_duplicates"
+                android:tint="?android:attr/textColorPrimary"
+                android:visibility="gone" />
 
-        <!-- Tasks: the weekly review. -->
-        <ImageButton
-            android:id="@+id/tasks_review"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/task_review"
-            android:src="@drawable/ic_task_review"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
+            <ImageButton
+                android:id="@+id/contacts_transfer"
+                android:layout_width="@dimen/app_bar_tool_width"
+                android:layout_height="@dimen/app_bar_tool_height"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/contacts_transfer"
+                android:src="@drawable/ic_import_export"
+                android:tint="?android:attr/textColorPrimary"
+                android:visibility="gone" />
+
+        </org.pimalaya.ui.ToolGroup>
+
+        <!-- Tasks: clarify the Inbox, shown while it holds an item, and
+             the weekly review. -->
+        <org.pimalaya.ui.ToolGroup
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/app_bar_tools_height"
+            android:background="@drawable/tool_group"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/app_bar_tools_padding"
+            android:paddingEnd="@dimen/app_bar_tools_padding">
+
+            <ImageButton
+                android:id="@+id/tasks_clarify"
+                android:layout_width="@dimen/app_bar_tool_width"
+                android:layout_height="@dimen/app_bar_tool_height"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/task_clarify"
+                android:src="@drawable/ic_task_clarify"
+                android:tint="?android:attr/textColorPrimary"
+                android:visibility="gone" />
+
+            <ImageButton
+                android:id="@+id/tasks_review"
+                android:layout_width="@dimen/app_bar_tool_width"
+                android:layout_height="@dimen/app_bar_tool_height"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/task_review"
+                android:src="@drawable/ic_task_review"
+                android:tint="?android:attr/textColorPrimary"
+                android:visibility="gone" />
+
+        </org.pimalaya.ui.ToolGroup>
 
         <!-- Calendar: the agenda's two modes, the list and the week, the
              one on drawn on the nav indicator by CalendarList. -->
@@ -197,101 +224,122 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- Contacts selection mode: merge the selected cards. -->
-        <ImageButton
-            android:id="@+id/contacts_merge"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/merge_selected"
-            android:src="@drawable/ic_merge"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
+        <!-- A selection's actions: merge or delete contacts; read or
+             unread, star or unstar, delete messages; then select or clear
+             every row, the box centred in its tool slot. -->
+        <org.pimalaya.ui.ToolGroup
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/app_bar_tools_height"
+            android:background="@drawable/tool_group"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/app_bar_tools_padding"
+            android:paddingEnd="@dimen/app_bar_tools_padding">
 
-        <ImageButton
-            android:id="@+id/contacts_delete"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/delete_selected"
-            android:src="@drawable/ic_delete_bar"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
+            <ImageButton
+                android:id="@+id/contacts_merge"
+                android:layout_width="@dimen/app_bar_tool_width"
+                android:layout_height="@dimen/app_bar_tool_height"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/merge_selected"
+                android:src="@drawable/ic_merge"
+                android:tint="?android:attr/textColorPrimary"
+                android:visibility="gone" />
 
-        <!-- Mail selection mode: read or unread, star or unstar, and
-             delete, over every selected message. -->
-        <ImageButton
-            android:id="@+id/mail_select_seen"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/message_mark_read"
-            android:src="@drawable/ic_check"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
+            <ImageButton
+                android:id="@+id/contacts_delete"
+                android:layout_width="@dimen/app_bar_tool_width"
+                android:layout_height="@dimen/app_bar_tool_height"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/delete_selected"
+                android:src="@drawable/ic_delete_bar"
+                android:tint="?android:attr/textColorPrimary"
+                android:visibility="gone" />
 
-        <ImageButton
-            android:id="@+id/mail_select_flag"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/message_flag"
-            android:src="@drawable/ic_star"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
+            <ImageButton
+                android:id="@+id/mail_select_seen"
+                android:layout_width="@dimen/app_bar_tool_width"
+                android:layout_height="@dimen/app_bar_tool_height"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/message_mark_read"
+                android:src="@drawable/ic_check"
+                android:tint="?android:attr/textColorPrimary"
+                android:visibility="gone" />
 
-        <ImageButton
-            android:id="@+id/mail_select_delete"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/message_delete"
-            android:src="@drawable/ic_delete_bar"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
+            <ImageButton
+                android:id="@+id/mail_select_flag"
+                android:layout_width="@dimen/app_bar_tool_width"
+                android:layout_height="@dimen/app_bar_tool_height"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/message_flag"
+                android:src="@drawable/ic_star"
+                android:tint="?android:attr/textColorPrimary"
+                android:visibility="gone" />
 
-        <!-- A selection, of contacts or mail: select or clear every row. The
-             box is centred in an app-bar-button-wide slot, exactly like
-             the per-row checkboxes (contact_end_slot). -->
-        <FrameLayout
-            android:id="@+id/selection_all_slot"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:visibility="gone">
+            <ImageButton
+                android:id="@+id/mail_select_delete"
+                android:layout_width="@dimen/app_bar_tool_width"
+                android:layout_height="@dimen/app_bar_tool_height"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/message_delete"
+                android:src="@drawable/ic_delete_bar"
+                android:tint="?android:attr/textColorPrimary"
+                android:visibility="gone" />
 
-            <CheckBox
-                android:id="@+id/selection_all"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:buttonTint="?android:attr/textColorPrimary"
-                android:contentDescription="@string/select_all" />
+            <FrameLayout
+                android:id="@+id/selection_all_slot"
+                android:layout_width="@dimen/app_bar_tool_width"
+                android:layout_height="@dimen/app_bar_tool_height"
+                android:visibility="gone">
 
-        </FrameLayout>
+                <CheckBox
+                    android:id="@+id/selection_all"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:buttonTint="?android:attr/textColorPrimary"
+                    android:contentDescription="@string/select_all"
+                    android:minHeight="0dp"
+                    android:minWidth="0dp" />
+
+            </FrameLayout>
+
+        </org.pimalaya.ui.ToolGroup>
 
         <!-- Editor: the addressbooks the contact belongs to, the one
-             placement gesture (docs/merged-view.md). -->
-        <ImageButton
-            android:id="@+id/contact_books"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/manage_books_title"
-            android:src="@drawable/ic_account"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
+             placement gesture (docs/merged-view.md), and more fields; the
+             FAB is the validate (check) action. Add field hides in
+             conflict mode, where nothing can be added. -->
+        <org.pimalaya.ui.ToolGroup
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/app_bar_tools_height"
+            android:background="@drawable/tool_group"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/app_bar_tools_padding"
+            android:paddingEnd="@dimen/app_bar_tools_padding">
 
-        <!-- Editor: reveal more fields; the FAB is the validate (check)
-             action. Hidden in conflict mode where nothing can be added. -->
-        <ImageButton
-            android:id="@+id/contact_add_field"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/contact_add_field"
-            android:src="@drawable/ic_add_entry"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
+            <ImageButton
+                android:id="@+id/contact_books"
+                android:layout_width="@dimen/app_bar_tool_width"
+                android:layout_height="@dimen/app_bar_tool_height"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/manage_books_title"
+                android:src="@drawable/ic_account"
+                android:tint="?android:attr/textColorPrimary"
+                android:visibility="gone" />
+
+            <ImageButton
+                android:id="@+id/contact_add_field"
+                android:layout_width="@dimen/app_bar_tool_width"
+                android:layout_height="@dimen/app_bar_tool_height"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/contact_add_field"
+                android:src="@drawable/ic_add_entry"
+                android:tint="?android:attr/textColorPrimary"
+                android:visibility="gone" />
+
+        </org.pimalaya.ui.ToolGroup>
 
         <!-- Reader: what is done to the open message, one tonal pill:
              the destructive end first, the answers last, under the
@@ -395,9 +443,10 @@
              and not on any one row of it. -->
         <ImageButton
             android:id="@+id/bar_delete"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_margin="4dp"
+            android:background="@drawable/button_tonal"
             android:contentDescription="@string/event_delete"
             android:src="@drawable/ic_delete_bar"
             android:tint="?android:attr/textColorPrimary"

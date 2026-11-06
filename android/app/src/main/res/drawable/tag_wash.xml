@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A state named on a card's row ("In progress", "Reply received"): the
+     accent washed out, since the card's own tone would not show it. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/wash" />
+    <corners android:radius="1000dp" />
+</shape>

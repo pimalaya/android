@@ -147,7 +147,7 @@ public final class MessageView implements FilesList.Origins {
     private void header(MailStore.StoredMessage message) {
         TextView avatar = host.findViewById(R.id.message_view_avatar);
         avatar.setText(Avatar.letter(message.fromAddress));
-        avatar.setBackground(Avatar.circle(host, message.fromAddress));
+        Avatar.paint(avatar, message.fromAddress);
 
         ((TextView) host.findViewById(R.id.message_view_subject))
                 .setText(

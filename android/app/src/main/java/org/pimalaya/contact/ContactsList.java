@@ -504,7 +504,7 @@ public final class ContactsList {
             TextView avatar = row.findViewById(R.id.contact_avatar);
             avatar.setText(Avatar.letter(name));
             // NOTE: seeded by the body's hash, as it was by the body's text.
-            avatar.setBackground(Avatar.circle(host, entry.object()));
+            Avatar.paint(avatar, entry.object());
             boolean checked = selectedKeys.contains(group.key);
             avatar.setVisibility(checked ? View.INVISIBLE : View.VISIBLE);
             android.widget.ImageView check = row.findViewById(R.id.contact_check);

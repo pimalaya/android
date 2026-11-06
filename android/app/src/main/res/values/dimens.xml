@@ -8,10 +8,18 @@
     <dimen name="app_bar_icon">24dp</dimen>
     <dimen name="app_bar_title_padding">4dp</dimen>
 
-    <!-- A bar toggle (the calendar's modes): a tonal pill of icon
-         buttons, the one on on the nav indicator, 44dp tall in all. -->
-    <dimen name="app_bar_toggle_width">44dp</dimen>
-    <dimen name="app_bar_toggle_height">40dp</dimen>
+    <!-- A bar's toolbox (ToolGroup), the reader's: a 40dp tonal pill of
+         38 by 36dp icon buttons, its 48dp height and 6dp padding holding
+         the pill's 4dp inset. -->
+    <dimen name="app_bar_tools_height">48dp</dimen>
+    <dimen name="app_bar_tools_padding">6dp</dimen>
+    <dimen name="app_bar_tool_width">38dp</dimen>
+    <dimen name="app_bar_tool_height">36dp</dimen>
+
+    <!-- A bar toggle (the calendar's modes): the toolbox's shape, the
+         one on on the nav indicator, 40dp tall in all. -->
+    <dimen name="app_bar_toggle_width">38dp</dimen>
+    <dimen name="app_bar_toggle_height">36dp</dimen>
     <dimen name="app_bar_toggle_padding">2dp</dimen>
     <dimen name="app_bar_toggle_margin">4dp</dimen>
 
