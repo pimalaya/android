@@ -23,6 +23,7 @@ import org.pimalaya.client.MessageSources;
 import org.pimalaya.client.Named;
 import org.pimalaya.client.NamedStep;
 import org.pimalaya.client.NamedStepItem;
+import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.StepRequest;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.PimdirAccount;
@@ -692,8 +693,9 @@ public final class MailEngine extends PimdirEngine {
      * Names an arrival by the pending create sharing its {@code Message-ID}.
      *
      * <p>So the engine lands the create on it (pimdir SYNC §6), not a second
-     * copy: a provider-filed sent copy. Already bound members stay as named.
-     * Answers {@code items}, named.
+     * copy: a provider-filed sent copy, which takes the provider's markers
+     * first, so the staged guess pushes none. Already bound members stay as
+     * named. Answers {@code items}, named.
      */
     List<Named> nameByMessageId(String collection, List<Named> items) {
         if (items.isEmpty()) {
@@ -735,7 +737,17 @@ public final class MailEngine extends PimdirEngine {
                     mail().policy().forgetSentAlias(messageId);
                 }
             }
-            named.add(create == null ? item : item.linked(create));
+            if (create == null) {
+                named.add(item);
+                continue;
+            }
+            try {
+                mutateFlags(
+                        collection, offline.handleFor(collection, create), new Flags(item.flags()));
+            } catch (JSONException failure) {
+                throw new PimalayaException("Unwritable markers: " + failure.getMessage());
+            }
+            named.add(item.linked(create));
         }
         return named;
     }

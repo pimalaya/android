@@ -564,7 +564,7 @@ A mail pass and the background fill SHALL run an account's mailboxes concurrentl
 - THEN one write lands whole before the other begins
 
 ### Requirement: A sent message is in Sent at once
-Sending SHALL stage the message as composed into the mailbox the account marks as its sent mail, beside its submission, so Sent shows it before any sync. Gmail and Graph file sent mail themselves: before a page reaches the engine, an arrival carrying the `Message-ID` of a pending create in that mailbox SHALL be named by the create's key, so the listing lands the staged copy and nothing is pushed there. Gmail stamps a `Message-ID` of its own on what it sends: the submission SHALL read Gmail's sent copy back for it, and an arrival carrying that one SHALL be named by the create staged under the composed one. On IMAP the staged copy's push SHALL be the append, made only once the submission went (A message is submitted and a copy is kept). A JMAP account, which sends nothing yet, and an account marking no sent mailbox SHALL stage none. While the submission is in the outbox, a list showing the outbox SHALL list its outbox row alone, not the staged copy; discarding the outbox row SHALL withdraw the copy with it.
+Sending SHALL stage the message as composed into the mailbox the account marks as its sent mail, beside its submission, so Sent shows it before any sync. Gmail and Graph file sent mail themselves: before a page reaches the engine, an arrival carrying the `Message-ID` of a pending create in that mailbox SHALL be named by the create's key, and the create SHALL take the arrival's markers first, so the listing lands the staged copy and nothing is pushed there: the staged copy's `\Seen` is a guess, and Gmail's markers are the message's in every label, so pushing it would mark a message sent to oneself read in the inbox too. Gmail stamps a `Message-ID` of its own on what it sends: the submission SHALL read Gmail's sent copy back for it, and an arrival carrying that one SHALL be named by the create staged under the composed one. On IMAP the staged copy's push SHALL be the append, made only once the submission went (A message is submitted and a copy is kept). A JMAP account, which sends nothing yet, and an account marking no sent mailbox SHALL stage none. While the submission is in the outbox, a list showing the outbox SHALL list its outbox row alone, not the staged copy; discarding the outbox row SHALL withdraw the copy with it.
 
 #### Scenario: Sent offline
 - GIVEN a message sent with no network
@@ -575,6 +575,11 @@ Sending SHALL stage the message as composed into the mailbox the account marks a
 - GIVEN a message sent from a Graph account
 - WHEN the next sync lists `Sent Items`
 - THEN the staged copy is landed on Graph's own copy, and Sent holds one
+
+#### Scenario: A message sent to oneself on Gmail
+- GIVEN a message a Gmail account sends to its own address
+- WHEN the next sync lists Sent and Gmail delivered the message unread
+- THEN it stays unread, in Sent and in the inbox, and the sync marks nothing on Gmail
 
 #### Scenario: Gmail renaming what it sends
 - GIVEN a message sent from a Gmail account, which Gmail sends under a `Message-ID` of its own

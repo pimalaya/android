@@ -121,6 +121,12 @@ public class MailMoveTest {
             calls.add("append " + mailbox);
         }
 
+        @Override
+        public void setFlag(
+                MailSession session, MessageRef message, Flags.Marker flag, boolean add) {
+            calls.add((add ? "add " : "remove ") + flag.wire() + " " + message.id());
+        }
+
         private void refuseGone(String handle) {
             if (gone.contains(handle)) {
                 throw new PimalayaException("Requested entity was not found.", 404);
@@ -458,6 +464,40 @@ public class MailMoveTest {
         assertEquals("1", scalar("SELECT count(*) FROM items WHERE collection = ?", sent));
         assertEquals("Hi",
                 scalar("SELECT subject FROM mail_summary WHERE item IN (SELECT id FROM items WHERE collection = ?)", sent));
+    }
+
+    /** A self-send Gmail delivers unread: the copy takes its flags, pushing none. */
+    @Test
+    public void aSentCopyTakesTheFlagsOfTheProvidersOwnCopy() throws Exception {
+        String date = "2026-10-08T09:00:00Z";
+        String body = "Message-ID: <m1@example.com>\r\nSubject: Hi\r\n\r\nbody\r\n";
+        stager().mutateAdd(
+                sent,
+                "m1@example.com",
+                body,
+                Flags.of(Flags.Marker.SEEN),
+                PimdirSummary.mail("m1@example.com", "Hi", null, EMAIL, EMAIL,
+                        date, body.length(), false),
+                PimdirSummary.mailSortKey(date));
+
+        JSONObject arrival =
+                new JSONObject()
+                        .put("handle", "900")
+                        .put("flags", new JSONArray())
+                        .put("linkId", "900")
+                        .put(
+                                "summary",
+                                PimdirSummary.mail("m1@example.com", "Hi", null, EMAIL,
+                                        EMAIL, date, body.length(), false))
+                        .put("sortKey", PimdirSummary.mailSortKey(date));
+        Server server = new Server();
+        server.listed = new JSONArray().put(arrival);
+        sync(server, sent);
+        sync(server, sent);
+
+        assertEquals("nothing pushed", List.of(), server.calls);
+        assertEquals("unread, as the provider has it", "0",
+                scalar("SELECT marks & 1 FROM items WHERE collection = ?", sent));
     }
 
     @Test
