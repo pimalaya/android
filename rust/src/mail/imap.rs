@@ -1356,8 +1356,13 @@ impl<H: Host> ImapSession<'_, H> {
         Ok(!found.is_empty())
     }
 
-    /// Copies one message into `target`, the original kept.
+    /// Copies one message into `target`, the original kept; skipped when
+    /// `target` holds its `Message-ID`, as a copy rerun after a lost answer
+    /// filed it already.
     pub fn copy(&mut self, mailbox: &str, uid: &str, target: &str) -> Result<(), BridgeError> {
+        if self.copied(mailbox, uid, target)? {
+            return Ok(());
+        }
         self.select(mailbox)?;
         self.run(ImapMessageCopy::new(
             uids(uid)?,

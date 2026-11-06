@@ -1088,6 +1088,37 @@ fn a_relocation_run_again_after_a_lost_copy_files_one_copy() {
     );
 }
 
+/// A copy whose answer was lost is run again: the copy it made is found by
+/// its `Message-ID` and not made twice.
+#[test]
+fn a_copy_run_again_after_a_lost_answer_files_one_copy() {
+    let mut client = Client::new(Boxes::new(&[
+        ("INBOX", &[(1, "m1@example.org")]),
+        ("Archive", &[]),
+    ]));
+    client.host.dies_after = Some("UID COPY");
+
+    let mut first = state(vec![Capability::UidPlus]);
+    let lost = ImapSession::bind(&mut client, &mut first).copy("INBOX", "1", "Archive");
+    assert!(
+        lost.is_err(),
+        "the connection died before the COPY answered"
+    );
+
+    client.host.dead = false;
+    let mut again = state(vec![Capability::UidPlus]);
+    ImapSession::bind(&mut client, &mut again)
+        .copy("INBOX", "1", "Archive")
+        .unwrap();
+
+    assert_eq!(client.host.ids("Archive"), ["m1@example.org"], "one copy");
+    assert_eq!(
+        client.host.ids("INBOX"),
+        ["m1@example.org"],
+        "the original kept"
+    );
+}
+
 /// A first relocation copies as ever.
 #[test]
 fn a_relocation_without_move_copies_a_message_the_target_lacks() {

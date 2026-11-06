@@ -86,6 +86,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a copied message filed twice on IMAP or Microsoft 365 when the server's answer to the copy was lost: the copy is skipped when the target already holds the message.
 - Fixed a message sent again when the app was stopped while handing it over: it is now kept as *May have been sent*, for you to send again if it did not arrive.
 - Fixed copying or moving a message on an IMAP account copying another mailbox's message instead when both mailboxes held the same UID: the copy now comes from the mailbox holding that message, matched by its body and its Message-ID within the account.
 - Fixed a message sent to yourself from a Gmail account arriving already read: the sync pushed the read mark of the copy staged in Sent, and Gmail, which keeps one read state per message, applied it to the inbox copy too. The copy in Sent now takes Gmail's own marks when it lands.

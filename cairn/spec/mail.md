@@ -1006,8 +1006,8 @@ A submission that fails after the whole message was handed over and before any v
 - WHEN the user opens it and taps *Send again*
 - THEN it is queued again and the next sync hands it over
 
-### Requirement: An IMAP copy or append is not made twice
-Where the server has no MOVE, a relocation SHALL search the target for the message's `Message-ID` (`UID SEARCH HEADER`) before its COPY and skip the COPY when it is there, so a relocation run again after a lost answer disposes of the original without filing a second copy. An `APPEND` of a message whose `Message-ID` the mailbox already holds SHALL be skipped and count as done. A message carrying no `Message-ID` SHALL be copied and appended as before.
+### Requirement: A copy or append is not made twice
+Where the server has no MOVE, a relocation SHALL search the target for the message's `Message-ID` (`UID SEARCH HEADER`) before its COPY and skip the COPY when it is there, so a relocation run again after a lost answer disposes of the original without filing a second copy. A copy SHALL be skipped the same way when its target holds the message: on IMAP by `UID SEARCH HEADER`, on Graph by the target folder's messages filtered on the source's `internetMessageId`. An `APPEND` of a message whose `Message-ID` the mailbox already holds SHALL be skipped and count as done. A message carrying no `Message-ID` SHALL be copied and appended as before.
 
 #### Scenario: A COPY whose answer was lost
 - GIVEN a server without MOVE whose connection dies after a COPY into Archive and before its answer

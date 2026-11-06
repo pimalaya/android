@@ -274,13 +274,40 @@ impl<H: Host> Msgraph<'_, H> {
     }
 
     /// Copies one message into the folder `to` (a folder id), failing
-    /// with the 404 of a message gone for the caller to refuse.
+    /// with the 404 of a message gone for the caller to refuse; skipped when
+    /// `to` holds its `internetMessageId`, as a copy rerun after a lost
+    /// answer filed it already.
     pub fn copy_message(&mut self, id: &str, to: &str) -> Result<(), BridgeError> {
+        if self.holds_copy(id, to)? {
+            return Ok(());
+        }
         let auth = HttpAuthBearer::new(self.token);
         let coroutine =
             MsgraphMessageCopy::new(&auth, "me", id, to).map_err(|err| err.to_string())?;
         self.run(coroutine)?;
         Ok(())
+    }
+
+    /// Whether the folder `to` holds a message with the `internetMessageId`
+    /// of message `id`; false when it carries none.
+    fn holds_copy(&mut self, id: &str, to: &str) -> Result<bool, BridgeError> {
+        let auth = HttpAuthBearer::new(self.token);
+        let mut url = graph_url(&format!("me/messages/{id}"))?;
+        url.query_pairs_mut()
+            .append_pair("$select", "internetMessageId");
+        let message = self.run(MsgraphSend::<MsgraphMessage>::get(&auth, url))?;
+        let Some(internet) = message.internet_message_id else {
+            return Ok(false);
+        };
+
+        let filter = format!("internetMessageId eq '{}'", internet.replace('\'', "''"));
+        let mut url = graph_url(&format!("me/mailFolders/{to}/messages"))?;
+        url.query_pairs_mut()
+            .append_pair("$filter", &filter)
+            .append_pair("$select", "id")
+            .append_pair("$top", "1");
+        let page = self.run(MsgraphSend::<MsgraphMessagesListResponse>::get(&auth, url))?;
+        Ok(!page.value.is_empty())
     }
 
     /// Deletes one message for good, past `Recoverable Items`

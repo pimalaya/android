@@ -1797,3 +1797,55 @@ fn a_band_rounds_last_page_hands_the_folders_every_id() {
     assert!(enumerated.contains(&"undated".to_string()));
     assert_eq!(graph.id_lists, 3, "ten ids, four a page");
 }
+
+/// A copy whose answer was lost is run again: the target holding its
+/// `internetMessageId`, it is not copied twice.
+#[test]
+fn a_copy_run_again_after_a_lost_answer_files_one_copy() {
+    let mut archive: Vec<String> = Vec::new();
+    let mut copies = 0;
+    let mut answer = |request: &FakeRequest| match (request.method.as_str(), request.path.as_str())
+    {
+        ("GET", "/v1.0/me/messages/m1") => {
+            assert_eq!(request.param("$select"), Some("internetMessageId"));
+            FakeResponse::json(
+                200,
+                &json!({ "id": "m1", "internetMessageId": "<m1@example.org>" }),
+            )
+        }
+        ("GET", "/v1.0/me/mailFolders/archive/messages") => {
+            let filter = request.param("$filter").expect("a filter");
+            let held: Vec<_> = archive
+                .iter()
+                .filter(|id| filter == format!("internetMessageId eq '{id}'"))
+                .map(|_| json!({ "id": "c1" }))
+                .collect();
+            FakeResponse::json(200, &json!({ "value": held }))
+        }
+        ("POST", "/v1.0/me/messages/m1/copy") => {
+            copies += 1;
+            archive.push("<m1@example.org>".into());
+            if copies == 1 {
+                FakeResponse::lost()
+            } else {
+                FakeResponse::json(201, &json!({ "id": "c2" }))
+            }
+        }
+        other => panic!("unexpected request {other:?}"),
+    };
+
+    {
+        let mut client = Client::new(FakeServer::boxed(&mut answer));
+        let mut graph = Msgraph {
+            client: &mut client,
+            token: "token",
+        };
+        assert!(
+            graph.copy_message("m1", "archive").is_err(),
+            "the answer lost"
+        );
+        graph.copy_message("m1", "archive").unwrap();
+    }
+    drop(answer);
+    assert_eq!(copies, 1, "copied once");
+}
