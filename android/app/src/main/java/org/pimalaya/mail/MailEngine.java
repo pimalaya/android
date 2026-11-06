@@ -693,9 +693,8 @@ public final class MailEngine extends PimdirEngine {
      * Names an arrival by the pending create sharing its {@code Message-ID}.
      *
      * <p>So the engine lands the create on it (pimdir SYNC §6), not a second
-     * copy: a provider-filed sent copy, which takes the provider's markers
-     * first, so the staged guess pushes none. Already bound members stay as
-     * named. Answers {@code items}, named.
+     * copy: a provider-filed sent copy. Already bound members stay as named.
+     * Answers {@code items}, named.
      */
     List<Named> nameByMessageId(String collection, List<Named> items) {
         if (items.isEmpty()) {
@@ -741,6 +740,7 @@ public final class MailEngine extends PimdirEngine {
                 named.add(item);
                 continue;
             }
+            // NOTE: the provider's markers, or \Seen would reach every label.
             try {
                 mutateFlags(
                         collection, offline.handleFor(collection, create), new Flags(item.flags()));

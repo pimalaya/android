@@ -187,7 +187,7 @@ public class SubmissionTest {
         assertEquals("m1@example.org", store.outbox().outgoing(ONE).get(0).messageId);
     }
 
-    /** A hand-over the app died in may have gone: parked, never handed over again. */
+    /** A hand-over the app died in is parked, never handed over again. */
     @Test
     public void aHandOverTheAppDiedInIsParkedUncertain() {
         MailFixtures.queue(store, ONE, "m1@example.org", "Hello", DATE);

@@ -403,11 +403,7 @@ public final class Outbox {
         }
     }
 
-    /**
-     * Notes that {@code queued} is about to be handed over, until its verdict
-     * is recorded: a row still noted at the next drain may have gone, and is
-     * parked uncertain rather than sent again.
-     */
+    /** Notes {@code queued} as handed over until its verdict is recorded. */
     public void handing(long queued) {
         synchronized (HANDING) {
             java.util.Set<String> handing = new java.util.HashSet<>(handingSet());

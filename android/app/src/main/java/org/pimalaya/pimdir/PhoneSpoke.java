@@ -31,9 +31,6 @@ public interface PhoneSpoke {
      */
     JSONObject push(String spoke, JSONArray changes, IntConsumer pushed) throws JSONException;
 
-    /**
-     * Erases the rows of {@code handles} deleted on the phone, once the store
-     * took their deletion or the user put them back.
-     */
+    /** Erases the rows of {@code handles} deleted on the phone. */
     void purge(String spoke, List<String> handles) throws JSONException;
 }

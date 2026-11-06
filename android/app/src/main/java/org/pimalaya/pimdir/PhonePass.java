@@ -17,9 +17,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <p>The server pass's shape: bodies the round brought hydrated, settleable
  * conflicts settled ({@link #settle}) and pushed in a second exchange.
- * Skipped when the spoke is unavailable, and on the quiet path. A mass
- * deletion on the phone is held from the store ({@link HeldDeletions}), and
- * the deleted rows are erased only once the store took their deletion.
+ * Skipped when the spoke is unavailable, and on the quiet path.
  */
 public abstract class PhonePass extends PimdirEngine {
     /** The phone provider this pass reconciles with. */
@@ -83,7 +81,7 @@ public abstract class PhonePass extends PimdirEngine {
         return ingested;
     }
 
-    /** One engine run over the spoke, then the rows of what it let go erased. */
+    /** One engine run over the spoke, then the deleted rows erased. */
     private SyncReport exchange(String collection) throws JSONException {
         gone.clear();
         SyncReport report = clients.offline().sync(this, collection, false);

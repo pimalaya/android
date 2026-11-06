@@ -138,8 +138,8 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
      *
      * <p>Blocks until all are done. A failing key leaves the others running;
      * every failure is answered, in the order taken. One run at a time, so a
-     * session never serves two. An interrupt stops it between keys, the keys
-     * left failing, and it returns once every worker let go of its session.
+     * session never serves two. An interrupt stops it between keys, once every
+     * worker is done.
      */
     public synchronized Outcome run(String label, List<String> keys, Step<S> step) {
         Outcome outcome = new Outcome();
@@ -357,10 +357,7 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
         return outcomes;
     }
 
-    /**
-     * Waits for {@code work} to end whatever interrupts the caller, setting
-     * {@code stop} when something did.
-     */
+    /** Waits for {@code work} through any interrupt, noted in {@code stop}. */
     private static <T> T await(Future<T> work, AtomicBoolean stop) throws ExecutionException {
         while (true) {
             try {
@@ -399,10 +396,7 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
         return opened;
     }
 
-    /**
-     * Closes every session the pool opened, after any run; the caller's own
-     * stays open.
-     */
+    /** Closes the sessions the pool opened, after any run. */
     @Override
     public synchronized void close() {
         synchronized (sessions) {

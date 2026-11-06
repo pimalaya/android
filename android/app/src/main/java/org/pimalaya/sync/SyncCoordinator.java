@@ -283,12 +283,7 @@ public final class SyncCoordinator implements MailSync {
                 .show();
     }
 
-    /**
-     * Asks about the deletions phone passes held back: most of a book or a
-     * calendar deleted on the phone at once. Deleting them on the server, or
-     * putting them back on the phone, runs the drawer's sync; asking later
-     * leaves them held.
-     */
+    /** Asks about the deletions phone passes held back. */
     private void offerHeld() {
         List<HeldDeletions.Held> held = pimdir.held().unoffered();
         if (held.isEmpty()) {

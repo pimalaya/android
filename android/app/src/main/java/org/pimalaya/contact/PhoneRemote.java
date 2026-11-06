@@ -152,9 +152,8 @@ final class PhoneRemote implements PhoneSpoke {
                 boolean deleted = cursor.getInt(3) == 1;
 
                 if (deleted) {
-                    // NOTE: only a DELETED row propagates as a delete, erased
-                    // once the store took it ({@link #purge}); mere absence
-                    // never does (see below).
+                    // NOTE: only a DELETED row propagates as a delete, then
+                    // is finalized; mere absence never does (see below).
                     if (sourceId != null && !sourceId.isEmpty()) {
                         vanished.put(sourceId);
                     } else {

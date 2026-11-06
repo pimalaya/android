@@ -355,7 +355,6 @@ final class CalendarRemote implements PhoneSpoke {
             }
 
             if (deleted) {
-                // NOTE: erased once the store took it ({@link #purge}).
                 vanished.put(handle);
                 continue;
             }
@@ -384,12 +383,7 @@ final class CalendarRemote implements PhoneSpoke {
         return reply;
     }
 
-    /**
-     * Erases the objects of {@code handles} deleted on the phone.
-     *
-     * <p>A sync-adapter delete removes that row alone, so the purge names the
-     * master's exception rows too.
-     */
+    /** Erases the objects of {@code handles} deleted on the phone. */
     @Override
     public void purge(String collection, List<String> handles) {
         Target target = requireTarget(collection);

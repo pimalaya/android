@@ -304,7 +304,7 @@ public class MailMoveTest {
         assertEquals("no body uploaded", List.of("copy INBOX 42 Sent"), server.calls);
     }
 
-    /** An IMAP UID names a message in one mailbox: a copy comes from its own. */
+    /** A copy comes from its own mailbox, whatever other reuses its UID. */
     @Test
     public void aCopyComesFromItsOwnMailboxWhereAnotherReusesItsUid() throws Exception {
         String archive = store.collectionOf(EMAIL, "Archive");
@@ -482,7 +482,7 @@ public class MailMoveTest {
                 scalar("SELECT subject FROM mail_summary WHERE item IN (SELECT id FROM items WHERE collection = ?)", sent));
     }
 
-    /** A self-send Gmail delivers unread: the copy takes its flags, pushing none. */
+    /** A self-send Gmail delivers unread stays unread, nothing pushed. */
     @Test
     public void aSentCopyTakesTheFlagsOfTheProvidersOwnCopy() throws Exception {
         String date = "2026-10-08T09:00:00Z";

@@ -5,8 +5,7 @@ package org.pimalaya.client;
  *
  * <p>Held for a pass, not a verb: reused sockets without the session would
  * replay an answered IMAP greeting. The handle is a bridge pointer, freed once
- * by {@link #close} (try-with-resources): its verbs, {@link #reopen} and
- * {@link #close} hold the session's lock, so none frees it under another.
+ * by {@link #close}; verbs and {@link #close} hold the session's lock.
  */
 public final class MailSession implements AutoCloseable {
     private final Account account;

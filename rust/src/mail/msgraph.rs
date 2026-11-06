@@ -275,8 +275,7 @@ impl<H: Host> Msgraph<'_, H> {
 
     /// Copies one message into the folder `to` (a folder id), failing
     /// with the 404 of a message gone for the caller to refuse; skipped when
-    /// `to` holds its `internetMessageId`, as a copy rerun after a lost
-    /// answer filed it already.
+    /// `to` holds its `internetMessageId`.
     pub fn copy_message(&mut self, id: &str, to: &str) -> Result<(), BridgeError> {
         if self.holds_copy(id, to)? {
             return Ok(());
@@ -288,8 +287,7 @@ impl<H: Host> Msgraph<'_, H> {
         Ok(())
     }
 
-    /// Whether the folder `to` holds a message with the `internetMessageId`
-    /// of message `id`; false when it carries none.
+    /// Whether the folder `to` holds the `internetMessageId` of message `id`.
     fn holds_copy(&mut self, id: &str, to: &str) -> Result<bool, BridgeError> {
         let auth = HttpAuthBearer::new(self.token);
         let mut url = graph_url(&format!("me/messages/{id}"))?;

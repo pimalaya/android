@@ -9,14 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * The deletions phone passes held back from the server, by phone collection:
- * more than half of at least 20 members deleted on the phone at once.
- *
- * <p>In memory for the process, as {@link ParkedRounds}: the rows stay deleted
- * on the phone, so every pass finds them again, and a release or a restore
- * holds for one pass of its collection.
- */
+/** The deletions phone passes held back from the server, in memory. */
 public final class HeldDeletions {
     /** The fewest members a collection holds before its deletions are held. */
     static final int MASS = 20;
@@ -41,15 +34,12 @@ public final class HeldDeletions {
     /** The collections whose next pass puts their deleted members back. */
     private final Set<String> restored = new HashSet<>();
 
-    /** Whether {@code deleted} of {@code members} is too many to let go unasked. */
+    /** Whether {@code deleted} of {@code members} needs asking. */
     static boolean massive(int deleted, int members) {
         return members >= MASS && deleted * 2 > members;
     }
 
-    /**
-     * Records what one pass of {@code collection} held, null for nothing; the
-     * pass spent the release it was given.
-     */
+    /** Records what one pass of {@code collection} held, null for nothing. */
     synchronized void passed(String collection, Held round) {
         released.remove(collection);
         if (round == null) {
@@ -70,7 +60,7 @@ public final class HeldDeletions {
         released.addAll(collections);
     }
 
-    /** Puts the deleted members of {@code collections} back on their next pass. */
+    /** Puts the deleted members of {@code collections} back. */
     public synchronized void restore(Collection<String> collections) {
         restored.addAll(collections);
     }
@@ -85,10 +75,7 @@ public final class HeldDeletions {
         return round;
     }
 
-    /**
-     * The held deletions the user was not asked about yet, or asked about with
-     * other counts, marked asked.
-     */
+    /** The held deletions not asked about yet, marked asked. */
     public synchronized List<Held> unoffered() {
         List<Held> fresh = new ArrayList<>();
         for (Held round : held.values()) {
