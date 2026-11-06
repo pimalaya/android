@@ -100,6 +100,9 @@ const SORT_WINDOWS_DAYS: [Option<i64>; 3] = [Some(90), Some(365), None];
 /// past the first chunk: 50, 100, 200, 400 then 800 header reads at most.
 const SAMPLE_WIDENINGS: usize = 4;
 
+/// The seconds of a UTC day.
+const SECONDS_A_DAY: i64 = 86_400;
+
 /// The status of a mailbox the server refused to open, as an HTTP 404.
 ///
 /// RFC 3501 6.3.1 answers `NO` to `EXAMINE` or `SELECT` for a mailbox
@@ -544,6 +547,7 @@ impl<'a, H: Host> ImapSession<'a, H> {
     /// `count`, then a sample doubled up to [`SAMPLE_WIDENINGS`] times until
     /// a part holds nothing dated or received at or above the `count`th
     /// `Date`: UIDs grow with arrival, so older mail lies below, imports aside.
+    /// The sample's floor is then checked ([`Self::checked_floor`]).
     fn sampled_floor(
         &mut self,
         mailbox: &str,
@@ -571,16 +575,80 @@ impl<'a, H: Host> ImapSession<'a, H> {
             let at = floor.floor().and_then(|at| at.parse::<Timestamp>().ok());
             let settled = at.is_some_and(|at| !newer && received.iter().all(|r| *r < at));
             if settled {
-                return Ok(());
+                break;
             }
         }
-        if read < uids.len() {
-            log::debug!(
-                "{mailbox}: floor sampled from the newest {read} of {} UIDs",
-                uids.len()
-            );
+        let Some(unread) = uids.get(read).copied() else {
+            return Ok(());
+        };
+        log::debug!(
+            "{mailbox}: floor sampled from the newest {read} of {} UIDs",
+            uids.len()
+        );
+        self.checked_floor(mailbox, validity, floor, unread)
+    }
+
+    /// Reads what the round's search names at or below `unread` into `floor`.
+    fn checked_floor(
+        &mut self,
+        mailbox: &str,
+        validity: u32,
+        floor: &mut Floor,
+        unread: u32,
+    ) -> Result<(), BridgeError> {
+        let Some(at) = floor.floor().and_then(|at| at.parse::<Timestamp>().ok()) else {
+            return Ok(());
+        };
+        let round = Scope {
+            since: floor.floor().map(String::from),
+            until: floor.scope().until.clone(),
+        };
+        let mut found = self.scoped_uids(mailbox, validity, &round)?;
+        let beyond = found.iter().filter(|uid| **uid <= unread).count();
+        if beyond > floor.count() {
+            log::debug!("{mailbox}: {beyond} messages below the sample since its floor");
+            found = self.floor_day(&round, at, floor.count(), found)?;
+        }
+        let unsampled: Vec<u32> = found.into_iter().filter(|uid| *uid <= unread).collect();
+        for chunk in unsampled.chunks(IMAP_PAGE) {
+            for (_, header) in self.fetch_headers(mailbox, validity, chunk)? {
+                floor.offer(header.summary.date.as_deref());
+            }
         }
         Ok(())
+    }
+
+    /// The round's UIDs from the last day naming `count`, by `SENTSINCE` alone.
+    fn floor_day(
+        &mut self,
+        round: &Scope,
+        at: Timestamp,
+        count: usize,
+        mut found: Vec<u32>,
+    ) -> Result<Vec<u32>, BridgeError> {
+        let top = round
+            .until
+            .as_deref()
+            .and_then(|until| until.parse::<Timestamp>().ok())
+            .unwrap_or_else(Timestamp::now);
+        let mut low = epoch_day(at);
+        let mut high = epoch_day(top) + 1;
+        while high - low > 1 {
+            let day = low + (high - low) / 2;
+            let since =
+                Timestamp::from_second(day * SECONDS_A_DAY).map_err(|err| err.to_string())?;
+            let uids = self.searched_uids(&Scope {
+                since: Some(since.to_string()),
+                until: round.until.clone(),
+            })?;
+            if uids.len() >= count {
+                low = day;
+                found = uids;
+            } else {
+                high = day;
+            }
+        }
+        Ok(found)
     }
 
     /// [`Self::floor`] by `UID SORT`: the messages below the ceiling in
@@ -696,6 +764,15 @@ impl<'a, H: Host> ImapSession<'a, H> {
             return Ok(uids.clone());
         }
 
+        let uids = self.searched_uids(scope)?;
+        if let Some(cache) = self.state.cache_of(mailbox, validity) {
+            cache.searched.insert(key, uids.clone());
+        }
+        Ok(uids)
+    }
+
+    /// The UIDs of the scope in the open mailbox, newest first, uncached.
+    fn searched_uids(&mut self, scope: &Scope) -> Result<Vec<u32>, BridgeError> {
         let mut criteria = Vec::new();
         if let Some(since) = scope.received_since(SENT_MARGIN_DAYS) {
             criteria.push(SearchKey::SentSince(imap_date(since)?));
@@ -718,10 +795,6 @@ impl<'a, H: Host> ImapSession<'a, H> {
             .collect();
         uids.sort_unstable_by(|a, b| b.cmp(a));
         uids.dedup();
-
-        if let Some(cache) = self.state.cache_of(mailbox, validity) {
-            cache.searched.insert(key, uids.clone());
-        }
         Ok(uids)
     }
 
@@ -1645,6 +1718,11 @@ fn imap_date(instant: jiff::Timestamp) -> Result<NaiveDate, BridgeError> {
     )
     .and_then(|date| NaiveDate::try_from(date).ok())
     .ok_or_else(|| BridgeError::from(format!("No IMAP date for {instant}")))
+}
+
+/// The UTC day an instant falls on, counted from the epoch's.
+fn epoch_day(instant: Timestamp) -> i64 {
+    instant.as_second().div_euclid(SECONDS_A_DAY)
 }
 
 /// Opens a session on `url` and authenticates it, for a caller that will

@@ -583,6 +583,51 @@ fn without_sort_imported_mail_among_the_newest_uids_widens_the_sample() {
     assert_eq!(client.host.headers_read.len(), 400, "50, 50, 100, then 200");
 }
 
+/// `imports` messages above `daily(count)`'s UIDs, appended in date order:
+/// one a day from 1 January 2025, received when dated.
+fn appended(count: u32, imports: u32) -> Vec<Message> {
+    let first: Timestamp = "2025-01-01T08:00:00Z".parse().unwrap();
+    let mut messages = daily(count);
+    for index in 0..imports {
+        let date = first
+            .checked_add(SignedDuration::from_hours(24 * i64::from(index)))
+            .unwrap()
+            .to_string();
+        messages.push(Message {
+            uid: count + 1 + index,
+            received: date.clone(),
+            date,
+        });
+    }
+    messages
+}
+
+#[test]
+fn without_sort_imports_appended_in_date_order_floor_this_autumn() {
+    // NOTE: the sample's second part is older than its first: it settles.
+    let mut client = Client::new(Scripted::new(appended(100, 300)));
+    let mut state = state(Vec::new());
+
+    let mut floor = Floor::new(None, 25);
+    ImapSession::bind(&mut client, &mut state)
+        .floor("INBOX", &mut floor)
+        .unwrap();
+
+    let reply = floor.reply();
+    assert_eq!(reply.floor, Some(back(24, 12)), "this autumn's 25th");
+    assert_eq!(reply.dates.first(), Some(&back(0, 12)));
+    assert_eq!(
+        client.host.headers_read.len(),
+        75,
+        "the sample's 50, then the 25 of the day the searches found"
+    );
+    assert!(
+        client.host.sent("UID SEARCH") <= 2 + 16,
+        "a bisection by day: {:?}",
+        client.host.commands
+    );
+}
+
 #[test]
 fn without_sort_a_sample_is_bounded() {
     let mut client = Client::new(Scripted::new(imported(100, 2000)));
@@ -593,12 +638,22 @@ fn without_sort_a_sample_is_bounded() {
         .floor("INBOX", &mut floor)
         .unwrap();
 
+    assert!(
+        client.host.headers_read[..800]
+            .iter()
+            .all(|uid| *uid > 1300),
+        "four widenings past the first chunk: the 800 newest UIDs"
+    );
     assert_eq!(
         client.host.headers_read.len(),
-        800,
-        "four widenings past the first chunk"
+        850,
+        "then the 50 of the day the searches found"
     );
-    assert!(floor.full(), "the 50th of the sample all the same");
+    assert_eq!(
+        floor.reply().floor,
+        Some(back(49, 12)),
+        "this autumn's 50th"
+    );
 }
 
 #[test]
