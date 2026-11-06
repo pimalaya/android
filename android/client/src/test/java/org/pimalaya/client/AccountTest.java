@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 
 import java.util.Iterator;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.TreeMap;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -31,7 +32,8 @@ public class AccountTest {
                         "baseUrl", "imaps://imap.example.org:993",
                         "login", "jane",
                         "secret", "pw",
-                        "submitUrl", "smtps://smtp.example.org"),
+                        "submitUrl", "smtps://smtp.example.org",
+                        "zone", TimeZone.getDefault().getID()),
                 values(account.toJson()));
     }
 
@@ -41,7 +43,11 @@ public class AccountTest {
         Account account = new Account("jmap://api.fastmail.com", "", "pw");
 
         assertEquals(
-                Map.of("baseUrl", "jmap://api.fastmail.com", "login", "", "secret", "pw"),
+                Map.of(
+                        "baseUrl", "jmap://api.fastmail.com",
+                        "login", "",
+                        "secret", "pw",
+                        "zone", TimeZone.getDefault().getID()),
                 values(account.toJson()));
     }
 
