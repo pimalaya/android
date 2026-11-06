@@ -27,6 +27,8 @@
 </tr>
 </table>
 
+Every screen, light and dark, is drawn on the [design canvas](https://claude.ai/artifact/UJsQXRtqaiQZ6ufXpqAZLW#page-dcb81aee8d83) before it is built.
+
 ## Table of contents
 
 - [Features](#features)
