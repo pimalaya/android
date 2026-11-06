@@ -1,13 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <color name="divider">#424242</color>
-    <color name="divider_light">#363636</color>
-    <color name="surface">#2A2A2A</color>
+    <!-- The palette at night (cairn/changes/brand-palette). The accent is
+         the day's magenta lightened and calmed (OKLCH 0.80 0.10 349, where
+         the day's is 0.54 0.21), a pastel the dark page carries without
+         glare. -->
+    <color name="accent">#EFA3C8</color>
+    <color name="accent_ink">#F3B6D3</color>
+    <color name="page">#1A0D15</color>
+    <color name="ink">#F7E9F0</color>
+    <color name="ink_secondary">#BB9CAD</color>
+    <color name="wash">#422232</color>
+    <color name="dialog_ground">#2B1824</color>
+    <color name="error">#FFB4AB</color>
+
+    <color name="divider">#5A4351</color>
+    <!-- The ink at 10%. -->
+    <color name="divider_light">#1AF7E9F0</color>
+    <color name="surface">#23121C</color>
 
     <color name="star">#F2BE3C</color>
-    <color name="widget_ground">#1C1E21</color>
-    <color name="widget_text">#E6E1E5</color>
-    <color name="widget_text_secondary">#AEAAAE</color>
+    <color name="widget_ground">#1A0D15</color>
+    <color name="widget_text">#F7E9F0</color>
+    <color name="widget_text_secondary">#BB9CAD</color>
 
 </resources>

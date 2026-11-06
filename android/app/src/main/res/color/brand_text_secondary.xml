@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Secondary text in the palette's second ink, dimmed while disabled. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:alpha="?android:attr/disabledAlpha" android:color="@color/ink_secondary" android:state_enabled="false" />
+    <item android:color="@color/ink_secondary" />
+</selector>

@@ -1,12 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- Dark base, selected automatically when the system is in dark mode. -->
+    <!-- Dark base and palette, selected automatically when the system is
+         in dark mode (cairn/changes/brand-palette). -->
     <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorBackground">@color/page</item>
+        <item name="android:windowBackground">@color/page</item>
+        <item name="android:textColorPrimary">@color/brand_text_primary</item>
+        <item name="android:textColorSecondary">@color/brand_text_secondary</item>
+        <item name="android:textColorTertiary">@color/brand_text_secondary</item>
+        <item name="android:textColorHint">@color/brand_text_hint</item>
+        <item name="android:colorControlNormal">@color/ink_secondary</item>
+        <item name="android:colorControlActivated">@color/accent</item>
+        <item name="android:colorError">@color/error</item>
+        <item name="android:alertDialogTheme">@style/AppDialog</item>
+        <item name="android:datePickerDialogTheme">@style/AppDialog</item>
+        <item name="android:timePickerDialogTheme">@style/AppDialog</item>
 
         <!-- The night page tone; light status icons stay, the dark default. -->
         <item name="android:statusBarColor">?android:attr/colorBackground</item>
 
+    </style>
+
+    <style name="AppDialog" parent="@android:style/Theme.DeviceDefault.Dialog.Alert">
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorBackground">@color/dialog_ground</item>
+        <item name="android:textColorPrimary">@color/brand_text_primary</item>
+        <item name="android:textColorSecondary">@color/brand_text_secondary</item>
+        <item name="android:textColorHint">@color/brand_text_hint</item>
+        <item name="android:colorControlNormal">@color/ink_secondary</item>
+        <item name="android:colorControlActivated">@color/accent</item>
+        <item name="android:colorError">@color/error</item>
     </style>
 
 </resources>

@@ -1,17 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- Neutral surfaces; the night variant lives in values-night/. Every
-         other colour is pulled from the device theme (?android:attr/...). -->
-    <color name="divider">#BDBDBD</color>
-    <color name="divider_light">#E0E0E0</color>
-    <color name="surface">#EEEEEE</color>
+    <!-- The app's palette, the logo's magenta over warm greys leaning to
+         it (cairn/changes/brand-palette); the night variant lives in
+         values-night/. The theme hands them to the platform's attributes
+         (colorAccent, colorBackground, textColor*), which the views read. -->
+    <color name="accent">#BF1E83</color>
+    <!-- Accent text on a tonal fill. -->
+    <color name="accent_ink">#97156A</color>
+    <color name="page">#FFFFFF</color>
+    <color name="ink">#301F2A</color>
+    <color name="ink_secondary">#6F5464</color>
+    <!-- A tonal fill, the accent washed out. -->
+    <color name="wash">#F7D9EA</color>
+    <!-- A dialog's ground: the page in light, a step above it in dark. -->
+    <color name="dialog_ground">#FFFFFF</color>
+    <color name="error">#BA1A1A</color>
+    <!-- Text on an accent light enough to need it (WCAG luminance above
+         0.179), the night's: a deep plum of the accent's hue, 8.2:1 on it. -->
+    <color name="on_accent_dark">#410B2B</color>
+
+    <!-- Neutral surfaces, in the palette's tones. -->
+    <color name="divider">#D9BFCB</color>
+    <color name="divider_light">#ECD9E1</color>
+    <color name="surface">#F9F1F3</color>
 
     <!-- A starred message's star: the one fixed hue, since a yellow
          star is what marks importance whatever the theme's accent. -->
     <color name="star">#F2BE3C</color>
     <color name="widget_ground">#FFFFFF</color>
-    <color name="widget_text">#1C1B1F</color>
-    <color name="widget_text_secondary">#5E5E62</color>
+    <color name="widget_text">#301F2A</color>
+    <color name="widget_text_secondary">#6F5464</color>
 
 </resources>

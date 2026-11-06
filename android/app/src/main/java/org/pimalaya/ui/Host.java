@@ -114,11 +114,17 @@ public abstract class Host extends Activity {
     /** Rebuilds the drawer's account cards. */
     public abstract void reloadHome();
 
-    /** Black or white, whichever reads on the accent colour. */
+    /**
+     * A deep plum or white, whichever contrasts more with the accent.
+     *
+     * <p>By WCAG: above a relative luminance of 0.179 a dark tone contrasts
+     * more than white does, so the light theme's magenta takes white and the
+     * dark theme's pastel the plum.
+     */
     public int accentContrast() {
         int accent = resolveColor(android.R.attr.colorAccent);
-        return android.graphics.Color.luminance(accent) > 0.5f
-                ? android.graphics.Color.BLACK
+        return android.graphics.Color.luminance(accent) > 0.179f
+                ? getColor(org.pimalaya.R.color.on_accent_dark)
                 : android.graphics.Color.WHITE;
     }
 

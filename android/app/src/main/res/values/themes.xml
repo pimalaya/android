@@ -1,21 +1,48 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- DeviceDefault so the app inherits the phone maker's palette
-         (colorAccent, text colours), not a fixed Google one; the night
-         variant in values-night/ switches to the dark base, so the app
-         follows the system light/dark setting. The main bars and the
-         status bar sit on the page tone, the cards, pills and bottom
-         navigation on the app's neutral surface colour, never on
-         colorPrimary, whose tone varies too much across vendors and
-         versions to pair with textColorPrimary. -->
+    <!-- The app's own palette over the platform's widgets
+         (cairn/changes/brand-palette): DeviceDefault for the widgets'
+         shapes, its colours replaced, so the app looks itself on every
+         phone. The night variant in values-night/ switches to the dark
+         base and palette, following the system light/dark setting. The
+         main bars and the status bar sit on the page tone, the cards,
+         pills and bottom navigation on the surface colour, never on
+         colorPrimary. -->
     <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorBackground">@color/page</item>
+        <item name="android:windowBackground">@color/page</item>
+        <item name="android:textColorPrimary">@color/brand_text_primary</item>
+        <item name="android:textColorSecondary">@color/brand_text_secondary</item>
+        <item name="android:textColorTertiary">@color/brand_text_secondary</item>
+        <item name="android:textColorHint">@color/brand_text_hint</item>
+        <item name="android:colorControlNormal">@color/ink_secondary</item>
+        <item name="android:colorControlActivated">@color/accent</item>
+        <item name="android:colorError">@color/error</item>
+        <item name="android:alertDialogTheme">@style/AppDialog</item>
+        <item name="android:datePickerDialogTheme">@style/AppDialog</item>
+        <item name="android:timePickerDialogTheme">@style/AppDialog</item>
 
         <!-- Matches the app bars on API 26-34; API 35+ ignores
              both, edge-to-edge padding the bars instead. -->
         <item name="android:statusBarColor">?android:attr/colorBackground</item>
         <item name="android:windowLightStatusBar">true</item>
 
+    </style>
+
+    <!-- Dialogs and the date and time pickers in the same palette, not
+         the maker's. -->
+    <style name="AppDialog" parent="@android:style/Theme.DeviceDefault.Light.Dialog.Alert">
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorBackground">@color/dialog_ground</item>
+        <item name="android:textColorPrimary">@color/brand_text_primary</item>
+        <item name="android:textColorSecondary">@color/brand_text_secondary</item>
+        <item name="android:textColorHint">@color/brand_text_hint</item>
+        <item name="android:colorControlNormal">@color/ink_secondary</item>
+        <item name="android:colorControlActivated">@color/accent</item>
+        <item name="android:colorError">@color/error</item>
     </style>
 
     <!-- The sync sheet: a floating window on the bottom edge over a scrim,

@@ -46,6 +46,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Changed the app's colours to its own palette, the logo's magenta over warm greys, light and dark, the same on every phone rather than the phone maker's: the page, the cards, the text, the controls, the dialogs and the pickers.
 - Changed an account's settings to read as the setup's settings: an Account card, then one card of its domains, each led by its tile, the setup's rows first, then where it signs in. The phone's contacts and calendar take one switch per domain, and the addressbooks are picked in a dialog, each with its server sync.
 - Changed a list's add button to shrink away while its filters or the sync dock show, rather than ride over the dock, and come back after.
 - Changed every spinner to one size, so they all draw the same stroke.
