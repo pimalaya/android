@@ -86,6 +86,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a message Gmail or Microsoft 365 held back for a rate limit or a daily quota being kept as refused, waiting for you to send it again: it now stays in the outbox and goes out on a later sync.
 - Fixed the first sync of an IMAP mailbox on a server without SORT listing far more than its newest messages when older mail had been imported into it in date order.
 - Fixed a Gmail account's trash and spam, when shown from the setup, never listing the mail they already held: they are now listed in full on their first sync.
 - Fixed a copied message filed twice on IMAP or Microsoft 365 when the server's answer to the copy was lost: the copy is skipped when the target already holds the message.

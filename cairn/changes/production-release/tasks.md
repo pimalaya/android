@@ -24,7 +24,8 @@ Restated against the code on 2026-11-06. Gone since the 2026-10-09 review: the I
 - [x] Gmail: trash or junk ticked at the first step landed empty as a closed round (mail/GmailStep.java:84) and no later step fills it; the first step leaves them to a round of their own (cairn/log/2026-11-06-gmail-trash-opens-by-a-round.md)
 - [x] IMAP without SORT: the floor sample stopped early on imports appended in rising date order and listed every envelope back to their dates; now checked by the round's search and a halving by day (cairn/log/2026-11-06-the-floor-checked-without-sort.md). mail.md still says 50 while the code follows fill-from-two-queues' 25 (its fold owed)
 - [x] A null byte array from Java turned into an empty one at the bridge (`unwrap_or_default` in rust/src/ffi/offline.rs and ffi/mail.rs): unreachable today, an empty SMTP send if it ever was; now an error reply, and `PimdirSql.hash` throws on it. `read_string` still reads a null string as empty
-- [ ] To check: a Gmail 403 rate limit is parked as refused for good (`refused_by_api`, rust/src/mail/session.rs): `BridgeError` keeps a status and a message, not Gmail's reason, so the classification belongs where the body is read, rust/src/client/throttle.rs (`GmailApiError::parse(..).is_rate_limited()`), a rate-limited 403 the throttle gives up on answered as a 429, which stays queued; a Google Calendar insert rerun under the same iCalUID answers 409 on every pass, read back by `iCalUID` and bound instead, after a live check of the 409
+- [x] A send Gmail refused for a rate or a quota (a 403) was parked as refused for good; the throttle now marks the exchange `limited` and the row stays pending (cairn/log/2026-11-06-a-send-refused-for-a-rate-stays-queued.md)
+- [ ] To check: a Google Calendar insert rerun under the same iCalUID answers 409 on every pass, read back by `iCalUID` and bound instead, after a live check of the 409
 
 ## 2. Device checks, then fold and archive (owner)
 

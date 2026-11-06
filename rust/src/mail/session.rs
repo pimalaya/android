@@ -1058,7 +1058,8 @@ impl<H: Host> Mail<'_, '_, H> {
                 };
                 if let Err(err) = jmap.send_message(&composed) {
                     let unanswered = jmap.client.unanswered();
-                    return Err(Refused::http(err, unanswered, |status| {
+                    let limited = jmap.client.limited();
+                    return Err(Refused::http(err, unanswered, limited, |status| {
                         matches!(status, 413 | REFUSED)
                     }));
                 }
@@ -1073,7 +1074,8 @@ impl<H: Host> Mail<'_, '_, H> {
                 };
                 if let Err(err) = graph.send_message(raw) {
                     let unanswered = graph.client.unanswered();
-                    return Err(Refused::http(err, unanswered, refused_by_api));
+                    let limited = graph.client.limited();
+                    return Err(Refused::http(err, unanswered, limited, refused_by_api));
                 }
                 Ok(None)
             }
@@ -1090,7 +1092,8 @@ impl<H: Host> Mail<'_, '_, H> {
                     Ok(id) => id,
                     Err(err) => {
                         let unanswered = gmail.client.unanswered();
-                        return Err(Refused::http(err, unanswered, refused_by_api));
+                        let limited = gmail.client.limited();
+                        return Err(Refused::http(err, unanswered, limited, refused_by_api));
                     }
                 };
                 let filed = match gmail.envelope(&id) {
@@ -1199,11 +1202,11 @@ impl Refused {
     }
 
     /// A failed HTTP send: refused for good when `refused` says so of its
-    /// status; uncertain when it went whole and no answer came
-    /// (`unanswered`) or a server error did, which a gateway may give after
-    /// the work was done; else transient.
-    fn http(err: BridgeError, unanswered: bool, refused: fn(u16) -> bool) -> Self {
-        let permanent = err.status.is_some_and(refused);
+    /// status and no rate or quota refused it (`limited`); uncertain when it
+    /// went whole and no answer came (`unanswered`) or a server error did,
+    /// which a gateway may give after the work was done; else transient.
+    fn http(err: BridgeError, unanswered: bool, limited: bool, refused: fn(u16) -> bool) -> Self {
+        let permanent = !limited && err.status.is_some_and(refused);
         let uncertain = !permanent && uncertain(err.status, unanswered);
         Self {
             message: err.to_string(),
@@ -1236,6 +1239,17 @@ mod tests {
         assert!(uncertain(Some(504), false));
         assert!(!uncertain(Some(429), false), "throttled before any work");
         assert!(!uncertain(Some(401), true));
+    }
+
+    #[test]
+    fn a_send_refused_for_a_rate_or_a_quota_stays_queued() {
+        let forbidden = || BridgeError {
+            message: "Forbidden".into(),
+            status: Some(403),
+        };
+        let limited = Refused::http(forbidden(), false, true, refused_by_api);
+        assert!(!limited.permanent && !limited.uncertain);
+        assert!(Refused::http(forbidden(), false, false, refused_by_api).permanent);
     }
 
     fn roster(names: &[&str]) -> Vec<(String, Mailbox)> {

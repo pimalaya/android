@@ -123,6 +123,8 @@ pub struct Exchange {
     resent: bool,
     /// Whether any byte of its answer came.
     heard: bool,
+    /// Whether its answer refused it for a rate or a quota.
+    limited: bool,
     /// How far its answer was read, to settle it at its end.
     follow: Follow,
 }
@@ -144,6 +146,11 @@ impl<H: Host> Client<H> {
         self.exchange.unanswered()
     }
 
+    /// Whether the last answer refused the request for a rate or a quota.
+    pub fn limited(&self) -> bool {
+        self.exchange.limited
+    }
+
     /// Writes request bytes to `url`, recorded for a throttled retry.
     ///
     /// A write after the answer started, or to another URL, begins a new
@@ -159,6 +166,7 @@ impl<H: Host> Client<H> {
             exchange.resent = false;
             exchange.follow = Follow::Unknown;
             exchange.heard = false;
+            exchange.limited = false;
             let reused = self.host.begin(url);
             self.exchange.reused = reused;
         }
@@ -374,6 +382,7 @@ impl<H: Host> Client<H> {
 
     /// Reads an answer's head, and its body when it may be throttled.
     fn read_answer(&mut self, url: &str) -> Result<Answered, BridgeError> {
+        self.exchange.limited = false;
         let mut bytes = Vec::new();
 
         let head_end = loop {
@@ -420,7 +429,10 @@ impl<H: Host> Client<H> {
             }
         };
 
-        let Some(throttle) = throttled(head.status, &body) else {
+        let throttle = throttled(head.status, &body);
+        self.exchange.limited =
+            matches!(head.status, 403 | 429) && (throttle.is_some() || names_daily_quota(&body));
+        let Some(throttle) = throttle else {
             return Ok(Answered::Passed(bytes));
         };
 
@@ -1302,6 +1314,29 @@ mod tests {
     const URL: &str = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
     const REQUEST: &[u8] =
         b"GET /gmail/v1/users/me/messages HTTP/1.1\r\nHost: gmail.googleapis.com\r\n\r\n";
+
+    /// A rate limit given up on, or a daily quota, refused nothing for good.
+    #[test]
+    fn a_rate_or_quota_refusal_handed_back_is_limited() {
+        let refused = answer("403 Forbidden", GMAIL_MINUTE_QUOTA);
+        let answers = vec![refused.as_slice(); MAX_RETRIES as usize + 1];
+        let mut client = Client::new(Scripted::new(&answers, "2026-10-07T08:49:20Z"));
+        client.http_write(URL, REQUEST).unwrap();
+        assert_eq!(client.http_read(URL).unwrap(), refused);
+        assert!(client.limited(), "a rate limit given up on");
+
+        let daily = answer("403 Forbidden", br#"{"reason":"dailyLimitExceeded"}"#);
+        let mut client = Client::new(Scripted::new(&[&daily], "2026-10-07T08:49:20Z"));
+        client.http_write(URL, REQUEST).unwrap();
+        client.http_read(URL).unwrap();
+        assert!(client.limited(), "a daily quota");
+
+        let denied = answer("403 Forbidden", b"Forbidden");
+        let mut client = Client::new(Scripted::new(&[&denied], "2026-10-07T08:49:20Z"));
+        client.http_write(URL, REQUEST).unwrap();
+        client.http_read(URL).unwrap();
+        assert!(!client.limited(), "a plain refusal");
+    }
 
     #[test]
     fn a_minute_quota_refusal_waits_for_the_next_minute_then_succeeds() {
