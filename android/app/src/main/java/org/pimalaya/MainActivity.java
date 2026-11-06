@@ -1687,6 +1687,7 @@ public class MainActivity extends Host
         // NOTE: away while the screen's filters or the sync dock show, as
         // they were left.
         float scale = fabAway() ? 0f : 1f;
+        fab.setClickable(scale > 0f);
         fab.animate().cancel();
         fab.setScaleX(scale);
         fab.setScaleY(scale);
@@ -1791,13 +1792,14 @@ public class MainActivity extends Host
     }
 
     /**
-     * Shrinks the extended FAB to nothing, or grows it back: away, it takes
-     * no touch, its bounds gone with its size.
+     * Shrinks the extended FAB to nothing, or grows it back; away, it takes
+     * no tap.
      */
     @Override
     public void refreshFab() {
         boolean away = fabAway();
         View fab = findViewById(R.id.fab_extended);
+        fab.setClickable(!away);
         fab.animate().cancel();
         fab.animate()
                 .scaleX(away ? 0f : 1f)
