@@ -13,6 +13,10 @@
     <color name="wash">#422232</color>
     <color name="dialog_ground">#2B1824</color>
     <color name="error">#FFB4AB</color>
+    <color name="on_accent">#410B2B</color>
+    <!-- The ink at 20%, a ripple the dark page shows; the accent at 30%. -->
+    <color name="ripple">#33F7E9F0</color>
+    <color name="text_highlight">#4DEFA3C8</color>
 
     <color name="divider">#5A4351</color>
     <!-- The ink at 10%. -->

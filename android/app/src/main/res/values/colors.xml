@@ -19,6 +19,12 @@
     <!-- Text on an accent light enough to need it (WCAG luminance above
          0.179), the night's: a deep plum of the accent's hue, 8.2:1 on it. -->
     <color name="on_accent_dark">#410B2B</color>
+    <!-- Text and glyphs on the accent: white by day, the plum above by night. -->
+    <color name="on_accent">#FFFFFF</color>
+    <!-- A touch's ripple, the ink at 12%; selected text's highlight, the
+         accent at 30%. -->
+    <color name="ripple">#1F301F2A</color>
+    <color name="text_highlight">#4DBF1E83</color>
 
     <!-- Neutral surfaces, in the palette's tones. -->
     <color name="divider">#D9BFCB</color>

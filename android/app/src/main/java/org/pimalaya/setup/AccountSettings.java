@@ -52,6 +52,7 @@ import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.PillField;
 import org.pimalaya.ui.Sections;
+import org.pimalaya.ui.Switches;
 import org.pimalaya.ui.SyncPill;
 
 /**
@@ -262,7 +263,7 @@ public final class AccountSettings {
     private void addAccount(Sections sections, AccountEntry account) {
         String email = account.email;
         List<View> rows = new ArrayList<>();
-        Switch toggle = new Switch(host);
+        Switch toggle = Switches.of(host);
         toggle.setChecked(AccountActivation.enabled(host, email));
         toggle.setOnCheckedChangeListener(
                 (view, checked) -> {
@@ -393,7 +394,7 @@ public final class AccountSettings {
         // settings included, so turning it on asks again; idle while the
         // account does not sync in the background, which it needs.
         boolean syncs = BackgroundCheck.syncs(host, email);
-        Switch notify = new Switch(host);
+        Switch notify = Switches.of(host);
         notify.setChecked(BackgroundCheck.notifies(host, email) && BackgroundCheck.permitted(host));
         notify.setEnabled(syncs);
         notify.setOnCheckedChangeListener(
@@ -463,7 +464,7 @@ public final class AccountSettings {
                                         List.of(email),
                                         () -> renderIfOpen(email))));
 
-        Switch rich = new Switch(host);
+        Switch rich = Switches.of(host);
         rich.setChecked(ComposeFormat.rich(host, email));
         rich.setOnCheckedChangeListener(
                 (view, checked) -> ComposeFormat.set(host, email, checked));
@@ -607,7 +608,7 @@ public final class AccountSettings {
                 onPhone |= entry.phoneSynced;
             }
         }
-        Switch phone = new Switch(host);
+        Switch phone = Switches.of(host);
         phone.setChecked(onPhone && PhoneMirror.CONTACTS.granted(host));
         phone.setOnCheckedChangeListener((view, checked) -> setBooksOnPhone(email, checked));
         rows.add(
@@ -818,7 +819,7 @@ public final class AccountSettings {
                 ids.add(calendar.id);
             }
         }
-        Switch phone = new Switch(host);
+        Switch phone = Switches.of(host);
         phone.setChecked(
                 PhoneCalendars.shown(host, email) && PhoneMirror.CALENDAR.granted(host));
         phone.setOnCheckedChangeListener(

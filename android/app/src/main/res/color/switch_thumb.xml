@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A switch's thumb in the palette, not the system's wallpaper colours
+     (DeviceDefault's on Android 12 and later): the text on the accent when
+     on, the secondary ink when off. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:alpha="?android:attr/disabledAlpha" android:color="@color/ink_secondary" android:state_enabled="false" />
+    <item android:color="@color/on_accent" android:state_checked="true" />
+    <item android:color="@color/ink_secondary" />
+</selector>

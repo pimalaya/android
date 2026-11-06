@@ -75,4 +75,21 @@
         <item name="android:textSize">28sp</item>
         <item name="android:textStyle">bold</item>
     </style>
+    <!-- The platform's widgets with their DeviceDefault shapes, in the
+         palette (cairn/changes/redesign-for-the-palette): a box or a radio
+         the accent ticked. A switch is tinted in code (Switches), its
+         DeviceDefault style being private. -->
+    <style name="AppCheckBox" parent="@android:style/Widget.DeviceDefault.CompoundButton.CheckBox">
+        <item name="android:buttonTint">@color/compound_button</item>
+    </style>
+
+    <style name="AppRadioButton" parent="@android:style/Widget.DeviceDefault.CompoundButton.RadioButton">
+        <item name="android:buttonTint">@color/compound_button</item>
+    </style>
+
+    <!-- A spinner in the accent; one on the accent is tinted in code. -->
+    <style name="AppProgress" parent="@android:style/Widget.DeviceDefault.ProgressBar">
+        <item name="android:indeterminateTint">@color/accent</item>
+    </style>
+
 </resources>

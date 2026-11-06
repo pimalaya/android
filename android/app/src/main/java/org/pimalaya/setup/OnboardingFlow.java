@@ -48,6 +48,7 @@ import org.pimalaya.ui.CardRows;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.PillField;
 import org.pimalaya.ui.Sections;
+import org.pimalaya.ui.Switches;
 
 /**
  * The connection wizard behind the auth panel, address to first sync.
@@ -2558,7 +2559,7 @@ public final class OnboardingFlow {
             // NOTE: on for a server of the linked one's name (imap.example.org
             // and smtp.example.org), off for another, so a password never goes
             // to a name it was not typed for unasked.
-            identity.same = new Switch(host);
+            identity.same = Switches.of(host);
             identity.same.setChecked(sameServer(identity.lead(), identity.linked.lead()));
             identity.same.setOnCheckedChangeListener(
                     (view, checked) -> {
@@ -2729,7 +2730,7 @@ public final class OnboardingFlow {
      * notifications permission, a refusal turning it back off.
      */
     private Switch notifySwitch() {
-        Switch toggle = new Switch(host);
+        Switch toggle = Switches.of(host);
         toggle.setChecked(switches.notifies);
         toggle.setOnCheckedChangeListener(
                 (view, checked) -> {
@@ -2748,7 +2749,7 @@ public final class OnboardingFlow {
      * mirror's permissions, a refusal turning it back off.
      */
     private Switch mirrorSwitch(PhoneMirror mirror) {
-        Switch toggle = new Switch(host);
+        Switch toggle = Switches.of(host);
         toggle.setChecked(switches.mirrors.contains(mirror));
         toggle.setOnCheckedChangeListener(
                 (view, checked) -> {

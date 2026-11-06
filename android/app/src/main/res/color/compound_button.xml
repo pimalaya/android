@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A checkbox's or a radio button's box in the palette: the accent when
+     ticked, the secondary ink when not. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:alpha="?android:attr/disabledAlpha" android:color="@color/ink_secondary" android:state_enabled="false" />
+    <item android:color="@color/accent" android:state_checked="true" />
+    <item android:color="@color/ink_secondary" />
+</selector>

@@ -4,7 +4,7 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="oval">
-            <solid android:color="#00696F" />
+            <solid android:color="#BF1E83" />
             <size
                 android:width="48dp"
                 android:height="48dp" />

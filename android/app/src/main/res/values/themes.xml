@@ -21,6 +21,17 @@
         <item name="android:colorControlNormal">@color/ink_secondary</item>
         <item name="android:colorControlActivated">@color/accent</item>
         <item name="android:colorError">@color/error</item>
+        <!-- The platform's widgets in the palette rather than the
+             wallpaper's colours DeviceDefault takes from Android 12 on:
+             popups and menus, ripples, links, selections, boxes and
+             spinners; a switch is tinted in code (Switches). -->
+        <item name="android:colorBackgroundFloating">@color/dialog_ground</item>
+        <item name="android:colorControlHighlight">@color/ripple</item>
+        <item name="android:textColorLink">@color/accent</item>
+        <item name="android:textColorHighlight">@color/text_highlight</item>
+        <item name="android:checkboxStyle">@style/AppCheckBox</item>
+        <item name="android:radioButtonStyle">@style/AppRadioButton</item>
+        <item name="android:progressBarStyle">@style/AppProgress</item>
         <item name="android:alertDialogTheme">@style/AppDialog</item>
         <item name="android:datePickerDialogTheme">@style/AppDialog</item>
         <item name="android:timePickerDialogTheme">@style/AppDialog</item>
@@ -43,6 +54,17 @@
         <item name="android:colorControlNormal">@color/ink_secondary</item>
         <item name="android:colorControlActivated">@color/accent</item>
         <item name="android:colorError">@color/error</item>
+        <!-- The platform's widgets in the palette rather than the
+             wallpaper's colours DeviceDefault takes from Android 12 on:
+             popups and menus, ripples, links, selections, boxes and
+             spinners; a switch is tinted in code (Switches). -->
+        <item name="android:colorBackgroundFloating">@color/dialog_ground</item>
+        <item name="android:colorControlHighlight">@color/ripple</item>
+        <item name="android:textColorLink">@color/accent</item>
+        <item name="android:textColorHighlight">@color/text_highlight</item>
+        <item name="android:checkboxStyle">@style/AppCheckBox</item>
+        <item name="android:radioButtonStyle">@style/AppRadioButton</item>
+        <item name="android:progressBarStyle">@style/AppProgress</item>
     </style>
 
     <!-- The sync sheet: a floating window on the bottom edge over a scrim,
