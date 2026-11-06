@@ -758,12 +758,22 @@ public final class PimdirStorage {
 
     /** Applies a batch of engine writes atomically; returns what it did. */
     public JSONArray applyWrites(JSONArray writes) throws JSONException {
+        return applyWrites(writes, Map.of());
+    }
+
+    /**
+     * {@link #applyWrites(JSONArray)}, a message filed under the link id its
+     * listing named it by in {@code listed} (engine collection, handle).
+     */
+    public JSONArray applyWrites(JSONArray writes, Map<String, String> listed)
+            throws JSONException {
         SQLiteDatabase db = store.getWritableDatabase();
         db.beginTransaction();
         compiled = new HashMap<>();
         rebinding = new HashMap<>();
         overruling = new HashSet<>();
         settling = new HashSet<>();
+        this.listed = listed;
         try {
             Map<String, byte[]> bodies = new HashMap<>();
             List<JSONObject> stamps = new ArrayList<>();
@@ -861,6 +871,7 @@ public final class PimdirStorage {
             rebinding = null;
             overruling = null;
             settling = null;
+            this.listed = null;
             PimdirItems.unlinkCollected(store, db, blobs);
         }
     }
@@ -1140,15 +1151,15 @@ public final class PimdirStorage {
         String known =
                 bound != null ? bound : released.get(collection + "\n" + source + "\n" + handle);
         String linkId = placement.isNull("linkId") ? known : placement.optString("linkId", known);
-        // NOTE: a message is filed under its handle, the identity its
-        // listing names it by, so a create landed onto the handle its
-        // arrival is listed at takes that handle as its identity too; the
+        // NOTE: a message is filed under the link id its listing names it
+        // by, so a create landed onto an arrival takes the arrival's; the
         // item it was staged as goes with its provisional handle.
         boolean mail = isMail(db, collection);
+        String named = mail && bound == null ? listed.get(engineCollection + "\n" + handle) : null;
         String staged = null;
-        if (mail && !handle.startsWith(PROVISIONAL) && linkId != null && !linkId.equals(handle)) {
+        if (named != null && linkId != null && !linkId.equals(named)) {
             staged = linkId;
-            linkId = handle;
+            linkId = named;
         }
         String object = placement.isNull("object") ? null : placement.optString("object", null);
         JSONObject summary = placement.optJSONObject("summary");
@@ -2296,6 +2307,12 @@ public final class PimdirStorage {
      * the item's conflict (SYNC §7). Null outside a batch.
      */
     private Set<String> settling;
+
+    /**
+     * The link id each member was listed under, by engine collection and
+     * handle, as the driver named it. Null outside a batch.
+     */
+    private Map<String, String> listed;
 
     /**
      * The first column of a read's first row, null for none or NULL.

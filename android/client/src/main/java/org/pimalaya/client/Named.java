@@ -15,8 +15,9 @@ import org.json.JSONObject;
  *
  * @param flags its IMAP markers
  * @param handle its UID within its mailbox, or the provider's message id
- * @param linkId what the store files it under: the handle as listed, the
- *     bound or pending create's link id once named
+ * @param linkId what the store files it under: as listed, the handle or on
+ *     IMAP the UID, UIDVALIDITY and mailbox; the bound or pending create's
+ *     link id once named
  * @param sortKey its summary's sort key, empty when listed unnamed
  * @param summary its summary, opaque (the pimdir persistence format),
  *     read-only by contract; null when listed unnamed

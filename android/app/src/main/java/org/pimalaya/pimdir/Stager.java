@@ -64,6 +64,14 @@ public abstract class Stager implements OfflineDriver {
     }
 
     /**
+     * The link id each member of the page last listed was named by, by engine
+     * collection and handle; none for a driver listing nothing.
+     */
+    protected java.util.Map<String, String> listedLinks() {
+        return java.util.Map.of();
+    }
+
+    /**
      * Where a pass's time goes, page by page.
      *
      * <p>The debug log's numbers, and what tests read to split bridge from
@@ -202,7 +210,7 @@ public abstract class Stager implements OfflineDriver {
                         page.waited += queued;
                         StoreProfile.begin();
                         try {
-                            effects = offline.applyWrites(writes);
+                            effects = offline.applyWrites(writes, listedLinks());
                         } finally {
                             profile = StoreProfile.end();
                         }

@@ -145,19 +145,21 @@ public final class MailReader {
     }
 
     /**
-     * Where the server holds a message, as {@code [mailbox, id]}.
+     * Where the server holds a message, as {@code [mailbox, handle]}.
      *
      * <p>For the target of a pending move, the mailbox it is moving from.
      */
     private String[] addressOf(MailStore.StoredMessage message) {
         String[] source = null;
+        String handle;
         synchronized (stager.locks.store) {
             if (stager.offline.isPendingCreate(message.collection, message.id)) {
                 source = stager.offline.moveSourceOf(message.collection, message.id);
             }
+            handle = stager.offline.handleFor(message.collection, message.id);
         }
         if (source == null) {
-            return new String[] {message.mailbox, message.id};
+            return new String[] {message.mailbox, handle};
         }
         return new String[] {
             PimdirAccount.nameOf(mail.accountIdOf(message.accountEmail), source[0]), source[1]

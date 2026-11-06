@@ -728,6 +728,25 @@ fn a_narrowed_round_hands_every_uid_on_its_last_page() {
     assert_eq!(page.enumerated, None);
 }
 
+/// Two mailboxes reusing a UID list two messages: one handle, two link ids.
+#[test]
+fn two_mailboxes_reusing_a_uid_name_two_messages() {
+    let mut client = Client::new(Scripted::new(daily(3)));
+    let mut state = state(Vec::new());
+    let whole: MailRequest = from_str(r#"{"listing":{"kind":"round"}}"#).unwrap();
+
+    let mut named = Vec::new();
+    for mailbox in ["INBOX", "Archive/2026#1:x"] {
+        let page = ImapSession::bind(&mut client, &mut state)
+            .list_page(mailbox, &whole)
+            .unwrap();
+        let member = page.items.into_iter().find(|item| item.handle == "3");
+        named.push(member.expect("UID 3 listed").link_id);
+    }
+
+    assert_eq!(named, ["3:7:INBOX", "3:7:Archive/2026#1:x"]);
+}
+
 #[test]
 fn bodies_stream_in_one_fetch_straight_to_files() {
     let mut client = Client::new(Scripted::new(daily(5)));

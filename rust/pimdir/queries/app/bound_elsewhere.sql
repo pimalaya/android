@@ -1,5 +1,5 @@
 -- The binding a pending create copies from (SYNC §3, origin_for_link), in its
--- account and under its Message-ID: an IMAP link id is a UID mailboxes reuse.
+-- account and under its Message-ID.
 SELECT b.collection, b.handle FROM bindings b
 JOIN items i ON i.id = b.item
 WHERE i.link_id IN (:link_id, CASE WHEN :link_id GLOB 'dup:*'

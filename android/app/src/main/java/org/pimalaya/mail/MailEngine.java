@@ -131,6 +131,22 @@ public final class MailEngine extends PimdirEngine {
                 : new JSONObject().put("objects", new JSONObject());
     }
 
+    /** The link id each member of the page last listed came under. */
+    private final Map<String, String> listedLinks = new HashMap<>();
+
+    @Override
+    protected Map<String, String> listedLinks() {
+        return listedLinks;
+    }
+
+    /** Remembers the link ids a page's members were listed under. */
+    private void rememberListed(String collection, List<Named> items) {
+        listedLinks.clear();
+        for (Named item : items) {
+            listedLinks.put(collection + "\n" + item.handle(), item.linkId());
+        }
+    }
+
     /**
      * Reconciles one mailbox with its server: list, then push what is staged.
      *
@@ -495,6 +511,7 @@ public final class MailEngine extends PimdirEngine {
         long started = System.nanoTime();
         MailPage page = clients.mail().enumerateMailbox(session, mailboxOf(collection), request);
         page = page.with(nameUnnamed(collection, listing, page));
+        rememberListed(collection, page.items());
         page = page.with(nameByMessageId(collection, page.items()));
         remote(System.nanoTime() - started);
         return listed(collection, page, true).toJson();
@@ -518,6 +535,7 @@ public final class MailEngine extends PimdirEngine {
         Landing step = landing;
         landing = null;
         boolean opens = listing.round() && step.empty;
+        rememberListed(collection, step.items);
         step.named = nameByMessageId(collection, step.items);
         MailPage page =
                 new MailPage(
@@ -1199,7 +1217,7 @@ public final class MailEngine extends PimdirEngine {
             case "setFlags":
                 return pushFlags(collection, mailbox, handle, change);
             case "remove":
-                return pushRemove(mailbox, handle, change);
+                return pushRemove(collection, mailbox, handle, change);
             case "add":
                 return pushAdd(collection, mailbox, handle, change);
             default:
@@ -1217,7 +1235,8 @@ public final class MailEngine extends PimdirEngine {
      * <p>A move's pending create is withdrawn once delivered: the message comes
      * back with the destination's listing under its new handle.
      */
-    private JSONObject pushRemove(String mailbox, String handle, JSONObject change)
+    private JSONObject pushRemove(
+            String collection, String mailbox, String handle, JSONObject change)
             throws JSONException {
         String to = change.isNull("to") ? null : change.optString("to", null);
         if (to == null) {
@@ -1239,8 +1258,12 @@ public final class MailEngine extends PimdirEngine {
         } catch (RuntimeException failure) {
             gone(mailbox, handle, failure);
         }
-        String linkId = change.optString("linkId", handle);
+        String linkId = change.optString("linkId", null);
         synchronized (locks.store) {
+            if (linkId == null) {
+                String[] held = offline.bound(collection, List.of(handle)).get(handle);
+                linkId = held == null ? handle : held[0];
+            }
             String create = offline.pendingCreateOf(to, linkId);
             if (create != null) {
                 offline.withdrawCreate(to, create);

@@ -355,8 +355,8 @@ pub struct Named {
     pub flags: Vec<String>,
     /// The UID within its mailbox, or the provider's message id.
     pub handle: String,
-    /// The handle again: what the store files it under, a reader opens and
-    /// a push addresses it by.
+    /// What the store files it under, unique in the account: the handle, or
+    /// on IMAP the UID with its mailbox's UIDVALIDITY and the mailbox.
     pub link_id: String,
     /// The summary's sort key, empty when listed unnamed.
     #[serde(skip_serializing_if = "String::is_empty")]
