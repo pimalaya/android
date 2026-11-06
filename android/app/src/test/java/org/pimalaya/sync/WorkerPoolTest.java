@@ -1,6 +1,7 @@
 package org.pimalaya.sync;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
@@ -11,6 +12,8 @@ import org.robolectric.RobolectricTestRunner;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The pool's own rules, apart from any engine.
@@ -93,5 +96,77 @@ public class WorkerPoolTest {
         }
         assertEquals("in the order given", List.of("a", "b", "c"), keys);
         assertSame(refused, outcome.failure());
+    }
+
+    @Test
+    public void anInterruptedRunClosesNoSessionBeforeItsWorkersLetGo() throws Exception {
+        List<String> events = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        boolean[] interruptKept = new boolean[1];
+        Thread caller =
+                new Thread(
+                        () -> {
+                            try (WorkerPool<AutoCloseable> pool =
+                                    new WorkerPool<>(
+                                            2, null, () -> () -> events.add("closed"), null)) {
+                                pool.run("rotated", List.of("a", "b"), (session, key, remote) -> {
+                                    if (key.equals("a")) {
+                                        started.countDown();
+                                        release.await(5, TimeUnit.SECONDS);
+                                        events.add("a done");
+                                    }
+                                });
+                                interruptKept[0] = Thread.currentThread().isInterrupted();
+                            }
+                        });
+        caller.start();
+        assertTrue(started.await(5, TimeUnit.SECONDS));
+        caller.interrupt();
+        caller.join(300);
+        assertTrue("the run waits for its worker", caller.isAlive());
+        assertFalse("no session closed under a running key", events.contains("closed"));
+
+        release.countDown();
+        caller.join(5_000);
+        assertEquals(List.of("a done", "closed", "closed"), events);
+        assertTrue("the interrupt is the caller's again", interruptKept[0]);
+    }
+
+    @Test
+    public void anInterruptedRunTakesNoFurtherKey() throws Exception {
+        List<String> ran = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch started = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        WorkerPool.Outcome[] outcome = new WorkerPool.Outcome[1];
+        Thread caller =
+                new Thread(
+                        () -> {
+                            try (WorkerPool<Session> pool =
+                                    new WorkerPool<>(2, null, Session::new, null)) {
+                                outcome[0] =
+                                        pool.run("rotated", List.of("a", "b", "c", "d"),
+                                                (session, key, remote) -> {
+                                                    started.countDown();
+                                                    release.await(5, TimeUnit.SECONDS);
+                                                    ran.add(key);
+                                                });
+                            }
+                        });
+        caller.start();
+        assertTrue(started.await(5, TimeUnit.SECONDS));
+        caller.interrupt();
+        caller.join(300);
+        release.countDown();
+        caller.join(5_000);
+
+        Collections.sort(ran);
+        assertEquals(List.of("a", "b"), ran);
+        List<String> failed = new ArrayList<>();
+        for (WorkerPool.Failure failure : outcome[0].failures) {
+            failed.add(failure.key);
+            assertTrue(failure.error instanceof InterruptedException);
+        }
+        assertEquals(List.of("c", "d"), failed);
     }
 }

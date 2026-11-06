@@ -85,6 +85,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a mail sync interrupted by the screen rotating, or the app closing, freeing a connection another of its workers was still using: the sync now stops between mailboxes and lets go of its connections only once every worker is done with them.
 - Fixed the drawer's empty state, shown with no account, sitting near the top of the drawer rather than centred in it.
 - Fixed a drag on an empty part of the account setup, around its Continue button, reaching the screen beneath it: the bottom navigation there switched that hidden screen and raised its add button, "New message", over the setup. The setup now takes every touch made on it, as the account settings, filters and deleted items do.
 - Fixed the search index failing its first refresh on a fresh install (no such table: store.store_meta) because it opened before the store had been created: the store is now created first, so the index is built on the first launch rather than the second.

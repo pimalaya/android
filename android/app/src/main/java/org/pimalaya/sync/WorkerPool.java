@@ -5,9 +5,11 @@ import android.util.Log;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -136,7 +138,8 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
      *
      * <p>Blocks until all are done. A failing key leaves the others running;
      * every failure is answered, in the order taken. One run at a time, so a
-     * session never serves two.
+     * session never serves two. An interrupt stops it between keys, the keys
+     * left failing, and it returns once every worker let go of its session.
      */
     public synchronized Outcome run(String label, List<String> keys, Step<S> step) {
         Outcome outcome = new Outcome();
@@ -152,6 +155,7 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
         AtomicInteger next = new AtomicInteger();
         AtomicLong remote = new AtomicLong();
         AtomicReference<Exception> unopened = new AtomicReference<>();
+        AtomicBoolean stop = new AtomicBoolean();
         Exception[] errors = new Exception[keys.size()];
         boolean[] taken = new boolean[keys.size()];
 
@@ -176,7 +180,7 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
                         }
                         try {
                             int index;
-                            while ((index = next.getAndIncrement()) < keys.size()) {
+                            while (!stopped(stop) && (index = next.getAndIncrement()) < keys.size()) {
                                 taken[index] = true;
                                 try {
                                     step.run(session, keys.get(index), remote);
@@ -200,11 +204,15 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
         }
         for (Future<?> worker : running) {
             try {
-                worker.get();
-            } catch (Exception interrupted) {
-                Log.w("pimalaya", "worker failed: " + label, interrupted);
-                unopened.compareAndSet(null, interrupted);
+                await(worker, stop);
+            } catch (ExecutionException failure) {
+                Log.w("pimalaya", "worker failed: " + label, failure);
+                unopened.compareAndSet(null, failure);
             }
+        }
+        if (stopped(stop)) {
+            Thread.currentThread().interrupt();
+            unopened.compareAndSet(null, new InterruptedException(label + " interrupted"));
         }
 
         for (int index = 0; index < keys.size(); index++) {
@@ -235,7 +243,7 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
      *
      * <p>Blocks until every worker finds none. A failing key leaves the
      * others running; every failure is answered, in the order they came. One
-     * run at a time, as {@link #run}.
+     * run at a time, and stopped by an interrupt, as {@link #run}.
      */
     public synchronized Outcome drain(String label, Source source, Step<S> step) {
         Outcome outcome = new Outcome();
@@ -244,6 +252,7 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
         long number = RUNS.incrementAndGet();
         AtomicInteger keys = new AtomicInteger();
         AtomicLong remote = new AtomicLong();
+        AtomicBoolean stop = new AtomicBoolean();
         List<Failure> failures = java.util.Collections.synchronizedList(new ArrayList<>());
 
         List<Future<?>> running = new ArrayList<>(size);
@@ -279,7 +288,7 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
                                 } finally {
                                     source.back(key, landed);
                                 }
-                                key = source.next();
+                                key = stopped(stop) ? null : source.next();
                             }
                         } finally {
                             if (joiner != null) {
@@ -295,11 +304,15 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
         }
         for (Future<?> worker : running) {
             try {
-                worker.get();
-            } catch (Exception interrupted) {
-                Log.w("pimalaya", "worker failed: " + label, interrupted);
-                failures.add(new Failure("", interrupted));
+                await(worker, stop);
+            } catch (ExecutionException failure) {
+                Log.w("pimalaya", "worker failed: " + label, failure);
+                failures.add(new Failure("", failure));
             }
+        }
+        if (stopped(stop)) {
+            Thread.currentThread().interrupt();
+            failures.add(new Failure("", new InterruptedException(label + " interrupted")));
         }
 
         outcome.failures.addAll(failures);
@@ -314,7 +327,7 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
      * Runs several pools' runs at once, one per account, outcomes in order.
      *
      * <p>A run that threw as a whole answers that failure alone. One run goes
-     * on the calling thread.
+     * on the calling thread. An interrupt waits for every run to end.
      */
     public static List<Outcome> together(List<Callable<Outcome>> runs) {
         List<Outcome> outcomes = new ArrayList<>(runs.size());
@@ -330,14 +343,37 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
         for (Callable<Outcome> run : runs) {
             running.add(WORKERS.submit(run));
         }
+        AtomicBoolean interrupted = new AtomicBoolean();
         for (Future<Outcome> run : running) {
             try {
-                outcomes.add(run.get());
-            } catch (Exception failure) {
+                outcomes.add(await(run, interrupted));
+            } catch (ExecutionException failure) {
                 outcomes.add(failed(failure));
             }
         }
+        if (interrupted.get()) {
+            Thread.currentThread().interrupt();
+        }
         return outcomes;
+    }
+
+    /**
+     * Waits for {@code work} to end whatever interrupts the caller, setting
+     * {@code stop} when something did.
+     */
+    private static <T> T await(Future<T> work, AtomicBoolean stop) throws ExecutionException {
+        while (true) {
+            try {
+                return work.get();
+            } catch (InterruptedException interrupt) {
+                stop.set(true);
+            }
+        }
+    }
+
+    /** Whether a run should take no further key. */
+    private static boolean stopped(AtomicBoolean stop) {
+        return stop.get() || Thread.currentThread().isInterrupted();
     }
 
     /** The outcome of a run that failed as a whole. */
@@ -363,9 +399,12 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
         return opened;
     }
 
-    /** Closes every session the pool opened; the caller's own stays open. */
+    /**
+     * Closes every session the pool opened, after any run; the caller's own
+     * stays open.
+     */
     @Override
-    public void close() {
+    public synchronized void close() {
         synchronized (sessions) {
             for (int slot = borrowed ? 1 : 0; slot < sessions.size(); slot++) {
                 S session = sessions.get(slot);

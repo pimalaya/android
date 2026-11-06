@@ -4,8 +4,9 @@ package org.pimalaya.client;
  * One account's live mail connection: sockets plus an authenticated session.
  *
  * <p>Held for a pass, not a verb: reused sockets without the session would
- * replay an answered IMAP greeting. The handle is a bridge pointer: one owner,
- * one thread at a time, freed once by {@link #close} (try-with-resources).
+ * replay an answered IMAP greeting. The handle is a bridge pointer, freed once
+ * by {@link #close} (try-with-resources): its verbs, {@link #reopen} and
+ * {@link #close} hold the session's lock, so none frees it under another.
  */
 public final class MailSession implements AutoCloseable {
     private final Account account;
@@ -70,7 +71,7 @@ public final class MailSession implements AutoCloseable {
      * <p>The run's sessions share what they read of a Gmail account. Kept
      * across {@link #reopen}.
      */
-    public void join(long run) {
+    public synchronized void join(long run) {
         this.run = run;
         if (handle != 0) {
             Native.joinMailRun(handle, run);
@@ -84,7 +85,7 @@ public final class MailSession implements AutoCloseable {
      * reopening half would leave the other claiming a conversation the server
      * never had.
      */
-    void reopen() {
+    synchronized void reopen() {
         release();
         MailSession opened = MailClient.openMail(account);
         this.transport = opened.transport;
@@ -100,7 +101,7 @@ public final class MailSession implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         release();
     }
 

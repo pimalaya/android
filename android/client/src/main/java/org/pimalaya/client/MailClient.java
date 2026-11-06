@@ -206,8 +206,10 @@ public class MailClient {
         // NOTE: run once, never retried: sending is not idempotent, and an
         // accepted submission that lost its answer would go twice. A failure
         // leaves it queued for the outbox instead.
-        String json =
-                Native.submitMessage(session.transport(), session.handle(), source, payload);
+        String json;
+        synchronized (session) {
+            json = Native.submitMessage(session.transport(), session.handle(), source, payload);
+        }
 
         JSONObject reply = Replies.read(json);
         String error = reply.optString("error");
@@ -242,13 +244,15 @@ public class MailClient {
      * <p>A copy that lost its answer and ran again would file a second one.
      */
     public void copy(MailSession session, MessageRef message, String target) {
-        Replies.object(
-                Native.copyMessage(
-                        session.transport(),
-                        session.handle(),
-                        message.mailbox(),
-                        message.id(),
-                        target));
+        synchronized (session) {
+            Replies.object(
+                    Native.copyMessage(
+                            session.transport(),
+                            session.handle(),
+                            message.mailbox(),
+                            message.id(),
+                            target));
+        }
     }
 
     /**
@@ -271,13 +275,15 @@ public class MailClient {
 
     /** Appends one message to {@code mailbox}; IMAP only, run once. */
     public void append(MailSession session, String mailbox, byte[] source, Flags flags) {
-        Replies.object(
-                Native.appendMessage(
-                        session.transport(),
-                        session.handle(),
-                        mailbox,
-                        source,
-                        flags.toJson().toString()));
+        synchronized (session) {
+            Replies.object(
+                    Native.appendMessage(
+                            session.transport(),
+                            session.handle(),
+                            mailbox,
+                            source,
+                            flags.toJson().toString()));
+        }
     }
 
     /**
@@ -324,6 +330,12 @@ public class MailClient {
      * session; a live server's refusal is reported at once. Never submission.
      */
     private static String on(MailSession session, OnSession verb) {
+        synchronized (session) {
+            return onLocked(session, verb);
+        }
+    }
+
+    private static String onLocked(MailSession session, OnSession verb) {
         String reply;
         boolean reopened = false;
         try {
