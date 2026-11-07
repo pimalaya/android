@@ -36,6 +36,9 @@ change: oauth-verification
 - [ ] Confirm the shipped client `ba9b19e1-973e-4d7c-aed9-848bd2fee385` lives in the pimalaya.org tenant (Entra admin center > App registrations > Overview, Directory ID); if it does, it is the production client and production-release §4's "production Entra client" is done
 - [ ] Authentication: `pimalaya://oauth2redirect` under Mobile and desktop applications, public client flows allowed, any organisational directory and personal Microsoft accounts
 - [ ] Branding & properties: name, logo, home page, privacy statement and terms URLs on pimalaya.org, publisher domain pimalaya.org (submission.md §4)
-- [ ] API permissions listing the delegated scopes the app asks for, so a tenant admin can grant them in one consent
+- [ ] API permissions listing the delegated scopes the app asks for (android/app/src/main/java/org/pimalaya/account/Oauth.java), so a tenant admin can grant them in one consent: Microsoft Graph `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`, `Tasks.ReadWrite`, `Contacts.ReadWrite`, `openid`, `profile`, `email`, `offline_access`; Office 365 Exchange Online `IMAP.AccessAsUser.All`, `SMTP.Send`
 - [ ] Docs: the admin consent link for tenants that block user consent
-- [ ] Publisher verification, when a work tenant's refusal shows up or a legal entity exists: Partner Center enrollment, business verification, a pimalaya.org business mailbox, then the Partner One ID on the registration
+- [ ] Publisher verification, started now that Google's is pending (owner, 2026-11-07): a work tenant's risk-based step-up consent, on by default, sends an unverified multitenant app asking non-basic scopes to an admin. Microsoft reviews no scopes and no video, only the publisher's identity:
+  - a member work account on pimalaya.org in the tenant, Application Administrator and MFA (Partner Center takes no personal Microsoft account)
+  - Microsoft AI Cloud Partner Program enrollment with it: the sole trader's legal name, address and registration documents, a pimalaya.org contact mailbox; sole-trader eligibility is not stated on Microsoft's pages, the enrollment answers it
+  - once business verification passes, the partner global account's Partner One ID entered under Branding & properties > Publisher verification, the consent screen then showing the verified badge

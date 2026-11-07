@@ -7,7 +7,7 @@ change: production-release
 
 ## 0. Started now: what waits on others
 
-- [ ] Privacy policy on pimalaya.org, matching PRIVACY.md (Google's verification and Play's Data safety form both ask for it)
+- [x] Privacy policy on pimalaya.org, matching PRIVACY.md (Google's verification and Play's Data safety form both ask for it): https://pimalaya.org/android/privacy/, rendered from PRIVACY.md (oauth-verification §1)
 - [ ] Google: restricted-scope verification for `https://mail.google.com/` submitted (privacy policy, demo video, Search Console for pimalaya.org, yearly renewal); until then 100 users and 7-day refresh tokens in Testing (oauth-verification); the owner runs it in another session (2026-11-07)
 - [x] Play developer account: personal, created long before 2023-11-13 (owner, 2026-11-07), so the closed test of 12 testers for 14 days asked of newer personal accounts does not apply (Play Console's dashboard lists it when it does); the app is created and on internal testing
 
@@ -74,7 +74,11 @@ Restated against the code on 2026-11-06. Gone since the 2026-10-09 review: the I
 ## 7. Store release
 
 - [ ] One release once everything is ready (owner, 2026-11-07): the store at storage-v1.0.0 (pimdir's owner fence decided, io-pimdir released at v1, the app following it) and the io-* libraries released at the final validation; Play internal testing until then
-- [ ] Play: fixed-price listing, payments profile, EU trader declaration (it shows an address publicly), Data safety form, screenshots light and dark
+- [ ] Play store listing: name, short description (80 characters), full description, 512x512 icon, 1024x500 feature graphic, category, contact email, privacy policy URL. Phone screenshots rendered from the design canvas on 2026-11-07, light and dark, 1080x1920 with a caption (Play refuses a side over twice the other, so the canvas's 390x844 frames sit on the wash); the README's full-height ones in screenshots/
+- [ ] Play pricing: the fixed price and a payments profile. Play never turns a free app paid, so App pricing is checked still open before any wider track
+- [ ] Play EU trader declaration (it shows an address publicly)
+- [ ] Play App content: Data safety form (PRIVACY.md), App access (sign-in steps and a working test account for the reviewer, since the app shows nothing before an account), content rating questionnaire, target audience, ads (none), Advertising ID (unused). No sensitive-permission or foreground-service declaration: the manifest asks for neither
+- [ ] Play production only once Google's verification lifts the 100-user cap (oauth-verification §2), else Google sign-in stops at 100 users, paying ones included
 - [ ] F-Droid: fastlane metadata, the recipe building Rust and the NDK, reproducible to keep the upstream signature
 - [ ] GitHub release: signed APKs per ABI and universal, CHANGELOG section cut for the version
 - [ ] Release checklist run on a clean phone: setup on Google, Microsoft, Fastmail and an IMAP and DAV host, a day of background sync, offline use
