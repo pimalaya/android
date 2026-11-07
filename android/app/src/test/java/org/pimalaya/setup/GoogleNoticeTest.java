@@ -144,22 +144,45 @@ public class GoogleNoticeTest {
     /** The notice names what the grant asks for, and nothing else. */
     @Test
     public void theNoticeNamesOnlyTheDataAsked() {
-        Context context = RuntimeEnvironment.getApplication();
-        String mail = GoogleNotice.text(context, Set.of(Oauth.GOOGLE_MAIL_SCOPE)).toString();
-        assertTrue(mail.contains(context.getString(R.string.google_notice_mail)));
-        assertTrue(mail.contains(context.getString(R.string.google_notice_identity)));
-        assertTrue(mail.contains(context.getString(R.string.google_notice_use)));
-        assertFalse(mail.contains(context.getString(R.string.google_notice_calendar)));
-        assertFalse(mail.contains(context.getString(R.string.google_notice_mirror)));
+        GoogleNotice.show(host, Set.of(Oauth.GOOGLE_MAIL_SCOPE), () -> {}, () -> {});
+        String mail = shown();
+        assertTrue(mail.contains(host.getString(R.string.google_notice_mail)));
+        assertTrue(mail.contains(host.getString(R.string.google_notice_identity)));
+        assertTrue(mail.contains(host.getString(R.string.google_notice_use)));
+        assertTrue(mail.contains(host.getString(R.string.google_notice_privacy)));
+        assertFalse(mail.contains(host.getString(R.string.google_notice_calendar)));
+        assertFalse(mail.contains(host.getString(R.string.google_notice_mirror)));
 
-        String contacts =
-                GoogleNotice.text(context, Set.of(Oauth.GOOGLE_PEOPLE_SCOPE)).toString();
-        assertTrue(contacts.contains(context.getString(R.string.google_notice_contacts)));
-        assertTrue(contacts.contains(context.getString(R.string.google_notice_mirror)));
+        GoogleNotice.show(host, Set.of(Oauth.GOOGLE_PEOPLE_SCOPE), () -> {}, () -> {});
+        String contacts = shown();
+        assertTrue(contacts.contains(host.getString(R.string.google_notice_contacts)));
+        assertTrue(contacts.contains(host.getString(R.string.google_notice_mirror)));
         assertFalse(
                 "no address read for contacts alone",
-                contacts.contains(context.getString(R.string.google_notice_identity)));
-        assertFalse(contacts.contains(context.getString(R.string.google_notice_mail)));
+                contacts.contains(host.getString(R.string.google_notice_identity)));
+        assertFalse(contacts.contains(host.getString(R.string.google_notice_mail)));
+    }
+
+    /** Every text the notice showing shows, one per line. */
+    private static String shown() {
+        AlertDialog notice = ShadowAlertDialog.getLatestAlertDialog();
+        return String.join("\n", texts(notice.getWindow().getDecorView()));
+    }
+
+    /** Every text a view shows, its children's included. */
+    private static List<String> texts(android.view.View view) {
+        List<String> texts = new ArrayList<>();
+        if (view instanceof android.widget.TextView
+                && view.getVisibility() == android.view.View.VISIBLE) {
+            texts.add(((android.widget.TextView) view).getText().toString());
+        }
+        if (view instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup) view;
+            for (int index = 0; index < group.getChildCount(); index++) {
+                texts.addAll(texts(group.getChildAt(index)));
+            }
+        }
+        return texts;
     }
 
     /** An executor holding its tasks, so nothing reaches the network. */

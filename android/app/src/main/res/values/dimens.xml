@@ -75,6 +75,11 @@
     <dimen name="domain_tile_badge_glyph">16dp</dimen>
     <dimen name="domain_tile_overhang">6dp</dimen>
 
+    <!-- The Google notice's service rows: each service's glyph on a
+         washed disc, as the canvas draws it. -->
+    <dimen name="notice_disc">40dp</dimen>
+    <dimen name="notice_glyph">22dp</dimen>
+
     <!-- The bottom navigation: an icon on its indicator pill over a
          label, per item. -->
     <dimen name="nav_height">80dp</dimen>
