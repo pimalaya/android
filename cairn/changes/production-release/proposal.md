@@ -19,4 +19,4 @@ The production track and F-Droid wait for a storage-v1.0.0 store. A store of ano
 
 The 2026-10-09 review items found fixed on 2026-11-06 are left out: time zones and series (calendar-zones-and-series, calendar-occurrence-writes), attachments opened and saved (attachments-as-files), JMAP sending and calendar writes, device-to-device transfer (data_extraction_rules), event reminders through the phone's calendar and new-mail notifications (background-check), a JNI failure answered as an error reply rather than a null (`ErrorReply`, rust/src/ffi.rs).
 
-Out of this milestone: iOS, push (relay), remote search, SecureStore blobs bound to their purpose (audit-s1-residuals I3, later by the owner's choice of 2026-11-07).
+Out of this milestone: iOS, push (relay), remote search, SecureStore blobs bound to their purpose (audit-s1-residuals I3, later by the owner's choice of 2026-11-07), hide in recents (hide-in-recents, later, 2026-11-07).

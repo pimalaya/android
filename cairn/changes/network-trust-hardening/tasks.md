@@ -26,14 +26,14 @@ Rust paths are relative to rust/src/, Java to android/*/src/main/java/org/pimala
 ## Open
 
 - [ ] M6 duplicate writes (ambiguous SMTP/JMAP/Graph/Gmail sends, IMAP COPY fallback rerun, append retry, Graph event `transactionId`)
-- [ ] H3 issuer flow: a config pairing an honest issuer with another host still gets that issuer's token (needs RFC 9728 protected-resource metadata or a registrable-domain rule); the M3 flag covers passwords only
-- [ ] M1 `iss` is checked when present but not required when metadata advertises `authorization_response_iss_parameter_supported` (io-pim-discovery 0.9 drops that field); shipped Google and Microsoft grants keep their own redirect URIs and no expected issuer
-- [ ] M2 io-oauth itself still accepts http endpoints (library change)
+- [ ] (moved to oauth-hardening, 2026-11-07) H3 issuer flow: a config pairing an honest issuer with another host still gets that issuer's token (needs RFC 9728 protected-resource metadata or a registrable-domain rule); the M3 flag covers passwords only
+- [ ] (moved to oauth-hardening, 2026-11-07) M1 `iss` is checked when present but not required when metadata advertises `authorization_response_iss_parameter_supported` (io-pim-discovery 0.9 drops that field); shipped Google and Microsoft grants keep their own redirect URIs and no expected issuer
+- [ ] (moved to oauth-hardening, 2026-11-07) M2 io-oauth itself still accepts http endpoints (library change)
 - [ ] L1 throttle resend: read timeout treated as loss for PUT/DELETE, 503 retry of POST
-- [ ] L2 discovery walk redirects to non-http schemes and internal hosts (io-pim-discovery)
-- [ ] L3 RFC 8707 `resource` on token exchange and refresh
-- [ ] L4 identity check after a grant
-- [ ] L5 error redirects before the state check, loopback first connection
-- [ ] L6 TLS 1.2 floor on API 26-28
-- [ ] L8 DoH without DNSSEC, PACC digest trust documented
-- [ ] `trusted_href` approximates a site without a public-suffix list (generic second levels like `co.uk` refused)
+- [ ] (moved to network-warnings, 2026-11-07: warned about, not refused) L2 discovery walk redirects to non-http schemes and internal hosts (io-pim-discovery)
+- [ ] (moved to oauth-hardening, 2026-11-07) L3 RFC 8707 `resource` on token exchange and refresh
+- [ ] (moved to oauth-hardening, 2026-11-07) L4 identity check after a grant
+- [ ] (moved to oauth-hardening, 2026-11-07) L5 error redirects before the state check, loopback first connection
+- [ ] (moved to network-warnings, 2026-11-07: warned about, not refused) L6 TLS 1.2 floor on API 26-28
+- [ ] (moved to network-warnings, 2026-11-07: warned about, not refused) L8 DoH without DNSSEC, PACC digest trust documented
+- [ ] (moved to network-warnings, 2026-11-07: warned about, not refused) `trusted_href` approximates a site without a public-suffix list (generic second levels like `co.uk` refused)
