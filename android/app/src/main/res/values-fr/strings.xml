@@ -2,7 +2,7 @@
 <resources>
 
     <string name="store_refused_title">Réinstallez l\'application</string>
-    <string name="store_refused_message">Cette version de l\'application ne peut pas ouvrir les données qu\'une version précédente a enregistrées sur ce téléphone. Rien n\'y a été lu ni modifié. Désinstallez puis réinstallez l\'application : elle repart d\'un nouveau stockage, et vos comptes se resynchronisent depuis leurs serveurs. Ce qui n\'était pas encore synchronisé, comme un message encore dans la boîte d\'envoi, est perdu avec l\'ancien stockage.</string>
+    <string name="store_refused_message">Cette version de l\'application ne peut pas ouvrir les données qu\'une version précédente a enregistrées sur ce téléphone. Rien n\'y a été lu ni modifié. Désinstallez l\'application sans conserver ses données, puis réinstallez-la : elle repart d\'un nouveau stockage, et vos comptes se resynchronisent depuis leurs serveurs. Ce qui n\'était pas encore synchronisé, comme un message encore dans la boîte d\'envoi, est perdu avec l\'ancien stockage.</string>
     <string name="store_refused_code">Raison : %1$s (%2$s)</string>
     <string name="new_account">Nouveau compte</string>
     <string name="cancel_auth">Annuler</string>
@@ -56,7 +56,7 @@
     <string name="task_google_local">Google Tasks garde le titre, les notes, le jour d\'échéance et l\'état fait. Touchez pour voir ce qui reste sur ce téléphone.</string>
     <string name="google_tasks_limits_title">Ce que Google Tasks garde</string>
     <string-array name="google_tasks_limits">
-        <item>L\'état d\'une tâche (Boîte, En attente, Un jour), ses catégories, sa priorité, la personne attendue et le mail d\'où elle vient restent sur ce téléphone seulement. Un autre appareil ou une réinstallation les perd.</item>
+        <item>L\'état d\'une tâche (Boîte, En attente, Un jour), ses catégories, sa priorité, la personne attendue et le mail d\'où elle vient restent sur ce téléphone seulement. Un autre appareil ne les voit pas, et une réinstallation ne les garde que si vous conservez les données de l\'application en la désinstallant.</item>
         <item>Google garde un jour d\'échéance, pas une heure.</item>
         <item>Une tâche En cours apparaît à faire sur Google, et une tâche Annulée apparaît faite.</item>
         <item>Une tâche modifiée ici et sur Google entre deux synchronisations revient en conflit sur toute la tâche, pas sur le seul détail modifié des deux côtés.</item>

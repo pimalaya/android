@@ -27,10 +27,14 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- NOTE: predictive back stays off: from API 36 it stops calling
-         onBackPressed, which MainActivity steps its pages back with. -->
+         onBackPressed, which MainActivity steps its pages back with.
+         hasFragileUserData makes Android 10+ offer to keep the app's data on
+         uninstall: the outbox, staged edits and phone-only task details
+         would go with it. -->
     <application
         android:name=".App"
         android:allowBackup="false"
+        android:hasFragileUserData="true"
         android:enableOnBackInvokedCallback="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"

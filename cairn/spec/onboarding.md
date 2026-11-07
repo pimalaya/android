@@ -258,6 +258,14 @@ The app SHALL exclude every file from cloud backup and from a device transfer. A
 - WHEN the app starts
 - THEN it opens, asks to add the accounts again, and starts every time after
 
+### Requirement: An uninstall offers to keep the app's data
+On Android 10 and later, uninstalling the app SHALL offer to keep its data (`android:hasFragileUserData`), so a reinstall signed by the same key finds its store, its accounts and what was not yet synced. Messages that send the user to a reinstall SHALL say whether to keep the data: a refused store asks for a reinstall without it, and what stays on the phone alone survives a reinstall only with it.
+
+#### Scenario: An uninstall with a message in the outbox
+- GIVEN a message waiting in the outbox
+- WHEN the app is uninstalled keeping its data, then installed again from the same channel
+- THEN the message is still waiting, and the next sync sends it
+
 ### Requirement: The sync adapters serve their own accounts alone
 The contacts sync adapter SHALL run only for one of the app's accounts and the contacts authority, the calendar one only for one of the app's accounts and the calendar authority; any other request, a missing account included, SHALL do nothing.
 

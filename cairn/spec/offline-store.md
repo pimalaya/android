@@ -813,7 +813,7 @@ The store's writing connection SHALL run with `synchronous = FULL` (STORAGE §4.
 - THEN the writer syncs at every commit, and the log names the SQLite version
 
 ### Requirement: An incompatible store blocks start-up
-The app SHALL refuse to start on a store of another draft or another schema, or one it cannot open, saying the store's version is not compatible and the app must be reinstalled, and SHALL neither read nor write it.
+The app SHALL refuse to start on a store of another draft or another schema, or one it cannot open, saying the store's version is not compatible and the app must be reinstalled without keeping its data, and SHALL neither read nor write it.
 
 #### Scenario: A store from an earlier test build
 - GIVEN a store written before the app's own shape, with `STRICT` tables

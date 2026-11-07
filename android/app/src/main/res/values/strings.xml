@@ -6,7 +6,7 @@
 
     <!-- The screen standing for the app when its store is of another draft (StoreRefusedActivity). -->
     <string name="store_refused_title">Reinstall the app</string>
-    <string name="store_refused_message">This version of the app cannot open the data an earlier version stored on this phone. Nothing in it has been read or changed. Uninstall the app and install it again: it starts with a new store, and your accounts sync back from their servers. Anything not yet synced, such as a message still in the outbox, is lost with the old store.</string>
+    <string name="store_refused_message">This version of the app cannot open the data an earlier version stored on this phone. Nothing in it has been read or changed. Uninstall the app without keeping its data, then install it again: it starts with a new store, and your accounts sync back from their servers. Anything not yet synced, such as a message still in the outbox, is lost with the old store.</string>
     <string name="store_refused_code">Reason: %1$s (%2$s)</string>
 
     <string name="new_account">New account</string>
@@ -63,7 +63,7 @@
     <string name="task_google_local">Google Tasks keeps the title, notes, due day and done. Tap for what stays on this phone.</string>
     <string name="google_tasks_limits_title">What Google Tasks keeps</string>
     <string-array name="google_tasks_limits">
-        <item>A task\'s state (Inbox, Waiting, Someday), its categories, priority, who it waits on and the mail it came from stay on this phone only. Another device or a reinstall loses them.</item>
+        <item>A task\'s state (Inbox, Waiting, Someday), its categories, priority, who it waits on and the mail it came from stay on this phone only. Another device never sees them, and a reinstall keeps them only if you keep the app\'s data when uninstalling it.</item>
         <item>Google keeps a due day, not a time.</item>
         <item>In progress shows as open on Google, and Cancelled as done.</item>
         <item>A task changed both here and on Google between two syncs comes back as a conflict on the whole task, not on the one detail both changed.</item>
