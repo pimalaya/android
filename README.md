@@ -34,9 +34,6 @@ Every screen, light and dark, is drawn on the [design canvas](https://claude.ai/
 - [Features](#features)
 - [Coverage](#coverage)
 - [Installation](#installation)
-  - [Closed alpha](#closed-alpha)
-  - [APK](#apk)
-  - [Sources](#sources)
 - [AI policy](https://github.com/pimalaya/.github/blob/master/AI_POLICY.md)
 - [License](#license)
 - [Social](#social)
@@ -45,27 +42,28 @@ Every screen, light and dark, is drawn on the [design canvas](https://claude.ai/
 
 ## Features
 
-- **All in one**: mail, contacts, calendars and your attachments in a single app.
-- **Merged accounts**: one list per domain across every account, narrowed by filters and chips.
+- **One merged view**: mail, contacts, calendars, tasks and files, each in one list across every account, narrowed by filters and chips.
+- **Local-first**: everything lives on the phone and works offline; changes sync once the network is back, merged rather than overwritten.
 - **Automatic setup**: type your email address, the servers and the sign-in are found for you.
-- **Offline first**: everything lives on the phone, and changes sync once the network is back.
-- **Light syncs**: mail in steps of about 50, only the mailboxes you tick, only what changed.
-- **Mail**: read, reply, forward, star and delete, and open or save attachments.
-- **Contacts**: a complete vCard editor, duplicates merged, import and export.
-- **Calendars**: create, edit and delete events, to-dos and journal entries.
-- **Phone integration**: contacts and calendars in Android's own apps, new-mail notifications.
-- **Private**: no account with us, no analytics, no ads; the app talks only to your providers.
+- **Light syncs**: mail in steps of about 50, only the mailboxes you tick, only what changed, in the background as often as you choose.
+- **Mail**: read, reply, forward, star, move, copy and delete, write in rich text or plain text, open or save attachments. Drafts and attachments in the composer are not there yet.
+- **Contacts**: a complete vCard editor, upcoming birthdays, duplicates merged, import and export.
+- **Calendars**: create, edit and delete events, to-dos and journal entries, in a week or a list view.
+- **Tasks**: the to-dos of every calendar and task list in one list, kept the GTD way (Getting Things Done): Inbox, Waiting and Someday lists, a clarify flow and a weekly review, captures from a widget, a shortcut or the share sheet.
+- **Files**: every attachment as a file, beside your own folders on the phone, searchable by name and sender.
+- **Phone integration**: contacts and calendars in Android's own apps, new-mail notifications, home screen widgets.
+- **Private**: no account with us, no analytics, no ads; the app talks only to your providers, and to Cloudflare's DNS resolver for your domain name when you add an account.
 
 ## Coverage
 
-| Provider | Mail | Contacts | Calendars |
-|----------|------|----------|-----------|
-| Gmail and Google Workspace | [Gmail API][gmail] | [People API][people] | [Calendar API][gcal] |
-| Outlook.com and Microsoft 365 | [Microsoft Graph][msgraph] | [Microsoft Graph][msgraph] | [Microsoft Graph][msgraph] |
-| Fastmail, and any JMAP server | [JMAP][rfc8621] | [JMAP][rfc9610] | [JMAP][jmapcal] |
-| Posteo, and any standard provider | [IMAP][rfc3501] and [SMTP][rfc5321] | [CardDAV][rfc6352] | [CalDAV][rfc4791] |
+| Provider | Mail | Contacts | Calendars | Tasks |
+|----------|------|----------|-----------|-------|
+| Gmail and Google Workspace | [Gmail API][gmail] | [People API][people] | [Calendar API][gcal] | [Tasks API][gtasks] |
+| Outlook.com and Microsoft 365 | [Microsoft Graph][msgraph] | [Microsoft Graph][msgraph] | [Microsoft Graph][msgraph] | [Microsoft Graph][msgraph] |
+| Fastmail, and any JMAP server | [JMAP][rfc8621] | [JMAP][rfc9610] | [JMAP][jmapcal] | |
+| Posteo, and any standard provider | [IMAP][rfc3501] and [SMTP][rfc5321] | [CardDAV][rfc6352] | [CalDAV][rfc4791] | [CalDAV][rfc4791] |
 
-Signing in works with a password, an app password, or [OAuth 2.0][rfc6749], including your provider's own when it supports [dynamic registration][rfc7591]. Servers are found from your address through [autoconfig][autoconfig], [PACC][pacc] and [DNS discovery][rfc6764].
+Signing in works with a password, an app password, an API token, or [OAuth 2.0][rfc6749], including your provider's own when it supports [dynamic registration][rfc7591]. Servers are found from your address through [autoconfig][autoconfig], [PACC][pacc] and [DNS discovery][rfc6764].
 
 [rfc3501]: https://www.rfc-editor.org/rfc/rfc3501
 [rfc4791]: https://www.rfc-editor.org/rfc/rfc4791
@@ -82,6 +80,7 @@ Signing in works with a password, an app password, or [OAuth 2.0][rfc6749], incl
 [gmail]: https://developers.google.com/gmail/api
 [people]: https://developers.google.com/people
 [gcal]: https://developers.google.com/calendar
+[gtasks]: https://developers.google.com/tasks
 [msgraph]: https://learn.microsoft.com/en-us/graph/overview
 
 ## Installation
@@ -90,7 +89,7 @@ The app needs Android 8.0 or newer.
 
 ### Closed alpha
 
-Testers are chosen one by one, for coverage of providers, servers and phones. To apply, write to [pimalaya.org@posteo.net](mailto:pimalaya.org@posteo.net) with the providers or servers you would use, your phone and Android version, and the Google account of that phone to get the app through Google Play's closed testing. Testers report what goes wrong on the [issue tracker](https://github.com/pimalaya/android/issues).
+Testers are chosen one by one, for coverage of providers, servers and phones. To apply, write to [pimalaya.org@posteo.net](mailto:pimalaya.org@posteo.net) with the providers or servers you would use, your phone and Android version, and the Google account of that phone to get the app through Google Play's internal testing. Testers report what goes wrong on the [issue tracker](https://github.com/pimalaya/android/issues). Until Google ends its review of the app, signing in to a Google account shows an unverified-app warning.
 
 ### APK
 
