@@ -144,6 +144,25 @@ public final class FileStore {
         return ItemLinks.derived(messageLinkId) ? null : "part:" + messageLinkId + "#" + section;
     }
 
+    /** A body's parts as files no stand-in holds, each under an id below 0. */
+    public static List<StoredFile> parts(long seq, List<MessageBody.Attachment> attachments) {
+        List<StoredFile> parts = new ArrayList<>(attachments.size());
+        for (int index = 0; index < attachments.size(); index++) {
+            MessageBody.Attachment attachment = attachments.get(index);
+            parts.add(
+                    new StoredFile(
+                            null,
+                            null,
+                            -(seq * 10_000L + index + 1),
+                            attachment.name(),
+                            attachment.mime().isEmpty() ? null : attachment.mime(),
+                            attachment.size(),
+                            attachment.part(),
+                            null));
+        }
+        return parts;
+    }
+
     /** What a file collection is called: a folder's name, or Attachments. */
     public String label(PimdirCollections.Stored collection) {
         return isAttachments(collection)
@@ -472,10 +491,12 @@ public final class FileStore {
      *
      * <p>Its bytes, read from {@code source}, become a blob shared with every
      * file holding the same ones; the folder places the same key with that
-     * body, a stand-in staying (section 14.3).
+     * body, a stand-in staying (section 14.3). A part no stand-in holds
+     * ({@link #parts}) is saved as a file of its own.
      */
     boolean save(String folder, StoredFile file, java.io.File source) throws IOException {
-        return place(folder, file.linkId, file.name, file.mediaType, source);
+        String linkId = file.linkId == null ? "file:" + random() : file.linkId;
+        return place(folder, linkId, file.name, file.mediaType, source);
     }
 
     /**

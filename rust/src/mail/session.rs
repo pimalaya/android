@@ -314,7 +314,7 @@ pub struct NamedStepItem {
     pub flags: Vec<String>,
     /// Its provider id.
     pub handle: String,
-    /// What the store files it under, the handle.
+    /// The identity hint its summary states ([`Named::link_id`]).
     pub link_id: String,
     /// The mailboxes it is a member of, by name.
     pub mailboxes: Vec<String>,

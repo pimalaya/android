@@ -10,6 +10,7 @@ import org.pimalaya.client.PimdirSql;
 
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -88,8 +89,7 @@ public final class PimdirSummary {
             writeList(db, kind, collection, linkId, lists);
         }
         writeAddresses(db, collection, linkId, addresses, fresh);
-        String rule = ruleOf(kind);
-        if (rule != null) {
+        for (String rule : rulesOf(kind)) {
             link(db, rule, linkId);
         }
         if (fresh) {
@@ -106,23 +106,25 @@ public final class PimdirSummary {
     }
 
     /**
-     * The automatic-reference rule (STORAGE §14.2) a summary of this kind runs.
+     * The automatic-reference rules (STORAGE §14.2) a summary of its kind runs.
      *
      * <p>A mail refers to its sender's card, a card gathers its addresses'
      * mail, a calendar item the mail inviting to it (from the mail's side once
-     * its body is stored, {@code MailStore.restateFromBody}).
+     * its body is stored, {@code MailStore.restateFromBody}), a task the mail
+     * its {@code mid} names, whichever is written last.
      */
-    private static String ruleOf(String kind) {
+    private static List<String> rulesOf(String kind) {
         switch (kind) {
             case "mail":
-                return "LINK_SENDERS_OF";
+                return List.of("LINK_SENDERS_OF", "LINK_SOURCES_TO");
             case "contact":
-                return "LINK_MAIL_FROM";
+                return List.of("LINK_MAIL_FROM");
             case "event":
+                return List.of("LINK_INVITATIONS_TO");
             case "task":
-                return "LINK_INVITATIONS_TO";
+                return List.of("LINK_INVITATIONS_TO", "LINK_SOURCES_OF");
             default:
-                return null;
+                return List.of();
         }
     }
 

@@ -12,7 +12,7 @@ import org.json.JSONObject;
  *
  * @param flags its IMAP markers
  * @param handle its provider id
- * @param linkId what the store files it under, the handle
+ * @param linkId the identity hint its summary states
  * @param mailboxes the mailboxes it is a member of, by name
  * @param path the file its body was written to
  * @param received reception time in epoch milliseconds; null when unknown

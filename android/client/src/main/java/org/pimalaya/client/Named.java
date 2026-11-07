@@ -15,9 +15,8 @@ import org.json.JSONObject;
  *
  * @param flags its IMAP markers
  * @param handle its UID within its mailbox, or the provider's message id
- * @param linkId what the store files it under: as listed, the handle or on
- *     IMAP the UID, UIDVALIDITY and mailbox; the bound or pending create's
- *     link id once named
+ * @param linkId the identity hint the store keys it by (its {@code
+ *     Message-ID}), the bound or create's link id once named; null unnamed
  * @param sortKey its summary's sort key, empty when listed unnamed
  * @param summary its summary, opaque (the pimdir persistence format),
  *     read-only by contract; null when listed unnamed
@@ -49,17 +48,12 @@ public record Named(
         }
     }
 
-    /**
-     * One listed message off the bridge.
-     *
-     * <p>An absent link id is the handle, as the engine reads it.
-     */
+    /** One listed message off the bridge. */
     static Named from(JSONObject item) {
-        String handle = Json.string(item, "handle");
         return new Named(
                 Json.strings(item.optJSONArray("flags")),
-                handle,
-                item.isNull("linkId") ? handle : item.optString("linkId"),
+                Json.string(item, "handle"),
+                item.isNull("linkId") ? null : item.optString("linkId"),
                 item.optString("sortKey"),
                 item.optJSONObject("summary"));
     }

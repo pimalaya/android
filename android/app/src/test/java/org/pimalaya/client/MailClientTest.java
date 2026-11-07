@@ -786,10 +786,11 @@ public class MailClientTest {
     /** A round's page as rs/mail/listing.rs writes it (its own test pins it). */
     private static final String ROUND =
             "{\"complete\":true,\"cursor\":\"7:8\",\"items\":[{\"flags\":[\"\\\\Seen\"],"
-                    + "\"handle\":\"7\",\"linkId\":\"7\",\"sortKey\":\"2026-10-01T08:00:00Z\","
+                    + "\"handle\":\"7\",\"linkId\":\"m1@example.org\","
+                    + "\"sortKey\":\"2026-10-01T08:00:00Z\","
                     + "\"summary\":{\"mail\":{\"addresses\":[],\"date\":\"2026-10-01T08:00:00Z\","
                     + "\"in_reply_to\":[],\"message_id\":\"m1@example.org\",\"subject\":\"Hi\"}}},"
-                    + "{\"flags\":[],\"handle\":\"8\",\"linkId\":\"8\"}],\"last\":false,"
+                    + "{\"flags\":[],\"handle\":\"8\"}],\"last\":false,"
                     + "\"vanished\":[]}";
 
     @Test
@@ -811,13 +812,14 @@ public class MailClientTest {
         Named named = round.items().get(0);
         assertEquals(List.of("\\Seen"), named.flags());
         assertEquals("7", named.handle());
-        assertEquals("7", named.linkId());
+        assertEquals("m1@example.org", named.linkId());
         assertEquals("2026-10-01T08:00:00Z", named.sortKey());
         assertEquals(
                 "m1@example.org",
                 named.summary().getJSONObject("mail").getString("message_id"));
         Named bare = round.items().get(1);
         assertEquals("absent reads empty, as optString did", "", bare.sortKey());
+        assertEquals("named by the driver", null, bare.linkId());
         assertEquals(null, bare.summary());
         assertSameJson(ROUND, round.toJson().toString());
 

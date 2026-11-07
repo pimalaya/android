@@ -50,7 +50,8 @@ import java.util.function.Supplier;
  *
  * <p>Mail logs in per session, the engine reconciles per collection: a pass
  * runs a few caller-opened sessions side by side ({@code WorkerPool}). Pages
- * land newest first in their own writes, named (pimdir SYNC section 4).
+ * land newest first in their own writes, named (pimdir SYNC section 4): a
+ * message by its {@code Message-ID}, its server id the handle alone.
  */
 public final class MailEngine extends PimdirEngine {
     /**
@@ -95,56 +96,26 @@ public final class MailEngine extends PimdirEngine {
      * The account's mailboxes and their roles, in one round.
      *
      * <p>Records account-wide listing (Gmail, JMAP), All Mail (Gmail) and
-     * single-message erase; other accounts' cross-linked bodies are released
-     * once ({@link MailStore#repairLinks}).
+     * single-message erase.
      */
     public List<Mailbox> mailboxes() {
         List<Mailbox> mailboxes = clients.mail().listMailboxes(session);
         Account server = session.account();
-        boolean accountWide = server.info().accountLevel();
-        MailPolicy.markAccountWide(pimdir.context(), accountId, accountWide);
+        MailPolicy.markAccountWide(pimdir.context(), accountId, server.info().accountLevel());
         MailPolicy.markAllMail(pimdir.context(), accountId, server.info().hasAllMail());
         MailPolicy.markExpungesOne(pimdir.context(), accountId, session.expungesOne());
-        if (!accountWide) {
-            int released;
-            synchronized (locks.store) {
-                released = mail().repairLinks(accountId);
-            }
-            if (released > 0) {
-                Log.i("pimalaya", "mail bodies linked across mailboxes released: " + released);
-            }
-        }
         return mailboxes;
     }
 
-    /**
-     * The bodies the store holds under some link ids, within this account.
-     *
-     * <p>A link id spans mailboxes only on account-wide listings (Gmail, JMAP);
-     * elsewhere a handle is one mailbox's (an IMAP UID, a Graph id), so nothing
-     * links and every body is fetched.
-     */
+    /** The mailbox {@link #download} raises bodies in, null outside one. */
+    private String upgrading;
+
+    /** The bodies the account holds for {@link #upgrading}'s messages. */
     @Override
     protected JSONObject lookup(JSONArray links) throws JSONException {
-        return accountWide()
-                ? offline.lookupObjects(links, accountId)
-                : new JSONObject().put("objects", new JSONObject());
-    }
-
-    /** The link id each member of the page last listed came under. */
-    private final Map<String, String> listedLinks = new HashMap<>();
-
-    @Override
-    protected Map<String, String> listedLinks() {
-        return listedLinks;
-    }
-
-    /** Remembers the link ids a page's members were listed under. */
-    private void rememberListed(String collection, List<Named> items) {
-        listedLinks.clear();
-        for (Named item : items) {
-            listedLinks.put(collection + "\n" + item.handle(), item.linkId());
-        }
+        return upgrading == null
+                ? new JSONObject().put("objects", new JSONObject())
+                : offline.lookupMessages(links, upgrading, accountId);
     }
 
     /**
@@ -435,14 +406,10 @@ public final class MailEngine extends PimdirEngine {
         final String checkpoint;
         final boolean empty;
 
-        /** The members as the enumerate named them, until then as stepped. */
-        List<Named> named;
-
         Landing(List<Named> items, String checkpoint, boolean empty) {
             this.items = items;
             this.checkpoint = checkpoint;
             this.empty = empty;
-            this.named = items;
         }
     }
 
@@ -452,16 +419,15 @@ public final class MailEngine extends PimdirEngine {
      * <p>On an empty mailbox opening a round, they are that round, closed with
      * {@code checkpoint} (the history id before the step), so the next pass is
      * a delta; elsewhere a delta adding them, finding nothing absent. Answers
-     * the members under the link ids they landed with: a sent copy's is its
-     * create's ({@link #nameByMessageId}), which its body downloads under.
+     * the members that landed under the keys the store gave them, which their
+     * bodies download under.
      */
     List<Named> land(String collection, List<Named> items, String checkpoint) {
         boolean empty;
         synchronized (locks.store) {
             empty = !offline.bindsAny(collection);
         }
-        Landing step = new Landing(items, checkpoint, empty);
-        landing = step;
+        landing = new Landing(items, checkpoint, empty);
         try {
             String bound = bound(collection);
             MailStore.Coverage coverage = mail().coverage(collection);
@@ -474,7 +440,27 @@ public final class MailEngine extends PimdirEngine {
         } finally {
             landing = null;
         }
-        return step.named;
+        return stored(collection, items);
+    }
+
+    /** The members the store binds, each under the key it filed it by. */
+    private List<Named> stored(String collection, List<Named> items) {
+        List<String> handles = new ArrayList<>(items.size());
+        for (Named item : items) {
+            handles.add(item.handle());
+        }
+        Map<String, String[]> bound;
+        synchronized (locks.store) {
+            bound = offline.bound(collection, handles);
+        }
+        List<Named> stored = new ArrayList<>(items.size());
+        for (Named item : items) {
+            String[] held = bound.get(item.handle());
+            if (held != null && held[0] != null) {
+                stored.add(item.linked(held[0]));
+            }
+        }
+        return stored;
     }
 
     /**
@@ -511,7 +497,6 @@ public final class MailEngine extends PimdirEngine {
         long started = System.nanoTime();
         MailPage page = clients.mail().enumerateMailbox(session, mailboxOf(collection), request);
         page = page.with(nameUnnamed(collection, listing, page));
-        rememberListed(collection, page.items());
         page = page.with(nameByMessageId(collection, page.items()));
         remote(System.nanoTime() - started);
         return listed(collection, page, true).toJson();
@@ -535,8 +520,6 @@ public final class MailEngine extends PimdirEngine {
         Landing step = landing;
         landing = null;
         boolean opens = listing.round() && step.empty;
-        rememberListed(collection, step.items);
-        step.named = nameByMessageId(collection, step.items);
         MailPage page =
                 new MailPage(
                         opens ? step.checkpoint : null,
@@ -544,39 +527,44 @@ public final class MailEngine extends PimdirEngine {
                         null,
                         false,
                         null,
-                        step.named,
+                        nameByMessageId(collection, step.items),
                         true,
                         false,
                         List.of());
         return listed(collection, page, false);
     }
 
+    /** The mailbox of the arrivals {@link #arrived} holds, null for none. */
+    private String arrivedIn;
+
+    /** A delta's arrivals, by handle, until a write files them. */
+    private final List<String> arrived = new ArrayList<>();
+
     /**
      * Counts a page and owes its arrivals.
      *
      * <p>With {@code arrivals}, a delta's members new to the store are owed
-     * their body whatever the date ({@link MailOwed}); a step's download
-     * anyway.
+     * their body whatever the date ({@link MailOwed}), once a write files them
+     * under their keys ({@link #applied}); a step's download anyway.
      */
     private MailPage listed(String collection, MailPage page, boolean arrivals) {
         List<String> handles = new ArrayList<>();
-        Map<String, String> links = new HashMap<>();
         for (Named item : page.items()) {
             handles.add(item.handle());
-            links.put(item.handle(), item.linkId());
         }
+        arrived.clear();
+        arrivedIn = null;
         if (arrivals && !page.complete() && !handles.isEmpty()) {
             Map<String, String[]> bound;
             synchronized (locks.store) {
                 bound = offline.bound(collection, handles);
             }
-            List<String> arrived = new ArrayList<>();
             for (String handle : handles) {
                 if (!bound.containsKey(handle)) {
-                    arrived.add(links.get(handle));
+                    arrived.add(handle);
                 }
             }
-            MailOwed.owe(pimdir.context(), collection, arrived);
+            arrivedIn = collection;
         }
         listed(handles.size());
         step(Progress.STAGE_DOWNLOAD, handles.size());
@@ -707,13 +695,7 @@ public final class MailEngine extends PimdirEngine {
         return collections;
     }
 
-    /**
-     * Names an arrival by the pending create sharing its {@code Message-ID}.
-     *
-     * <p>So the engine lands the create on it (pimdir SYNC §6), not a second
-     * copy: a provider-filed sent copy. Already bound members stay as named.
-     * Answers {@code items}, named.
-     */
+    /** Readies provider-filed sent copies to land on their creates. */
     List<Named> nameByMessageId(String collection, List<Named> items) {
         if (items.isEmpty()) {
             return items;
@@ -910,12 +892,14 @@ public final class MailEngine extends PimdirEngine {
         if (handles.isEmpty()) {
             return List.of();
         }
+        upgrading = collection;
         try {
             Log.d(
                     "pimalaya",
                     "mail bodies " + collection + " (" + handles.size() + "): "
                             + clients.offline().upgrade(this, collection, handles, false));
         } finally {
+            upgrading = null;
             // NOTE: every write naming them has returned, committed or not:
             // one no row names (the write failed) is an orphan to unlink.
             for (String hash : pinned) {
@@ -1188,9 +1172,22 @@ public final class MailEngine extends PimdirEngine {
         return files;
     }
 
+    /** Owes the arrivals a write filed, under the keys it gave them. */
     @Override
     protected void applied(JSONArray effects) {
         MailStager.applied(pimdir, effects);
+        if (arrived.isEmpty()) {
+            return;
+        }
+        Map<String, String[]> bound = offline.bound(arrivedIn, arrived);
+        List<String> owed = new ArrayList<>(bound.size());
+        for (String[] held : bound.values()) {
+            if (held[0] != null) {
+                owed.add(held[0]);
+            }
+        }
+        arrived.removeAll(bound.keySet());
+        MailOwed.owe(pimdir.context(), arrivedIn, owed);
     }
 
     @Override

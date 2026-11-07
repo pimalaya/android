@@ -28,9 +28,6 @@ public final class MailPolicy {
     /** Which accounts are listed account-wide, by account id. */
     private static final String ACCOUNT_WIDE_PREFS = "mail-account-wide";
 
-    /** Which accounts had their cross-linked bodies released, by account id. */
-    private static final String LINKS_REPAIRED_PREFS = "mail-links-repaired";
-
     /** Accounts whose servers erase no single message (no UIDPLUS), by id. */
     private static final String MARKING_PREFS = "mail-marks-deleted";
 
@@ -219,20 +216,6 @@ public final class MailPolicy {
         context.getSharedPreferences(TRASH_PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .remove(accountEmail)
-                .apply();
-    }
-
-    /** Whether an account's cross-linked bodies were released. */
-    boolean linksRepaired(String accountId) {
-        return context.getSharedPreferences(LINKS_REPAIRED_PREFS, Context.MODE_PRIVATE)
-                .getBoolean(accountId, false);
-    }
-
-    /** Remembers that an account had its cross-linked bodies released. */
-    void markLinksRepaired(String accountId) {
-        context.getSharedPreferences(LINKS_REPAIRED_PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .putBoolean(accountId, true)
                 .apply();
     }
 }

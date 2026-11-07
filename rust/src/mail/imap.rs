@@ -16,9 +16,6 @@
 //! SEARCH` once per session (a day of margin past each bound), then each
 //! page's headers by `UID FETCH`. Its cursor is the lowest UID reached,
 //! refused once the UIDVALIDITY moved, for the engine to restart.
-//!
-//! A member's handle is its UID; its link id ([`link_id`]) adds the
-//! mailbox's UIDVALIDITY and the mailbox, last so any name stays whole.
 
 use core::num::{NonZeroU32, NonZeroU64};
 use std::{
@@ -817,10 +814,7 @@ impl<'a, H: Host> ImapSession<'a, H> {
             .fetch_headers(mailbox, validity, uids)?
             .into_iter()
             .filter(|(_, header)| scope.contains(header.summary.date.as_deref()))
-            .map(|(uid, header)| Named {
-                link_id: link_id(mailbox, validity, uid),
-                ..Named::new(uid.to_string(), header.flags, header.summary)
-            })
+            .map(|(uid, header)| Named::new(uid.to_string(), header.flags, header.summary))
             .collect())
     }
 
@@ -1816,11 +1810,6 @@ fn decode_cursor(cursor: &str) -> Option<(u32, u64)> {
     let (validity, modseq) = cursor.split_once(':')?;
 
     Some((validity.parse().ok()?, modseq.parse().ok()?))
-}
-
-/// A message's link id, unique in its account: UID, UIDVALIDITY, mailbox.
-fn link_id(mailbox: &str, validity: u32, uid: u32) -> String {
-    format!("{uid}:{validity}:{mailbox}")
 }
 
 #[cfg(test)]

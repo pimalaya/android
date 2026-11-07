@@ -38,6 +38,7 @@ import org.robolectric.RuntimeEnvironment;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -247,28 +248,52 @@ public class MailEngineTest {
     }
 
     @Test
-    public void aLookupAnswersTheAccountsOwnBodiesOnAnAccountWideListingAlone() throws Exception {
+    public void aLookupAnswersTheAccountsBodiesOfTheSameMessageAlone() throws Exception {
+        store.replaceMailboxes(
+                EMAIL, List.of(new Mailbox("INBOX", ""), new Mailbox("Archive", "")));
+        String archive = store.collectionOf(EMAIL, "Archive");
         store.replaceMailboxes("john@example.com", List.of(new Mailbox("INBOX", "")));
         String theirs = store.collectionOf("john@example.com", "INBOX");
+        held(theirs, "theirs@example.org", "Hi", "their body");
+        held(collection, "ours@example.org", "Hi", "our body");
+        held(collection, "reused@example.org", "First", "the first body");
+        held(collection, "alt:Hi||a@example.org", "Hi", "an undated body");
+        for (String linkId : List.of(
+                "theirs@example.org", "ours@example.org", "alt:Hi||a@example.org")) {
+            held(archive, linkId, "Hi", null);
+        }
+        held(archive, "reused@example.org", "Second", null);
+        JSONArray links =
+                new JSONArray()
+                        .put("theirs@example.org")
+                        .put("ours@example.org")
+                        .put("reused@example.org")
+                        .put("alt:Hi||a@example.org");
+
+        JSONObject objects =
+                engine.offline.lookupMessages(links, archive, accountId).getJSONObject("objects");
+
+        List<String> answered = new ArrayList<>();
+        for (Iterator<String> keys = objects.keys(); keys.hasNext(); ) {
+            answered.add(keys.next());
+        }
+        assertEquals(
+                "another account's, another message's and a derived key's are no fact",
+                List.of("ours@example.org"),
+                answered);
+    }
+
+    /** One message of a mailbox, its body held unless null. */
+    private void held(String mailbox, String linkId, String subject, String body) {
         fixtures.put(
                 pimdir.getWritableDatabase(),
-                theirs,
-                new ItemFixtures.Row("m-1", "their body", null, ""));
-        fixtures.put(
-                pimdir.getWritableDatabase(),
-                collection,
-                new ItemFixtures.Row("m-2", "our body", null, ""));
-        MailEngine driver = new MailEngine(pimdir, Clients.real(), null, accountId);
-        JSONArray links = new JSONArray().put("m-1").put("m-2");
-
-        // NOTE: an IMAP UID or a Graph id names one mailbox's message.
-        MailPolicy.markAccountWide(pimdir.context(), accountId, false);
-        assertEquals(0, driver.lookup(links).getJSONObject("objects").length());
-
-        MailPolicy.markAccountWide(pimdir.context(), accountId, true);
-        JSONObject objects = driver.lookup(links).getJSONObject("objects");
-        assertEquals("another account's is no fact", 1, objects.length());
-        assertTrue(objects.has("m-2"));
+                mailbox,
+                new ItemFixtures.Row(
+                        linkId,
+                        body,
+                        PimdirSummary.mail(null, subject, null, "a@example.org", null, null, 0,
+                                false),
+                        ""));
     }
 
     @Test

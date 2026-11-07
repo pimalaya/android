@@ -10,7 +10,7 @@ Folds into spec/mail.md.
 ## ADDED Requirements
 
 ### Requirement: A message is named by its Message-ID
-A message's link id SHALL be the key pimdir assigns from its `Message-ID` (STORAGE §9): the `Message-ID` when no other message holds it, a key minted over its handle when another does, an `alt:` key when it states none. Its handle SHALL be its server's id, an IMAP UID in its mailbox or a Gmail, JMAP or Graph id, and the only id the app asks its server with. A message in two mailboxes of one account SHALL be one item in two placements, its body linked from either, never under a derived key. Its attachment records and references SHALL follow it across a move, a copy, a label and a UIDVALIDITY change.
+A message's link id SHALL be the key pimdir assigns from its `Message-ID` (STORAGE §9): the `Message-ID` when no other message holds it, a key minted over its handle when another does, an `alt:` key when it states none. Its handle SHALL be its server's id, an IMAP UID in its mailbox or a Gmail, JMAP or Graph id, and the only id the app asks its server with. A message in two mailboxes of one account SHALL be one item in two placements, its body linked from either, never under a derived key. Its attachment records and references SHALL follow it across a move, a copy and a label.
 
 A pending create's origin, the binding its push copies from (pimdir SYNC §3), SHALL be one of the same account holding the body the create carries, when it carries one.
 

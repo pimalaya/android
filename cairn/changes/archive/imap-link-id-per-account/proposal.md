@@ -1,11 +1,13 @@
 ---
 cairn: change
 id: imap-link-id-per-account
-status: active
+status: abandoned
 created: 2026-11-06
 ---
 
 # An IMAP message's link id is unique in its account
+
+Abandoned, superseded by cairn/changes/mail-named-by-message-id (2026-11-07). Its encoding was built (6b604e4) and removed by that change: pimdir names a message by its `Message-ID`, not by a server id, so the collision this change answered cannot occur. Its delta is not folded.
 
 ## Why
 

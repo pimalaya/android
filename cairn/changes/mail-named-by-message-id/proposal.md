@@ -22,7 +22,7 @@ The owner decided on 2026-11-07 to follow pimdir: a message's identity is its `M
 
 - **The key.** Every backend lists a message with its `Message-ID` as the hint and its server id as the handle (an IMAP UID in its mailbox, a Gmail, JMAP or Graph id). The store assigns the key by pimdir's table (STORAGE §9): the `Message-ID` when free or held by the same message (agreeing on subject, date and sender), a `dup:` key minted over the handle when another message holds it, an `alt:` key when the message states none. So two different messages never share a key, whatever their server ids.
 - **One message, several mailboxes.** A message in two mailboxes of one account is one item in two placements: one `seq`, one body, one set of attachment records. A body is linked from any mailbox holding the same identity, on every backend, never under a derived key (`lookup_objects`).
-- **Links follow the message.** Attachment records (`part:<link id>#<section>`) and references (`attachment`, `sender`, `invitation`, `source`) keep their message across a move, a copy, a label, a UIDVALIDITY change or a Graph move.
+- **Links follow the message.** Attachment records (`part:<link id>#<section>`) and references (`attachment`, `sender`, `invitation`, `source`) keep their message across a move, a copy, a label or a Graph move.
 - **No `Message-ID`.** Such a message lists, reads and syncs under its `alt:` key, with no attachment records and no references (pimdir's rule): its reader shows its attachments from its body, and the Files tab does not list them.
 - **Undone.** imap-link-id-per-account's encoding goes: an IMAP handle is its UID in its mailbox, its link id the identity.
 - **Moved to the handle or the identity**, every place reading a mail link id as a server id: the reader's fetch (MailReader `addressOf`), MailEngine's pushes and the `pushRemove` fallback, `lookup` and the body release of mail.md's requirement, `nameByMessageId` (a sent copy Gmail files under a `Message-ID` of its own), the copy origin (bound_elsewhere.sql), the outbox, Deleted items, notifications, search and the stager's `listedLinks`.
@@ -38,4 +38,5 @@ The store is a draft (pimdir storage-draft-09): an account added before this cha
 
 ## Open
 
+- A UIDVALIDITY change: the connector lists every message under a new UID, whose `Message-ID` the old UID's binding still holds, so pimdir mints each one a `dup:` key (STORAGE §9), a derived key with no attachment records nor references, and the round parks on the absent old bindings. pimdir's answer is its rekey (SYNC §8, io-pimdir `PimdirRekey`), carrying every placement onto its new handle by link id: a bridge entry, a rekey signal from the IMAP listing and the engine running it, a follow-up change (found while building this, 2026-11-07).
 - pimdir's identity is store-wide (STORAGE §9.2): the same message in two accounts shares a `seq` and its references, its placements and attachment records listed by account.

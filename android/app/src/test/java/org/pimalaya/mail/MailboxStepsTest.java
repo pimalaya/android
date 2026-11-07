@@ -8,8 +8,6 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
-import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -315,103 +313,6 @@ public class MailboxStepsTest {
             assertTrue("read, not linked: " + handle, server.read.contains(sent + "/" + handle));
         }
         assertEquals(server.body(inbox, "108"), bodyOf(inbox, "108"));
-    }
-
-    @Test
-    public void bodiesOnceLinkedAcrossMailboxesAreReleasedOnceAndReadAgain() throws Exception {
-        Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 120, 1).mailbox(junk, 0, 1);
-        firstSync(server);
-
-        crossLink("120");
-        assertEquals(server.body(inbox, "120"), bodyOf(sent, "120"));
-
-        assertEquals("both sides of the link", 2, store.repairLinks(accountId));
-        assertEquals("once", 0, store.repairLinks(accountId));
-        assertEquals(12, held(inbox)[1]);
-        assertEquals(11, held(sent)[1]);
-
-        // NOTE: the frontier at all mail, so the download takes both bodies
-        // whatever today's date and zone: with none held, its window is the
-        // first of the current month, local midnight, which the sent copy
-        // (twenty minutes before the inbox's, at the turn of a month) falls
-        // below in UTC.
-        MailWindow.set(context, accountId, null);
-        server.read.clear();
-        for (String collection : List.of(inbox, sent)) {
-            List<MailBodies.Row> rows = new ArrayList<>();
-            for (MailBodies.Row row : store.bodyRows(List.of(collection), null)) {
-                if (!row.bodied && row.linkId.equals("120")) {
-                    rows.add(row);
-                }
-            }
-            server.engine.download(collection, rows);
-        }
-        assertEquals(List.of(inbox + "/120", sent + "/120"), server.read);
-        assertEquals(server.body(inbox, "120"), bodyOf(inbox, "120"));
-        assertEquals(server.body(sent, "120"), bodyOf(sent, "120"));
-    }
-
-    @Test
-    public void theRepairKeepsABodyItsMessageStillNeeds() throws Exception {
-        Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 120, 1).mailbox(junk, 0, 1);
-        firstSync(server);
-        String own = hashOf(sent, "120");
-        for (String handle : List.of("117", "118", "119", "120")) {
-            crossLink(handle);
-        }
-
-        // NOTE: the sent copies of 118 to 120 need their body as
-        // release_before says: a conflict, a pending create (no base), a
-        // local edit (a base naming another body).
-        SQLiteDatabase db = pimdir.getWritableDatabase();
-        db.execSQL(
-                "UPDATE bindings SET conflicted = 1 WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = '118')",
-                new Object[] {sent});
-        db.execSQL(
-                "UPDATE bindings SET base_present = 0, base_flags_known = 0, base_object = NULL,"
-                        + " base_revision = NULL"
-                        + " WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = '119')",
-                new Object[] {sent});
-        db.execSQL(
-                "UPDATE bindings SET base_object = ? WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = '120')",
-                new Object[] {own, sent});
-
-        assertEquals("117 on both sides, the inbox's 118 to 120", 5, store.repairLinks(accountId));
-        for (String handle : List.of("117", "118", "119", "120")) {
-            assertNull("released: inbox " + handle, hashOf(inbox, handle));
-        }
-        assertNull("released: sent 117", hashOf(sent, "117"));
-        for (String handle : List.of("118", "119", "120")) {
-            assertNotNull("kept: sent " + handle, hashOf(sent, handle));
-        }
-    }
-
-    /**
-     * What the store-wide lookup left: the sent message filed with the
-     * inbox's body of the same UID, its base moved with it.
-     */
-    private void crossLink(String handle) {
-        String hash = hashOf(inbox, handle);
-        SQLiteDatabase db = pimdir.getWritableDatabase();
-        db.execSQL(
-                "UPDATE bindings SET base_object = ? WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = ?)",
-                new Object[] {hash, sent, handle});
-        db.execSQL(
-                "UPDATE items SET object_hash = ? WHERE collection = ? AND link_id = ?",
-                new Object[] {hash, sent, handle});
-    }
-
-    /** The body hash a mailbox's message is stored with, null for none. */
-    private String hashOf(String collection, String handle) {
-        try (Cursor cursor =
-                pimdir.getReadableDatabase()
-                        .rawQuery(
-                                "SELECT object_hash FROM items WHERE collection = ?"
-                                        + " AND link_id = ?",
-                                new String[] {collection, handle})) {
-            assertTrue(cursor.moveToFirst());
-            return cursor.isNull(0) ? null : cursor.getString(0);
-        }
     }
 
     /** The body a mailbox's message is stored with, its headers left out. */

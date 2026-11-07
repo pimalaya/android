@@ -683,14 +683,16 @@ impl Harness {
             .is_some_and(|covered| covered.scope.since.is_none())
     }
 
-    /// The message ids a mailbox holds.
+    /// The message ids a mailbox holds: the handles it binds.
     fn held(&self, label: &str) -> BTreeSet<String> {
         let reader = PimdirReader::open(self.dir.path()).unwrap();
         reader
             .list_items(label, None, 100_000)
             .unwrap()
             .into_iter()
-            .map(|item| item.link_id.as_str().to_string())
+            .flat_map(|item| reader.item_bindings(label, item.link_id.as_str()).unwrap())
+            .filter(|(source, _)| source.as_str() == SOURCE)
+            .map(|(_, binding)| binding.handle.as_str().to_string())
             .collect()
     }
 

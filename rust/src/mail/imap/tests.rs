@@ -728,23 +728,20 @@ fn a_narrowed_round_hands_every_uid_on_its_last_page() {
     assert_eq!(page.enumerated, None);
 }
 
-/// Two mailboxes reusing a UID list two messages: one handle, two link ids.
+/// A member is named by its header, its UID only its handle.
 #[test]
-fn two_mailboxes_reusing_a_uid_name_two_messages() {
+fn a_member_is_named_by_its_header_not_its_uid() {
     let mut client = Client::new(Scripted::new(daily(3)));
     let mut state = state(Vec::new());
     let whole: MailRequest = from_str(r#"{"listing":{"kind":"round"}}"#).unwrap();
 
-    let mut named = Vec::new();
-    for mailbox in ["INBOX", "Archive/2026#1:x"] {
-        let page = ImapSession::bind(&mut client, &mut state)
-            .list_page(mailbox, &whole)
-            .unwrap();
-        let member = page.items.into_iter().find(|item| item.handle == "3");
-        named.push(member.expect("UID 3 listed").link_id);
-    }
+    let page = ImapSession::bind(&mut client, &mut state)
+        .list_page("INBOX", &whole)
+        .unwrap();
+    let member = page.items.into_iter().find(|item| item.handle == "3");
+    let member = member.expect("UID 3 listed");
 
-    assert_eq!(named, ["3:7:INBOX", "3:7:Archive/2026#1:x"]);
+    assert_eq!(member.link_id, format!("alt:m3|{}|", back(0, 12)));
 }
 
 #[test]

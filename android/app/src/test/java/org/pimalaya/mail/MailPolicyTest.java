@@ -112,12 +112,6 @@ public class MailPolicyTest {
     }
 
     @Test
-    public void theLinksRepairedMarkIsWrittenAsBefore() {
-        assertEquals(0, store.repairLinks(accountId));
-        assertTrue(prefs("mail-links-repaired").getBoolean(accountId, false));
-    }
-
-    @Test
     public void theInboxOnlyMarkIsWrittenAsBefore() {
         store.replaceMailboxes(EMAIL, roster());
         assertTrue(prefs("mail-inbox-only").getBoolean(accountId, false));

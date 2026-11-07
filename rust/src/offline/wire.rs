@@ -1009,8 +1009,8 @@ impl From<SnapshotJson> for PimdirEnumerated {
 /// One listed member on the JSON wire, named by its meta (SYNC §4).
 ///
 /// The link id is the identity read, else the handle (kinds named by their
-/// resource: mail here, calendar resources). A member carrying its body (a
-/// DAV listing that read it) carries its hash.
+/// resource: calendar resources). A member carrying its body (a DAV listing
+/// that read it) carries its hash.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteItemJson {

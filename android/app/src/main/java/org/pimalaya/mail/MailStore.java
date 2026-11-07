@@ -1586,66 +1586,6 @@ public final class MailStore {
     }
 
     /**
-     * Frees an account's bodies linked across IMAP mailboxes by UID.
-     *
-     * <p>A UID was once read as an identity; both sides go back to summaries,
-     * needed bodies staying ({@code release_before}, STORAGE 11.4). Answers how
-     * many were freed.
-     */
-    int releaseCrossLinked(String accountId) {
-        SQLiteDatabase db = items.writable();
-        int released = 0;
-        db.beginTransaction();
-        try {
-            List<String[]> linked = new ArrayList<>();
-            try (Cursor cursor =
-                    PimdirDb.query(
-                            db, "CROSS_LINKED_MAIL", PimdirSql.values("account", accountId))) {
-                while (cursor.moveToNext()) {
-                    linked.add(
-                            new String[] {
-                                cursor.getString(0), cursor.getString(1), cursor.getString(2)
-                            });
-                }
-            }
-            for (String[] item : linked) {
-                // NOTE: a shared body naming the message's own lets go with it,
-                // a message having no cross-source merge to read it for, as
-                // release_bases_before does (STORAGE §11.4).
-                PimdirDb.exec(
-                        db,
-                        "RELEASE_MESSAGE_BODY",
-                        PimdirSql.values(
-                                "collection", item[0], "link_id", item[1], "object_hash", item[2]));
-                released++;
-            }
-            if (released > 0) {
-                PimdirDb.exec(db, "RECOMPUTE_REFCOUNTS", Map.of());
-                items.collectGarbage(db);
-            }
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
-        }
-        items.unlinkCollected();
-        return released;
-    }
-
-    /**
-     * {@link #releaseCrossLinked} once per account whose link ids are local.
-     *
-     * <p>Answers how many were freed, 0 once done.
-     */
-    int repairLinks(String accountId) {
-        if (policy.linksRepaired(accountId)) {
-            return 0;
-        }
-        int released = releaseCrossLinked(accountId);
-        policy.markLinksRepaired(accountId);
-        return released;
-    }
-
-    /**
      * The markers one stored envelope carries, the base of a staged change.
      *
      * <p>Read back, not taken from the row, which carries only the three the

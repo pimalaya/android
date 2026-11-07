@@ -243,9 +243,7 @@ public final class MessageView implements FilesList.Origins {
                     List<FileStore.StoredFile> files =
                             message.pending()
                                     ? new ArrayList<>()
-                                    : parts.files().attachments(
-                                            parts.mail().accountIdOf(message.accountEmail),
-                                            message.id);
+                                    : reader().attachments(message, loaded);
                     ItemLinks.Endpoint self = MailStore.endpointOf(message);
                     int links = self == null ? -1 : parts.links().links(self).size();
 

@@ -271,7 +271,7 @@ public final class DeletedItems {
      *
      * <p>Into its last collection, the store revives the row and its public id
      * (STORAGE §11.1). Elsewhere: a contact or event keeps its UID, a mail is
-     * named from its body (its handle names nothing in another mailbox).
+     * named from its body (a key minted in its mailbox names nothing there).
      */
     public void restore(Stager engine, Row row, String target)
             throws RefusedException, JSONException {

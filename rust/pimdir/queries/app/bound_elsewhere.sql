@@ -1,5 +1,5 @@
 -- The binding a pending create copies from (SYNC §3, origin_for_link), in its
--- account and under its Message-ID.
+-- account.
 SELECT b.collection, b.handle FROM bindings b
 JOIN items i ON i.id = b.item
 WHERE i.link_id IN (:link_id, CASE WHEN :link_id GLOB 'dup:*'
@@ -9,10 +9,5 @@ WHERE i.link_id IN (:link_id, CASE WHEN :link_id GLOB 'dup:*'
   AND substr(b.collection, 1, length(:account)) = :account
   AND b.base_present = 1 AND (:object IS NULL OR b.base_object = :object)
   AND i.deleted = 0 AND i.retained_at IS NULL
-  AND NOT EXISTS (
-    SELECT 1 FROM items c JOIN mail_summary cs ON cs.item = c.id
-    WHERE c.collection = :collection AND c.link_id = :link_id
-      AND cs.message_id IS NOT NULL
-      AND cs.message_id IS NOT (SELECT s.message_id FROM mail_summary s WHERE s.item = i.id))
 ORDER BY i.link_id <> :link_id, b.collection
 LIMIT 1;

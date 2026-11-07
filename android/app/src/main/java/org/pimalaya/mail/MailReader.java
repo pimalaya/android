@@ -8,6 +8,7 @@ import org.pimalaya.client.MailClient;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.file.FileStore;
+import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirAccount;
 
 import java.io.File;
@@ -97,6 +98,15 @@ public final class MailReader {
             }
         }
         return read;
+    }
+
+    /** A message's stand-ins, else under a derived key its body's parts. */
+    public List<FileStore.StoredFile> attachments(
+            MailStore.StoredMessage message, MessageBody body) {
+        if (ItemLinks.derived(message.id)) {
+            return body == null ? List.of() : FileStore.parts(message.seq, body.attachments());
+        }
+        return files.attachments(mail.accountIdOf(message.accountEmail), message.id);
     }
 
     /**

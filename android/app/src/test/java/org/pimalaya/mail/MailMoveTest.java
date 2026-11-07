@@ -464,7 +464,7 @@ public class MailMoveTest {
                 new JSONObject()
                         .put("handle", "900")
                         .put("flags", new JSONArray().put(Flags.Marker.SEEN.wire()))
-                        .put("linkId", "900")
+                        .put("linkId", "m1@example.com")
                         .put(
                                 "summary",
                                 PimdirSummary.mail("m1@example.com", "Hi", null, EMAIL,
@@ -475,7 +475,7 @@ public class MailMoveTest {
         sync(server, sent);
 
         assertTrue("landed, not appended", server.calls.isEmpty());
-        assertEquals("filed under the arrival's handle", "900",
+        assertEquals("filed under the create's key", "m1@example.com",
                 scalar("SELECT link_id FROM items WHERE collection = ?", sent));
         assertEquals("1", scalar("SELECT count(*) FROM items WHERE collection = ?", sent));
         assertEquals("Hi",
@@ -500,7 +500,7 @@ public class MailMoveTest {
                 new JSONObject()
                         .put("handle", "900")
                         .put("flags", new JSONArray())
-                        .put("linkId", "900")
+                        .put("linkId", "m1@example.com")
                         .put(
                                 "summary",
                                 PimdirSummary.mail("m1@example.com", "Hi", null, EMAIL,

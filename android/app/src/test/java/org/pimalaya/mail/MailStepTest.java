@@ -44,6 +44,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -94,11 +96,11 @@ public class MailStepTest {
         final Instant received;
         final List<String> mailboxes;
 
-        /** Its bare {@code Message-ID}, null for none. */
+        /** Its bare {@code Message-ID}, its id unless stamped. */
         final String messageId;
 
         Mail(String id, String date, Instant received, String... mailboxes) {
-            this(id, date, received, null, List.of(mailboxes));
+            this(id, date, received, id, List.of(mailboxes));
         }
 
         private Mail(
@@ -120,9 +122,10 @@ public class MailStepTest {
         }
 
         byte[] source() {
-            String stamp = messageId == null ? "" : "Message-ID: <" + messageId + ">\r\n";
-            return (stamp + "Date: " + date + "\r\nSubject: Mail " + id + "\r\n\r\nBody " + id
-                            + "\r\n")
+            String sent =
+                    DateTimeFormatter.RFC_1123_DATE_TIME.format(OffsetDateTime.parse(date));
+            return ("Message-ID: <" + messageId + ">\r\nFrom: a@example.org\r\nDate: " + sent
+                            + "\r\nSubject: Mail " + id + "\r\n\r\nBody " + id + "\r\n")
                     .getBytes(StandardCharsets.UTF_8);
         }
     }
@@ -171,7 +174,7 @@ public class MailStepTest {
                             new NamedStepItem(
                                     List.of(Flags.Marker.SEEN.wire()),
                                     mail.id,
-                                    mail.id,
+                                    mail.messageId,
                                     mail.mailboxes,
                                     file.getAbsolutePath(),
                                     mail.received.toEpochMilli(),
@@ -345,7 +348,7 @@ public class MailStepTest {
         MailStore.Query all = store.query((account, name) -> true, false, false, "");
         for (MailStore.StoredMessage message : store.all(all)) {
             if (message.collection.equals(sent)) {
-                assertEquals("filed under the arrival's handle", "s1", message.id);
+                assertEquals("filed under the create's key", "mine@example.org", message.id);
             }
         }
         assertNull("the alias is spent", store.policy().stagedSentCopy("theirs@gmail"));

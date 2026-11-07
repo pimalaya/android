@@ -551,15 +551,25 @@ impl PimdirRemote for Remote<'_> {
     }
 }
 
-/// The message ids the store holds in the inbox.
+/// The message ids the store holds in the inbox: the handles it binds.
 fn handles(dir: &Path) -> BTreeSet<String> {
     let reader = PimdirReader::open(dir).unwrap();
     reader
         .list_items(INBOX, None, 100_000)
         .unwrap()
         .into_iter()
-        .map(|item| item.link_id.as_str().to_string())
+        .filter_map(|item| handle_of(&reader, item.link_id.as_str()))
         .collect()
+}
+
+/// The handle the source binds an inbox item by.
+fn handle_of(reader: &PimdirReader, link_id: &str) -> Option<String> {
+    reader
+        .item_bindings(INBOX, link_id)
+        .unwrap()
+        .into_iter()
+        .find(|(source, _)| source.as_str() == SOURCE)
+        .map(|(_, binding)| binding.handle.as_str().to_string())
 }
 
 /// Whether the store holds the message as read.
@@ -569,7 +579,7 @@ fn is_read(dir: &Path, id: &str) -> bool {
         .list_items(INBOX, None, 100_000)
         .unwrap()
         .into_iter()
-        .find(|item| item.link_id.as_str() == id)
+        .find(|item| handle_of(&reader, item.link_id.as_str()).as_deref() == Some(id))
         .is_some_and(|item| item.flags.contains("\\Seen"))
 }
 
@@ -580,7 +590,7 @@ fn size(dir: &Path, id: &str) -> Option<u64> {
         .list_summaries(INBOX, None, 100_000)
         .unwrap()
         .into_iter()
-        .find(|item| item.link_id.as_str() == id)
+        .find(|item| handle_of(&reader, item.link_id.as_str()).as_deref() == Some(id))
         .unwrap();
     match item.summary {
         Some(PimdirSummary::Mail(summary)) => summary.size,

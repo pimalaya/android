@@ -757,30 +757,41 @@ public final class PimdirStorage {
         return reply;
     }
 
-    /** Applies a batch of engine writes atomically; returns what it did. */
-    public JSONArray applyWrites(JSONArray writes) throws JSONException {
-        return applyWrites(writes, Map.of());
+    /** {@link #lookupObjects} for one collection's messages, agreeing ones. */
+    public JSONObject lookupMessages(JSONArray links, String engineCollection, String account)
+            throws JSONException {
+        SQLiteDatabase db = store.getReadableDatabase();
+        JSONObject objects = new JSONObject();
+        String collection = collectionOf(engineCollection);
+        for (int index = 0; index < links.length(); index++) {
+            String linkId = links.getString(index);
+            Map<String, Object> values =
+                    PimdirSql.values("collection", collection, "link_id", linkId);
+            values.put("account", account);
+            try (Cursor cursor = PimdirDb.query(db, "HELD_MESSAGE_OBJECT", values)) {
+                if (cursor.moveToFirst() && blobs.verified(cursor.getString(0))) {
+                    JSONObject object = new JSONObject();
+                    object.put("hash", cursor.getString(0));
+                    object.put("size", cursor.getLong(1));
+                    objects.put(linkId, object);
+                }
+            }
+        }
+        return new JSONObject().put("objects", objects);
     }
 
-    /**
-     * {@link #applyWrites(JSONArray)}, a message filed under the link id its
-     * listing named it by in {@code listed} (engine collection, handle).
-     */
-    public JSONArray applyWrites(JSONArray writes, Map<String, String> listed)
-            throws JSONException {
+    /** Applies a batch of engine writes atomically; returns what it did. */
+    public JSONArray applyWrites(JSONArray writes) throws JSONException {
         SQLiteDatabase db = store.getWritableDatabase();
         db.beginTransaction();
         compiled = new HashMap<>();
         rebinding = new HashMap<>();
         overruling = new HashSet<>();
         settling = new HashSet<>();
-        this.listed = listed;
         try {
             Map<String, byte[]> bodies = new HashMap<>();
             List<JSONObject> stamps = new ArrayList<>();
-            Set<String> links = new HashSet<>();
             Set<String> fresh = new HashSet<>();
-            Set<String> staged = new HashSet<>();
             Map<String, String> released = new HashMap<>();
             JSONArray effects = new JSONArray();
             Set<String> superseded = supersededHandles(writes);
@@ -795,7 +806,7 @@ public final class PimdirStorage {
                     case "upsert": {
                         JSONObject placement = op.getJSONObject("placement");
                         String kind = applyUpsert(
-                                db, placement, superseded, links, released, fresh, effects);
+                                db, placement, superseded, released, fresh, effects);
                         if (kind != null) {
                             effects.put(effect(placement.getString("collection"),
                                     placement.getString("handle"), kind));
@@ -803,7 +814,7 @@ public final class PimdirStorage {
                         break;
                     }
                     case "drop":
-                        applyBatchDrop(db, op, staged, released, effects);
+                        applyBatchDrop(db, op, released, effects);
                         break;
                     case "setCheckpoint":
                         setCheckpoint(db, op);
@@ -837,16 +848,8 @@ public final class PimdirStorage {
             }
 
             // NOTE: an item's fate is the batch's outcome, as io-pimdir
-            // settles it from the hub the whole batch folded into: a staged
-            // mail create no upsert carried on goes with its provisional
-            // handle, and an item the batch created and left unbound was
-            // never stored.
-            for (String key : staged) {
-                if (!links.contains(key)) {
-                    String[] parts = key.split("\n", 2);
-                    items.remove(db, parts[0], parts[1]);
-                }
-            }
+            // settles it from the hub the whole batch folded into: an item the
+            // batch created and left unbound was never stored.
             for (String key : fresh) {
                 String[] parts = key.split("\n", 2);
                 if (!isBound(db, parts[0], parts[1])) {
@@ -872,7 +875,6 @@ public final class PimdirStorage {
             rebinding = null;
             overruling = null;
             settling = null;
-            this.listed = null;
             PimdirItems.unlinkCollected(store, db, blobs);
         }
     }
@@ -924,10 +926,9 @@ public final class PimdirStorage {
      * Applies one drop in place, recording what the rest of the batch reads.
      *
      * <p>The link id its handle was bound to, continued by a later unnamed
-     * upsert of that handle (as io-pimdir resolves it), and the staged mail
-     * create it superseded.
+     * upsert of that handle (as io-pimdir resolves it).
      */
-    private void applyBatchDrop(SQLiteDatabase db, JSONObject drop, Set<String> staged,
+    private void applyBatchDrop(SQLiteDatabase db, JSONObject drop,
             Map<String, String> released, JSONArray effects) throws JSONException {
         String collection = drop.getString("collection");
         String handle = drop.getString("handle");
@@ -942,15 +943,6 @@ public final class PimdirStorage {
         String bound = linkOf(db, stored, source, handle);
         if (bound != null) {
             released.putIfAbsent(stored + "\n" + source + "\n" + handle, bound);
-        }
-        // NOTE: a message is filed under the handle its listing names
-        // (applyUpsert), so a mail create whose provisional handle an accepted
-        // push or a landing supersedes is no item of its own: the arrival is,
-        // under its handle, whether this batch files it or the next listing
-        // brings it. Settled at the batch's end, the upsert landing it reading
-        // the summary it carries on.
-        if (bound != null && !deleted && handle.startsWith(PROVISIONAL) && isMail(db, stored)) {
-            staged.add(stored + "\n" + bound);
         }
         applyDrop(db, collection, handle, deleted);
         if (deleted) {
@@ -1139,8 +1131,8 @@ public final class PimdirStorage {
      * created.
      */
     private String applyUpsert(SQLiteDatabase db, JSONObject placement, Set<String> superseded,
-            Set<String> links, Map<String, String> released, Set<String> fresh,
-            JSONArray effects) throws JSONException {
+            Map<String, String> released, Set<String> fresh, JSONArray effects)
+            throws JSONException {
         String engineCollection = placement.getString("collection");
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
@@ -1152,16 +1144,7 @@ public final class PimdirStorage {
         String known =
                 bound != null ? bound : released.get(collection + "\n" + source + "\n" + handle);
         String linkId = placement.isNull("linkId") ? known : placement.optString("linkId", known);
-        // NOTE: a message is filed under the link id its listing names it
-        // by, so a create landed onto an arrival takes the arrival's; the
-        // item it was staged as goes with its provisional handle.
         boolean mail = isMail(db, collection);
-        String named = mail && bound == null ? listed.get(engineCollection + "\n" + handle) : null;
-        String staged = null;
-        if (named != null && linkId != null && !linkId.equals(named)) {
-            staged = linkId;
-            linkId = named;
-        }
         String object = placement.isNull("object") ? null : placement.optString("object", null);
         JSONObject summary = placement.optJSONObject("summary");
         String sortKey = placement.optString("sortKey", "");
@@ -1206,9 +1189,9 @@ public final class PimdirStorage {
         // upsert carrying none below the level the row holds is one the
         // engine loaded before the body was filed (a reader opening it, a
         // fill chunk landing) and merged while its network ran: it never
-        // takes the body away. Releasing one is RELEASE_BEFORE's,
-        // releaseCrossLinked's and the collectors' to do, a staged
-        // removal's and a conflict's the engine's to say.
+        // takes the body away. Releasing one is RELEASE_BEFORE's and the
+        // collectors' to do, a staged removal's and a conflict's the
+        // engine's to say.
         String kept = null;
         if (mail && previousObject != null && object == null && !tombstone
                 && !"conflict".equals(placement.optString("status", "clean"))) {
@@ -1289,19 +1272,17 @@ public final class PimdirStorage {
         }
 
         // NOTE: a write without summary keeps the stored row (flag pushes,
-        // pulled deletions). A message created from another (a landed create,
-        // a copy, a move's target) takes that one's stored summary.
+        // pulled deletions). A message created from another (a copy, a move's
+        // target) takes that one's stored summary.
         boolean carried =
                 mail
                         && !exists
                         && summary == null
                         && carrySummary(
-                                db, collection, source, staged, placement.optJSONObject("origin"),
-                                linkId);
+                                db, collection, source, placement.optJSONObject("origin"), linkId);
         if (!carried) {
             PimdirSummary.write(db, collection, linkId, summary, !exists);
         }
-        links.add(collection + "\n" + linkId);
         writeBinding(db, collection, source, linkId, handle, placement, superseded, !exists, kept,
                 shared);
         adjustRefcount(db, previousObject, object);
@@ -2086,29 +2067,23 @@ public final class PimdirStorage {
     /**
      * Gives a fresh message its source message's stored summary.
      *
-     * <p>From the item staged as its create ({@code staged}), else its origin;
-     * answers whether one was there.
+     * <p>From its origin; answers whether one was there.
      */
     private boolean carrySummary(
             SQLiteDatabase db,
             String collection,
             String source,
-            String staged,
             JSONObject origin,
             String linkId)
             throws JSONException {
-        String fromCollection = collection;
-        String fromLink = staged;
-        if (fromLink == null && origin != null) {
-            fromCollection = collectionOf(origin.getString("collection"));
-            String handle = origin.getString("handle");
-            fromLink = linkOf(db, fromCollection, source, handle);
-            if (fromLink == null) {
-                fromLink = nameOf(handle);
-            }
-        }
-        if (fromLink == null) {
+        if (origin == null) {
             return false;
+        }
+        String fromCollection = collectionOf(origin.getString("collection"));
+        String handle = origin.getString("handle");
+        String fromLink = linkOf(db, fromCollection, source, handle);
+        if (fromLink == null) {
+            fromLink = nameOf(handle);
         }
         // NOTE: the tables Annex A.1 files a message's summary in, copied
         // row for row whatever their columns.
@@ -2325,12 +2300,6 @@ public final class PimdirStorage {
      * the item's conflict (SYNC §7). Null outside a batch.
      */
     private Set<String> settling;
-
-    /**
-     * The link id each member was listed under, by engine collection and
-     * handle, as the driver named it. Null outside a batch.
-     */
-    private Map<String, String> listed;
 
     /**
      * The first column of a read's first row, null for none or NULL.

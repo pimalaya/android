@@ -355,8 +355,8 @@ pub struct Named {
     pub flags: Vec<String>,
     /// The UID within its mailbox, or the provider's message id.
     pub handle: String,
-    /// What the store files it under, unique in the account: the handle, or
-    /// on IMAP the UID with its mailbox's UIDVALIDITY and the mailbox.
+    /// The identity hint its summary states (STORAGE §9), empty if unnamed.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub link_id: String,
     /// The summary's sort key, empty when listed unnamed.
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -371,7 +371,7 @@ impl Named {
     pub fn new(handle: String, flags: Vec<String>, summary: PimdirMailSummary) -> Self {
         let sort_key = summary.sort_key().0;
         Self {
-            link_id: handle.clone(),
+            link_id: summary.link_id().0,
             handle,
             flags,
             summary: Some(SummaryJson::from(&PimdirSummary::Mail(summary))),
@@ -383,7 +383,7 @@ impl Named {
     /// summary where the store does not bind it yet.
     pub fn unnamed(handle: String, flags: Vec<String>) -> Self {
         Self {
-            link_id: handle.clone(),
+            link_id: String::new(),
             handle,
             flags,
             summary: None,
@@ -595,10 +595,10 @@ mod tests {
             serde_json::to_string(&round).unwrap(),
             concat!(
                 r#"{"complete":true,"cursor":"7:8","items":[{"flags":["\\Seen"],"handle":"7","#,
-                r#""linkId":"7","sortKey":"2026-10-01T08:00:00Z","summary":{"mail":{"addresses":[],"#,
-                r#""date":"2026-10-01T08:00:00Z","in_reply_to":[],"message_id":"m1@example.org","#,
-                r#""subject":"Hi"}}},{"flags":[],"handle":"8","linkId":"8"}],"last":false,"#,
-                r#""vanished":[]}"#
+                r#""linkId":"m1@example.org","sortKey":"2026-10-01T08:00:00Z","summary":{"mail":"#,
+                r#"{"addresses":[],"date":"2026-10-01T08:00:00Z","in_reply_to":[],"#,
+                r#""message_id":"m1@example.org","subject":"Hi"}}},{"flags":[],"handle":"8"}],"#,
+                r#""last":false,"vanished":[]}"#
             )
         );
 
@@ -610,6 +610,33 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&MailPage::rejected()).unwrap(),
             r#"{"complete":false,"cursorRejected":true,"items":[],"last":false,"vanished":[]}"#
+        );
+    }
+
+    /// A member's hint is what its summary states, never its server id.
+    #[test]
+    fn a_member_is_named_by_its_message_id_never_its_handle() {
+        let summary = |message_id: Option<&str>| PimdirMailSummary {
+            message_id: message_id.map(String::from),
+            subject: "Hi".into(),
+            date: Some("2026-10-01T08:00:00Z".into()),
+            sender: Some("a@example.org".into()),
+            ..Default::default()
+        };
+
+        let named = |handle: &str, message_id| {
+            Named::new(handle.into(), Vec::new(), summary(message_id)).link_id
+        };
+        assert_eq!(named("42", Some("m1@example.org")), "m1@example.org");
+        assert_eq!(
+            named("AAMkAD=", Some("m1@example.org")),
+            "m1@example.org",
+            "one message keeps one hint whatever its server id"
+        );
+        assert_eq!(named("7", Some("dup:x@y")), "esc:dup:x@y");
+        assert_eq!(
+            named("42", None),
+            "alt:Hi|2026-10-01T08:00:00Z|a@example.org"
         );
     }
 }
