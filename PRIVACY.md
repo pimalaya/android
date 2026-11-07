@@ -2,7 +2,7 @@
 
 Last updated: 12 October 2026
 
-This privacy policy describes how the **Pimalaya** Android app (package `org.pimalaya`, the "app") handles your data. Pimalaya is a free and open-source mail, contacts and calendar app published by the Pimalaya project. Its source code is available at https://github.com/pimalaya/android.
+This privacy policy describes how the **Pimalaya** Android app (package `org.pimalaya`, the "app") handles your data. Pimalaya is a free and open-source mail, contacts and calendar app published by the Pimalaya project. Its source code is available at https://github.com/pimalaya/android. The [Pimalaya privacy policy](https://pimalaya.org/privacy/) covers every Pimalaya app; this one details the Android app.
 
 ## Summary
 

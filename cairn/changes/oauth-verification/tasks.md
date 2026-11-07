@@ -9,10 +9,13 @@ change: oauth-verification
 
 - [ ] Decide the contacts and calendar scopes (proposal, Decisions), then the final scope list in `GOOGLE_SCOPES`
 - [x] Two GCP projects (2026-11-06): "Pimalaya" for production, the one verified, holding the release clients alone; "Pimalaya Dev" (991810147220, the former one) for the debug client, never verified, set to In production so its grants skip the 7-day expiry. The debug client stays out of the demo video and scope experiments stay out of the verified project
-- [ ] pimalaya.org app page at https://pimalaya.org/android/ and privacy page at https://pimalaya.org/android/privacy/, the latter rendered from a copy of PRIVACY.md (websites www-android-pages, built 2026-11-06, publish owed). After a PRIVACY.md edit: `npm run sync:privacy` in the websites repo, then publish
+- [x] pimalaya.org app page at https://pimalaya.org/android/ and its privacy page at https://pimalaya.org/android/privacy/, the latter rendered from a copy of PRIVACY.md (websites www-android-pages, published 2026-11-06). After a PRIVACY.md edit: `npm run sync:privacy` in the websites repo, then the Publish workflow of pimalaya/_www
+- [ ] The brand's privacy policy at https://pimalaya.org/privacy/ and terms of use at https://pimalaya.org/terms/, covering every interface, linked from every page's footer (websites www-privacy-terms, built 2026-11-07, publish owed). Each interface joining the project gets its section or link in the privacy policy first
 - [ ] Search Console: pimalaya.org as a Domain property (DNS TXT), by an account that is Owner or Editor of the "Pimalaya" project (the verification follows the account, not the project)
 - [ ] Production Android clients in "Pimalaya", one per signing key, custom URI scheme enabled on each: Play App Signing (SHA-1 from the Play Console), GitHub APK, F-Droid unless the build is reproducible under the GitHub key. Debug builds keep the "Pimalaya Dev" client, release builds take theirs: each build picks its client ID and its reversed-client-ID scheme in AndroidManifest.xml (production-release §4)
 - [ ] Optional: the Play client's ownership verified through the Play Console (Admin on the app)
+- [ ] In-app disclosure in each interface before its Google sign-in (proposal, Google facts): the data accessed and how it is used, then a confirm step (a button on Android, a prompt in the command-line wizards), before the browser opens
+- [ ] Clients of other interfaces (command-line, terminal, desktop) added to "Pimalaya" only once each is ready for production; each needs its section or link in the privacy policy, its disclosure, and its part in the demo video
 - [ ] Branding page filled (submission.md §1), 120x120 logo
 - [ ] Data Access page: exactly the scopes the app asks for, each shown as sensitive or restricted there
 - [ ] Audience: publishing status to In production (verification needs it; ends the 7-day expiry; starts the lifetime 100-user count, closed testers included)
