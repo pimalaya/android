@@ -57,9 +57,17 @@
     </string-array>
     <string name="notify_needs_background">Needs background sync.</string>
     <string name="account_tasks_in">In %1$s</string>
-    <string name="account_tasks_in_google">In %1$s · States and categories stay on this phone</string>
+    <string name="account_tasks_in_google">In %1$s · Google Tasks keeps the title, notes, due day and done</string>
     <string name="task_google_local_title">On this phone only</string>
-    <string name="task_google_local">Google Tasks has no place for a task\'s state, categories or who it waits on, so they stay on this phone.</string>
+    <string name="task_google_local">Google Tasks keeps the title, notes, due day and done. Tap for what stays on this phone.</string>
+    <string name="google_tasks_limits_title">What Google Tasks keeps</string>
+    <string-array name="google_tasks_limits">
+        <item>A task\'s state (Inbox, Waiting, Someday), its categories, priority, who it waits on and the mail it came from stay on this phone only. Another device or a reinstall loses them.</item>
+        <item>Google keeps a due day, not a time.</item>
+        <item>In progress shows as open on Google, and Cancelled as done.</item>
+        <item>A task changed both here and on Google between two syncs comes back as a conflict on the whole task, not on the one detail both changed.</item>
+        <item>A subtask made on Google under a task made on this phone does not show under it.</item>
+    </string-array>
     <string name="calendars_title">Which calendars?</string>
     <string name="calendars_description">The ones you pick sync to this phone. You can change this later in the calendar\'s filter.</string>
     <string name="calendars_none">This account has no calendar</string>

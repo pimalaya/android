@@ -51,9 +51,17 @@
     </string-array>
     <string name="notify_needs_background">Demande la synchronisation en arrière-plan.</string>
     <string name="account_tasks_in">Dans %1$s</string>
-    <string name="account_tasks_in_google">Dans %1$s · États et catégories restent sur ce téléphone</string>
+    <string name="account_tasks_in_google">Dans %1$s · Google Tasks garde le titre, les notes, le jour d\'échéance et l\'état fait</string>
     <string name="task_google_local_title">Sur ce téléphone seulement</string>
-    <string name="task_google_local">Google Tasks n\'a pas de place pour l\'état d\'une tâche, ses catégories ni la personne attendue : ils restent sur ce téléphone.</string>
+    <string name="task_google_local">Google Tasks garde le titre, les notes, le jour d\'échéance et l\'état fait. Touchez pour voir ce qui reste sur ce téléphone.</string>
+    <string name="google_tasks_limits_title">Ce que Google Tasks garde</string>
+    <string-array name="google_tasks_limits">
+        <item>L\'état d\'une tâche (Boîte, En attente, Un jour), ses catégories, sa priorité, la personne attendue et le mail d\'où elle vient restent sur ce téléphone seulement. Un autre appareil ou une réinstallation les perd.</item>
+        <item>Google garde un jour d\'échéance, pas une heure.</item>
+        <item>Une tâche En cours apparaît à faire sur Google, et une tâche Annulée apparaît faite.</item>
+        <item>Une tâche modifiée ici et sur Google entre deux synchronisations revient en conflit sur toute la tâche, pas sur le seul détail modifié des deux côtés.</item>
+        <item>Une sous-tâche créée sur Google sous une tâche créée sur ce téléphone n\'apparaît pas sous elle.</item>
+    </string-array>
     <string name="calendars_title">Quels agendas ?</string>
     <string name="calendars_description">Ceux que vous choisissez se synchronisent sur ce téléphone. Vous pourrez changer cela plus tard dans le filtre de l\'agenda.</string>
     <string name="calendars_none">Ce compte n\'a aucun agenda.</string>

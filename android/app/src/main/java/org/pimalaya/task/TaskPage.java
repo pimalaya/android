@@ -398,12 +398,17 @@ public final class TaskPage {
         // NOTE: said where they are set: a Google task list keeps none of
         // them, so they stay on the phone.
         if (EventStore.isGoogleTaskList(target.url)) {
+            ImageView chevron = new ImageView(host);
+            chevron.setImageResource(R.drawable.ic_chevron_right);
+            chevron.setImageTintList(
+                    ColorStateList.valueOf(
+                            host.resolveColor(android.R.attr.textColorSecondary)));
             rows.add(
                     sections.row(
                             host.getString(R.string.task_google_local_title),
                             host.getString(R.string.task_google_local),
-                            null,
-                            null));
+                            chevron,
+                            () -> GoogleLimits.show(host)));
         }
         sections.section(
                 R.string.task_section_organise,

@@ -45,6 +45,7 @@ import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.SyncCoordinator;
 import org.pimalaya.sync.SyncPasses;
 import org.pimalaya.sync.SyncStamps;
+import org.pimalaya.task.GoogleLimits;
 import org.pimalaya.task.TaskStore;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.CardRows;
@@ -881,8 +882,8 @@ public final class AccountSettings {
                 taking.isEmpty()
                         ? host.getString(noTasksReason(calendars.get(0).url))
                         : host.getString(taken, String.join(", ", taking)),
-                null,
-                null);
+                google ? chevron() : null,
+                google ? () -> GoogleLimits.show(host) : null);
     }
 
     /** Why an account's calendars take no tasks, by the service they are on. */

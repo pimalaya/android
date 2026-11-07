@@ -132,6 +132,7 @@ public final class CaptureSheet {
         // NOTE: said where the state and categories are set, for the list
         // picked: Google keeps neither.
         TextView local = dialog.findViewById(R.id.capture_local);
+        local.setOnClickListener(view -> GoogleLimits.show(host));
         Runnable placed =
                 () ->
                         local.setVisibility(
