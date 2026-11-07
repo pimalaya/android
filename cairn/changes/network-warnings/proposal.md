@@ -22,4 +22,4 @@ The S2 network-trust audit's low findings left open by network-trust-hardening (
 
 ## Kept
 
-A password or token is never sent in clear, without TLS at all (network-trust spec): a warning cannot make it unreadable to whoever is on the path. The owner confirms or overrules this.
+A password or token is never sent in clear, without TLS at all (network-trust spec): a warning cannot make it unreadable to whoever is on the path. Confirmed by the owner on 2026-11-07, for now.
