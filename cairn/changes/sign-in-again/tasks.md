@@ -12,4 +12,5 @@ change: sign-in-again
 - [x] Credentials replaced in place keeping the store; a server, protocol or login change confirmed, that domain dropped and listed again; the sending server changed in place
 - [x] Tests (SignInAgainTest, WrongGrantTest, SignInRefusalsTest, rust account::identity): a password replaced keeps the outbox and staged edits; a grant for another address refused; a server change drops and lists that domain alone
 - [ ] Device check; fold, log, CHANGELOG
-- [ ] Aliases accepted by the identity check (proposal, Open)
+- [x] Aliases accepted by the identity check (proposal, Aliases; rust account::identity tests)
+- [ ] Graph `$select=proxyAddresses` on a personal Microsoft account (proposal, Open)

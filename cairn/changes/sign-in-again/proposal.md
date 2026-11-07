@@ -32,6 +32,10 @@ On the Pimalaya Android canvas (version 115, 2026-11-07), light and dark, copied
 - **A move** is a base URL that differs past its user part, trailing slash and case, or a password login that differs past case (confirmed on the password page's Continue). Its count is the changes not pushed yet (count_owing.sql), the outbox aside. A mail move keeps the outbox, its staged sent copies dropped with the old mailboxes; a contacts move drops the address books and their phone accounts; a calendar move forgets its phone calendars. Saving waits while a sync runs; a moved or added domain lists again when its tab opens.
 - **The identity (oauth-hardening L4)** is checked on every browser grant, the first setup included: Google by the Gmail profile, else the primary calendar's id (the app asks no `openid` or `email` scope); Graph by `/me`; JMAP by the session's username. Where none can be read the grant is allowed: Google contacts alone, Outlook IMAP and SMTP, Graph without `User.Read` (a 403), generic OIDC (io-oauth drops the `id_token`), a JMAP username without `@`.
 
+## Aliases (2026-11-07)
+
+The identity accepts the account's own aliases, as the owner asked: a gmail.com or googlemail.com address spelt with dots, a `+` tag or the other domain (never a Workspace domain, whose dots count); a verified Gmail send-as address, for a grant holding the mail scope; a Graph `smtp:` proxy address; a JMAP identity, for a session that submits. An unverified send-as address (pending, rejected, expired) is not taken. Still refused: a Workspace alias on no send-as list or under a calendar-only grant, a JMAP wildcard identity (`*@domain`), a Microsoft alias missing from `proxyAddresses`.
+
 ## Open
 
-- **Aliases.** The identity compares addresses ignoring case alone, so an account typed under an alias (googlemail.com, a Workspace or Microsoft alias) is refused against its primary address, at the first setup too. Gmail's send-as list (`users.settings.sendAs`, under the mail scope) would accept a Google alias.
+- Whether Graph answers `$select=proxyAddresses` for a personal Microsoft account: an error there would read as no identity, letting every personal Microsoft grant through unchecked. To check on the Microsoft test account.

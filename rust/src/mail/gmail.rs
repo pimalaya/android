@@ -45,6 +45,7 @@ use io_gmail::{
                 trash::GmailMessageTrash,
                 untrash::GmailMessageUntrash,
             },
+            settings::{GmailVerificationStatus, send_as::list::GmailSendAsList},
             users::get_profile::GmailProfileGet,
         },
         send::{GMAIL_API_BASE, GmailSendError, GmailSendOutput},
@@ -73,6 +74,7 @@ use crate::{
 /// 20 of 6,000 are counted, the quota Google may enforce any day.
 pub mod quota {
     pub const GET_PROFILE: u32 = 1;
+    pub const SEND_AS_LIST: u32 = 1;
     pub const LABELS_LIST: u32 = 1;
     pub const HISTORY_LIST: u32 = 2;
     pub const MESSAGES_LIST: u32 = 5;
@@ -440,6 +442,24 @@ impl<H: Host> Gmail<'_, H> {
         let coroutine = GmailProfileGet::new(&auth, "me").map_err(|err| err.to_string())?;
 
         Ok(self.run(quota::GET_PROFILE, coroutine)?.email_address)
+    }
+
+    /// The verified addresses the mailbox sends as, its own included.
+    pub fn send_as(&mut self) -> Result<Vec<String>, BridgeError> {
+        let auth = HttpAuthBearer::new(self.token);
+        let coroutine = GmailSendAsList::new(&auth, "me").map_err(|err| err.to_string())?;
+        let aliases = self.run(quota::SEND_AS_LIST, coroutine)?.send_as;
+
+        Ok(aliases
+            .into_iter()
+            .filter(|alias| {
+                matches!(
+                    alias.verification_status,
+                    None | Some(GmailVerificationStatus::Accepted)
+                )
+            })
+            .map(|alias| alias.send_as_email)
+            .collect())
     }
 
     /// The account's labels that file mail, as `(id, mailbox)` pairs.

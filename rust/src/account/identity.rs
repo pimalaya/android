@@ -3,14 +3,19 @@
 //! The address a browser grant signed in as, against the account's.
 
 use io_http::rfc6750::bearer::HttpAuthBearer;
-use io_msgraph::v1::rest::users::get::MsgraphUserGet;
-use serde::Serialize;
+use io_jmap::rfc8621::email_submission::JMAP_SUBMISSION_CAPABILITY;
+use io_msgraph::v1::send::MsgraphSend;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::{
     account::{GOOGLE_PREFIX, JMAP_PREFIX, MSGRAPH_PREFIX, jmap_session_url},
     calendar::gcal::Gcal,
-    client::{Auth, Client, Host, jmap::Jmap, msgraph::Msgraph},
+    client::{
+        Auth, Client, Host,
+        jmap::Jmap,
+        msgraph::{Msgraph, graph_url},
+    },
     error::BridgeError,
     mail::gmail::Gmail,
 };
@@ -31,17 +36,20 @@ const GOOGLE_HOSTS: [&str; 6] = [
     "apidata.googleusercontent.com",
 ];
 
+/// The consumer Gmail domains, one mailbox whatever its dots and tags.
+const GMAIL_DOMAINS: [&str; 2] = ["gmail.com", "googlemail.com"];
+
 /// The Graph API's host.
 const GRAPH_HOST: &str = "graph.microsoft.com";
 
 /// Where a grant's address is read.
 #[derive(Debug, Eq, PartialEq)]
 pub enum Identity {
-    /// The JMAP session's `username`, at the session URL.
+    /// The JMAP session's `username` at the session URL, then its identities.
     Jmap(Url),
-    /// Graph's `/me`: its `mail`, else its `userPrincipalName`.
+    /// Graph's `/me`: `mail`, else `userPrincipalName`, then SMTP proxies.
     Graph,
-    /// The mailbox profile's address.
+    /// The mailbox profile's address, then its send-as addresses.
     Mailbox,
     /// The primary calendar's id.
     Calendar,
@@ -86,12 +94,12 @@ impl Identity {
         graph.then_some(Self::Graph)
     }
 
-    /// Reads the address `token` signs in as, none when the API names none.
+    /// Reads the addresses `token` signs in as, the one the API names first.
     pub fn read<H: Host>(
         &self,
         client: &mut Client<H>,
         token: &str,
-    ) -> Result<Option<String>, BridgeError> {
+    ) -> Result<Vec<String>, BridgeError> {
         match self {
             Self::Jmap(url) => {
                 let mut jmap = Jmap {
@@ -99,16 +107,71 @@ impl Identity {
                     session_url: url.clone(),
                     auth: Auth::Bearer(token),
                 };
-                Ok(Some(jmap.session()?.username).filter(|name| !name.is_empty()))
+                Ok(vec![jmap.session()?.username])
             }
             Self::Graph => {
                 let auth = HttpAuthBearer::new(token);
-                let get = MsgraphUserGet::new(&auth, "me").map_err(|err| err.to_string())?;
-                let user = Msgraph { client, token }.run(get)?;
-                Ok(user.mail.or(user.user_principal_name))
+                let mut url = graph_url("me")?;
+                url.query_pairs_mut()
+                    .append_pair("$select", "mail,userPrincipalName,proxyAddresses");
+                let me = Msgraph { client, token }.run(MsgraphSend::<GraphMe>::get(&auth, url))?;
+
+                let proxies = me.proxy_addresses.into_iter().flatten();
+                let smtp = proxies.filter_map(|proxy| {
+                    let (kind, address) = proxy.split_once(':')?;
+                    kind.eq_ignore_ascii_case("smtp")
+                        .then(|| address.to_string())
+                });
+                Ok(me
+                    .mail
+                    .or(me.user_principal_name)
+                    .into_iter()
+                    .chain(smtp)
+                    .collect())
             }
-            Self::Mailbox => Gmail { client, token }.address().map(Some),
-            Self::Calendar => Gcal { client, token }.primary_id(),
+            Self::Mailbox => Ok(vec![Gmail { client, token }.address()?]),
+            Self::Calendar => Ok(Gcal { client, token }.primary_id()?.into_iter().collect()),
+        }
+    }
+
+    /// Reads the other addresses `token` sends as, where a call names them.
+    pub fn aliases<H: Host>(
+        &self,
+        client: &mut Client<H>,
+        token: &str,
+    ) -> Result<Vec<String>, BridgeError> {
+        match self {
+            Self::Jmap(url) => {
+                let mut jmap = Jmap {
+                    client,
+                    session_url: url.clone(),
+                    auth: Auth::Bearer(token),
+                };
+                let mut calls = jmap.calls()?;
+                if !calls
+                    .session
+                    .capabilities
+                    .contains_key(JMAP_SUBMISSION_CAPABILITY)
+                {
+                    return Ok(Vec::new());
+                }
+
+                let identities = calls.identities()?;
+                Ok(identities
+                    .into_iter()
+                    .map(|identity| identity.email)
+                    .collect())
+            }
+            Self::Mailbox => Gmail { client, token }.send_as(),
+            Self::Graph | Self::Calendar => Ok(Vec::new()),
+        }
+    }
+
+    /// Whether `own` and `address` name one mailbox, ignoring case.
+    fn same(&self, own: &str, address: &str) -> bool {
+        match self {
+            Self::Mailbox | Self::Calendar => gmail_mailbox(own) == gmail_mailbox(address),
+            Self::Jmap(_) | Self::Graph => own.to_lowercase() == address.to_lowercase(),
         }
     }
 }
@@ -126,36 +189,129 @@ impl<H: Host> Client<H> {
             return GrantCheck::default();
         };
 
-        // NOTE: a username that is no address names no account to compare.
-        let signed_as = match identity.read(self, token) {
-            Ok(signed_as) => signed_as.filter(|signed| signed.contains('@')),
-            Err(err) => {
-                log::warn!("grant identity unread: {err}");
-                None
-            }
-        };
-        let refused = signed_as
-            .as_deref()
-            .is_some_and(|signed| signed.to_lowercase() != address.to_lowercase());
+        let read = identity.read(self, token).unwrap_or_else(|err| {
+            log::warn!("grant identity unread: {err}");
+            Vec::new()
+        });
 
-        GrantCheck { signed_as, refused }
+        // NOTE: a username that is no address names no account to compare.
+        let Some(signed_as) = read.first().filter(|signed| signed.contains('@')) else {
+            return GrantCheck::default();
+        };
+
+        let owns = |owned: &[String]| owned.iter().any(|own| identity.same(own, address));
+        let refused = !owns(&read)
+            && match identity.aliases(self, token) {
+                Ok(aliases) => !owns(&aliases),
+                Err(err) => {
+                    log::warn!("grant aliases unread: {err}");
+                    true
+                }
+            };
+
+        GrantCheck {
+            signed_as: Some(signed_as.clone()),
+            refused,
+        }
     }
+}
+
+/// Graph's `/me` as selected, its proxy addresses included.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphMe {
+    mail: Option<String>,
+    user_principal_name: Option<String>,
+    proxy_addresses: Option<Vec<String>>,
+}
+
+/// An address lowercased, a consumer Gmail one as its mailbox's.
+fn gmail_mailbox(address: &str) -> String {
+    let address = address.to_lowercase();
+    let Some((local, domain)) = address.rsplit_once('@') else {
+        return address;
+    };
+    if !GMAIL_DOMAINS.contains(&domain) {
+        return address;
+    }
+
+    let local = local.split_once('+').map_or(local, |(local, _)| local);
+    format!("{}@gmail.com", local.replace('.', ""))
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use crate::{
-        account::identity::{GrantCheck, Identity},
+        account::identity::{GrantCheck, Identity, MAIL_SCOPE},
         client::{
             Client,
-            fake::{FakeResponse, FakeServer, jmap_session},
+            fake::{BoxedServer, FakeResponse, FakeServer, jmap_session},
         },
     };
 
     fn bases(bases: &[&str]) -> Vec<String> {
         bases.iter().map(|base| base.to_string()).collect()
+    }
+
+    /// A Gmail mailbox at `address`, its send-as list `send_as`.
+    fn gmail(address: &'static str, send_as: Value) -> Client<BoxedServer<'static>> {
+        Client::new(BoxedServer::boxed(move |request| {
+            match request.path.as_str() {
+                "/gmail/v1/users/me/profile" => {
+                    FakeResponse::json(200, &json!({ "emailAddress": address }))
+                }
+                "/gmail/v1/users/me/settings/sendAs" => {
+                    FakeResponse::json(200, &json!({ "sendAs": send_as }))
+                }
+                other => panic!("unexpected request {other}"),
+            }
+        }))
+    }
+
+    /// Graph's `alice@corp.example`, its proxies named only when selected.
+    fn graph(proxies: Value) -> Client<BoxedServer<'static>> {
+        Client::new(BoxedServer::boxed(move |request| {
+            assert_eq!(request.path, "/v1.0/me");
+            let mut user = json!({
+                "mail": "alice@corp.example",
+                "userPrincipalName": "alice@corp.example",
+            });
+            let select = request.param("$select").unwrap_or_default();
+            if select.split(',').any(|name| name == "proxyAddresses") {
+                user["proxyAddresses"] = proxies.clone();
+            }
+            FakeResponse::json(200, &user)
+        }))
+    }
+
+    /// A JMAP session of `jane@example.com` that sends as `emails`.
+    fn jmap(emails: &'static [&'static str]) -> Client<BoxedServer<'static>> {
+        let session = jmap_session(
+            json!({
+                "urn:ietf:params:jmap:mail": {},
+                "urn:ietf:params:jmap:submission": {},
+            }),
+            json!({ "urn:ietf:params:jmap:mail": "a1" }),
+        );
+        Client::new(BoxedServer::boxed(move |request| {
+            if request.method == "GET" {
+                return FakeResponse::json(200, &session);
+            }
+            let call = &request.json::<Value>()["methodCalls"][0];
+            assert_eq!(call[0], "Identity/get");
+            let list: Vec<Value> = emails
+                .iter()
+                .map(|email| json!({ "id": email, "name": "", "email": email }))
+                .collect();
+            let get = json!({ "accountId": "a1", "state": "s1", "list": list, "notFound": [] });
+            let body = json!({
+                "methodResponses": [["Identity/get", get, call[2]]],
+                "sessionState": "s1",
+            });
+            FakeResponse::json(200, &body)
+        }))
     }
 
     /// The API a grant's address is read from, by its servers and scope.
@@ -191,10 +347,8 @@ mod tests {
 
     #[test]
     fn a_grant_for_another_address_is_refused() {
-        let mut client = Client::new(FakeServer::new(|request| {
-            assert_eq!(request.path, "/gmail/v1/users/me/profile");
-            FakeResponse::json(200, &json!({ "emailAddress": "bob@gmail.com" }))
-        }));
+        let send_as = json!([{ "sendAsEmail": "bob@gmail.com", "isPrimary": true }]);
+        let mut client = gmail("bob@gmail.com", send_as);
 
         let check = client.check_grant(
             &bases(&["google://alice@gmail.com"]),
@@ -210,6 +364,135 @@ mod tests {
                 refused: true,
             }
         );
+    }
+
+    #[test]
+    fn a_consumer_gmail_address_is_taken_in_any_spelling() {
+        let mut client = Client::new(FakeServer::new(|request| {
+            assert_eq!(request.path, "/gmail/v1/users/me/profile");
+            FakeResponse::json(200, &json!({ "emailAddress": "alice@gmail.com" }))
+        }));
+
+        for typed in [
+            "A.Lice@gmail.com",
+            "alice+news@gmail.com",
+            "a.l.ice+x.y@googlemail.com",
+        ] {
+            let base = format!("google://{typed}");
+            let check = client.check_grant(&bases(&[&base]), MAIL_SCOPE, "token", typed);
+
+            assert!(!check.refused, "{typed} is refused");
+        }
+    }
+
+    #[test]
+    fn the_gmail_spelling_stays_off_workspace_domains() {
+        let send_as = json!([{ "sendAsEmail": "alice@corp.example", "isPrimary": true }]);
+        let mut client = gmail("alice@corp.example", send_as);
+
+        for typed in ["a.lice@corp.example", "alice+news@corp.example"] {
+            let base = format!("google://{typed}");
+            let check = client.check_grant(&bases(&[&base]), MAIL_SCOPE, "token", typed);
+
+            assert!(check.refused, "{typed} is taken");
+        }
+    }
+
+    #[test]
+    fn a_gmail_send_as_address_is_taken() {
+        let send_as = json!([
+            { "sendAsEmail": "alice@corp.example", "isPrimary": true },
+            { "sendAsEmail": "Sales@Corp.Example", "verificationStatus": "accepted" },
+        ]);
+        let mut client = gmail("alice@corp.example", send_as);
+
+        let check = client.check_grant(
+            &bases(&["google://sales@corp.example"]),
+            MAIL_SCOPE,
+            "token",
+            "sales@corp.example",
+        );
+
+        assert_eq!(
+            check,
+            GrantCheck {
+                signed_as: Some("alice@corp.example".into()),
+                refused: false,
+            }
+        );
+    }
+
+    #[test]
+    fn a_graph_proxy_address_is_taken() {
+        let proxies = json!(["SMTP:alice@corp.example", "smtp:al@corp.example"]);
+        let mut client = graph(proxies);
+
+        let check = client.check_grant(
+            &bases(&["msgraph://al@corp.example"]),
+            "Mail.ReadWrite",
+            "token",
+            "AL@corp.example",
+        );
+
+        assert_eq!(
+            check,
+            GrantCheck {
+                signed_as: Some("alice@corp.example".into()),
+                refused: false,
+            }
+        );
+    }
+
+    #[test]
+    fn a_jmap_identity_is_taken() {
+        let mut client = jmap(&["jane@example.com", "J@Alias.example"]);
+
+        let check = client.check_grant(
+            &bases(&["jmap://identities.example.com/jmap/session"]),
+            "",
+            "token",
+            "j@alias.example",
+        );
+
+        assert_eq!(
+            check,
+            GrantCheck {
+                signed_as: Some("jane@example.com".into()),
+                refused: false,
+            }
+        );
+    }
+
+    #[test]
+    fn an_address_on_no_alias_list_is_refused() {
+        let send_as = json!([
+            { "sendAsEmail": "alice@corp.example", "isPrimary": true },
+            { "sendAsEmail": "sales@corp.example", "verificationStatus": "pending" },
+        ]);
+        let check = gmail("alice@corp.example", send_as).check_grant(
+            &bases(&["google://sales@corp.example"]),
+            MAIL_SCOPE,
+            "token",
+            "sales@corp.example",
+        );
+        assert!(check.refused, "an unverified send-as address is taken");
+
+        let proxies = json!(["SMTP:alice@corp.example", "SIP:al@corp.example"]);
+        let check = graph(proxies).check_grant(
+            &bases(&["msgraph://al@corp.example"]),
+            "Mail.ReadWrite",
+            "token",
+            "al@corp.example",
+        );
+        assert!(check.refused, "a proxy address other than SMTP is taken");
+
+        let check = jmap(&["jane@example.com", "j@alias.example"]).check_grant(
+            &bases(&["jmap://others.example.com/jmap/session"]),
+            "",
+            "token",
+            "bob@alias.example",
+        );
+        assert!(check.refused, "an address no identity names is taken");
     }
 
     #[test]

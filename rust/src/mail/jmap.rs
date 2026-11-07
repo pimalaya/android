@@ -820,7 +820,7 @@ impl<H: Host> JmapCalls<'_, '_, H> {
     }
 
     /// The identities the account may send as.
-    fn identities(&mut self) -> Result<Vec<JmapIdentity>, BridgeError> {
+    pub fn identities(&mut self) -> Result<Vec<JmapIdentity>, BridgeError> {
         let opts = JmapIdentityGetOptions::default();
         let coroutine =
             JmapIdentityGet::new(&self.session, &self.auth, opts).map_err(|err| err.to_string())?;
