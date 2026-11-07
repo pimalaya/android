@@ -1082,13 +1082,13 @@ public class MainActivity extends Host
     @Override
     protected void onResume() {
         super.onResume();
-        // NOTE: back from the browser without a redirect (a cancelled
-        // grant) must not leave Continue on its loader; a real redirect
-        // re-enters loading right after.
+        // NOTE: back from the browser without a redirect (the consent page
+        // left) must not leave Continue on its loader; a redirect, handled
+        // in onNewIntent before this, keeps it while it redeems.
         if (flipper != null
                 && screen == PANEL_AUTH
                 && authFlipper.getDisplayedChild() != OnboardingFlow.STEP_EMAIL) {
-            onboarding.resetConfigContinue();
+            onboarding.resumed();
         }
 
         App.of(this).state.onScreen = true;

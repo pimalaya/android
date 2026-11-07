@@ -95,6 +95,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed the sign-in page staying on its loader after leaving the browser's consent page without consenting: back in the app, Continue is offered again.
 - Fixed a task created on the phone in a Google task list being created twice on Google when the answer to its creation was lost: the next sync recognises Google's copy by its title, notes, due day and completion and files the task once.
 - Fixed an agenda entry or a task edited both on the phone and on the server keeping its old title in the agenda and the Tasks tab once the sync merged the two edits, though the merged entry held the new one.
 - Fixed two IMAP messages sharing a UID in different mailboxes sharing their attachments: the archive's message 42 could list the inbox's 42's file and never its own. A message is now named by its `Message-ID` on every account, the server's own id used only to ask the server, so a message keeps its attachments and links when it moves, on IMAP and Microsoft 365 alike, a message in two mailboxes is downloaded once, and a task made from a mail and the mail now show each other in their links. An account added before this is removed and added again.

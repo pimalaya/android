@@ -275,7 +275,7 @@ The contacts sync adapter SHALL run only for one of the app's accounts and the c
 - THEN the book's contacts sync is left as it was
 
 ### Requirement: An OAuth redirect is the grant's own
-An intent SHALL redeem, and so end, the in-flight grant only when its URL is the grant's redirect URI exactly, up to its query, and its query carries the grant's state; any other intent reaching the app SHALL leave the grant waiting. A grant started more than 15 minutes ago SHALL be abandoned: dropped when a redirect arrives, when it is loaded and when the app starts. A grant over the app's own scheme SHALL show the step's loader while the browser is out.
+An intent SHALL redeem, and so end, the in-flight grant only when its URL is the grant's redirect URI exactly, up to its query, and its query carries the grant's state; any other intent reaching the app SHALL leave the grant waiting. A grant started more than 15 minutes ago SHALL be abandoned: dropped when a redirect arrives, when it is loaded and when the app starts. A grant SHALL show the step's loader while the browser is out and while its redirect redeems. Back in the app with no redirect, the consent page left, the loader SHALL go and Continue be offered again, the grant still waiting for its redirect.
 
 #### Scenario: Another app fires the redirect scheme
 - GIVEN a grant waiting in the browser
@@ -286,6 +286,11 @@ An intent SHALL redeem, and so end, the in-flight grant only when its URL is the
 - GIVEN a grant started and never finished
 - WHEN the app starts 20 minutes later
 - THEN the sealed grant is gone
+
+#### Scenario: Back from the consent page without consenting
+- GIVEN a Google sign-in whose consent page is open in the browser
+- WHEN the user leaves it and switches back to the app
+- THEN the sign-in page's Continue is offered again, not left on its loader
 
 ### Requirement: A custom client's loopback waits for its own redirect
 The loopback redirect of a custom client SHALL be `http://127.0.0.1` (RFC 8252 section 8.3), a typed `localhost` refused. Its listener SHALL run on a thread of its own, give each connection 10 s and 8 KiB to send its request line, answer 400 to any request but a `GET` of the redirect's path carrying the grant's state, and keep waiting for that one until its 300 s pass.

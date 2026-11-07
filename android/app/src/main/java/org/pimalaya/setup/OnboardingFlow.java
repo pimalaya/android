@@ -825,6 +825,21 @@ public final class OnboardingFlow {
         }
     }
 
+    /**
+     * The app back on screen during setup: from a grant's page with no
+     * redirect, the consent page left, Continue is offered again. A redirect
+     * that landed keeps the loader on while it redeems.
+     */
+    public void resumed() {
+        if (!oauth.takeBrowserOut()) {
+            return;
+        }
+        if (checking != null && checking.signIn == SignIn.BROWSER) {
+            checking = null;
+        }
+        resetConfigContinue();
+    }
+
     /** The running step's main button back to idle, unless a page signs in. */
     public void resetConfigContinue() {
         switch (shell.authStep()) {

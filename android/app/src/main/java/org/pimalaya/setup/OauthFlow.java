@@ -93,6 +93,12 @@ public final class OauthFlow {
     /** The loopback redirect listener, closed with the activity. */
     private java.net.ServerSocket loopbackServer;
 
+    /**
+     * Whether a grant's page went out to the browser with no redirect back
+     * since; set on the loopback listener's thread too.
+     */
+    private volatile boolean browserOut;
+
     /** Builds the grants; {@link #onConnected} is wired after. */
     public OauthFlow(Host host, AccountClient client, SetupShell shell) {
         this.host = host;
@@ -270,6 +276,10 @@ public final class OauthFlow {
         String issuer = pendingIssuer;
         pendingOauth = null;
         clearPendingOauth();
+        // NOTE: the loader again, for a redirect landing after the app came
+        // back without it (resumed) and dropped it.
+        browserOut = false;
+        onBusy.run();
 
         // NOTE: the one-time code is redacted; everything else in the
         // redirect is needed verbatim to debug rejections.
@@ -681,6 +691,8 @@ public final class OauthFlow {
                                                 session.state(),
                                                 LOOPBACK_READ_TIMEOUT_MS,
                                                 done);
+                                browserOut = false;
+                                host.postAlive(onBusy);
                                 OauthTokens tokens = session.redeem(tokenEndpoint, redirectUrl);
                                 // NOTE: not postAlive: the redeemed grant
                                 // persists the account (finishOnboarding),
@@ -779,6 +791,7 @@ public final class OauthFlow {
     private void abort(Exception error) {
         pendingOauth = null;
         clearPendingOauth();
+        browserOut = false;
         onAborted.run();
         host.showError(error, R.string.connect_failed);
     }
@@ -799,7 +812,19 @@ public final class OauthFlow {
         if (!scheme.equals("https") && !(scheme.equals("http") && loopback)) {
             throw new IllegalStateException("Refused to open a non-https authorization URL");
         }
+        browserOut = true;
         host.startActivity(new Intent(Intent.ACTION_VIEW, uri));
+    }
+
+    /**
+     * Whether the app came back from a grant's page with no redirect, the
+     * consent page left; cleared by asking. The grant stays, so its redirect
+     * still lands if one comes.
+     */
+    public boolean takeBrowserOut() {
+        boolean out = browserOut;
+        browserOut = false;
+        return out;
     }
 
     /** A free loopback TCP port, for the redirect prefill. */
