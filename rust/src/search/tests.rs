@@ -542,6 +542,9 @@ fn answers(floor: &mut Floor, now: i64, case: &Json) -> Option<String> {
 fn the_search_vectors_answer_on_the_floor() {
     let spec = spec();
     let dir = tempfile::tempdir().unwrap();
+    // Held throughout: a child another test forks keeps a released owner
+    // lock until its exec, so a reopen could find the store owned.
+    let _held = PimdirStore::open(dir.path()).unwrap();
     build(&spec, dir.path());
     let vectors = json(&spec.join("vectors/search/queries.json"));
     assert_eq!(vectors["v"], 2, "queries.json at another version");
