@@ -197,11 +197,6 @@ public class AccountClient {
         return Json.string(reply, "client_id");
     }
 
-    /** Google's CardDAV principal root for the email, PROPFIND's start. */
-    public static String googleCarddavBase(String email) {
-        return base("googleCarddav", email);
-    }
-
     /** A Google API account's base URL: People, Gmail or Calendar. */
     public static String googleBase(String email) {
         return base("google", email);

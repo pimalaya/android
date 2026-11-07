@@ -22,9 +22,6 @@ public final class Oauth {
     /** Google's token endpoint. */
     public static final String GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
-    /** CardDAV scope (the one DAVx5 uses); reuses the WebDAV transport. */
-    public static final String GOOGLE_SCOPE = "https://www.googleapis.com/auth/carddav";
-
     /** People API scope, for the Google Contacts API backend. */
     public static final String GOOGLE_PEOPLE_SCOPE = "https://www.googleapis.com/auth/contacts";
 
@@ -62,7 +59,8 @@ public final class Oauth {
             java.util.Set.of("offline_access", "openid", "profile", "email");
 
     /**
-     * The hosts Google's client signs in to: Gmail IMAP/SMTP, its APIs and DAV.
+     * The hosts Google's client signs in to: Gmail IMAP/SMTP and its APIs, not
+     * its CardDAV or CalDAV.
      */
     static final java.util.Set<String> GOOGLE_HOSTS =
             java.util.Set.of(
@@ -70,8 +68,7 @@ public final class Oauth {
                     "smtp.gmail.com",
                     "www.googleapis.com",
                     "gmail.googleapis.com",
-                    "people.googleapis.com",
-                    "apidata.googleusercontent.com");
+                    "people.googleapis.com");
 
     /** Google Tasks, the task lists Google keeps apart from its calendars. */
     static final String GOOGLE_TASKS_SCOPE = "https://www.googleapis.com/auth/tasks";
@@ -84,7 +81,6 @@ public final class Oauth {
                     "https://mail.google.com/",
                     "https://www.googleapis.com/auth/calendar",
                     GOOGLE_TASKS_SCOPE,
-                    "https://www.googleapis.com/auth/carddav",
                     GOOGLE_PEOPLE_SCOPE);
 
     /**
@@ -226,8 +222,7 @@ public final class Oauth {
                         case CALENDAR ->
                                 part.equals("https://www.googleapis.com/auth/calendar")
                                         || part.equals(GOOGLE_TASKS_SCOPE);
-                        case CONTACTS ->
-                                part.equals(GOOGLE_SCOPE) || part.equals(GOOGLE_PEOPLE_SCOPE);
+                        case CONTACTS -> part.equals(GOOGLE_PEOPLE_SCOPE);
                     };
             if (own) {
                 kept.add(part);

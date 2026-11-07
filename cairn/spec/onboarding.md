@@ -114,7 +114,15 @@ The protocol sweep SHALL run the fixed provider rules (by domain, then by MX) be
 #### Scenario: A Google address
 - GIVEN an address whose mail exchanges live at Google
 - WHEN discovery runs
-- THEN mail (IMAP, Gmail API), sending (SMTP), contacts (CardDAV, People API) and calendars (CalDAV, Calendar API) are offered
+- THEN mail (IMAP, Gmail API), sending (SMTP), contacts (People API) and calendars (Calendar API) are offered
+
+### Requirement: Google connects over its APIs alone
+The setups, standard and advanced, SHALL NOT offer Google's CardDAV or CalDAV, whether io-pim-discovery's provider rule names them or not: Google's contacts SHALL connect over the People API and its calendars over the Google Calendar API. The app's Google client SHALL NOT ask for the `https://www.googleapis.com/auth/carddav` scope, nor sign in to Google's CalDAV host.
+
+#### Scenario: A Gmail address in the advanced setup
+- GIVEN an address the Google provider rule matches, its services discovered with CardDAV and CalDAV among them
+- WHEN the advanced setup lists the ways to connect contacts and calendars
+- THEN it lists the People API and the Google Calendar API, and no CardDAV or CalDAV row of Google's
 
 ### Requirement: A domain with no autoconfig is asked of its MX provider
 When the address's domain publishes no autoconfig, the protocol sweep SHALL ask the provider its MX records name (the registrable domain of each MX host, never a public suffix) for its autoconfig, and SHALL follow an `autoconfig.<domain>` alias to its target when the alias itself fails, over https only.

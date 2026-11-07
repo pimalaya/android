@@ -27,7 +27,7 @@ Pimalaya is an open-source mail, contacts and calendar client for Android (https
 
 **`https://www.googleapis.com/auth/calendar`**
 
-Users list, create, edit and delete events in their Google calendars, including recurring events, attendees and reminders, and choose which calendars to sync. [If kept over `calendar.events` + `calendar.calendarlist.readonly`, proposal Decisions: users may sync over Google's CalDAV endpoint instead of the Calendar API, which takes this scope.]
+Users list, create, edit and delete events in their Google calendars, including recurring events, attendees and reminders, and choose which calendars to sync. [If kept over `calendar.events` + `calendar.calendarlist.readonly` (proposal Decisions), this needs a use the narrower pair does not cover; with Google's CalDAV no longer offered (drop-google-dav), none is known.]
 
 **`https://www.googleapis.com/auth/tasks`**
 
@@ -36,10 +36,6 @@ Users list, create, complete, edit and delete the tasks of their Google Tasks li
 **`https://www.googleapis.com/auth/contacts`**
 
 Users list, create, edit and delete their Google contacts (People API), including contact groups, and may mirror them into the phone's own Contacts app.
-
-**`https://www.googleapis.com/auth/carddav`** (only if kept, proposal Decisions)
-
-Users who prefer the open CardDAV standard sync the same contacts over Google's CardDAV endpoint instead of the People API; the user picks one of the two at setup.
 
 **Security assessment statement** (in the notes field)
 

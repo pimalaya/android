@@ -407,14 +407,10 @@ impl AccountJson {
 
 /// Builds an account base URL of the given kind.
 ///
-/// `googleCarddav` is Google's CardDAV principal root for the email,
 /// `google` and `msgraph` wrap the email behind their sentinel, `jmap` an
 /// HTTPS session URL (or bare host) behind [`JMAP_PREFIX`].
 pub fn base_url(kind: &str, value: &str) -> Result<String, String> {
     match kind {
-        "googleCarddav" => Ok(format!(
-            "https://www.googleapis.com/carddav/v1/principals/{value}/"
-        )),
         "google" => Ok(format!("{GOOGLE_PREFIX}{value}")),
         "msgraph" => Ok(format!("{MSGRAPH_PREFIX}{value}")),
         "jmap" => {
@@ -575,10 +571,6 @@ mod tests {
     /// Every kind builds its shape; jmap strips an HTTP(S) scheme.
     #[test]
     fn base_url_builds_every_kind() {
-        assert_eq!(
-            base_url("googleCarddav", "user@gmail.com").unwrap(),
-            "https://www.googleapis.com/carddav/v1/principals/user@gmail.com/",
-        );
         assert_eq!(
             base_url("google", "user@gmail.com").unwrap(),
             "google://user@gmail.com",

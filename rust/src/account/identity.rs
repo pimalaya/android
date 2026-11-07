@@ -27,13 +27,12 @@ const MAIL_SCOPE: &str = "https://mail.google.com/";
 const CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calendar";
 
 /// The hosts one token of that authorization server signs in to.
-const GOOGLE_HOSTS: [&str; 6] = [
+const GOOGLE_HOSTS: [&str; 5] = [
     "imap.gmail.com",
     "smtp.gmail.com",
     "www.googleapis.com",
     "gmail.googleapis.com",
     "people.googleapis.com",
-    "apidata.googleusercontent.com",
 ];
 
 /// The consumer Gmail domains, one mailbox whatever its dots and tags.
@@ -321,7 +320,7 @@ mod tests {
         let google = "https://mail.google.com/ https://www.googleapis.com/auth/calendar";
         assert_eq!(Identity::of(&gmail, google), Some(Identity::Mailbox));
 
-        let calendar = bases(&["https://apidata.googleusercontent.com/caldav/v2/"]);
+        let calendar = bases(&["google://alice@gmail.com"]);
         let scope = "https://www.googleapis.com/auth/calendar";
         assert_eq!(Identity::of(&calendar, scope), Some(Identity::Calendar));
 

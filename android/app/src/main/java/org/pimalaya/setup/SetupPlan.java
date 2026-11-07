@@ -34,8 +34,8 @@ final class SetupPlan {
      * One domain's discovered options, by configuration and auth method.
      *
      * <p>Configurations ranked for the domain, methods by {@link #authRank};
-     * one this app cannot drive is left out. {@code protocolName} names a
-     * service kind for the user.
+     * one this app cannot drive or does not offer ({@link #offered}) is left
+     * out. {@code protocolName} names a service kind for the user.
      */
     static List<SetupOption> discoveredOptions(
             PimDomain domain, Discovery discovery, Function<String, String> protocolName) {
@@ -52,7 +52,7 @@ final class SetupPlan {
                         Integer.compare(domain.rank(left.service()), domain.rank(right.service())));
 
         for (ServiceConfig config : configs) {
-            String baseUrl = Endpoints.endpointUrl(config, email);
+            String baseUrl = offered(config) ? Endpoints.endpointUrl(config, email) : null;
             if (baseUrl == null) {
                 continue;
             }
@@ -312,6 +312,15 @@ final class SetupPlan {
     /** Whether a config came from a fixed provider rule (Google, Microsoft). */
     static boolean fromProvider(ServiceConfig config) {
         return config.source() != null && config.source().startsWith("provider:");
+    }
+
+    /**
+     * Whether the app offers a discovered config: not Google's CardDAV or
+     * CalDAV, its contacts and calendars connecting over its APIs alone.
+     */
+    static boolean offered(ServiceConfig config) {
+        boolean dav = "carddav".equals(config.service()) || "caldav".equals(config.service());
+        return !dav || !"provider:google".equals(config.source());
     }
 
     /** The first labels of a host naming a service rather than whose it is. */

@@ -38,15 +38,15 @@ A target is a provider account reached over one protocol for one domain: the add
 | `microsoft-imap` | mail | outlook.office365.com, smtp.office365.com STARTTLS, XOAUTH2 | app-only client-credentials token for microsoft@pimalaya.onmicrosoft.com | IMAP |
 | `fastmail-jmap` | mail | JMAP (`jmap://`) | API token of pimalaya@fastmail.org | JMAP |
 | `fastmail-imap` | mail | imap.fastmail.com, smtp.fastmail.com | app password | IMAP |
-| `google-carddav` | contacts | Google CardDAV | service-account token | People API |
 | `google-gcal` | calendars | Calendar API (`google://`) | service-account token | Calendar API |
-| `google-caldav` | calendars | Google CalDAV | service-account token | Calendar API |
 | `fastmail-carddav`, `fastmail-caldav` | contacts, calendars | Fastmail CardDAV, CalDAV | DAV app password | WebDAV (extended MKCOL, MKCALENDAR, PUT) |
 | `fastmail-jmap-contacts`, `fastmail-jmap-calendar` | contacts, calendars | JMAP | API token | none: the token's JMAP session offers mail and submission alone |
 
 Microsoft Graph (`msgraph://`) is not a target yet: the bridge addresses `/me`, which an app-only token cannot, and the consent flow that mints a user token is out of scope. It drops in once a delegated refresh token is supplied (`MICROSOFT_GRAPH_REFRESH_TOKEN`), as a Stalwart container will. The Fastmail JMAP contacts and calendar targets skip, saying so: the test token's session lists no contacts or calendars capability.
 
-An account is built the way the connection flow builds it: discovery (`PimalayaClient.searchAll`) for the address, the domain's endpoint and mail's submission derived by the flow's own functions, the user put in a mail URL for a token credential, stored in an in-memory `SecureStore` (the Android keystore is a device's). Google's CalDAV home lists the primary calendar alone, so `google-caldav` works in the primary calendar, writing only events carrying the run's tag.
+An account is built the way the connection flow builds it: discovery (`PimalayaClient.searchAll`) for the address, the domain's endpoint and mail's submission derived by the flow's own functions, the user put in a mail URL for a token credential, stored in an in-memory `SecureStore` (the Android keystore is a device's).
+
+`google-carddav` and `google-caldav` were retired on 2026-11-07 (drop-google-dav), the app no longer offering Google's CardDAV or CalDAV; the run tables in tasks.md keep them as they ran. Google's contacts have no target until a `google-people` one exists.
 
 ### Credentials
 

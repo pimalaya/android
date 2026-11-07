@@ -642,8 +642,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_accountInfo<'local>(
 
 /// `Native.accountBase`: builds an account base URL of the given kind.
 ///
-/// `googleCarddav`, `google` or `msgraph` from an email, `jmap` from an
-/// HTTPS session URL or bare host; pure. Returns `{"url": ".."}`.
+/// `google` or `msgraph` from an email, `jmap` from an HTTPS session URL or
+/// bare host; pure. Returns `{"url": ".."}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_accountBase<'local>(
     mut env: EnvUnowned<'local>,

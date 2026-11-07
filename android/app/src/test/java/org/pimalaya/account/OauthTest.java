@@ -31,7 +31,6 @@ public class OauthTest {
     public void googleMailCalendarsAndContactsAreOneConsent() {
         assertEquals(google(GMAIL), google(CALENDAR));
         assertEquals(google(GMAIL), google(CONTACTS));
-        assertEquals(google(GMAIL), google("https://www.googleapis.com/auth/carddav"));
     }
 
     @Test
@@ -104,7 +103,8 @@ public class OauthTest {
     }
 
     /**
-     * A shipped client asks for its provider's scopes, nothing a config adds.
+     * A shipped client asks for its provider's scopes, nothing a config adds:
+     * Google's CardDAV scope neither, its contacts going over the People API.
      */
     @Test
     public void theShippedClientAsksForFixedScopes() {
@@ -113,6 +113,11 @@ public class OauthTest {
                 Oauth.fixedScope(
                         Oauth.Shipped.GOOGLE,
                         GMAIL + " https://www.googleapis.com/auth/drive " + CALENDAR));
+        assertEquals(
+                CONTACTS,
+                Oauth.fixedScope(
+                        Oauth.Shipped.GOOGLE,
+                        "https://www.googleapis.com/auth/carddav " + CONTACTS));
         assertEquals(
                 "https://outlook.office.com/IMAP.AccessAsUser.All offline_access",
                 Oauth.fixedScope(

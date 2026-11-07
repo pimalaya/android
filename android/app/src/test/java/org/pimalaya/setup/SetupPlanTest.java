@@ -244,6 +244,26 @@ public class SetupPlanTest {
                         .isEmpty());
     }
 
+    /** Google's rule names its CardDAV and CalDAV too; only its APIs are offered. */
+    @Test
+    public void googleConnectsOverItsApisAlone() {
+        AuthMethod grant = oauth(Oauth.GOOGLE_AUTH_ENDPOINT, "calendar");
+        List<ServiceConfig> searched =
+                List.of(
+                        config("caldav", "https://apidata.googleusercontent.com/caldav/v2/", null, "provider:google", grant),
+                        config("carddav", "https://www.googleapis.com/carddav/v1/", null, "provider:google", grant),
+                        config("gcal", "https://www.googleapis.com/calendar/v3/", null, "provider:google", grant),
+                        config("caldav", "https://dav.example.org/", null, "dav", grant));
+        SetupPlan.Discovery discovery = new SetupPlan.Discovery(searched, EMAIL, EMAIL);
+
+        List<String> calendars = new ArrayList<>();
+        for (SetupOption option : SetupPlan.discoveredOptions(PimDomain.CALENDAR, discovery, service -> service)) {
+            calendars.add(option.service + "|" + option.detail);
+        }
+        assertEquals(List.of("caldav|dav.example.org", "gcal|www.googleapis.com"), calendars);
+        assertTrue(SetupPlan.discoveredOptions(PimDomain.CONTACTS, discovery, service -> service).isEmpty());
+    }
+
     private static List<String> describe(List<SetupOption> options) {
         List<String> described = new ArrayList<>();
         for (SetupOption option : options) {

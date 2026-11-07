@@ -44,7 +44,7 @@ public class E2eCalendarTest extends E2eCase {
         "offline-store: A staged removal is a tombstone the load hands back / The delete is derived",
     })
     public void anEventRoundTripsThroughAScratchCalendar() throws Exception {
-        String name = scratchCalendar();
+        String name = scratch();
         items.seed(name, subject("seeded"));
 
         connected();
@@ -133,7 +133,7 @@ public class E2eCalendarTest extends E2eCase {
         "offline-store: A staged removal is a tombstone the load hands back / The row is not resurrected",
     })
     public void anEventWrittenElsewhereIsDeleted() throws Exception {
-        String name = scratchCalendar();
+        String name = scratch();
         items.seed(name, subject("elsewhere"));
 
         connected();
@@ -158,7 +158,7 @@ public class E2eCalendarTest extends E2eCase {
         "offline-store: A staged removal is a tombstone the load hands back / The row is not resurrected",
     })
     public void anEventCreatedOnThePhoneIsDeleted() throws Exception {
-        String name = scratchCalendar();
+        String name = scratch();
         connected();
         EventStore.StoredCalendar calendar = calendarOf(phone, name);
         String uid = UUID.randomUUID().toString();
@@ -197,21 +197,9 @@ public class E2eCalendarTest extends E2eCase {
                 + "END:VEVENT\r\nEND:VCALENDAR\r\n";
     }
 
-    /**
-     * A scratch calendar, or Google's primary (its CalDAV home lists no other).
-     *
-     * <p>Only tagged events are written to the primary.
-     */
-    private String scratchCalendar() throws Exception {
-        return target.id.equals("google-caldav") ? E2eGoogleCalendarFixture.PRIMARY : scratch();
-    }
-
     /** A device's calendar of that name, which must be listed. */
     private EventStore.StoredCalendar calendarOf(E2eDevice device, String name) {
-        EventStore.StoredCalendar calendar =
-                name.equals(E2eGoogleCalendarFixture.PRIMARY)
-                        ? device.calendars(address).get(0)
-                        : device.calendar(address, name);
+        EventStore.StoredCalendar calendar = device.calendar(address, name);
         assertNotNull("the calendar " + name + " listed", calendar);
         return calendar;
     }

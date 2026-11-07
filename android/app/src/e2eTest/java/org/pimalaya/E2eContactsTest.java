@@ -44,7 +44,7 @@ public class E2eContactsTest extends E2eCase {
                 () -> items.titles(name, tag).contains(subject("seeded")) ? null : "not yet");
 
         connected();
-        BookEntry book = phone.book(address, bookName(name));
+        BookEntry book = phone.book(address, name);
         assertNotNull("an address book listed", book);
         String url = book.book.url();
         settles(
@@ -124,7 +124,7 @@ public class E2eContactsTest extends E2eCase {
                 () -> items.titles(name, tag).contains(subject("elsewhere")) ? null : "not yet");
 
         connected();
-        String url = phone.book(address, bookName(name)).book.url();
+        String url = phone.book(address, name).book.url();
         settles(
                 "the seeded contact synced",
                 () -> {
@@ -152,7 +152,7 @@ public class E2eContactsTest extends E2eCase {
     public void aContactCreatedOnThePhoneIsDeleted() throws Exception {
         String name = scratch();
         connected();
-        String url = phone.book(address, bookName(name)).book.url();
+        String url = phone.book(address, name).book.url();
         String uid = UUID.randomUUID().toString();
         phone.contacts().save(url, new Card(uid, null, null, vcard(uid, subject("created"))));
         settles(
@@ -173,15 +173,6 @@ public class E2eContactsTest extends E2eCase {
                             ? "server " + titles + ", phone " + names(phone, url)
                             : null;
                 });
-    }
-
-    /**
-     * The book a test works in: the scratch one, or Google's first listed.
-     *
-     * <p>Google's contacts are one fixed list.
-     */
-    private String bookName(String scratch) {
-        return target.id.equals("google-carddav") ? null : scratch;
     }
 
     /** What a device's book holds under the tag, staged ones marked. */

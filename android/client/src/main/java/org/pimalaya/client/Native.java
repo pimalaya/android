@@ -178,8 +178,8 @@ final class Native {
     /**
      * Builds an account base URL of a kind, returning {@code {"url": ".."}}.
      *
-     * <p>{@code googleCarddav}, {@code google}, {@code msgraph} from an email,
-     * {@code jmap} from an HTTPS session URL or bare host.
+     * <p>{@code google} and {@code msgraph} from an email, {@code jmap} from
+     * an HTTPS session URL or bare host.
      */
     static native String accountBase(String kind, String value);
 

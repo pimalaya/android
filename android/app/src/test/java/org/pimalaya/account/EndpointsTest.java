@@ -66,9 +66,13 @@ public class EndpointsTest {
                 List.of(
                         "imaps://imap.gmail.com:993",
                         "smtps://smtp.gmail.com:465",
-                        "google://jane@gmail.com",
-                        "https://apidata.googleusercontent.com/caldav/v2/jane%40gmail.com/user");
+                        "google://jane@gmail.com");
         assertTrue(Endpoints.allOn(gmail, "google", Oauth.GOOGLE_HOSTS));
+        assertFalse(
+                Endpoints.allOn(
+                        List.of("https://apidata.googleusercontent.com/caldav/v2/jane%40gmail.com/user"),
+                        "google",
+                        Oauth.GOOGLE_HOSTS));
         assertFalse(
                 Endpoints.allOn(
                         List.of("imaps://imap.gmail.com:993", "imaps://imap.evil.example:993"),

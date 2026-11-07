@@ -30,19 +30,16 @@ final class E2eTarget {
 
     /** The contacts targets. */
     static final List<String> CONTACTS =
-            List.of("google-carddav", "fastmail-carddav", "fastmail-jmap-contacts");
+            List.of("fastmail-carddav", "fastmail-jmap-contacts");
 
     /** The calendar targets. */
     static final List<String> CALENDAR =
-            List.of("google-gcal", "google-caldav", "fastmail-caldav", "fastmail-jmap-calendar");
+            List.of("google-gcal", "fastmail-caldav", "fastmail-jmap-calendar");
 
     /** Every target the suite knows, in report order. */
     static final List<String> ALL = all();
 
     private static final String GMAIL_SCOPE = "https://mail.google.com/";
-
-    private static final String CARDDAV_SCOPE =
-            "https://www.googleapis.com/auth/carddav https://www.googleapis.com/auth/contacts";
 
     private static final String CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
 
@@ -163,21 +160,11 @@ final class E2eTarget {
                                         E2eSecrets.env("FASTMAIL_APP_PASSWORD"),
                                         null);
                 return target;
-            case "google-carddav":
-                {
-                    Callable<String> token = () -> E2eSecrets.googleToken(google, CARDDAV_SCOPE);
-                    target.domain = PimDomain.CONTACTS;
-                    target.service = "carddav";
-                    target.secret = token;
-                    target.itemFixture = () -> new E2eGoogleContactsFixture(token);
-                    return target;
-                }
             case "google-gcal":
-            case "google-caldav":
                 {
                     Callable<String> token = () -> E2eSecrets.googleToken(google, CALENDAR_SCOPE);
                     target.domain = PimDomain.CALENDAR;
-                    target.service = id.equals("google-gcal") ? "gcal" : "caldav";
+                    target.service = "gcal";
                     target.secret = token;
                     target.itemFixture = () -> new E2eGoogleCalendarFixture(token);
                     return target;

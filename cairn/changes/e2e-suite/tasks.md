@@ -62,6 +62,7 @@ Java paths are relative to android/app/src/main/java/org/pimalaya/, the suite's 
 - [x] Merged into the main tree (2026-10-11) on top of mail-sync-robustness, the IMAP/Graph/JMAP steps, sync-feedback-pinned, oauth-pending-grant-encrypted, throttle-chunk-bounds; one conflict, `MessageView.load`, re-applied onto `mailboxWindow`
 - [x] Live run of the merged tree on the Google targets, below
 - [x] Live run on every target, below
+- [ ] A `google-people` target (contacts over the People API, `google://`), Google's contacts target since `google-carddav` was retired (drop-google-dav, 2026-11-07); `E2eGoogleContactsFixture` already speaks the People API, but `Endpoints.endpointUrl` maps a discovered `gpeople` config to its https URL, not the `google://` base the setup's People option uses
 - [ ] Fold (no spec change), log, archive
 
 ## Run on the merged tree, 2026-10-11

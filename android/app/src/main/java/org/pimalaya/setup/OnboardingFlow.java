@@ -863,9 +863,9 @@ public final class OnboardingFlow {
                         new SetupPlan.Discovery(searchedConfigs, pendingEmail, emailLogin()),
                         this::protocolName);
 
-        // NOTE: the provider sign-ins are contacts sign-ins (CardDAV, the
-        // People API, Graph). No protocol signal reveals where contacts live at
-        // Google or Microsoft, so the sign-in itself is the real test.
+        // NOTE: the provider sign-ins are contacts sign-ins (the People API,
+        // Graph). No protocol signal reveals where contacts live at Google or
+        // Microsoft, so the sign-in itself is the real test.
         if (domain == PimDomain.CONTACTS && matchedProvider != null) {
             addProviderOptions(options);
         }
@@ -890,25 +890,12 @@ public final class OnboardingFlow {
     /**
      * The matched provider's contacts sign-ins, as options.
      *
-     * <p>Hand-written: neither Google nor Microsoft publishes a CardDAV SRV
-     * record or well-known, so the endpoints and scopes are the app's own
-     * knowledge.
+     * <p>Hand-written: neither Google nor Microsoft publishes its contacts
+     * API in a SRV record or well-known, so the endpoints and scopes are the
+     * app's own knowledge.
      */
     private void addProviderOptions(List<SetupOption> options) {
         if ("provider:google".equals(matchedProvider)) {
-            // NOTE: the provider rule names Google's CardDAV itself now, so
-            // the hand-written one would be the same row twice.
-            if (!providerFound("carddav")) {
-                options.add(
-                        providerOption(
-                                R.string.config_carddav,
-                                "www.googleapis.com",
-                                AccountClient.googleCarddavBase(pendingEmail),
-                                AuthMethod.codeGrant(
-                                        Oauth.GOOGLE_AUTH_ENDPOINT,
-                                        Oauth.GOOGLE_TOKEN_ENDPOINT,
-                                        Oauth.GOOGLE_SCOPE)));
-            }
             options.add(
                     providerOption(
                             R.string.config_google_api,
@@ -929,16 +916,6 @@ public final class OnboardingFlow {
                                 Oauth.MICROSOFT_AUTH_ENDPOINT,
                                 Oauth.MICROSOFT_TOKEN_ENDPOINT,
                                 Oauth.MICROSOFT_SCOPE)));
-    }
-
-    /** Whether a provider rule named this service. */
-    private boolean providerFound(String service) {
-        for (ServiceConfig config : searchedConfigs) {
-            if (service.equals(config.service()) && SetupPlan.fromProvider(config)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**

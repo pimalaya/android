@@ -7,7 +7,7 @@ change: oauth-verification
 
 ## 1. Google, before submitting
 
-- [ ] Decide the contacts and calendar scopes (proposal, Decisions), then the final scope list in `GOOGLE_SCOPES`
+- [ ] Decide the calendar scope (proposal, Decisions), then the final scope list in `GOOGLE_SCOPES`; contacts decided 2026-11-07, `contacts` alone (drop-google-dav)
 - [x] Two GCP projects (2026-11-06): "Pimalaya" for production, the one verified, holding the release clients alone; "Pimalaya Dev" (991810147220, the former one) for the debug client, never verified, set to In production so its grants skip the 7-day expiry. The debug client stays out of the demo video and scope experiments stay out of the verified project
 - [x] pimalaya.org app page at https://pimalaya.org/android/ and its privacy page at https://pimalaya.org/android/privacy/, the latter rendered from a copy of PRIVACY.md (websites www-android-pages, published 2026-11-06). After a PRIVACY.md edit: `npm run sync:privacy` in the websites repo, then the Publish workflow of pimalaya/_www
 - [x] The brand's privacy policy at https://pimalaya.org/privacy/ and terms of use at https://pimalaya.org/terms/, covering every interface, linked from every page's footer (websites www-privacy-terms, published 2026-11-07). Each interface joining the project gets its section or link in the privacy policy first
@@ -18,7 +18,7 @@ change: oauth-verification
 - [ ] In-app disclosure in each interface before its Google sign-in (proposal, Google facts): the data accessed and how it is used, then a confirm step (a button on Android, a prompt in the command-line wizards), before the browser opens
 - [ ] Clients of other interfaces (command-line, terminal, desktop) added to "Pimalaya" only once each is ready for production; each needs its section or link in the privacy policy, its disclosure, and its part in the demo video
 - [ ] Branding page filled (submission.md §1), 120x120 logo
-- [ ] Data Access page: exactly the scopes the app asks for, each shown as sensitive or restricted there
+- [x] Data Access page (owner, 2026-11-07): `https://mail.google.com/`, `calendar`, `tasks` and `contacts`, the scopes release builds ask for since drop-google-dav; the Gmail, Calendar, Tasks and People APIs enabled, the CardDAV and CalDAV APIs left off. Revisit if `calendar` narrows
 - [ ] Audience: publishing status to In production (verification needs it; ends the 7-day expiry; starts the lifetime 100-user count, closed testers included)
 - [ ] Demo video recorded and uploaded unlisted (submission.md §3)
 

@@ -88,6 +88,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Changed the store's statements to the app's own, which SQLite 3.18 runs as Android 8.0 ships it, the step before the app uses the phone's SQLite instead of bundling one; a store the previous version wrote opens unchanged.
 - Changed the store to run on the phone's own SQLite rather than one bundled with the app, which makes each APK 1.3 to 1.9 MB smaller (10.5 MB instead of 12.4 MB on arm64-v8a); a store the previous version wrote opens unchanged. Every commit to the store is now synced to disk before it is answered, whatever the phone's default.
 
+### Removed
+
+- Removed Google's CardDAV and CalDAV from the advanced setup: a Google account's contacts connect over the People API and its calendars over the Google Calendar API, as the recommended setup already did, and the app no longer asks Google for the CardDAV permission. An account connected over Google's CardDAV or CalDAV keeps syncing until it is next signed in again; remove it and add it again to move it onto the APIs.
+
 ### Fixed
 
 - Fixed a task created on the phone in a Google task list being created twice on Google when the answer to its creation was lost: the next sync recognises Google's copy by its title, notes, due day and completion and files the task once.

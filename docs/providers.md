@@ -29,14 +29,15 @@ Cross-provider notes:
 - Finding (OAuth on device, 2026-11-04): the in-app round trip works: the JMAP grant (mail and contacts, resource `https://api.fastmail.com/jmap/session`) came back with a code. The CalDAV grant failed with `invalid_target`: its resource was the RFC 6764 shard `https://d709745.caldav.fastmail.com/dav/calendars`, which advertises Bearer with no RFC 9728 `resource_metadata`, while `caldav.fastmail.com` names `https://caldav.fastmail.com/dav/calendars` (authorization server `https://api.fastmail.com`). io-pim-discovery keeps the resolved shard over the advertised parent, so its RFC 9728 pass finds nothing and `SetupPlan.resourceOf` falls back to the shard URL. Two grants, two registered clients: the one-consent question (cairn/changes/one-fastmail-consent) is still open.
 - To verify: CardDAV sync-collection deltas; the JMAP Contacts path end to end (RFC 9610 ContactCard, /changes deltas, m:n addressbook memberships) over an API token.
 
-## Google (IMAP + SMTP, CalDAV, CardDAV or People API, OAuth)
+## Google (IMAP + SMTP, Gmail API, Calendar API, People API, OAuth)
 
 - Status: untested on device. Onboarding offers every domain from io-pim-discovery's provider rule since 2026-10-06 (custom domains included, matched by MX).
+- Not offered since 2026-11-07 (drop-google-dav): Google's CardDAV and CalDAV. The APIs reach the same data with working sync tokens, contact groups and Google Tasks, and the verified client keeps one scope less; the DAV behaviors below are why.
 - Auth: OAuth code grant with PKCE. Calendar and contacts scopes are "sensitive" (free verification); Gmail's `https://mail.google.com/`, which IMAP and SMTP need too, is "restricted" (yearly paid CASA). An unverified app stops at 100 users in total. Password IMAP is off: without OAuth, Gmail takes an app password, which needs 2-step verification. Google and Microsoft sign-ins are the provider plan's (docs/monetization.md); the shipped client ids are for testing.
-- Quotas, per project: the Calendar API, which CalDAV shares, allows 10,000 requests a minute (600 per user) and bills past 1,000,000 a day; a 15-minute background sync costs roughly 500 requests a day per calendar user while Google's calendars are listed in full. Gmail over IMAP has no per-project quota, only per-user bandwidth.
-- Known behaviors (CalDAV): a `sync-collection` with no token answers 400 (sync tokens are served at Depth 0 only), so every pass falls back to a `PROPFIND` listing; the primary calendar's collection is `events`; a PUT stores the resource under a name of Google's.
+- Quotas, per project: the Calendar API allows 10,000 requests a minute (600 per user) and bills past 1,000,000 a day; a 15-minute background sync costs roughly 500 requests a day per calendar user while Google's calendars are listed in full. Gmail over IMAP has no per-project quota, only per-user bandwidth.
+- Known behaviors (CalDAV, no longer offered): a `sync-collection` with no token answers 400 (sync tokens are served at Depth 0 only), so every pass falls back to a `PROPFIND` listing; the primary calendar's collection is `events`; a PUT stores the resource under a name of Google's.
 - Known behaviors (contacts): creates land in the myContacts system group (the engine patches the target group right after); memberships are m:n contact groups; updates guarded by the person etag; sync tokens bind to their field mask (the delta round always asks READ_FIELDS plus metadata). CardDAV rewrites the UID and ignores If-Match.
-- To verify: IMAP and SMTP over XOAUTH2; the CalDAV listing fallback; People sync-token deltas incl. the EXPIRED_SYNC_TOKEN fallback.
+- To verify: IMAP and SMTP over XOAUTH2; People sync-token deltas incl. the EXPIRED_SYNC_TOKEN fallback.
 
 ## Microsoft (IMAP + SMTP, Graph, OAuth)
 

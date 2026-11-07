@@ -65,9 +65,9 @@ The store SHALL hand out `U+0001` followed by the link id as the handle of a pla
 - THEN the resource is named after the card, and the binding takes whatever handle the push assigns
 
 #### Scenario: The server files the create under a name of its own
-- GIVEN a card created on the phone, pushed to Google's CardDAV, which files it under its own name and says so in `Location`
+- GIVEN a card created on the phone, pushed to a CardDAV server which files it under its own name and says so in `Location`
 - WHEN the card is deleted on the phone
-- THEN the next pass deletes the resource Google named, and the card is not listed back
+- THEN the next pass deletes the resource the server named, and the card is not listed back
 
 ### Requirement: One identity under two handles
 A write resolving an existing `(collection, link_id, source)` binding to a different handle SHALL be refused, unless the same batch supersedes the handle it holds. The store SHALL NOT record the incoming handle in the bound one's place, and SHALL NOT freeze the item.
@@ -585,7 +585,7 @@ Every caller in the process, the activity, the sync adapters, the background job
 A pushed create or edit SHALL record the revision the server holds the item at: the ETag the write answered, read as the string it is (quotes of its own included), or, when the write answered none, the one a read of that member answers. A read that fails SHALL leave the revision unknown and SHALL NOT fail the write.
 
 #### Scenario: A server answering no ETag
-- GIVEN a CalDAV server that answers a PUT with no ETag, as Google's does
+- GIVEN a CalDAV server that answers a PUT with no ETag
 - WHEN an entry created on the phone is pushed, then deleted on the phone
 - THEN the pass after the delete pushes it, rather than reading the listing as a change made elsewhere and pulling the entry back
 
