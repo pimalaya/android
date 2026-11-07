@@ -26,3 +26,7 @@ Google Tasks is the least capable task backend: its API keeps a title, notes, a 
 ## Design
 
 On the canvas, light and dark: the task page's row with its chevron, and the dialog.
+
+## Open
+
+- A title over Google's cap is refused with a 400 ("Title is too long", live 2026-11-07): what the user sees then is not said yet.
