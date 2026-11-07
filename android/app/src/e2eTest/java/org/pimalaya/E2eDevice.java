@@ -5,12 +5,12 @@ import static org.robolectric.Shadows.shadowOf;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.SharedPreferences;
-import android.database.Cursor;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
@@ -33,7 +33,6 @@ import org.pimalaya.phone.Accounts;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
-import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.sync.SyncCoordinator;
 import org.pimalaya.sync.SyncPasses;
 import org.robolectric.shadows.ShadowNetworkInfo;
@@ -366,54 +365,28 @@ final class E2eDevice {
         return found.isEmpty() ? null : found.get(0);
     }
 
+    /** The statuses owing the server a push (SYNC §3): a conflict waits. */
+    private static final Set<String> OWING = Set.of("created", "dirty", "tombstone");
+
     /**
-     * Whether an item owes its server a push, read off the store.
-     *
-     * <p>No agreed base yet (a create, a move's target), markers past the
-     * agreed ones, or, outside mail, a body past the agreed one.
+     * Whether an item owes its server a push: the status the store derives
+     * for its placement, as the sync engine loads it.
      */
     boolean owes(String collection, String linkId) {
-        try (Cursor cursor =
-                pimdir.getReadableDatabase()
-                        .rawQuery(
-                                "SELECT i.flags, i.object_hash, b.link_id, b.base_present,"
-                                        + " b.base_flags, b.base_object, c.kind"
-                                        + " FROM items i"
-                                        + " JOIN collections c ON c.id = i.collection"
-                                        + " LEFT JOIN bindings b ON b.collection = i.collection"
-                                        + " AND b.link_id = i.link_id AND b.source = ?"
-                                        + " WHERE i.collection = ? AND i.link_id = ?",
-                                new String[] {
-                                    PimdirStorage.sourceOf(collection),
-                                    PimdirStorage.collectionOf(collection),
-                                    linkId
-                                })) {
-            if (!cursor.moveToFirst()) {
-                return false;
-            }
-            if (cursor.isNull(2) || cursor.getInt(3) == 0) {
-                return true;
-            }
-            boolean flagsMoved =
-                    !cursor.isNull(0)
-                            && !cursor.isNull(4)
-                            && !flagSet(cursor.getString(0)).equals(flagSet(cursor.getString(4)));
-            boolean bodyMoved =
-                    !PimdirSummary.MAIL.equals(cursor.getString(6))
-                            && !cursor.isNull(1)
-                            && !cursor.getString(1).equals(cursor.getString(5));
-            return flagsMoved || bodyMoved;
-        }
-    }
-
-    private static Set<String> flagSet(String json) {
         try {
-            JSONArray array = new JSONArray(json);
-            Set<String> flags = new HashSet<>();
-            for (int index = 0; index < array.length(); index++) {
-                flags.add(array.getString(index));
+            JSONObject scope =
+                    new JSONObject().put("kind", "links").put("links", new JSONArray().put(linkId));
+            JSONArray placements =
+                    new PimdirStorage(pimdir)
+                            .loadCollection(collection, scope)
+                            .getJSONArray("placements");
+            for (int index = 0; index < placements.length(); index++) {
+                JSONObject placement = placements.getJSONObject(index);
+                if (linkId.equals(placement.getString("linkId"))) {
+                    return OWING.contains(placement.getString("status"));
+                }
             }
-            return flags;
+            return false;
         } catch (JSONException error) {
             throw new AssertionError(error);
         }
