@@ -64,8 +64,8 @@ Restated against the code on 2026-11-06. Gone since the 2026-10-09 review: the I
 
 ## 6. What a user meets first
 
-- [ ] Drafts: a message being written is kept and reopened (scope being set by the owner, 2026-11-07)
-- [ ] Attachments added in the composer, and kept on a forward (scope being set by the owner, 2026-11-07)
+- [ ] Drafts: a message being written is kept and reopened (later, by the owner's choice of 2026-11-07)
+- [ ] Attachments added in the composer, and kept on a forward (later, by the owner's choice of 2026-11-07)
 - [ ] Restoring a deleted message on every backend, not IMAP alone (DeletedItemsPage)
 - [ ] Gmail: a message under a label the store does not hold yet has its body read twice, the next pass's round over the new label filing it; not a loss (a-message-is-filed-somewhere, whose Graph and JMAP halves are dead code since 3d999f8, listed for deletion in fill-from-two-queues)
 - [ ] Store performance follow-ups: agenda prefilter, contacts rows from summaries, refcounts, large attachments streamed (store-performance-followups)
