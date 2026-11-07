@@ -622,4 +622,23 @@ public class TaskSyncTest {
         assertEquals("token-1", synced);
         assertEquals(synced, one("SELECT CAST(checkpoint AS TEXT) FROM sources"));
     }
+
+    @Test
+    public void aToDoMergedByTheSyncListsWhatItMerged() throws Exception {
+        list(new Calendar("work", "Work", WORK, "", null, "", true));
+        dav.of(WORK).put("gate.ics", new String[] {"e0", todo("gate", "")});
+        engine.sync(calendar("Work").id);
+        writes.edit(
+                store.load(context).get(0), TaskEdit.at(TaskWrites.now()).withList(Task.SOMEDAY));
+        String retitled = todo("gate", "").replace("Fix the gate", "Fix the gate today");
+        dav.of(WORK).put("gate.ics", new String[] {"e1", retitled});
+
+        engine.sync(calendar("Work").id);
+
+        TaskStore.Stored task = store.load(context).get(0);
+        String body = task.event.ical();
+        assertTrue(body, body.contains("SUMMARY:Fix the gate today\r\n"));
+        assertEquals(body, "Fix the gate today", task.task.summary());
+        assertEquals(body, Task.SOMEDAY, task.task.list());
+    }
 }

@@ -87,6 +87,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed an agenda entry or a task edited both on the phone and on the server keeping its old title in the agenda and the Tasks tab once the sync merged the two edits, though the merged entry held the new one.
 - Fixed two IMAP messages sharing a UID in different mailboxes sharing their attachments: the archive's message 42 could list the inbox's 42's file and never its own. Each message is now named by its UID, its mailbox and the mailbox's UIDVALIDITY; an IMAP account added before this is removed and added again.
 - Fixed the add button, hidden while a sync runs, still opening when tapping where it had been.
 - Fixed a Google Calendar meeting you organize failing on every sync once its creation had reached Google but the answer was lost: the sync now finds the meeting Google already holds and keeps it.

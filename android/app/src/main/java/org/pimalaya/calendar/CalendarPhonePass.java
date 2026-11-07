@@ -6,6 +6,7 @@ import org.json.JSONException;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Derived;
 import org.pimalaya.client.EventMerge;
 import org.pimalaya.pimdir.PhonePass;
 import org.pimalaya.pimdir.PimdirDb;
@@ -83,12 +84,14 @@ public final class CalendarPhonePass extends PhonePass {
                 EventMerge merge =
                         CalendarClient.mergeEvent(conflict.base, conflict.local, conflict.remote);
                 if (merge.resolved()) {
+                    // NOTE: a summary left out keeps the replaced one.
+                    Derived derived = CalendarSummaries.of(merge.ical());
                     on.mutateResolve(
                             collection,
                             conflict.handle,
                             merge.ical(),
-                            null,
-                            "",
+                            derived == null ? null : derived.summary(),
+                            derived == null ? "" : derived.sortKey(),
                             conflict.resolves);
                     settled += 1;
                 }

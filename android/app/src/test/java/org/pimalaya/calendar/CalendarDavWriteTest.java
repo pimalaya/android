@@ -5,6 +5,7 @@ import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
 
+import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -25,9 +26,12 @@ import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.Transport;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirIndexDb;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -46,6 +50,8 @@ public class CalendarDavWriteTest {
 
     private final Account account = new Account("https://dav.example.org/", EMAIL, "secret");
 
+    private PimdirDb pimdir;
+    private Clients clients;
     private EventStore events;
     private CalendarEngine engine;
     private String calendar;
@@ -115,17 +121,19 @@ public class CalendarDavWriteTest {
     @Before
     public void setUp() {
         Context context = RuntimeEnvironment.getApplication();
-        PimdirDb pimdir = new PimdirDb(context);
+        pimdir = new PimdirDb(context);
         events = new EventStore(context, pimdir);
         events.replaceCalendars(
                 EMAIL, List.of(new Calendar("work", "Work", URL, "", null, "", true)));
         calendar = events.loadCalendars().get(0).id;
+        clients =
+                new Clients(
+                        new AccountClient(), new ContactClient(), dav, new MailClient(),
+                        new OfflineClient());
         engine =
                 new CalendarEngine(
                         pimdir,
-                        new Clients(
-                                new AccountClient(), new ContactClient(), dav, new MailClient(),
-                                new OfflineClient()),
+                        clients,
                         new RemoteAccount(null, account, new PimdirAccount(context).idOf(EMAIL)));
     }
 
@@ -171,5 +179,37 @@ public class CalendarDavWriteTest {
         assertEquals(List.of("e-1.ics"), dav.deleted);
         engine.sync(calendar);
         assertTrue("not pulled back", !anyStored());
+    }
+
+    @Test
+    public void anEntryMergedByTheSyncShowsWhatItMergedInTheAgenda() throws Exception {
+        LocalDate day = LocalDate.now().plusDays(7);
+        String date = day.format(DateTimeFormatter.BASIC_ISO_DATE);
+        dav.entries.put("e-1.ics", new String[] {"e0", entry(date, "Standup", "Room 1")});
+        engine.sync(calendar);
+        new CalendarStager(pimdir, clients)
+                .mutateEdit(calendar, stored().handle, entry(date, "Standup", "Room 2"), null, "");
+        dav.entries.put("e-1.ics", new String[] {"e9", entry(date, "Retro", "Room 1")});
+
+        engine.sync(calendar);
+
+        PimdirIndexDb index = pimdir.startIndex();
+        index.refresh();
+        String until = day.plusDays(1).format(DateTimeFormatter.BASIC_ISO_DATE);
+        JSONObject row =
+                index.agenda(CalendarList.instantOf(date), CalendarList.instantOf(until))
+                        .getJSONArray("occurrences")
+                        .getJSONObject(0);
+        String body = stored().ical();
+        assertTrue(body, body.contains("SUMMARY:Retro\r\n"));
+        assertEquals(body, "Retro", row.getString("summary"));
+        assertEquals(body, "Room 2", row.getString("location"));
+    }
+
+    /** An entry on {@code day} at {@code location}. */
+    private static String entry(String day, String summary, String location) {
+        return ical(summary)
+                .replace("20261013", day)
+                .replace("END:VEVENT", "LOCATION:" + location + "\r\nEND:VEVENT");
     }
 }
