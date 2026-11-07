@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./logo.svg" alt="Logo" width="128" height="128" />
   <h1>🗂️ Pimalaya Android</h1>
-  <p>Android app to manage your mail, contacts and calendars</p>
+  <p>Android app to manage mail, contacts and calendars in a local-first merged view</p>
   <p>
     <a href="https://matrix.to/#/#pimalaya:matrix.org"><img alt="Matrix" src="https://img.shields.io/badge/chat-%23pimalaya-blue?style=flat&logo=matrix&logoColor=white"/></a>
     <a href="https://fosstodon.org/@pimalaya"><img alt="Mastodon" src="https://img.shields.io/badge/news-%40pimalaya-blue?style=flat&logo=mastodon&logoColor=white"/></a>
@@ -14,16 +14,16 @@
 
 <table>
 <tr>
-<td><img src="screenshots/onboarding.png" width="200" alt="Automatic account setup from an email address" /></td>
-<td><img src="screenshots/domains.png" width="200" alt="Pick mail, contacts and calendar per account" /></td>
-<td><img src="screenshots/mail.png" width="200" alt="Mail list across every account" /></td>
-<td><img src="screenshots/contacts.png" width="200" alt="Merged contact list across every account" /></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="screenshots/onboarding-dark.png" /><img src="screenshots/onboarding.png" width="200" alt="Automatic account setup from an email address" /></picture></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="screenshots/domains-dark.png" /><img src="screenshots/domains.png" width="200" alt="Pick mail, contacts and calendar per account" /></picture></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="screenshots/mail-dark.png" /><img src="screenshots/mail.png" width="200" alt="Mail list across every account" /></picture></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="screenshots/contacts-dark.png" /><img src="screenshots/contacts.png" width="200" alt="Merged contact list across every account" /></picture></td>
 </tr>
 <tr>
-<td><img src="screenshots/calendar.png" width="200" alt="Week view across every calendar" /></td>
-<td><img src="screenshots/files.png" width="200" alt="Attachments and files across every account" /></td>
-<td><img src="screenshots/accounts.png" width="200" alt="Accounts drawer with sync status" /></td>
-<td><img src="screenshots/account.png" width="200" alt="Per-account sync settings" /></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="screenshots/calendar-dark.png" /><img src="screenshots/calendar.png" width="200" alt="Week view across every calendar" /></picture></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="screenshots/files-dark.png" /><img src="screenshots/files.png" width="200" alt="Attachments and files across every account" /></picture></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="screenshots/accounts-dark.png" /><img src="screenshots/accounts.png" width="200" alt="Accounts drawer with sync status" /></picture></td>
+<td><picture><source media="(prefers-color-scheme: dark)" srcset="screenshots/account-dark.png" /><img src="screenshots/account.png" width="200" alt="Per-account sync settings" /></picture></td>
 </tr>
 </table>
 
