@@ -8,8 +8,8 @@ change: production-release
 ## 0. Started now: what waits on others
 
 - [ ] Privacy policy on pimalaya.org, matching PRIVACY.md (Google's verification and Play's Data safety form both ask for it)
-- [ ] Google: restricted-scope verification for `https://mail.google.com/` submitted (privacy policy, demo video, Search Console for pimalaya.org, yearly renewal); until then 100 users and 7-day refresh tokens in Testing (oauth-verification)
-- [ ] Play developer account: a personal account created after 2023-11-13 needs a closed test of at least 12 testers for 14 days in a row before production access, an organisation account a D-U-N-S number; the pre-v1 builds run that test
+- [ ] Google: restricted-scope verification for `https://mail.google.com/` submitted (privacy policy, demo video, Search Console for pimalaya.org, yearly renewal); until then 100 users and 7-day refresh tokens in Testing (oauth-verification); the owner runs it in another session (2026-11-07)
+- [x] Play developer account: personal, created long before 2023-11-13 (owner, 2026-11-07), so the closed test of 12 testers for 14 days asked of newer personal accounts does not apply (Play Console's dashboard lists it when it does); the app is created and on internal testing
 
 ## 1. Data loss and correctness
 
@@ -20,7 +20,7 @@ Restated against the code on 2026-11-06. Gone since the 2026-10-09 review: the I
 - [ ] A fake ContactsContract provider, so the contacts spoke of the phone pass is tested as the calendar one is (FakeCalendarProvider)
 - [x] Gmail: a message sent to oneself arrives read: the staged Sent copy carries `\Seen` (mail/MailSubmit.java:121) and Gmail's flags are per message, so the push marks the inbox copy read. Fixed: the staged copy takes the markers of the provider's own before landing (cairn/log/2026-11-06-sent-copy-takes-provider-markers.md)
 - [x] IMAP: a staged copy's origin was found again by link id across every collection of the source, so a copy could take another mailbox's message under the same UID; the statement now follows pimdir's `origin_for_link` within the account and the `Message-ID` (cairn/log/2026-11-06-a-copy-from-its-own-mailbox.md)
-- [ ] IMAP: built 2026-11-06 (imap-link-id-per-account): an IMAP link id is `<UID>:<UIDVALIDITY>:<mailbox>`; owed, the device check with the IMAP account removed and added again, and two IMAP accounts sharing a mailbox name, UIDVALIDITY and UID still share one. Was: the inbox's message 42 carrying invoice.pdf and the archive's message 42 carrying beach.jpg share one attachment record, so opening one can show the other's file and the Files tab lists one where there are two. Reproduced in the store on 2026-11-06 (a FileStoreTest probe, not committed): both recorded through `recordAttachments(account, "42", ..)`, message 42 lists `[invoice.pdf]` and beach.jpg is never recorded. Attachment stand-ins are keyed `part:<link id>#<section>` and listed by account and link id (pimdir STORAGE §14.3, `list_attachments`), and an IMAP link id is a bare UID every mailbox reuses, so the reader can badge another mailbox's parts. The store itself holds one stand-in for two messages sharing a UID, so no reader-side fix can separate them. A decision first, in a cairn change: the IMAP link id the `Message-ID`, an identity pimdir's model assumes, falling back to UIDVALIDITY and UID for a message without one or sharing one in its mailbox; bodies stay unshared on IMAP (a Sent copy and its delivery share a `Message-ID`, not their bytes); stores already written re-list their IMAP mail rather than reinstall
+- [ ] IMAP: an IMAP link id was a bare UID, which every mailbox reuses, so the inbox's message 42 carrying invoice.pdf and the archive's message 42 carrying beach.jpg shared one attachment record (`part:42#2`). Built 2026-11-06 (6b604e4, imap-link-id-per-account): the link id is `<UID>:<UIDVALIDITY>:<mailbox>`. Owed: the device check with the IMAP account removed and added again. Left open: two IMAP accounts sharing a mailbox name, UIDVALIDITY and UID share a `seq` and reference endpoints, their attachments staying apart
 - [ ] Repeated writes left after M6: done, a send the app stopped in parked uncertain (cairn/log/2026-11-06-a-send-the-app-stopped-in-waits.md) and a copy skipped when its target holds the message (cairn/log/2026-11-06-a-copy-is-not-made-twice.md); left, creates rerun after a lost answer: a contact created on the phone reaches Google, the answer is lost, the next sync creates it again and the server holds two. Creates without an idempotency key (Graph contacts, Google People, Google Tasks, Microsoft To Do, JMAP cards and events). Checked 2026-11-06: the next pass lists the server's copy named by its identity and pimdir lands the pending create on it (CalendarMirrorTest `aCreateWhoseAnswerWasLostIsFiledOnce`), so every backend that keeps the UID files once: CalDAV, CardDAV, JMAP, Google Calendar (`iCalUID`), Google People (`clientData`), Graph contacts and To Do (the stash). The JMAP lookup by `uid` (c0a7767) was reverted as redundant, a request per create for nothing; the Google Calendar 409 read-back stays, costing nothing unless Google answers 409. Left: Google Tasks, whose UID is Google's task id, so a lost create files a second task; matched on its content, nothing visible (owner, 2026-11-06), proposed in google-tasks-lost-create (network-trust-hardening, whose Open M6 and L1 are stale)
 - [x] Gmail: trash or junk ticked at the first step landed empty as a closed round (mail/GmailStep.java:84) and no later step fills it; the first step leaves them to a round of their own (cairn/log/2026-11-06-gmail-trash-opens-by-a-round.md)
 - [x] IMAP without SORT: the floor sample stopped early on imports appended in rising date order and listed every envelope back to their dates; now checked by the round's search and a halving by day (cairn/log/2026-11-06-the-floor-checked-without-sort.md). mail.md still says 50 while the code follows fill-from-two-queues' 25 (its fold owed)
@@ -40,7 +40,7 @@ Restated against the code on 2026-11-06. Gone since the 2026-10-09 review: the I
 ## 3. Released libraries and supply chain
 
 - [x] io-http 0.6.0, ical-rs 0.7.0, io-imap 0.8.1, io-webdav 0.7.0, io-jmap 0.7.0, io-pim-discovery 0.11.0 released and pinned from crates.io (checked 2026-11-06)
-- [ ] The three git sources left in rust/Cargo.toml released and dropped: io-pimdir (the pinned b25523d is storage-draft-09, after the v0.9.0 tag 42a2f26; the bridge first follows 5c18a02, the search zone the CLIs moved to on 2026-11-06), io-msgraph past v0.7.0 for the To Do surface (01105a5), io-gtasks 0.1.0 first published; release-pinned-libs/tasks.md restated (it still names io-pimdir 0.8.0 and leaves the done releases open)
+- [ ] The three git sources left in rust/Cargo.toml released and dropped at the final validation, kept as git pins until then (owner, 2026-11-07): io-pimdir (the pinned b25523d is storage-draft-09, after the v0.9.0 tag 42a2f26; the bridge first follows 5c18a02, the search zone the CLIs moved to on 2026-11-06), io-msgraph past v0.7.0 for the To Do surface (01105a5), io-gtasks 0.1.0 first published; release-pinned-libs/tasks.md restated (it still names io-pimdir 0.8.0 and leaves the done releases open)
 - [ ] A body bound (`max_body_len`) on every HTTP call, none in rust/src as of 2026-11-06 (release-pinned-libs)
 - [ ] CI builds unsigned and signs on `v*` tags only, in a protected environment (release-supply-chain)
 - [ ] Actions pinned by SHA, least `permissions`, a read-only Cachix token outside releases (release-supply-chain)
@@ -52,22 +52,21 @@ Restated against the code on 2026-11-06. Gone since the 2026-10-09 review: the I
 
 - [ ] Google: an Android OAuth client per signing key (Play App Signing, GitHub APK, F-Droid unless reproducible), the redirect scheme in AndroidManifest.xml following
 - [ ] Microsoft: the production Entra client in place of the testing one; publisher verification for tenants that require it (oauth-verification)
-- [ ] Re-sign-in: an account whose grant or password stopped working signs in again from its settings, keeping its outbox and staged edits
+- [ ] Re-sign-in: an account whose grant or password stopped working signs in again, keeping its outbox and staged edits. The owner's direction (2026-11-07): the onboarding's Review your domains page, opened from the account's settings on its address (typing an existing address already shows its domains Connected, and AccountCommit.persist merges onto the stored account). To settle in a cairn change: the domains filled from the account's stored settings rather than discovery's; a new password, token or grant keeps the store while a changed server or protocol re-lists that domain; the identity checked after a grant (L4) and the login kept; no domain unticked there; a sync refused for its sign-in offering it from the account's card
 - [ ] Fastmail: one consent for IMAP, JMAP and DAV (one-fastmail-consent)
 
 ## 5. Security residuals
 
 - [x] Lock-screen notifications private, a public version saying only the count, a Settings switch showing sender and subject (audit-s1-residuals I1; [log](../../log/2026-11-07-locked-notifications-show-the-count.md))
 - [ ] "Hide in recents" setting (audit-s1-residuals I2)
-- [ ] SecureStore blobs bound to their purpose as AAD (audit-s1-residuals I3)
 - [ ] Sync adapters not parallel, no URL in warnings (audit-s1-residuals L1, L3)
 - [ ] OAuth: issuer pairing (H3), `iss` required where advertised (M1), https-only endpoints in io-oauth (M2), RFC 8707 `resource` (L3), identity check after a grant (L4), error redirects before the state check (L5) (network-trust-hardening)
 - [ ] Network: discovery redirects to other schemes or internal hosts refused (L2), TLS 1.2 floor on API 26 to 28 (L6), DoH and PACC trust documented (L8), a public-suffix rule in `trusted_href` (network-trust-hardening)
 
 ## 6. What a user meets first
 
-- [ ] Drafts: a message being written is kept and reopened
-- [ ] Attachments added in the composer, and kept on a forward
+- [ ] Drafts: a message being written is kept and reopened (scope being set by the owner, 2026-11-07)
+- [ ] Attachments added in the composer, and kept on a forward (scope being set by the owner, 2026-11-07)
 - [ ] Restoring a deleted message on every backend, not IMAP alone (DeletedItemsPage)
 - [ ] Gmail: a message under a label the store does not hold yet has its body read twice, the next pass's round over the new label filing it; not a loss (a-message-is-filed-somewhere, whose Graph and JMAP halves are dead code since 3d999f8, listed for deletion in fill-from-two-queues)
 - [ ] Store performance follow-ups: agenda prefilter, contacts rows from summaries, refcounts, large attachments streamed (store-performance-followups)
@@ -75,7 +74,7 @@ Restated against the code on 2026-11-06. Gone since the 2026-10-09 review: the I
 
 ## 7. Store release
 
-- [ ] Storage gate: the production track and F-Droid only on a storage-v1.0.0 store (pimdir's owner fence decided, io-pimdir released at v1, the app following it); until then Play closed testing and GitHub pre-releases
+- [ ] One release once everything is ready (owner, 2026-11-07): the store at storage-v1.0.0 (pimdir's owner fence decided, io-pimdir released at v1, the app following it) and the io-* libraries released at the final validation; Play internal testing until then
 - [ ] Play: fixed-price listing, payments profile, EU trader declaration (it shows an address publicly), Data safety form, screenshots light and dark
 - [ ] F-Droid: fastlane metadata, the recipe building Rust and the NDK, reproducible to keep the upstream signature
 - [ ] GitHub release: signed APKs per ABI and universal, CHANGELOG section cut for the version
