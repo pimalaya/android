@@ -145,6 +145,19 @@ A browser grant against Google's or Microsoft's authorization server SHALL run w
 - WHEN the browser card runs
 - THEN the app's Google client is not used, the generic client page opens instead
 
+### Requirement: Google's calendars are asked as their events and their list
+The app's Google client SHALL ask, for calendars, `https://www.googleapis.com/auth/calendar.events` and `https://www.googleapis.com/auth/calendar.calendarlist.readonly`, never the full `https://www.googleapis.com/auth/calendar` scope: where io-pim-discovery's provider rule or a grant from an earlier release names the full one, the grant SHALL ask for the two in its place. A calendar SHALL sign in only when both come back from Google's consent page. The check that a grant signed in as the account's address SHALL read the primary calendar's id off the calendar list (`calendarList.get("primary")`), under the two or the full scope, so a grant from an earlier release keeps syncing and is still checked.
+
+#### Scenario: The calendar list unticked on Google's consent page
+- GIVEN a Google calendar signing in again
+- WHEN the consent page grants its events and the tasks but not the calendar list
+- THEN the calendar does not land, its page says Calendar was not allowed, and the account keeps its earlier sign-in
+
+#### Scenario: A calendar granted by an earlier release
+- GIVEN a Google calendar whose grant holds the full calendar scope
+- WHEN it syncs, then signs in again
+- THEN it syncs on that grant, and the new sign-in asks for its events and the calendar list
+
 ### Requirement: Each build type signs in to Google with its own client
 Release builds, every channel alike (Google Play, the GitHub APKs, F-Droid), SHALL sign in to Google with the client of the verified "Pimalaya" project, and debug builds with the client of the "Pimalaya Debug" project, so the verified project holds only what ships. Each build SHALL carry one Google client ID and its reversed form as the redirect scheme, both set per build type in android/app/build.gradle.kts and read by Oauth.java and the manifest's intent-filter. An account SHALL keep refreshing its tokens with the client it was granted by, so a build changing its client strands no grant.
 

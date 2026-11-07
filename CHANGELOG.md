@@ -53,6 +53,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Changed what Google sign-in asks for calendars: to see and edit the events of your calendars and to see their list, no longer to manage every calendar (share or delete one), which the app never did. An account signed in before keeps syncing, and its next sign-in asks for the narrower access.
 - Changed what a task on a Google task list says about Google Tasks: its page, the capture sheet and the account's Tasks row now say what Google keeps (title, notes, due day, done), and a tap lists what it does not: the state, categories and links staying on the phone, the due time, In progress and Cancelled, a task changed on both sides, and subtasks made on Google.
 - Changed Google sign-in on release builds to the client of Pimalaya's production project, the one going through Google's verification, debug builds keeping the development one; an account signed in before keeps its grant.
 - Changed the week card: today sits on an accent disc, and each day shows a dot per calendar holding an entry, in its colour.

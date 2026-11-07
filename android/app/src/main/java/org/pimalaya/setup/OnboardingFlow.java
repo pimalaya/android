@@ -3567,10 +3567,12 @@ public final class OnboardingFlow {
             }
             String asked = Oauth.fixedScope(shipped, Oauth.withTasks(shipped, scope));
             // NOTE: Google's consent page lets each permission be unticked,
-            // so a domain is signed in only when its scopes come back.
+            // so a domain is signed in only when its scopes come back, as
+            // asked: the full calendar scope a config names, narrowed.
             Set<String> fixed = scopeSet(asked);
             for (Page member : group) {
-                Set<String> needs = scopeSet(member.option.method.scope());
+                Set<String> needs =
+                        scopeSet(Oauth.fixedScope(shipped, member.option.method.scope()));
                 needs.retainAll(fixed);
                 grantNeeds.put(member.domain, needs);
             }

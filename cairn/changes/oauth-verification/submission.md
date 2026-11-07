@@ -25,9 +25,13 @@ Drafts to paste into the consoles. Google's are in English, as the review is. Br
 
 Pimalaya is an open-source mail, contacts and calendar client for Android (https://github.com/pimalaya/android). Users read, search, compose, send, label, move, archive and delete their Gmail messages in the app. The scope is needed for two reasons no narrower scope covers: the app connects over IMAP and SMTP, which accept only this scope, and it permanently deletes messages when the user empties Trash or deletes a message from Trash (Gmail API `users.messages.delete`), which `gmail.modify` does not permit. This is the "email client that allows users to compose, send, read, and process email via a user interface" use case of the Gmail API policy.
 
-**`https://www.googleapis.com/auth/calendar`**
+**`https://www.googleapis.com/auth/calendar.events`**
 
-Users list, create, edit and delete events in their Google calendars, including recurring events, attendees and reminders, and choose which calendars to sync. [If kept over `calendar.events` + `calendar.calendarlist.readonly` (proposal Decisions), this needs a use the narrower pair does not cover; with Google's CalDAV no longer offered (drop-google-dav), none is known.]
+Users list, create, edit and delete events in their Google calendars, recurring events and attendees included, in the calendars they own and in those shared with them for writing alike; a meeting the user organizes invites its guests through Google. `calendar.events.owned` would leave out the shared calendars, and the app never creates, renames, deletes or shares a calendar, so the full `calendar` scope is not requested.
+
+**`https://www.googleapis.com/auth/calendar.calendarlist.readonly`**
+
+The app lists the user's calendars (name, colour, whether the user can write to it, which one is primary) so the user chooses which to sync, and reads the primary calendar's id to check that the account signed in is the one the user entered. It never changes the list.
 
 **`https://www.googleapis.com/auth/tasks`**
 
@@ -35,7 +39,7 @@ Users list, create, complete, edit and delete the tasks of their Google Tasks li
 
 **`https://www.googleapis.com/auth/contacts`**
 
-Users list, create, edit and delete their Google contacts (People API), including contact groups, and may mirror them into the phone's own Contacts app.
+Users list, create, edit and delete their Google contacts (People API), including which labels a contact carries, and may mirror them into the phone's own Contacts app.
 
 **Security assessment statement** (in the notes field)
 

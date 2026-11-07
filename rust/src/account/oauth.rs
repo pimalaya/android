@@ -518,7 +518,7 @@ mod tests {
             authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
             client_id: "123.apps.googleusercontent.com",
             redirect_uri: "com.googleusercontent.apps.123:/oauth2redirect",
-            scope: "https://mail.google.com/ https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/contacts",
+            scope: "https://mail.google.com/ https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/contacts",
             state: "stateABCDEF0123456789abcdef012345",
             pkce_verifier: "verifierABCDEF0123456789abcdef0123456789ABCDEF0123456789abcdef01",
             extras: r#"{"access_type":"offline","prompt":"consent","include_granted_scopes":"true"}"#,
@@ -533,7 +533,7 @@ mod tests {
             scopes,
             [
                 "https://mail.google.com/",
-                "https://www.googleapis.com/auth/calendar",
+                "https://www.googleapis.com/auth/calendar.events",
                 "https://www.googleapis.com/auth/contacts",
             ]
         );

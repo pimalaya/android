@@ -41,7 +41,14 @@ final class E2eTarget {
 
     private static final String GMAIL_SCOPE = "https://mail.google.com/";
 
-    private static final String CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
+    /** The app's calendar scopes: every calendar's events, and their list. */
+    private static final String CALENDAR_SCOPE =
+            "https://www.googleapis.com/auth/calendar.events"
+                    + " https://www.googleapis.com/auth/calendar.calendarlist.readonly";
+
+    /** The fixture's, which also creates and deletes the calendars it seeds. */
+    private static final String CALENDAR_FIXTURE_SCOPE =
+            CALENDAR_SCOPE + " https://www.googleapis.com/auth/calendar.calendars";
 
     private static final String OUTLOOK_SCOPE = "https://outlook.office365.com/.default";
 
@@ -163,10 +170,12 @@ final class E2eTarget {
             case "google-gcal":
                 {
                     Callable<String> token = () -> E2eSecrets.googleToken(google, CALENDAR_SCOPE);
+                    Callable<String> seeding =
+                            () -> E2eSecrets.googleToken(google, CALENDAR_FIXTURE_SCOPE);
                     target.domain = PimDomain.CALENDAR;
                     target.service = "gcal";
                     target.secret = token;
-                    target.itemFixture = () -> new E2eGoogleCalendarFixture(token);
+                    target.itemFixture = () -> new E2eGoogleCalendarFixture(seeding);
                     return target;
                 }
             case "fastmail-carddav":

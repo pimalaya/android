@@ -109,10 +109,10 @@ public class OauthTest {
     @Test
     public void theShippedClientAsksForFixedScopes() {
         assertEquals(
-                GMAIL + " " + CALENDAR,
+                GMAIL + " " + CONTACTS,
                 Oauth.fixedScope(
                         Oauth.Shipped.GOOGLE,
-                        GMAIL + " https://www.googleapis.com/auth/drive " + CALENDAR));
+                        GMAIL + " https://www.googleapis.com/auth/drive " + CONTACTS));
         assertEquals(
                 CONTACTS,
                 Oauth.fixedScope(
@@ -124,5 +124,29 @@ public class OauthTest {
                         Oauth.Shipped.MICROSOFT,
                         "https://outlook.office.com/IMAP.AccessAsUser.All Files.ReadWrite.All offline_access"));
         assertNull(Oauth.fixedScope(Oauth.Shipped.GOOGLE, "https://www.googleapis.com/auth/drive"));
+    }
+
+    /**
+     * Google's full calendar scope, which discovery names and older grants
+     * hold, is asked as the events and the calendar list, with the tasks.
+     */
+    @Test
+    public void googlesCalendarIsAskedAsItsEventsAndItsList() {
+        String events = "https://www.googleapis.com/auth/calendar.events";
+        String list = "https://www.googleapis.com/auth/calendar.calendarlist.readonly";
+        String tasks = "https://www.googleapis.com/auth/tasks";
+        Oauth.Shipped google = Oauth.Shipped.GOOGLE;
+
+        assertEquals(
+                events + " " + list + " " + tasks,
+                Oauth.fixedScope(google, Oauth.withTasks(google, CALENDAR)));
+        assertEquals(
+                events + " " + list + " " + tasks,
+                Oauth.fixedScope(google, Oauth.withTasks(google, events + " " + list)));
+        assertEquals(
+                CALENDAR + " " + events + " " + list + " " + tasks,
+                Oauth.domainScope(
+                        PimDomain.CALENDAR,
+                        GMAIL + " " + CALENDAR + " " + events + " " + list + " " + tasks));
     }
 }

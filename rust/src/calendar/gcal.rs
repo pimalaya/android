@@ -32,9 +32,9 @@ use io_gcal::{
             acl::GcalAccessRole,
             calendar_list::{
                 GcalCalendarListEntry,
+                get::GcalCalendarListEntryGet,
                 list::{GcalCalendarListList, GcalCalendarListListParams},
             },
-            calendars::get::GcalCalendarGet,
             events::{
                 GcalEvent, GcalEventStatus, GcalEvents, GcalSendUpdates,
                 delete::GcalEventDelete,
@@ -75,10 +75,12 @@ pub struct Gcal<'c, H> {
 }
 
 impl<H: Host> Gcal<'_, H> {
-    /// The primary calendar's id, the address of the account it belongs to.
+    /// The primary calendar's id, the address of the account it belongs to,
+    /// read off the calendar list: the calendar list's scope covers it.
     pub fn primary_id(&mut self) -> Result<Option<String>, BridgeError> {
         let auth = HttpAuthBearer::new(self.token);
-        let coroutine = GcalCalendarGet::new(&auth, "primary").map_err(|err| err.to_string())?;
+        let coroutine =
+            GcalCalendarListEntryGet::new(&auth, "primary").map_err(|err| err.to_string())?;
 
         Ok(self.run(coroutine)?.id)
     }

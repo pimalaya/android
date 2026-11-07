@@ -79,12 +79,27 @@ public final class Oauth {
     static final String GOOGLE_TASKS_SCOPE = "https://www.googleapis.com/auth/tasks";
 
     /**
-     * The scopes Google's own client asks for: mail, calendars and contacts.
+     * Google's full calendar scope, which io-pim-discovery names and older
+     * grants hold: the app asks for the two below in its place.
+     */
+    static final String GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
+
+    /** The events of every calendar the user can write to. */
+    static final String GOOGLE_EVENTS_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+
+    /** The calendar list, which names the calendars and the primary one. */
+    static final String GOOGLE_CALENDAR_LIST_SCOPE =
+            "https://www.googleapis.com/auth/calendar.calendarlist.readonly";
+
+    /**
+     * The scopes Google's own client asks for: mail, calendars, tasks and
+     * contacts.
      */
     private static final java.util.Set<String> GOOGLE_SCOPES =
             java.util.Set.of(
                     "https://mail.google.com/",
-                    "https://www.googleapis.com/auth/calendar",
+                    GOOGLE_EVENTS_SCOPE,
+                    GOOGLE_CALENDAR_LIST_SCOPE,
                     GOOGLE_TASKS_SCOPE,
                     GOOGLE_PEOPLE_SCOPE);
 
@@ -125,7 +140,7 @@ public final class Oauth {
     public static String withTasks(Shipped client, String scope) {
         java.util.Set<String> parts = new java.util.LinkedHashSet<>(scopes(scope));
         if (client == Shipped.GOOGLE) {
-            if (parts.contains("https://www.googleapis.com/auth/calendar")) {
+            if (parts.contains(GOOGLE_CALENDAR_SCOPE) || parts.contains(GOOGLE_EVENTS_SCOPE)) {
                 parts.add(GOOGLE_TASKS_SCOPE);
             }
         } else if (parts.contains("Calendars.ReadWrite")) {
@@ -169,14 +184,18 @@ public final class Oauth {
     }
 
     /**
-     * A shipped client's scope: the requested one kept to the provider's set.
+     * A shipped client's scope: the requested one kept to the provider's set,
+     * Google's full calendar scope narrowed to the events and the list.
      */
     public static String fixedScope(Shipped client, String scope) {
         java.util.Set<String> allowed =
                 client == Shipped.GOOGLE ? GOOGLE_SCOPES : MICROSOFT_SCOPES;
         java.util.Set<String> kept = new java.util.LinkedHashSet<>();
         for (String part : scopes(scope)) {
-            if (allowed.contains(part)) {
+            if (client == Shipped.GOOGLE && part.equals(GOOGLE_CALENDAR_SCOPE)) {
+                kept.add(GOOGLE_EVENTS_SCOPE);
+                kept.add(GOOGLE_CALENDAR_LIST_SCOPE);
+            } else if (allowed.contains(part)) {
                 kept.add(part);
             }
         }
@@ -225,7 +244,9 @@ public final class Oauth {
                     switch (domain) {
                         case MAIL -> part.equals("https://mail.google.com/");
                         case CALENDAR ->
-                                part.equals("https://www.googleapis.com/auth/calendar")
+                                part.equals(GOOGLE_CALENDAR_SCOPE)
+                                        || part.equals(GOOGLE_EVENTS_SCOPE)
+                                        || part.equals(GOOGLE_CALENDAR_LIST_SCOPE)
                                         || part.equals(GOOGLE_TASKS_SCOPE);
                         case CONTACTS -> part.equals(GOOGLE_PEOPLE_SCOPE);
                     };

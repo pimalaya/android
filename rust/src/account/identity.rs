@@ -23,8 +23,12 @@ use crate::{
 /// The mail scope, under which the mailbox's profile names its address.
 const MAIL_SCOPE: &str = "https://mail.google.com/";
 
-/// The calendar scope, under which the primary calendar is the address.
-const CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calendar";
+/// The calendar scopes, under which the primary calendar is the address: the
+/// calendar list's, and the full one older grants hold.
+const CALENDAR_SCOPES: [&str; 2] = [
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+    "https://www.googleapis.com/auth/calendar",
+];
 
 /// The hosts one token of that authorization server signs in to.
 const GOOGLE_HOSTS: [&str; 5] = [
@@ -85,7 +89,8 @@ impl Identity {
             if scopes.contains(&MAIL_SCOPE) {
                 return Some(Self::Mailbox);
             }
-            return scopes.contains(&CALENDAR_SCOPE).then_some(Self::Calendar);
+            let calendar = scopes.iter().any(|scope| CALENDAR_SCOPES.contains(scope));
+            return calendar.then_some(Self::Calendar);
         }
 
         let graph = bases.iter().any(|base| base.starts_with(MSGRAPH_PREFIX))
@@ -250,6 +255,10 @@ mod tests {
         },
     };
 
+    /// The calendar scopes the app's Google client asks for.
+    const CALENDAR_GRANT: &str = "https://www.googleapis.com/auth/calendar.events \
+                                  https://www.googleapis.com/auth/calendar.calendarlist.readonly";
+
     fn bases(bases: &[&str]) -> Vec<String> {
         bases.iter().map(|base| base.to_string()).collect()
     }
@@ -321,8 +330,14 @@ mod tests {
         assert_eq!(Identity::of(&gmail, google), Some(Identity::Mailbox));
 
         let calendar = bases(&["google://alice@gmail.com"]);
-        let scope = "https://www.googleapis.com/auth/calendar";
-        assert_eq!(Identity::of(&calendar, scope), Some(Identity::Calendar));
+        assert_eq!(
+            Identity::of(&calendar, CALENDAR_GRANT),
+            Some(Identity::Calendar)
+        );
+        let older = "https://www.googleapis.com/auth/calendar";
+        assert_eq!(Identity::of(&calendar, older), Some(Identity::Calendar));
+        let events = "https://www.googleapis.com/auth/calendar.events";
+        assert_eq!(Identity::of(&calendar, events), None);
 
         let contacts = bases(&["google://alice@gmail.com"]);
         let scope = "https://www.googleapis.com/auth/contacts";
@@ -352,6 +367,31 @@ mod tests {
         let check = client.check_grant(
             &bases(&["google://alice@gmail.com"]),
             "https://mail.google.com/",
+            "token",
+            "alice@gmail.com",
+        );
+
+        assert_eq!(
+            check,
+            GrantCheck {
+                signed_as: Some("bob@gmail.com".into()),
+                refused: true,
+            }
+        );
+    }
+
+    /// A calendar grant reads its address off the calendar list, the one the
+    /// narrow scopes cover.
+    #[test]
+    fn a_calendar_grant_for_another_address_is_refused() {
+        let mut client = Client::new(FakeServer::new(|request| {
+            assert_eq!(request.path, "/calendar/v3/users/me/calendarList/primary");
+            FakeResponse::json(200, &json!({ "id": "bob@gmail.com" }))
+        }));
+
+        let check = client.check_grant(
+            &bases(&["google://alice@gmail.com"]),
+            CALENDAR_GRANT,
             "token",
             "alice@gmail.com",
         );
