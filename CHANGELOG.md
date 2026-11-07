@@ -97,6 +97,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a message sent from a Gmail account showing twice in Sent after the next sync when it was sent seconds after being written: Gmail dates its copy when it sends it, which kept the phone's own copy from being recognised as the same message.
 - Fixed the *New message* button flashing on the mail tab right after connecting an account: it stays away until the first sync has run.
 - Fixed the sign-in page staying on its loader after leaving the browser's consent page without consenting: back in the app, Continue is offered again.
 - Fixed a task created on the phone in a Google task list being created twice on Google when the answer to its creation was lost: the next sync recognises Google's copy by its title, notes, due day and completion and files the task once.

@@ -504,6 +504,34 @@ public class MessageIdNamingTest {
                 row(sent).flags.has(Flags.Marker.SEEN));
     }
 
+    /**
+     * Gmail restamps the Date too, to when it sent: its copy lands all the
+     * same, rather than a second row beside the staged one.
+     */
+    @Test
+    public void aGmailSentCopyRedatedLandsOnItsPendingCreate() throws Exception {
+        synced(sent);
+        stageSent("m1@example.com");
+        store.policy().aliasSentCopy("m1@example.com", "CAF00@mail.gmail.com");
+        String later = "2026-10-07T08:00:05Z";
+        server.list(
+                "Sent",
+                listed("18c2a", "CAF00@mail.gmail.com", "Hi")
+                        .put("summary",
+                                PimdirSummary.mail("CAF00@mail.gmail.com", "Hi", "", SENDER, null,
+                                        later, 0, true))
+                        .put("sortKey", PimdirSummary.mailSortKey(later)));
+
+        server.engine.sync(sent);
+
+        assertTrue("landed, not appended: " + server.calls, server.calls.isEmpty());
+        assertEquals("one row", "1",
+                scalar("SELECT count(*) FROM items WHERE collection = ?", sent));
+        assertEquals("the create's key", "m1@example.com",
+                scalar("SELECT link_id FROM items WHERE collection = ?", sent));
+        assertEquals("18c2a", scalar("SELECT handle FROM bindings WHERE collection = ?", sent));
+    }
+
     /** Stages a sent message's copy, as a submission does. */
     private void stageSent(String messageId) throws Exception {
         String body = "Message-ID: <" + messageId + ">\r\nSubject: Hi\r\n\r\nbody\r\n";

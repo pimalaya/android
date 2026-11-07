@@ -727,6 +727,7 @@ public final class MailEngine extends PimdirEngine {
                 continue;
             }
             String create = creates.remove(messageId);
+            boolean restamped = false;
             if (create == null) {
                 // NOTE: a provider that stamped a Message-ID of its own on
                 // what it sent (Gmail) files its copy under that one.
@@ -734,6 +735,7 @@ public final class MailEngine extends PimdirEngine {
                 create = staged == null ? null : creates.remove(staged);
                 if (create != null) {
                     mail().policy().forgetSentAlias(messageId);
+                    restamped = true;
                 }
             }
             if (create == null) {
@@ -747,7 +749,12 @@ public final class MailEngine extends PimdirEngine {
             } catch (JSONException failure) {
                 throw new PimalayaException("Unwritable markers: " + failure.getMessage());
             }
-            named.add(item.linked(create));
+            // NOTE: Gmail restamps the Date with the Message-ID, and the
+            // engine lands a create only on an arrival of the same subject,
+            // date and sender (SYNC 6). The copy read back for this very send
+            // is that create's, so its summary is left out, which says
+            // nothing against: kept, it would file a second copy.
+            named.add(restamped ? item.bare(create) : item.linked(create));
         }
         return named;
     }

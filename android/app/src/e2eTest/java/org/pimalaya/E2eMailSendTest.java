@@ -49,6 +49,9 @@ public class E2eMailSendTest extends E2eCase {
         MailStore.StoredMessage staged = phone.message(sent, subject);
         assertNotNull("in Sent at once", staged);
         assertTrue("marked pending", phone.owes(sent, staged.id));
+        // NOTE: sent seconds after it was composed, as by hand: Gmail dates
+        // its copy when it sends, so the staged Date no longer matches.
+        Thread.sleep(3_000);
         E2eDevice.network(RuntimeEnvironment.getApplication(), E2eDevice.Network.WIFI);
 
         if (target.smtp) {

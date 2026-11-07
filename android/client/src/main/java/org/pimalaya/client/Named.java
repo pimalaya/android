@@ -28,6 +28,14 @@ public record Named(
         return new Named(flags, handle, linkId, sortKey, summary);
     }
 
+    /**
+     * The same message filed under {@code linkId}, its summary and sort key
+     * left out, as a member listed unnamed is.
+     */
+    public Named bare(String linkId) {
+        return new Named(flags, handle, linkId, "", null);
+    }
+
     /** The message on the engine's wire, no summary or sort key when none. */
     public JSONObject toJson() {
         try {
