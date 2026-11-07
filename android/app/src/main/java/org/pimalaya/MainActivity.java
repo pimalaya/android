@@ -1427,6 +1427,9 @@ public class MainActivity extends Host
     @Override
     public void syncing(boolean active) {
         mailList.redrawFooter();
+        // NOTE: a first sync starting or ending moves the FAB, whether or
+        // not its dock shows.
+        refreshFab();
         if (active) {
             getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         } else {
@@ -1720,8 +1723,9 @@ public class MainActivity extends Host
         fab.setVisibility(View.VISIBLE);
         findViewById(R.id.fab).setVisibility(View.GONE);
         // NOTE: away while the screen's filters or the sync dock show, as
-        // they were left.
+        // they were left, or while the tab's first sync is still ahead.
         float scale = fabAway() ? 0f : 1f;
+        fabSyncHeld |= scale == 0f && fabHeldBySync();
         fab.setClickable(scale > 0f);
         fab.animate().cancel();
         fab.setScaleX(scale);
@@ -1810,8 +1814,8 @@ public class MainActivity extends Host
     }
 
     /**
-     * Whether the extended FAB stays away: while the list's filters or the
-     * sync dock show.
+     * Whether the extended FAB stays away: while the list's filters show, or
+     * a sync holds it ({@link #fabHeldBySync}).
      */
     private boolean fabAway() {
         switch (screen) {
@@ -1820,25 +1824,62 @@ public class MainActivity extends Host
             case Panels.CALENDAR:
             case Panels.FILES:
             case Panels.TASKS:
-                return dockShown || headerOf(screen).filtersShown();
+                return fabHeldBySync() || headerOf(screen).filtersShown();
             default:
-                return dockShown;
+                return fabHeldBySync();
         }
     }
 
     /**
-     * Shrinks the extended FAB to nothing, or grows it back; away, it takes
-     * no tap.
+     * Whether a sync holds the extended FAB away: its dock shows, or the tab's
+     * first sync is still ahead, which the tab starts a moment after it shows.
+     */
+    private boolean fabHeldBySync() {
+        return dockShown || (sync != null && sync.firstSyncAhead(domainOf(screen)));
+    }
+
+    /** How long the FAB a sync held waits, once free, before it comes back. */
+    private static final long FAB_BACK_MS = 400;
+
+    /** Whether a sync held the FAB away since it last came back. */
+    private boolean fabSyncHeld;
+
+    /** Brings the FAB back, unless something holds it away again. */
+    private final Runnable fabBack =
+            () -> {
+                if (!fabAway()) {
+                    fabSyncHeld = false;
+                    scaleFab(1f);
+                }
+            };
+
+    /**
+     * Shrinks the extended FAB to nothing, or grows it back.
+     *
+     * <p>Back from a sync only once none follows at once (the fill after a
+     * first sync, a first sync after a pass), whose dock would flash it.
      */
     @Override
     public void refreshFab() {
-        boolean away = fabAway();
+        main.removeCallbacks(fabBack);
+        if (fabAway()) {
+            fabSyncHeld |= fabHeldBySync();
+            scaleFab(0f);
+        } else if (fabSyncHeld) {
+            main.postDelayed(fabBack, FAB_BACK_MS);
+        } else {
+            scaleFab(1f);
+        }
+    }
+
+    /** Animates the extended FAB to a scale; away, it takes no tap. */
+    private void scaleFab(float scale) {
         View fab = findViewById(R.id.fab_extended);
-        fab.setClickable(!away);
+        fab.setClickable(scale > 0f);
         fab.animate().cancel();
         fab.animate()
-                .scaleX(away ? 0f : 1f)
-                .scaleY(away ? 0f : 1f)
+                .scaleX(scale)
+                .scaleY(scale)
                 .setDuration(150)
                 .setInterpolator(
                         android.view.animation.AnimationUtils.loadInterpolator(

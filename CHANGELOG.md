@@ -95,6 +95,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed the *New message* button flashing on the mail tab right after connecting an account: it stays away until the first sync has run.
 - Fixed the sign-in page staying on its loader after leaving the browser's consent page without consenting: back in the app, Continue is offered again.
 - Fixed a task created on the phone in a Google task list being created twice on Google when the answer to its creation was lost: the next sync recognises Google's copy by its title, notes, due day and completion and files the task once.
 - Fixed an agenda entry or a task edited both on the phone and on the server keeping its old title in the agenda and the Tasks tab once the sync merged the two edits, though the merged entry held the new one.

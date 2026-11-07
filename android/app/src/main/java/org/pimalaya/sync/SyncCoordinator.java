@@ -4,10 +4,12 @@ import android.app.AlertDialog;
 import android.util.Log;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountActivation;
@@ -112,6 +114,12 @@ public final class SyncCoordinator implements MailSync {
      * once.
      */
     private volatile boolean syncing;
+
+    /**
+     * The domains whose first sync ran since the app opened, whatever it ended
+     * with; one connected again owes it anew.
+     */
+    private final Set<PimDomain> firstRun = EnumSet.noneOf(PimDomain.class);
 
     private final List<Consumer<Boolean>> syncObservers = new ArrayList<>();
 
@@ -628,9 +636,33 @@ public final class SyncCoordinator implements MailSync {
         for (PimDomain domain : PimDomain.values()) {
             if (account.covers(domain)) {
                 FirstSync.owe(host, account.email, domain);
+                firstRun.remove(domain);
             }
         }
         host.postAlive(() -> screens.land(landingOf(account)));
+    }
+
+    /**
+     * Whether a domain's tab still waits on its first sync: an account that is
+     * on owes it, and none ran since the app opened or the account connected,
+     * whatever it ended with. The tab's add button stays away till then.
+     */
+    public boolean firstSyncAhead(PimDomain domain) {
+        return domain != null && !firstRun.contains(domain) && !owingFirst(domain).isEmpty();
+    }
+
+    /** The accounts that are on and owe a domain its first sync. */
+    private List<AccountEntry> owingFirst(PimDomain domain) {
+        List<AccountEntry> owing = new ArrayList<>();
+        for (String email : FirstSync.owing(host, domain)) {
+            for (AccountEntry account : passes.accountsFor(domain)) {
+                // NOTE: an account that is off keeps owing it.
+                if (account.email.equals(email) && AccountActivation.enabled(host, email)) {
+                    owing.add(account);
+                }
+            }
+        }
+        return owing;
     }
 
     /** The list a freshly connected account lands on: its first domain. */
@@ -655,15 +687,7 @@ public final class SyncCoordinator implements MailSync {
                 || host.isFinishing()) {
             return;
         }
-        List<AccountEntry> owing = new ArrayList<>();
-        for (String email : FirstSync.owing(host, domain)) {
-            for (AccountEntry account : passes.accountsFor(domain)) {
-                // NOTE: an account that is off keeps owing it.
-                if (account.email.equals(email) && AccountActivation.enabled(host, email)) {
-                    owing.add(account);
-                }
-            }
-        }
+        List<AccountEntry> owing = owingFirst(domain);
         if (owing.isEmpty()) {
             return;
         }
@@ -696,6 +720,7 @@ public final class SyncCoordinator implements MailSync {
         if (!startSync()) {
             return;
         }
+        firstRun.add(PimDomain.MAIL);
         host.io.execute(
                 () -> {
                     progress.planSteps(emailsOf(owing));
@@ -737,6 +762,7 @@ public final class SyncCoordinator implements MailSync {
         if (!startSync()) {
             return;
         }
+        firstRun.add(PimDomain.CONTACTS);
         host.io.execute(
                 () -> {
                     progress.planSync(PimDomain.CONTACTS, SyncScope.all(host), null);
@@ -761,6 +787,7 @@ public final class SyncCoordinator implements MailSync {
         if (!startSync()) {
             return;
         }
+        firstRun.add(PimDomain.CALENDAR);
         host.io.execute(
                 () -> {
                     progress.planSync(PimDomain.CALENDAR, SyncScope.all(host), emailsOf(owing));
