@@ -51,6 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Changed Google sign-in on release builds to the client of Pimalaya's production project, the one going through Google's verification, debug builds keeping the development one; an account signed in before keeps its grant.
 - Changed the week card: today sits on an accent disc, and each day shows a dot per calendar holding an entry, in its colour.
 - Changed every page, from the reader and the composer to an entry, a contact or a task, to drop in and lift away with its own bar, as the account settings do.
 - Changed the reader: Reply, Forward, Move and Delete moved to a bottom bar, Add to tasks, Copy and the flags staying at the top.

@@ -72,13 +72,13 @@
             </intent-filter>
 
             <!-- Catches the Google OAuth redirect (reversed-client-id
-                 custom scheme) and hands it to onNewIntent. -->
+                 custom scheme, the build type's: build.gradle.kts) and
+                 hands it to onNewIntent. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="com.googleusercontent.apps.991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1" />
+                <data android:scheme="${googleRedirectScheme}" />
             </intent-filter>
 
             <!-- Catches the Microsoft OAuth redirect (custom scheme)

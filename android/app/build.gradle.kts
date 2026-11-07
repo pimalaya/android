@@ -9,6 +9,22 @@ plugins {
 // it, PIMALAYA_KEYSTORE_ALIAS names the key (pimalaya when unset).
 val releaseKeystore = System.getenv("PIMALAYA_KEYSTORE")?.let { file(it) }
 
+// Google's OAuth client per build type, each named by the part before
+// .apps.googleusercontent.com: release builds (every channel) sign in through
+// the verified "Pimalaya" project, debug builds through "Pimalaya Dev". Each
+// account keeps the client it signed in with, so a switch strands no grant.
+val googleReleaseClient = "803561575535-v7nav2ev8dvv995g3j3mhnoq5423abco"
+val googleDebugClient = "991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1"
+
+// The client ID for Oauth.java, and its reversed form as the redirect scheme,
+// for Oauth.java and the manifest's intent-filter.
+fun com.android.build.api.dsl.ApplicationBuildType.googleClient(name: String) {
+    val scheme = "com.googleusercontent.apps.$name"
+    buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$name.apps.googleusercontent.com\"")
+    buildConfigField("String", "GOOGLE_REDIRECT_SCHEME", "\"$scheme\"")
+    manifestPlaceholders["googleRedirectScheme"] = scheme
+}
+
 android {
     namespace = "org.pimalaya"
     compileSdk = 36
@@ -54,7 +70,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            googleClient(googleDebugClient)
+        }
         release {
+            googleClient(googleReleaseClient)
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

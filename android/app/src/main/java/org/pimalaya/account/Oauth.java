@@ -1,5 +1,7 @@
 package org.pimalaya.account;
 
+import org.pimalaya.BuildConfig;
+
 /**
  * OAuth 2.0 provider defaults: the app's clients, redirects, endpoints, scopes.
  *
@@ -8,13 +10,12 @@ package org.pimalaya.account;
  * secret (PKCE only), on the reversed-client-id scheme.
  */
 public final class Oauth {
-    /** The app's Google Android client, which has no secret. */
-    public static final String GOOGLE_CLIENT_ID =
-            "991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1.apps.googleusercontent.com";
+    /** The build type's Google Android client (build.gradle.kts), no secret. */
+    public static final String GOOGLE_CLIENT_ID = BuildConfig.GOOGLE_CLIENT_ID;
 
     /** Reversed-client-id scheme, mirrored by the manifest intent-filter. */
     public static final String GOOGLE_REDIRECT_URI =
-            "com.googleusercontent.apps.991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1:/oauth2redirect";
+            BuildConfig.GOOGLE_REDIRECT_SCHEME + ":/oauth2redirect";
 
     /** Google's authorization endpoint. */
     public static final String GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";

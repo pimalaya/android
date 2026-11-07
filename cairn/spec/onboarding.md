@@ -137,6 +137,14 @@ A browser grant against Google's or Microsoft's authorization server SHALL run w
 - WHEN the browser card runs
 - THEN the app's Google client is not used, the generic client page opens instead
 
+### Requirement: Each build type signs in to Google with its own client
+Release builds, every channel alike (Google Play, the GitHub APKs, F-Droid), SHALL sign in to Google with the client of the verified "Pimalaya" project, and debug builds with the client of the "Pimalaya Dev" project, so the verified project holds only what ships. Each build SHALL carry one Google client ID and its reversed form as the redirect scheme, both set per build type in android/app/build.gradle.kts and read by Oauth.java and the manifest's intent-filter. An account SHALL keep refreshing its tokens with the client it was granted by, so a build changing its client strands no grant.
+
+#### Scenario: An account granted through the former client
+- GIVEN a Google account signed in by a release build carrying the "Pimalaya Dev" client
+- WHEN a release build carrying the "Pimalaya" client syncs it
+- THEN its tokens refresh through the "Pimalaya Dev" client, and the account keeps working without a new sign-in
+
 ### Requirement: A permission is asked only as its option is turned on
 The app SHALL ask the contacts, calendar and notifications permissions only when the user turns on an option needing them: a phone box or the notifications box of a setup, or the matching option in an account's settings. A refusal SHALL turn that option back off. Nothing else SHALL prompt: not continuing a setup, not opening the app, not a sync. An option whose permission was revoked in the system settings SHALL read as off, and turning it on SHALL ask again.
 
