@@ -64,6 +64,9 @@ public final class BackgroundCheck {
     /** The accounts whose new mail notifies. */
     private static final String NOTIFY = "notify";
 
+    /** Whether a locked phone shows new mail's sender and subject. */
+    private static final String LOCKED_DETAILS = "locked-details";
+
     /** The background job's id with the scheduler. */
     public static final int JOB = 1;
 
@@ -115,6 +118,16 @@ public final class BackgroundCheck {
         if (on && !syncs(context, email)) {
             setInterval(context, email, DEFAULT);
         }
+    }
+
+    /** Whether a locked phone shows new mail's sender and subject; off. */
+    public static boolean detailsLocked(Context context) {
+        return prefs(context).getBoolean(LOCKED_DETAILS, false);
+    }
+
+    /** Shows new mail's sender and subject on a locked phone, or not. */
+    public static void setDetailsLocked(Context context, boolean on) {
+        prefs(context).edit().putBoolean(LOCKED_DETAILS, on).apply();
     }
 
     /**

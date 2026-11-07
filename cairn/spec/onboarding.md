@@ -163,6 +163,19 @@ Both setups SHALL offer, for an account covering mail, a box "Notify new mail", 
 - WHEN it connects
 - THEN no permission was asked and the account does not notify
 
+### Requirement: A locked phone shows only how many messages arrived
+A new-mail notification SHALL show on a locked phone only how many messages arrived, whatever the phone's own lock-screen setting, until "Sender and subject on the lock screen" is turned on in the app's Settings page, off by default; turned on, the phone's own setting SHALL decide. Unlocked, the notification SHALL show the sender and the subject either way.
+
+#### Scenario: Off by default
+- GIVEN an account notifying new mail and a phone set to show all notification content
+- WHEN a message from Ann arrives while the phone is locked
+- THEN the lock screen reads "1 new message", with no sender or subject
+
+#### Scenario: Turned on
+- GIVEN "Sender and subject on the lock screen" turned on
+- WHEN a message arrives while the phone is locked
+- THEN the lock screen shows what the phone's own setting allows
+
 ### Requirement: The standard setup starts with nothing ticked
 The standard setup SHALL open with every domain unticked, so each ticked one shows its options to read in turn, and Continue SHALL stay disabled until one is ticked. Ticks SHALL be kept when the flow steps back to this screen.
 

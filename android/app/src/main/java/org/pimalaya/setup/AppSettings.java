@@ -4,14 +4,17 @@ import android.util.TypedValue;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.Switch;
 import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.List;
 import org.pimalaya.R;
 import org.pimalaya.calendar.WeekStart;
+import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.Sections;
+import org.pimalaya.ui.Switches;
 
 /**
  * The app's own settings, raised from the drawer: what belongs to no
@@ -80,6 +83,24 @@ public final class AppSettings {
                                             render();
                                         })));
         sections.section(0, 0, rows, null, false);
+
+        label(content, R.string.settings_notifications_label);
+        Switch details = Switches.of(host);
+        details.setChecked(BackgroundCheck.detailsLocked(host));
+        details.setOnCheckedChangeListener(
+                (view, checked) -> BackgroundCheck.setDetailsLocked(host, checked));
+        sections.section(
+                0,
+                0,
+                List.of(
+                        AccountSettings.switchRow(
+                                host,
+                                sections,
+                                host.getString(R.string.locked_details),
+                                host.getString(R.string.locked_details_note),
+                                details)),
+                null,
+                false);
     }
 
     /** A label over the next card, as the account settings draw theirs. */

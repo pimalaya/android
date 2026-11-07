@@ -57,7 +57,7 @@ Restated against the code on 2026-11-06. Gone since the 2026-10-09 review: the I
 
 ## 5. Security residuals
 
-- [ ] Lock-screen notifications private, a public version saying only the count (audit-s1-residuals I1)
+- [x] Lock-screen notifications private, a public version saying only the count, a Settings switch showing sender and subject (audit-s1-residuals I1; [log](../../log/2026-11-07-locked-notifications-show-the-count.md))
 - [ ] "Hide in recents" setting (audit-s1-residuals I2)
 - [ ] SecureStore blobs bound to their purpose as AAD (audit-s1-residuals I3)
 - [ ] Sync adapters not parallel, no URL in warnings (audit-s1-residuals L1, L3)

@@ -40,6 +40,9 @@
     <!-- Les réglages de l'app (AppSettings). -->
     <string name="settings_title">Réglages</string>
     <string name="settings_calendar_label">Agenda</string>
+    <string name="settings_notifications_label">Notifications</string>
+    <string name="locked_details">Expéditeur et objet sur l\'écran verrouillé</string>
+    <string name="locked_details_note">Désactivé, un téléphone verrouillé indique seulement combien de messages sont arrivés. Activé, il suit le réglage du téléphone.</string>
     <string name="week_start">Premier jour de la semaine</string>
     <string name="week_start_note">La vue semaine commence par lui. Tant que vous n\'en choisissez pas, il suit la langue du téléphone.</string>
     <string-array name="week_start_days">

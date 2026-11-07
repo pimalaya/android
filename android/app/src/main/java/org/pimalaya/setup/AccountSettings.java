@@ -274,6 +274,7 @@ public final class AccountSettings {
                 });
         rows.add(
                 switchRow(
+                        host,
                         sections,
                         host.getString(R.string.account_enable),
                         host.getString(R.string.account_enable_note),
@@ -412,6 +413,7 @@ public final class AccountSettings {
                 });
         View notifyRow =
                 switchRow(
+                        host,
                         sections,
                         host.getString(R.string.background_notify),
                         host.getString(
@@ -472,6 +474,7 @@ public final class AccountSettings {
                 (view, checked) -> ComposeFormat.set(host, email, checked));
         rows.add(
                 switchRow(
+                        host,
                         sections,
                         host.getString(R.string.compose_rich_default),
                         host.getString(R.string.compose_rich_default_line),
@@ -615,6 +618,7 @@ public final class AccountSettings {
         phone.setOnCheckedChangeListener((view, checked) -> setBooksOnPhone(email, checked));
         rows.add(
                 switchRow(
+                        host,
                         sections,
                         host.getString(R.string.phone_contacts),
                         host.getString(
@@ -828,6 +832,7 @@ public final class AccountSettings {
                 (view, checked) -> setCalendarsOnPhone(email, checked, ids));
         rows.add(
                 switchRow(
+                        host,
                         sections,
                         host.getString(R.string.phone_calendar),
                         host.getString(
@@ -1003,7 +1008,8 @@ public final class AccountSettings {
     }
 
     /** A row ending in a switch, the row as a whole toggling it. */
-    private View switchRow(Sections sections, String title, String line, Switch toggle) {
+    static View switchRow(
+            Host host, Sections sections, String title, String line, Switch toggle) {
         LinearLayout row = (LinearLayout) sections.row(title, line, null, toggle::toggle);
         LinearLayout.LayoutParams params =
                 new LinearLayout.LayoutParams(

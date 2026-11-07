@@ -99,15 +99,12 @@ public class BackgroundJob extends JobService {
     }
 
     /** Notifies the newest {@link #BURST} arrivals under an account summary. */
-    private static void notify(
-            Context context, String email, List<MailStore.StoredMessage> arrived) {
+    static void notify(Context context, String email, List<MailStore.StoredMessage> arrived) {
         if (arrived.isEmpty() || !BackgroundCheck.permitted(context)) {
             return;
         }
         NotificationManager manager = context.getSystemService(NotificationManager.class);
-        String channel = "mail-" + email;
-        manager.createNotificationChannel(
-                new NotificationChannel(channel, email, NotificationManager.IMPORTANCE_DEFAULT));
+        String channel = channel(manager, email, BackgroundCheck.detailsLocked(context));
 
         Intent launch =
                 context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
@@ -135,6 +132,8 @@ public class BackgroundJob extends JobService {
                             .setGroup(email)
                             .setAutoCancel(true)
                             .setContentIntent(open)
+                            .setVisibility(Notification.VISIBILITY_PRIVATE)
+                            .setPublicVersion(locked(context, channel, 1))
                             .build());
         }
         String count =
@@ -153,7 +152,38 @@ public class BackgroundJob extends JobService {
                         .setGroupSummary(true)
                         .setAutoCancel(true)
                         .setContentIntent(open)
+                        .setVisibility(Notification.VISIBILITY_PRIVATE)
+                        .setPublicVersion(locked(context, channel, arrived.size()))
                         .build());
+    }
+
+    /** The account's channel for the lock-screen choice, the other deleted. */
+    private static String channel(NotificationManager manager, String email, boolean details) {
+        // NOTE: a channel's lock-screen visibility is fixed once it is made.
+        String shown = "mail-" + email;
+        String hidden = "hidden-mail-" + email;
+        String other = details ? hidden : shown;
+        if (manager.getNotificationChannel(other) != null) {
+            manager.deleteNotificationChannel(other);
+        }
+        String id = details ? shown : hidden;
+        NotificationChannel channel =
+                new NotificationChannel(id, email, NotificationManager.IMPORTANCE_DEFAULT);
+        if (!details) {
+            channel.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
+        }
+        manager.createNotificationChannel(channel);
+        return id;
+    }
+
+    /** What a locked phone shows in place of {@code count} messages. */
+    private static Notification locked(Context context, String channel, int count) {
+        return new Notification.Builder(context, channel)
+                .setSmallIcon(R.drawable.ic_domain_mail)
+                .setContentTitle(
+                        context.getResources()
+                                .getQuantityString(R.plurals.notify_new_mail, count, count))
+                .build();
     }
 
     private static String sender(MailStore.StoredMessage message) {

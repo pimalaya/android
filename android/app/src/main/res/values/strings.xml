@@ -46,6 +46,9 @@
     <!-- The app's settings (AppSettings). -->
     <string name="settings_title">Settings</string>
     <string name="settings_calendar_label">Calendar</string>
+    <string name="settings_notifications_label">Notifications</string>
+    <string name="locked_details">Sender and subject on the lock screen</string>
+    <string name="locked_details_note">Off, a locked phone only says how many messages arrived. On, it follows the phone\'s own setting.</string>
     <string name="week_start">First day of the week</string>
     <string name="week_start_note">The week view starts on it. Until you pick one, it follows the phone\'s language.</string>
     <string-array name="week_start_days">
