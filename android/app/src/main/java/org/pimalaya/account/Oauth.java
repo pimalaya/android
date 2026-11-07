@@ -28,17 +28,22 @@ public final class Oauth {
     /** The Pimalaya Entra app registration (public client: PKCE, no secret). */
     public static final String MICROSOFT_CLIENT_ID = "ba9b19e1-973e-4d7c-aed9-848bd2fee385";
 
-    /** Custom scheme, mirrored by the manifest intent-filter. */
-    public static final String MICROSOFT_REDIRECT_URI = "pimalaya://oauth2redirect";
+    /** The build type's custom scheme, mirrored by the manifest intent-filter. */
+    public static final String MICROSOFT_REDIRECT_URI =
+            BuildConfig.MICROSOFT_REDIRECT_SCHEME + "://oauth2redirect";
 
     /**
      * The dynamic-registration issuer flow's redirect, in the manifest too.
      *
      * <p>A reverse-DNS private-use scheme (RFC 8252 §7.1) with one slash,
-     * having no naming authority. Fastmail rejects a loopback http redirect and
-     * a dot-less scheme alike; Stalwart accepts this too.
+     * having no naming authority: the application ID, so each build type's
+     * own. Fastmail rejects a loopback http redirect and a dot-less scheme
+     * alike; Stalwart accepts this too.
      */
-    public static final String REDIRECT_URI = "org.pimalaya:/oauth2redirect";
+    public static final String REDIRECT_URI = BuildConfig.APPLICATION_ID + ":/oauth2redirect";
+
+    /** {@link #REDIRECT_URI}'s scheme with its colon, the application ID's. */
+    public static final String REDIRECT_SCHEME = BuildConfig.APPLICATION_ID + ":";
 
     /** The `common` tenant serves both personal (MSA) and Entra accounts. */
     public static final String MICROSOFT_AUTH_ENDPOINT =

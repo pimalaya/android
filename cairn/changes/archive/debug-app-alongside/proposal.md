@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: debug-app-alongside
-status: active
+status: landed
 created: 2026-11-07
 ---
 

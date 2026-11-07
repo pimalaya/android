@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import org.pimalaya.BuildConfig;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.client.Addressbook;
@@ -30,11 +31,11 @@ import org.pimalaya.client.Addressbook;
  * the other's alone.
  */
 public final class Accounts {
-    /** The books' type; matches res/xml/authenticator.xml. */
-    public static final String TYPE = "org.pimalaya";
+    /** The books' type, per build type (authenticator.xml too). */
+    public static final String TYPE = BuildConfig.ACCOUNT_TYPE;
 
-    /** The calendars' type; matches res/xml/authenticator_calendar.xml. */
-    public static final String CALENDAR_TYPE = "org.pimalaya.calendar";
+    /** The calendars' type, per build type (authenticator_calendar.xml too). */
+    public static final String CALENDAR_TYPE = BuildConfig.CALENDAR_ACCOUNT_TYPE;
 
     private static final String DATA_URL = "url";
 

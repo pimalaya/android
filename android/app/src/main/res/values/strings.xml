@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <string name="app_name" translatable="false">Pimalaya</string>
+    <!-- app_name, account_type and calendar_account_type are per build type
+         (build.gradle.kts installedAs). -->
 
     <!-- The screen standing for the app when its store is of another draft (StoreRefusedActivity). -->
     <string name="store_refused_title">Reinstall the app</string>
@@ -157,7 +158,7 @@
     <string name="oauth_token_endpoint">Token endpoint</string>
     <string name="oauth_scope">Scope</string>
     <string name="oauth_redirect">Redirect URI</string>
-    <string name="oauth_redirect_invalid">Enter an http://127.0.0.1 loopback URL, or org.pimalaya:/oauth2redirect</string>
+    <string name="oauth_redirect_invalid">Enter an http://127.0.0.1 loopback URL, or %1$s</string>
     <string name="oauth_port_taken">Could not bind the loopback port; try another</string>
     <string name="oauth_loopback_done">Signed in. You can close this tab and return to Pimalaya.</string>
     <string name="oauth_metadata_incomplete">The server\'s OAuth metadata is missing an endpoint</string>

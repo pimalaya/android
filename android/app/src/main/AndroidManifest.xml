@@ -81,24 +81,26 @@
                 <data android:scheme="${googleRedirectScheme}" />
             </intent-filter>
 
-            <!-- Catches the Microsoft OAuth redirect (custom scheme)
-                 and hands it to onNewIntent. -->
+            <!-- Catches the Microsoft OAuth redirect (custom scheme, the
+                 build type's: build.gradle.kts) and hands it to
+                 onNewIntent. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="pimalaya" />
+                <data android:scheme="${microsoftRedirectScheme}" />
             </intent-filter>
 
             <!-- Catches the dynamic-registration OAuth redirect: a
                  reverse-DNS private-use scheme (RFC 8252 §7.1), which
                  the registration endpoints that reject a bare scheme
-                 (fastmail) require. -->
+                 (fastmail) require; the application ID, so the build
+                 type's. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="org.pimalaya" />
+                <data android:scheme="${applicationId}" />
             </intent-filter>
         </activity>
 

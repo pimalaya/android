@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The debug build's copy of main's shortcuts.xml, its targetPackage being
+     the debug application ID (org.pimalaya.debug); keep the two alike. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_capture"
+        android:shortcutId="capture"
+        android:shortcutLongLabel="@string/capture_title"
+        android:shortcutShortLabel="@string/capture_title">
+        <intent
+            android:action="org.pimalaya.action.CAPTURE"
+            android:targetClass="org.pimalaya.MainActivity"
+            android:targetPackage="org.pimalaya.debug" />
+    </shortcut>
+</shortcuts>

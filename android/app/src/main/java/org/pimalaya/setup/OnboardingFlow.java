@@ -2321,7 +2321,7 @@ public final class OnboardingFlow {
         }
         return comesBack(card.redirect.text())
                 ? null
-                : host.getString(R.string.oauth_redirect_invalid);
+                : host.getString(R.string.oauth_redirect_invalid, Oauth.REDIRECT_URI);
     }
 
     /**

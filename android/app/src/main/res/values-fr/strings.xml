@@ -419,7 +419,7 @@
     <string name="oauth_token_endpoint">Point de terminaison du jeton</string>
     <string name="oauth_scope">Portée</string>
     <string name="oauth_redirect">URI de redirection</string>
-    <string name="oauth_redirect_invalid">Saisissez une URL de rebouclage http://127.0.0.1, ou org.pimalaya:/oauth2redirect</string>
+    <string name="oauth_redirect_invalid">Saisissez une URL de rebouclage http://127.0.0.1, ou %1$s</string>
     <string name="oauth_port_taken">Impossible d\'utiliser le port de rebouclage ; essayez-en un autre</string>
     <string name="oauth_loopback_done">Connexion réussie. Vous pouvez fermer cet onglet et revenir à Pimalaya.</string>
     <string name="oauth_metadata_incomplete">Il manque un point de terminaison dans les métadonnées OAuth du serveur</string>

@@ -37,6 +37,9 @@ public class PendingGrantTest {
     private static final String VERIFIER = "v3r1f13r00000000000000000000000000000000000000000000000000000cd";
     private static final String SECRET = "cl13nt-s3cr3t";
 
+    /** The build type's redirect as the persisted JSON writes it. */
+    private static final String REDIRECT = Oauth.REDIRECT_URI.replace("/", "\\/");
+
     private Context context;
 
     @Before
@@ -62,7 +65,7 @@ public class PendingGrantTest {
         return new JSONObject()
                 .put("clientId", "client")
                 .put("clientSecret", SECRET)
-                .put("redirectUri", "org.pimalaya:/oauth2redirect")
+                .put("redirectUri", Oauth.REDIRECT_URI)
                 .put("state", STATE)
                 .put("verifier", VERIFIER)
                 .put("tokenEndpoint", "https://auth.example.org/token")
@@ -285,7 +288,7 @@ public class PendingGrantTest {
                 new OauthRequest("client", "sec", Oauth.REDIRECT_URI, "mail offline_access"),
                 "https://auth.example.org");
         assertEquals(
-                "{\"clientId\":\"client\",\"clientSecret\":\"sec\",\"redirectUri\":\"org.pimalaya:\\/oauth2redirect\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/auth.example.org\\/token\",\"email\":\"user@example.org\",\"issuer\":\"https:\\/\\/auth.example.org\",\"savedAt\":SAVED}",
+                "{\"clientId\":\"client\",\"clientSecret\":\"sec\",\"redirectUri\":\"" + REDIRECT + "\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/auth.example.org\\/token\",\"email\":\"user@example.org\",\"issuer\":\"https:\\/\\/auth.example.org\",\"savedAt\":SAVED}",
                 persisted());
 
         flow.launchSchemeGrant(
@@ -296,7 +299,7 @@ public class PendingGrantTest {
                 new OauthRequest("client", null, Oauth.REDIRECT_URI, "mail"),
                 null);
         assertEquals(
-                "{\"clientId\":\"client\",\"clientSecret\":\"\",\"redirectUri\":\"org.pimalaya:\\/oauth2redirect\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/auth.example.org\\/token\",\"email\":\"example.org\",\"issuer\":\"\",\"savedAt\":SAVED}",
+                "{\"clientId\":\"client\",\"clientSecret\":\"\",\"redirectUri\":\"" + REDIRECT + "\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/auth.example.org\\/token\",\"email\":\"example.org\",\"issuer\":\"\",\"savedAt\":SAVED}",
                 persisted());
         host.io.shutdownNow();
     }

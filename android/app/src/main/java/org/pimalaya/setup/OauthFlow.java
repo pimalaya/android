@@ -375,7 +375,7 @@ public final class OauthFlow {
                                 target,
                                 new AuthServer(auth, token),
                                 new OauthRequest(id, secret, redirect, scopes));
-                    } else if (redirect.startsWith("org.pimalaya:")) {
+                    } else if (redirect.startsWith(Oauth.REDIRECT_SCHEME)) {
                         launchSchemeGrant(
                                 target,
                                 new AuthServer(auth, token),
@@ -386,7 +386,7 @@ public final class OauthFlow {
                                         scopes),
                                 null);
                     } else {
-                        host.toast(host.getString(R.string.oauth_redirect_invalid));
+                        host.toast(host.getString(R.string.oauth_redirect_invalid, Oauth.REDIRECT_URI));
                     }
                 });
 
@@ -611,7 +611,7 @@ public final class OauthFlow {
 
         Uri redirect = Uri.parse(redirectUri);
         if (!"127.0.0.1".equals(redirect.getHost())) {
-            host.toast(host.getString(R.string.oauth_redirect_invalid));
+            host.toast(host.getString(R.string.oauth_redirect_invalid, Oauth.REDIRECT_URI));
             return;
         }
         int port = redirect.getPort() == -1 ? 80 : redirect.getPort();

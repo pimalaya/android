@@ -25,6 +25,22 @@ fun com.android.build.api.dsl.ApplicationBuildType.googleClient(name: String) {
     manifestPlaceholders["googleRedirectScheme"] = scheme
 }
 
+// What a second install would collide on, so a debug build installs beside a
+// release one: the launcher's name, the phone account types (Accounts.java and
+// res/xml) and the Microsoft redirect scheme (Oauth.java and the manifest).
+// The dynamic-registration redirect and the FileProvider follow the
+// application ID on their own, the launcher shortcut by a debug copy.
+fun com.android.build.api.dsl.ApplicationBuildType.installedAs(suffix: String, name: String) {
+    val accountType = "org.pimalaya$suffix"
+    resValue("string", "app_name", name)
+    resValue("string", "account_type", accountType)
+    resValue("string", "calendar_account_type", "$accountType.calendar")
+    buildConfigField("String", "ACCOUNT_TYPE", "\"$accountType\"")
+    buildConfigField("String", "CALENDAR_ACCOUNT_TYPE", "\"$accountType.calendar\"")
+    buildConfigField("String", "MICROSOFT_REDIRECT_SCHEME", "\"pimalaya$suffix\"")
+    manifestPlaceholders["microsoftRedirectScheme"] = "pimalaya$suffix"
+}
+
 android {
     namespace = "org.pimalaya"
     compileSdk = 36
@@ -71,9 +87,12 @@ android {
 
     buildTypes {
         debug {
+            applicationIdSuffix = ".debug"
+            installedAs(".debug", "Pimalaya Dev")
             googleClient(googleDebugClient)
         }
         release {
+            installedAs("", "Pimalaya")
             googleClient(googleReleaseClient)
             isMinifyEnabled = true
             isShrinkResources = true

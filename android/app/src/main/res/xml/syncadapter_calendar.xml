@@ -4,7 +4,7 @@
      as empty books. Made syncable as they are created
      (Accounts.reconcileCalendars). -->
 <sync-adapter xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accountType="org.pimalaya.calendar"
+    android:accountType="@string/calendar_account_type"
     android:allowParallelSyncs="false"
     android:contentAuthority="com.android.calendar"
     android:isAlwaysSyncable="false"
