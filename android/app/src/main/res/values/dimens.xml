@@ -79,6 +79,9 @@
          washed disc, as the canvas draws it. -->
     <dimen name="notice_disc">40dp</dimen>
     <dimen name="notice_glyph">22dp</dimen>
+    <!-- Its Agree pill, drawn centred in the dialog button's full height,
+         which stays the touch target. -->
+    <dimen name="notice_agree">36dp</dimen>
 
     <!-- The bottom navigation: an icon on its indicator pill over a
          label, per item. -->

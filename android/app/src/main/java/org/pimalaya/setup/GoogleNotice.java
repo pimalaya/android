@@ -3,6 +3,8 @@ package org.pimalaya.setup;
 import android.app.AlertDialog;
 import android.content.res.ColorStateList;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.LayerDrawable;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.method.LinkMovementMethod;
@@ -60,9 +62,16 @@ final class GoogleNotice {
                                     }
                                 })
                         .show();
-        // NOTE: Agree is the one filled button, Not now stays text.
+        // NOTE: Agree is the one filled button, Not now stays text. The pill
+        // is drawn at its own height, centred: the dialog button's full
+        // height stays the touch target, and a pill that tall reads heavy.
         Button agree = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
-        agree.setBackgroundResource(R.drawable.button_pill);
+        LayerDrawable pill =
+                new LayerDrawable(new Drawable[] {host.getDrawable(R.drawable.button_pill)});
+        pill.setLayerHeight(
+                0, host.getResources().getDimensionPixelSize(R.dimen.notice_agree));
+        pill.setLayerGravity(0, Gravity.CENTER_VERTICAL | Gravity.FILL_HORIZONTAL);
+        agree.setBackground(pill);
         agree.setTextColor(host.accentContrast());
         agree.setPadding(
                 host.dp(24), agree.getPaddingTop(), host.dp(24), agree.getPaddingBottom());
