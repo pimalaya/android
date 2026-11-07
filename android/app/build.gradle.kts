@@ -11,7 +11,7 @@ val releaseKeystore = System.getenv("PIMALAYA_KEYSTORE")?.let { file(it) }
 
 // Google's OAuth client per build type, each named by the part before
 // .apps.googleusercontent.com: release builds (every channel) sign in through
-// the verified "Pimalaya" project, debug builds through "Pimalaya Dev". Each
+// the verified "Pimalaya" project, debug builds through "Pimalaya Debug". Each
 // account keeps the client it signed in with, so a switch strands no grant.
 val googleReleaseClient = "803561575535-v7nav2ev8dvv995g3j3mhnoq5423abco"
 val googleDebugClient = "991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1"
@@ -88,7 +88,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            installedAs(".debug", "Pimalaya Dev")
+            installedAs(".debug", "Pimalaya Debug")
             googleClient(googleDebugClient)
         }
         release {

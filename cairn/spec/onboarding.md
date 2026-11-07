@@ -146,15 +146,15 @@ A browser grant against Google's or Microsoft's authorization server SHALL run w
 - THEN the app's Google client is not used, the generic client page opens instead
 
 ### Requirement: Each build type signs in to Google with its own client
-Release builds, every channel alike (Google Play, the GitHub APKs, F-Droid), SHALL sign in to Google with the client of the verified "Pimalaya" project, and debug builds with the client of the "Pimalaya Dev" project, so the verified project holds only what ships. Each build SHALL carry one Google client ID and its reversed form as the redirect scheme, both set per build type in android/app/build.gradle.kts and read by Oauth.java and the manifest's intent-filter. An account SHALL keep refreshing its tokens with the client it was granted by, so a build changing its client strands no grant.
+Release builds, every channel alike (Google Play, the GitHub APKs, F-Droid), SHALL sign in to Google with the client of the verified "Pimalaya" project, and debug builds with the client of the "Pimalaya Debug" project, so the verified project holds only what ships. Each build SHALL carry one Google client ID and its reversed form as the redirect scheme, both set per build type in android/app/build.gradle.kts and read by Oauth.java and the manifest's intent-filter. An account SHALL keep refreshing its tokens with the client it was granted by, so a build changing its client strands no grant.
 
 #### Scenario: An account granted through the former client
-- GIVEN a Google account signed in by a release build carrying the "Pimalaya Dev" client
+- GIVEN a Google account signed in by a release build carrying the "Pimalaya Debug" client
 - WHEN a release build carrying the "Pimalaya" client syncs it
-- THEN its tokens refresh through the "Pimalaya Dev" client, and the account keeps working without a new sign-in
+- THEN its tokens refresh through the "Pimalaya Debug" client, and the account keeps working without a new sign-in
 
 ### Requirement: A debug build installs beside a release build
-Debug builds SHALL be the package `org.pimalaya.debug`, named "Pimalaya Dev", and SHALL share no identifier a second install collides on with release builds: their phone account types, their OAuth redirect schemes (Google's, Microsoft's and the dynamic-registration one) and their launcher shortcut SHALL be their own. Release builds SHALL keep `org.pimalaya` and every identifier they carry today.
+Debug builds SHALL be the package `org.pimalaya.debug`, named "Pimalaya Debug" and its launcher icon the logo on black, and SHALL share no identifier a second install collides on with release builds: their phone account types, their OAuth redirect schemes (Google's, Microsoft's and the dynamic-registration one) and their launcher shortcut SHALL be their own. Release builds SHALL keep `org.pimalaya` and every identifier they carry today.
 
 #### Scenario: Both builds on one phone
 - GIVEN a release build of Pimalaya installed with its accounts

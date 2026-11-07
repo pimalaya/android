@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The debug build's launcher icon: the release icon as the launcher draws
+     it, on black instead of white. The release icon being no adaptive icon,
+     the launcher wraps it in one, its canvas shrunk to 0.4667 of the layer
+     (Launcher3's LEGACY_ICON_SCALE, 0.7 of the visible 72dp of 108dp); the
+     inset of (1 - 0.4667) / 2 each side draws it at that same size. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@android:color/black" />
+    <foreground>
+        <inset
+            android:drawable="@drawable/ic_launcher"
+            android:inset="26.67%" />
+    </foreground>
+</adaptive-icon>

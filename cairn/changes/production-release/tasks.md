@@ -50,7 +50,7 @@ Restated against the code on 2026-11-06. Gone since the 2026-10-09 review: the I
 
 ## 4. Sign-in for real users
 
-- [x] Google: release builds on the "Pimalaya" project's client, debug builds on "Pimalaya Dev"'s, the redirect scheme following ([log](../../log/2026-11-07-google-client-per-build.md)). One client serves every release channel; per-signing-key clients only if Google's reviewer asks (oauth-verification)
+- [x] Google: release builds on the "Pimalaya" project's client, debug builds on "Pimalaya Debug"'s, the redirect scheme following ([log](../../log/2026-11-07-google-client-per-build.md)). One client serves every release channel; per-signing-key clients only if Google's reviewer asks (oauth-verification)
 - [ ] Microsoft: the production Entra client in place of the testing one; publisher verification for tenants that require it (oauth-verification)
 - [ ] Re-sign-in: an account whose grant or password stopped working signs in again, keeping its outbox and staged edits. Built in sign-in-again (2026-11-07) on the onboarding's Review your domains page as the owner asked; owed, the device check and a personal Microsoft account read by its identity check
 - [ ] Fastmail: one consent for IMAP, JMAP and DAV (one-fastmail-consent)

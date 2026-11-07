@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The debug build's launcher icon, set apart from the release one
+     (res/drawable/ic_launcher_debug.xml). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:icon="@drawable/ic_launcher_debug"
+        tools:replace="android:icon" />
+
+</manifest>
