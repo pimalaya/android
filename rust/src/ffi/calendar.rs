@@ -23,7 +23,7 @@ use crate::{
         conflict::{merge, resolve},
         edit::{EventDraft, create, write},
         expand::expand,
-        gtasks::overlay,
+        gtasks::{overlay, same_task},
         phone,
         read::read,
         series::{remove, split},
@@ -544,6 +544,27 @@ pub extern "system" fn Java_org_pimalaya_client_Native_overlayTask<'local>(
             Ok(ical) => serde_json::json!({ "ical": ical }).to_string(),
             Err(err) => error_json(err),
         };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.sameTask`: whether two VTODO bodies read the same on Google.
+///
+/// Pure. Returns `{same}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_sameTask<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    left: JString<'local>,
+    right: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let left = read_string(env, &left);
+        let right = read_string(env, &right);
+
+        let json = serde_json::json!({ "same": same_task(&left, &right) }).to_string();
 
         Ok(env.new_string(json)?.into())
     })

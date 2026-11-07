@@ -22,8 +22,12 @@ import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.pimdir.PimdirEngine;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -160,11 +164,20 @@ public final class CalendarEngine extends PimdirEngine {
         for (Event event : delta.bodies()) {
             bodies.put(event.id(), event);
         }
+        Map<String, String[]> lost = lostCreates(collection, delta.bodies());
 
         JSONArray items = new JSONArray();
         for (EventRef event : delta.changed()) {
             Event body = bodies.get(event.id());
-            JSONObject item = body != null ? entry(overlaid(collection, body)) : new JSONObject();
+            String[] create = lost.get(event.id());
+            JSONObject item = new JSONObject();
+            if (create != null) {
+                // NOTE: Google's copy has its own UID: the create's body lands.
+                item = entry(new Event(body.id(), body.etag(), create[1]));
+                item.put("linkId", create[0]);
+            } else if (body != null) {
+                item = entry(overlaid(collection, body));
+            }
             item.put("handle", event.id());
             if (event.etag() != null) {
                 item.put("revision", event.etag());
@@ -231,6 +244,44 @@ public final class CalendarEngine extends PimdirEngine {
             Log.w("pimalaya", "task overlay failed: " + event.id(), failure);
             return event;
         }
+    }
+
+    /** Each unbound Google task's lost create, as {@code [linkId, body]}. */
+    private Map<String, String[]> lostCreates(String collection, List<Event> listed)
+            throws JSONException {
+        Map<String, String[]> named = new HashMap<>();
+        if (!EventStore.isGoogleTaskList(collection) || listed.isEmpty()) {
+            return named;
+        }
+        List<String> handles = new ArrayList<>(listed.size());
+        for (Event event : listed) {
+            handles.add(event.id());
+        }
+        Map<String, String> creates;
+        Map<String, String[]> bound;
+        synchronized (locks.store) {
+            creates = offline.pendingCreateBodies(collection);
+            if (creates.isEmpty()) {
+                return named;
+            }
+            bound = offline.bound(collection, handles);
+        }
+
+        for (Event event : listed) {
+            if (bound.containsKey(event.id())) {
+                continue;
+            }
+            Iterator<Map.Entry<String, String>> pending = creates.entrySet().iterator();
+            while (pending.hasNext()) {
+                Map.Entry<String, String> create = pending.next();
+                if (CalendarClient.sameTask(create.getValue(), event.ical())) {
+                    named.put(event.id(), new String[] {create.getKey(), create.getValue()});
+                    pending.remove();
+                    break;
+                }
+            }
+        }
+        return named;
     }
 
     /** One entry at full tier, as a read or a whole listing hands it over. */

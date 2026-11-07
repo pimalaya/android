@@ -176,6 +176,11 @@ public class CalendarClient {
         return Replies.object(Native.overlayTask(remote, local)).optString("ical", remote);
     }
 
+    /** Whether two VTODO bodies read the same in what Google keeps. Pure. */
+    public static boolean sameTask(String left, String right) {
+        return Replies.object(Native.sameTask(left, right)).optBoolean("same");
+    }
+
     /**
      * The resolution of a conflicted calendar object: its merge, sides picked.
      *

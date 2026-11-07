@@ -549,6 +549,9 @@ final class Native {
      */
     static native String overlayTask(String remote, String local);
 
+    /** Whether two VTODO bodies read the same on Google: {@code {same}}. */
+    static native String sameTask(String left, String right);
+
     /**
      * Resolves a conflicted calendar object with {@code picks}' sides.
      *

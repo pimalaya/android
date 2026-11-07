@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -2054,6 +2055,23 @@ public final class PimdirStorage {
         try (Cursor cursor = PimdirDb.query(db, "PENDING_CREATES_BY_MESSAGE_ID", values)) {
             while (cursor.moveToNext()) {
                 creates.put(cursor.getString(1), cursor.getString(0));
+            }
+        }
+        return creates;
+    }
+
+    /** A collection's pending creates' bodies by link id, in handle order. */
+    public Map<String, String> pendingCreateBodies(String engineCollection)
+            throws JSONException {
+        SQLiteDatabase db = store.getReadableDatabase();
+        Map<String, String> creates = new LinkedHashMap<>();
+        Map<String, Object> values =
+                source(collectionOf(engineCollection), sourceOf(engineCollection));
+        values.put("low", PROVISIONAL);
+        values.put("high", String.valueOf((char) (PROVISIONAL.charAt(0) + 1)));
+        try (Cursor cursor = PimdirDb.query(db, "PENDING_CREATE_OBJECTS", values)) {
+            while (cursor.moveToNext()) {
+                creates.put(cursor.getString(0), bodyOf(cursor.getString(1)));
             }
         }
         return creates;

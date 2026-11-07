@@ -26,7 +26,7 @@ use io_gtasks::{
                 list::{GtasksTaskListsList, GtasksTaskListsListParams},
             },
             tasks::{
-                GtasksTask,
+                GtasksTask, GtasksTaskStatus,
                 delete::GtasksTaskDelete,
                 get::GtasksTaskGet,
                 insert::GtasksTaskInsert,
@@ -396,6 +396,26 @@ pub fn overlay(remote: &str, local: &str) -> Result<String, BridgeError> {
     text(&cst)
 }
 
+/// Whether two VTODO bodies read the same in what Google keeps of a task.
+pub fn same_task(left: &str, right: &str) -> bool {
+    let kept = |ical: &str| {
+        let task = GtasksTask::from_ical(ical.as_bytes()).ok()?;
+        let done = task.status.as_option() == Some(&GtasksTaskStatus::Completed);
+
+        Some((
+            task.title.into_option().unwrap_or_default(),
+            task.notes.into_option().unwrap_or_default(),
+            task.due.into_option(),
+            done,
+        ))
+    };
+
+    match (kept(left), kept(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
+}
+
 /// Whether the last full listing is a day old or more.
 fn stale(listed: Timestamp, now: Timestamp) -> bool {
     now.duration_since(listed).as_secs() >= FULL_EVERY_HOURS * 3600
@@ -405,7 +425,7 @@ fn stale(listed: Timestamp, now: Timestamp) -> bool {
 mod tests {
     use jiff::{Timestamp, ToSpan};
 
-    use super::{later, overlay, stale};
+    use super::{later, overlay, same_task, stale};
 
     fn todo(lines: &str) -> String {
         format!(
@@ -459,6 +479,70 @@ mod tests {
         let remote = todo("SUMMARY:Buy ink\r\n");
 
         assert_eq!(overlay(&remote, &todo("SUMMARY:Ink\r\n")).unwrap(), remote);
+    }
+
+    #[test]
+    fn a_task_reads_the_same_as_googles_copy_of_it() {
+        let phone = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:local-1\r\n\
+                     DTSTAMP:20261107T080000Z\r\nSUMMARY:Call the plumber\r\n\
+                     DESCRIPTION:About the leak\\nunder the sink\r\n\
+                     DUE;TZID=Europe/Paris:20261110T233000\r\nSTATUS:IN-PROCESS\r\n\
+                     CATEGORIES:waiting\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
+        let google = todo(
+            "DTSTAMP:20261107T080102Z\r\nSUMMARY:Call the plumber\r\n\
+             DESCRIPTION:About the leak\\nunder the sink\r\nSTATUS:NEEDS-ACTION\r\n\
+             DUE;VALUE=DATE:20261110\r\n\
+             X-GOOGLE-WEB-VIEW-LINK:https://tasks.google.com/task/g1\r\n",
+        );
+
+        assert!(same_task(phone, &google));
+        assert!(same_task(&google, phone));
+    }
+
+    #[test]
+    fn what_google_folds_reads_the_same() {
+        for (phone, google) in [
+            ("DESCRIPTION:\r\n", ""),
+            ("STATUS:CANCELLED\r\n", "STATUS:NEEDS-ACTION\r\n"),
+            (
+                "COMPLETED:20261107T090000Z\r\n",
+                "STATUS:COMPLETED\r\nCOMPLETED:20261107T090000Z\r\n",
+            ),
+            ("DUE:20261110T233000Z\r\n", "DUE;VALUE=DATE:20261110\r\n"),
+        ] {
+            let phone = todo(&format!("SUMMARY:Buy ink\r\n{phone}"));
+            let google = todo(&format!("SUMMARY:Buy ink\r\n{google}"));
+
+            assert!(same_task(&phone, &google), "{phone}");
+        }
+    }
+
+    #[test]
+    fn each_field_google_keeps_tells_tasks_apart() {
+        let task = todo(
+            "SUMMARY:Buy ink\r\nDESCRIPTION:Black\r\nDUE;VALUE=DATE:20261110\r\n\
+             STATUS:NEEDS-ACTION\r\n",
+        );
+
+        for other in [
+            "SUMMARY:Buy paper\r\nDESCRIPTION:Black\r\nDUE;VALUE=DATE:20261110\r\n",
+            "SUMMARY:Buy ink\r\nDESCRIPTION:Blue\r\nDUE;VALUE=DATE:20261110\r\n",
+            "SUMMARY:Buy ink\r\nDESCRIPTION:Black\r\nDUE;VALUE=DATE:20261111\r\n",
+            "SUMMARY:Buy ink\r\nDESCRIPTION:Black\r\n",
+            "SUMMARY:Buy ink\r\nDESCRIPTION:Black\r\nDUE;VALUE=DATE:20261110\r\n\
+             STATUS:COMPLETED\r\n",
+        ] {
+            assert!(!same_task(&task, &todo(other)), "{other}");
+        }
+    }
+
+    #[test]
+    fn a_body_that_is_no_task_reads_as_no_other() {
+        let event = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:e1\r\n\
+                     SUMMARY:Buy ink\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+        assert!(!same_task(event, &todo("SUMMARY:Buy ink\r\n")));
+        assert!(!same_task("", ""));
     }
 
     #[test]
