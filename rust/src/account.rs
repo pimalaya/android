@@ -9,6 +9,7 @@
 //! pieces extracted here; onboarding lives in [`discovery`] and [`oauth`].
 
 mod discovery;
+pub mod identity;
 pub mod oauth;
 
 use secrecy::{ExposeSecret, SecretString};

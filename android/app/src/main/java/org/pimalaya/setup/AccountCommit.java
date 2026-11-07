@@ -1,5 +1,8 @@
 package org.pimalaya.setup;
 
+import android.content.Context;
+import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import org.pimalaya.account.AccountCredential;
@@ -9,8 +12,12 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SecureStore;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.contact.CardStore;
+import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.sync.FirstSync;
+import org.pimalaya.sync.SignInRefusals;
+import org.pimalaya.sync.SyncPasses;
 
 /**
  * The connection wizard's store work: the account its sign-ins add up to.
@@ -108,6 +115,81 @@ final class AccountCommit {
             }
         }
         return merged;
+    }
+
+    /** A saved sign-in again: the account, its moved domains, dropped books. */
+    record Again(AccountEntry stored, Set<PimDomain> moved, List<String> books) {}
+
+    /** Saves a sign-in again; a domain moved elsewhere is dropped, relisted. */
+    static Again again(
+            Context context, SyncPasses.Parts parts, AccountEntry stored, AccountEntry connected) {
+        Set<PimDomain> moved = moved(stored, connected);
+        AccountRemoval removal =
+                new AccountRemoval(context, parts, new PimdirContacts(parts.pimdir()));
+        List<String> books = new ArrayList<>();
+        for (PimDomain domain : moved) {
+            books.addAll(removal.forget(stored.email, domain));
+        }
+        AccountEntry saved = persist(parts.accounts(), connected);
+        for (PimDomain domain : connected.domains()) {
+            if (moved.contains(domain) || !stored.covers(domain)) {
+                FirstSync.owe(context, saved.email, domain);
+            }
+        }
+        SignInRefusals.forget(context, saved.email);
+        return new Again(saved, moved, books);
+    }
+
+    /** The domains both cover that {@code connected} moves elsewhere. */
+    static Set<PimDomain> moved(AccountEntry stored, AccountEntry connected) {
+        Set<PimDomain> moved = EnumSet.noneOf(PimDomain.class);
+        for (PimDomain domain : connected.domains()) {
+            if (!stored.covers(domain)) {
+                continue;
+            }
+            String before = stored.credential(domain).login;
+            String after = connected.credential(domain).login;
+            boolean relogged =
+                    !before.isEmpty() && !after.isEmpty() && !before.equalsIgnoreCase(after);
+            if (relogged
+                    || moves(
+                            stored.connection(domain).baseUrl,
+                            connected.connection(domain).baseUrl)) {
+                moved.add(domain);
+            }
+        }
+        return moved;
+    }
+
+    /** Whether two base URLs are two places: another server or protocol. */
+    static boolean moves(String before, String after) {
+        return !placeOf(before).equals(placeOf(after));
+    }
+
+    /** A base URL as a place: no user nor trailing slash, case folded. */
+    private static String placeOf(String url) {
+        String place = url == null ? "" : url;
+        try {
+            java.net.URI uri = java.net.URI.create(place);
+            if (uri.getHost() != null) {
+                place =
+                        new java.net.URI(
+                                        uri.getScheme(),
+                                        null,
+                                        uri.getHost(),
+                                        uri.getPort(),
+                                        uri.getPath(),
+                                        uri.getQuery(),
+                                        null)
+                                .toString();
+            }
+        } catch (IllegalArgumentException | java.net.URISyntaxException unread) {
+            // NOTE: a marker URL no URI reads is compared as written.
+        }
+        if (place.endsWith("/")) {
+            place = place.substring(0, place.length() - 1);
+        }
+        return place.toLowerCase(java.util.Locale.ROOT);
     }
 
     /**

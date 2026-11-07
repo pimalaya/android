@@ -15,7 +15,10 @@ use io_oauth::{
         },
         auth_request::Oauth20AuthRequestParams,
         auth_response::Oauth20AuthParams,
-        issue_access_token::{Oauth20AccessTokenErrorParams, Oauth20AccessTokenSuccessParams},
+        issue_access_token::{
+            Oauth20AccessTokenErrorCode, Oauth20AccessTokenErrorParams,
+            Oauth20AccessTokenSuccessParams,
+        },
         refresh_access_token::{
             Oauth20AccessTokenRefresh, Oauth20AccessTokenRefreshParams,
             Oauth20AccessTokenRefreshResult,
@@ -389,7 +392,7 @@ impl<H: Host> Client<H> {
             match coroutine.resume(arg.as_deref()) {
                 Oauth20AccessTokenRefreshResult::Ok(Ok(success)) => return Ok(success),
                 Oauth20AccessTokenRefreshResult::Ok(Err(err)) => {
-                    return Err(oauth_error(err).into());
+                    return Err(refresh_error(err));
                 }
                 Oauth20AccessTokenRefreshResult::Err(err) => return Err(err.to_string().into()),
                 Oauth20AccessTokenRefreshResult::WantsRead => {
@@ -455,6 +458,15 @@ fn trusted_metadata(
     }
 
     Ok(metadata)
+}
+
+/// A refused refresh, an ended grant (`invalid_grant`) as the sign-in 401.
+fn refresh_error(err: Oauth20AccessTokenErrorParams) -> BridgeError {
+    let status = (err.error == Oauth20AccessTokenErrorCode::InvalidGrant).then_some(401);
+    BridgeError {
+        message: oauth_error(err),
+        status,
+    }
 }
 
 /// Formats an RFC 6749 §5.2 token error response.
@@ -659,5 +671,17 @@ mod tests {
         assert!(build("intent://auth#Intent;scheme=x;end").is_err());
         assert!(build("http://127.0.0.1:8080/authorize").is_ok());
         assert!(build("https://auth.example.org/authorize").is_ok());
+    }
+
+    /// An ended grant is the sign-in refused; other refusals are not.
+    #[test]
+    fn an_ended_grant_refuses_the_sign_in() {
+        let refused = |body: &[u8]| {
+            refresh_error(Oauth20AccessTokenErrorParams::try_from(body).unwrap()).status
+        };
+
+        assert_eq!(refused(br#"{"error":"invalid_grant"}"#), Some(401));
+        assert_eq!(refused(br#"{"error":"invalid_client"}"#), None);
+        assert_eq!(refused(br#"{"error":"invalid_scope"}"#), None);
     }
 }

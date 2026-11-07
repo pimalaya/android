@@ -77,6 +77,7 @@ import org.pimalaya.setup.OnboardingFlow;
 import org.pimalaya.setup.SetupShell;
 import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.FirstSync;
+import org.pimalaya.sync.SignInRefusals;
 import org.pimalaya.sync.SyncCoordinator;
 import org.pimalaya.sync.SyncPasses;
 import org.pimalaya.sync.SyncStamps;
@@ -341,6 +342,8 @@ public class MainActivity extends Host
         oauth.onConnected = onboarding::connect;
         oauth.onAborted = onboarding::grantAborted;
         oauth.onBusy = onboarding::busy;
+        accountSettings.signInAgain = this::signInAgain;
+        sync.signInAgain = this::signInAgain;
         flipper = findViewById(R.id.flipper);
         lists = findViewById(R.id.lists);
         authFlipper = findViewById(R.id.auth_flipper);
@@ -773,6 +776,32 @@ public class MainActivity extends Host
         } else {
             cancelAuth();
         }
+    }
+
+    /** Opens the domains page on a stored account, to sign it in again. */
+    private void signInAgain(String email) {
+        AccountEntry account = AccountEntry.find(accounts, email);
+        if (account == null) {
+            return;
+        }
+        if (screen == Panels.ACCOUNT) {
+            accountSettings.leave();
+        }
+        if (drawer.isDrawerOpen(android.view.Gravity.START)) {
+            drawer.closeDrawer(android.view.Gravity.START);
+        }
+        onboarding.openOn(account);
+    }
+
+    @Override
+    public void backToAccount(String email) {
+        oauth.cancel();
+        onboarding.leave();
+        closeOverlay(PANEL_AUTH);
+        screen = PANEL_ROOT;
+        applyChrome(PANEL_ROOT);
+        reloadHome();
+        accountSettings.open(email);
     }
 
     /** Leaves the auth flow unfinished, onto the root, the drawer closed. */
@@ -1269,14 +1298,20 @@ public class MainActivity extends Host
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.WRAP_CONTENT, dp(30));
         pillParams.topMargin = dp(12);
+        boolean enabled = AccountActivation.enabled(this, email);
+        boolean signIn = enabled && SignInRefusals.refused(this, email);
         card.addView(
                 SyncPill.of(
-                        this,
-                        AccountActivation.enabled(this, email),
-                        SyncStamps.at(this, email),
-                        sync.bodiesLeft(email)),
+                        this, enabled, signIn, SyncStamps.at(this, email), sync.bodiesLeft(email)),
                 pillParams);
-        card.setOnClickListener(view -> openAccountSettings(email));
+        card.setOnClickListener(
+                view -> {
+                    if (signIn) {
+                        signInAgain(email);
+                    } else {
+                        openAccountSettings(email);
+                    }
+                });
 
         LinearLayout.LayoutParams cardParams =
                 new LinearLayout.LayoutParams(

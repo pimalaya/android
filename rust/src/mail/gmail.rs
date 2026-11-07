@@ -434,6 +434,14 @@ impl<H: Host> Gmail<'_, H> {
             .ok_or_else(|| BridgeError::from("Gmail named no history id"))
     }
 
+    /// The address of the mailbox the token signs in to.
+    pub fn address(&mut self) -> Result<String, BridgeError> {
+        let auth = HttpAuthBearer::new(self.token);
+        let coroutine = GmailProfileGet::new(&auth, "me").map_err(|err| err.to_string())?;
+
+        Ok(self.run(quota::GET_PROFILE, coroutine)?.email_address)
+    }
+
     /// The account's labels that file mail, as `(id, mailbox)` pairs.
     ///
     /// A user label's name is already its path, nested by `/`.

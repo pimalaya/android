@@ -318,6 +318,20 @@ public final class PimdirCollections {
         }
     }
 
+    /** Changes not synced yet in an account's collections of a kind. */
+    public int owing(String accountEmail, String kind, String except) {
+        try (Cursor cursor =
+                PimdirDb.query(
+                        store.getReadableDatabase(),
+                        "COUNT_OWING",
+                        PimdirSql.values(
+                                "account", accounts.idOf(accountEmail),
+                                "kind", kind,
+                                "except", except))) {
+            return cursor.moveToFirst() ? cursor.getInt(0) : 0;
+        }
+    }
+
     /** Whether a queued action, pending or parked, is anchored on a collection. */
     private static boolean anchorsQueued(SQLiteDatabase db, String collection) {
         try (Cursor cursor =

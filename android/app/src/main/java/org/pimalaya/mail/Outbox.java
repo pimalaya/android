@@ -148,6 +148,28 @@ public final class Outbox {
         return actions;
     }
 
+    /** Anchors an account's submissions on its outbox, as they were. */
+    void reanchor(String accountEmail) {
+        String outbox = outboxOf(accountEmail);
+        for (PimdirQueue.Action action : submissions(accountEmail)) {
+            if (action.collection().equals(outbox)) {
+                continue;
+            }
+            long moved =
+                    queue.enqueue(
+                            new PimdirQueue.Enqueued(
+                                    outbox,
+                                    accountEmail,
+                                    action.kind(),
+                                    action.payload(),
+                                    queue.body(action.objectHash())));
+            if (!action.pending()) {
+                queue.park(moved, action.error());
+            }
+            queue.acknowledge(action.id());
+        }
+    }
+
     /**
      * Stages one composed message from {@code from} for the next drain to hand
      * over, as Annex B.2's {@code submit} ({@link Submission#payload}),

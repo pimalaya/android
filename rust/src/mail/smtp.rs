@@ -104,7 +104,7 @@ impl<'a, H: Host> SmtpSession<'a, H> {
         }
 
         let password = SecretString::from(auth.secret().to_string());
-        match *auth {
+        let signed = match *auth {
             Auth::Bearer(_) => {
                 let user = url_user(&self.url)?;
                 self.run(SmtpAuthXoauth2::new(
@@ -112,20 +112,25 @@ impl<'a, H: Host> SmtpSession<'a, H> {
                     &password,
                     domain(),
                     SmtpAuthXoauth2Options::default(),
-                ))?;
+                ))
+                .map(|_| ())
             }
-            Auth::Basic { login, .. } => {
-                self.run(SmtpAuthPlain::new(
+            Auth::Basic { login, .. } => self
+                .run(SmtpAuthPlain::new(
                     None::<&str>,
                     login,
                     &password,
                     domain(),
                     SmtpAuthPlainOptions::default(),
-                ))?;
-            }
-        }
+                ))
+                .map(|_| ()),
+        };
 
-        Ok(())
+        // NOTE: the credential refused, the 401 of the HTTP backends as IMAP's.
+        signed.map_err(|err| BridgeError {
+            message: err.message,
+            status: Some(401),
+        })
     }
 
     /// Hands one composed message over, then closes the session.
@@ -189,7 +194,9 @@ impl<'a, H: Host> SmtpSession<'a, H> {
 pub enum SmtpSendError {
     /// The server refused this message, and would refuse it again.
     Refused(String),
-    /// Anything else: no network, TLS, authentication, a 4yz reply.
+    /// The server refused the credential, the message kept for later.
+    SignIn(String),
+    /// Anything else: no network, TLS, a 4yz reply.
     Transient(String),
     /// The whole message went over and no verdict came back: sending it
     /// again may deliver it twice.
@@ -207,8 +214,21 @@ impl SmtpSendError {
         matches!(self, Self::Uncertain(_))
     }
 
+    /// Whether the server refused the credential.
+    pub fn is_sign_in(&self) -> bool {
+        matches!(self, Self::SignIn(_))
+    }
+
     fn transient(err: impl Display) -> Self {
         Self::Transient(err.to_string())
+    }
+
+    /// A session that did not open: the credential refused, or transient.
+    fn connecting(err: BridgeError) -> Self {
+        match err.status {
+            Some(401) => Self::SignIn(err.message),
+            _ => Self::Transient(err.message),
+        }
     }
 
     /// A failure with no reply, before the message was handed over
@@ -224,9 +244,10 @@ impl SmtpSendError {
 impl Display for SmtpSendError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::Refused(message) | Self::Transient(message) | Self::Uncertain(message) => {
-                formatter.write_str(message)
-            }
+            Self::Refused(message)
+            | Self::SignIn(message)
+            | Self::Transient(message)
+            | Self::Uncertain(message) => formatter.write_str(message),
         }
     }
 }
@@ -299,7 +320,7 @@ pub fn send<H: Host>(
     composed: &Composed,
 ) -> Result<(), SmtpSendError> {
     let mut session = SmtpSession::new(client, url);
-    session.connect(auth).map_err(SmtpSendError::transient)?;
+    session.connect(auth).map_err(SmtpSendError::connecting)?;
     session.submit(composed)
 }
 
@@ -311,7 +332,23 @@ mod tests {
         send::SmtpCommandSendError,
     };
 
-    use crate::mail::smtp::{handed, refusal};
+    use crate::{
+        error::BridgeError,
+        mail::smtp::{SmtpSendError, handed, refusal},
+    };
+
+    #[test]
+    fn a_refused_credential_keeps_the_message_and_signs_in_again() {
+        let refused = SmtpSendError::connecting(BridgeError {
+            message: "535 5.7.8 Authentication failed".into(),
+            status: Some(401),
+        });
+        assert!(refused.is_sign_in());
+        assert!(!refused.is_permanent() && !refused.is_uncertain());
+
+        let lost = SmtpSendError::connecting("Connection reset".into());
+        assert!(!lost.is_sign_in());
+    }
 
     #[test]
     fn a_5yz_reply_is_the_servers_last_word() {

@@ -1123,4 +1123,23 @@
     <string name="widget_description">Capturer une tâche d\'un geste</string>
     <string name="widget_inbox">Boîte %1$d</string>
     <string name="widget_next_description">Vos prochaines actions, les échéances d\'abord</string>
+    <string name="sign_in_again">Se reconnecter</string>
+    <string name="sign_in_refused_title">Connexion refusée</string>
+    <plurals name="sign_in_refused_report">
+        <item quantity="one">Le serveur de %1$s a refusé sa connexion. Il se synchronise de nouveau une fois reconnecté.</item>
+        <item quantity="other">Les serveurs de %1$s ont refusé leur connexion. Ils se synchronisent de nouveau une fois reconnectés.</item>
+    </plurals>
+    <string name="choice_current">Actuel</string>
+    <string name="again_searching">Recherche de ses réglages</string>
+    <string name="again_unresolved">La connexion de %1$s est introuvable. Choisissez-la dans ses paramètres.</string>
+    <string name="again_move_title">%1$s : passer à un nouveau serveur ?</string>
+    <string name="again_move_message">Ce téléphone récupère de nouveau ses données (%1$s) depuis %2$s.</string>
+    <string name="again_login_title">%1$s : se connecter en tant que %2$s ?</string>
+    <string name="again_login_message">Ce téléphone récupère de nouveau ses données (%1$s) pour %2$s.</string>
+    <plurals name="again_move_dropped">
+        <item quantity="one">%1$d modification pas encore synchronisée est abandonnée.</item>
+        <item quantity="other">%1$d modifications pas encore synchronisées sont abandonnées.</item>
+    </plurals>
+    <string name="again_move">Déplacer</string>
+    <string name="grant_wrong_account">Vous vous êtes connecté en tant que %1$s. Ce compte est %2$s : connectez-vous avec lui.</string>
 </resources>

@@ -684,6 +684,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_submitMessage<'local>(
             .map_err(|err| Refused {
                 permanent: true,
                 uncertain: false,
+                status: None,
                 message: format!("Malformed submit payload: {err}"),
             })
             .and_then(|intent| {
@@ -698,6 +699,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_submitMessage<'local>(
                 error: refused.message,
                 permanent: refused.permanent,
                 uncertain: refused.uncertain,
+                status: refused.status,
             })
             .unwrap_or_else(|err| error_json(err.to_string())),
         };
@@ -831,6 +833,8 @@ struct RefusedReply {
     error: String,
     permanent: bool,
     uncertain: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<u16>,
 }
 
 #[cfg(test)]

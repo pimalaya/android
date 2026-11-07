@@ -236,11 +236,13 @@ public final class SyncPasses {
                 syncAccount(
                         entry.email, entry.server(PimDomain.CONTACTS), group.getValue(), outcome);
                 SyncStamps.mark(context, entry.email);
+                SignInRefusals.note(context, entry.email, PimDomain.CONTACTS.id, null);
             } catch (Exception error) {
                 if (PimdirEngine.expiredToken(error) && contacts.renewable()) {
                     try {
                         syncAccount(entry.email, refresh(entry), group.getValue(), outcome);
                         SyncStamps.mark(context, entry.email);
+                        SignInRefusals.note(context, entry.email, PimDomain.CONTACTS.id, null);
                         continue;
                     } catch (Exception retryError) {
                         error = retryError;
@@ -250,6 +252,7 @@ public final class SyncPasses {
                 // NOTE: one account failing (revoked token, server down)
                 // must not block the others.
                 Log.w("pimalaya", "sync failed for " + group.getKey(), error);
+                SignInRefusals.note(context, entry.email, PimDomain.CONTACTS.id, error);
                 if (outcome.failure == null) {
                     outcome.failure = error;
                 }
@@ -553,12 +556,14 @@ public final class SyncPasses {
                 throw uncertain;
             } catch (Exception error) {
                 mail.outbox().retryOutgoing(waiting.id);
+                SignInRefusals.note(context, account.email, SignInRefusals.SENDING, error);
                 throw error;
             }
             if (filed != null) {
                 mail.policy().aliasSentCopy(waiting.messageId, filed);
             }
             mail.outbox().acknowledge(waiting.id);
+            SignInRefusals.note(context, account.email, SignInRefusals.SENDING, null);
             sent += 1;
         }
         return sent;
@@ -599,6 +604,18 @@ public final class SyncPasses {
      * and one already open outlives the token that opened it.
      */
     public MailSession openMail(AccountEntry account) {
+        try {
+            MailSession session = signIn(account);
+            SignInRefusals.note(context, account.email, PimDomain.MAIL.id, null);
+            return session;
+        } catch (RuntimeException failure) {
+            SignInRefusals.note(context, account.email, PimDomain.MAIL.id, failure);
+            throw failure;
+        }
+    }
+
+    /** {@link #openMail} itself, the token renewed once if refused. */
+    private MailSession signIn(AccountEntry account) {
         try {
             return MailClient.openMail(account.server(PimDomain.MAIL));
         } catch (Exception refused) {
@@ -957,8 +974,10 @@ public final class SyncPasses {
                         session.call(server -> clients.calendar().listCalendars(transport, server)));
             } catch (Exception error) {
                 Log.w("pimalaya", "calendar list failed: " + AccountEntry.redacted(account.email), error);
+                SignInRefusals.note(context, account.email, PimDomain.CALENDAR.id, error);
                 return error;
             }
+            SignInRefusals.note(context, account.email, PimDomain.CALENDAR.id, null);
             // NOTE: the roster the phone's calendars hang off, its first
             // listing included: a setup chooses before its calendars are known.
             try {

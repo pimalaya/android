@@ -18,8 +18,11 @@ import org.pimalaya.mail.ComposeFormat;
 import org.pimalaya.mail.SenderName;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.FirstSync;
+import org.pimalaya.sync.SignInRefusals;
 import org.pimalaya.sync.SyncPasses;
 
 /**
@@ -35,6 +38,7 @@ final class AccountRemoval {
     private final MailStore mail;
     private final EventStore events;
     private final PimdirContacts contacts;
+    private final PimdirDb pimdir;
 
     /** Reads the domains' collections, as the activity's passes do. */
     private final SyncPasses passes;
@@ -46,6 +50,7 @@ final class AccountRemoval {
         this.mail = parts.mail();
         this.events = parts.events();
         this.contacts = contacts;
+        this.pimdir = parts.pimdir();
         this.passes = new SyncPasses(context, parts, SyncPasses.HEADLESS);
     }
 
@@ -93,7 +98,46 @@ final class AccountRemoval {
         SenderName.set(context, email, "");
         ComposeFormat.set(context, email, true);
         BackgroundCheck.forget(context, email);
+        SignInRefusals.forget(context, email);
         events.forget(email);
+        return urls;
+    }
+
+    /** Drops one domain of a kept account; answers the books it dropped. */
+    List<String> forget(String email, PimDomain domain) {
+        List<String> urls = new ArrayList<>();
+        List<String> ids = new ArrayList<>();
+        List<PimdirCollections.Stored> collections =
+                domain == PimDomain.MAIL
+                        ? mail.loadMailboxes(List.of(email))
+                        : passes.collectionsOf(domain);
+        for (PimdirCollections.Stored collection : collections) {
+            if (collection.accountEmail.equals(email)) {
+                ids.add(collection.id);
+            }
+        }
+        MergedFilter.of(context, domain).forget(email, ids);
+        switch (domain) {
+            case MAIL:
+                mail.forgetMailboxes(email);
+                break;
+            case CONTACTS:
+                for (BookEntry entry : base.loadAllAddressbooks()) {
+                    if (entry.accountEmail.equals(email)) {
+                        urls.add(entry.book.url());
+                    }
+                }
+                DefaultCollection.choose(context, email, PimdirSummary.CONTACT, null);
+                base.forgetAccount(email);
+                new PimdirCollections(pimdir, context)
+                        .replace(email, PimdirSummary.CONTACT, List.of());
+                break;
+            case CALENDAR:
+                DefaultCollection.choose(context, email, PimdirSummary.CALENDAR, null);
+                PhoneCalendars.forget(context, email, ids);
+                events.forget(email);
+                break;
+        }
         return urls;
     }
 

@@ -164,6 +164,10 @@ final class Native {
             String refreshToken,
             String scope);
 
+    /** Whether a grant over the JSON {@code bases} signed in as the address. */
+    static native String checkGrant(
+            Transport transport, String bases, String scope, String token, String address);
+
     /**
      * What an account base URL tells of its backend; pure.
      *

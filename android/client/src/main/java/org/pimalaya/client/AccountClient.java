@@ -161,6 +161,20 @@ public class AccountClient {
         return OauthTokens.from(reply);
     }
 
+    /** The address a grant signed in as when not {@code address}, else null. */
+    public String grantRefusal(
+            Transport transport, List<String> bases, String scope, String token, String address) {
+        JSONObject reply =
+                Replies.object(
+                        Native.checkGrant(
+                                transport,
+                                new JSONArray(bases).toString(),
+                                scope == null ? "" : scope,
+                                token,
+                                address));
+        return reply.optBoolean("refused") ? reply.optString("signedAs", null) : null;
+    }
+
     /** Fetches an authorization server's RFC 8414 metadata from its issuer. */
     public ServerMetadata serverMetadata(Transport transport, String issuer) {
         return ServerMetadata.from(Replies.object(Native.oauthServerMetadata(transport, issuer)));

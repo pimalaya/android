@@ -550,6 +550,37 @@ pub extern "system" fn Java_org_pimalaya_client_Native_oauthRefreshAccessToken<'
     .resolve::<ErrorReply>()
 }
 
+/// `Native.checkGrant`: `{"signedAs", "refused"}` of a grant over `bases`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_checkGrant<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    bases: JString<'local>,
+    scope: JString<'local>,
+    token: JString<'local>,
+    address: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let bases = read_string(env, &bases);
+        let scope = read_string(env, &scope);
+        let token = read_string(env, &token);
+        let address = read_string(env, &address);
+
+        let json = match from_str::<Vec<String>>(&bases) {
+            Err(err) => error_json(format!("Invalid base URL list: {err}")),
+            Ok(bases) => {
+                let check = Client::new(JniHost::new(env, &transport, None))
+                    .check_grant(&bases, &scope, &token, &address);
+                to_string(&check).unwrap_or_else(|err| error_json(err.to_string()))
+            }
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
 /// Public-client registration params.
 ///
 /// A loopback redirect, no secret, the code and refresh grants the app drives.

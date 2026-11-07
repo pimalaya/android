@@ -36,4 +36,7 @@ public interface SetupShell {
 
     /** A filter changed: the lists and the bar's filter icon follow. */
     void filterChanged();
+
+    /** Leaves the auth flow for an account's settings. */
+    void backToAccount(String email);
 }

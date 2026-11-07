@@ -44,6 +44,7 @@ import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.SyncCoordinator;
 import org.pimalaya.sync.SyncPasses;
+import org.pimalaya.sync.SignInRefusals;
 import org.pimalaya.sync.SyncStamps;
 import org.pimalaya.task.GoogleLimits;
 import org.pimalaya.task.TaskStore;
@@ -103,6 +104,9 @@ public final class AccountSettings {
     /** Builds the page; {@link #bind} wires it once laid out. */
     /** Opens what an account syncs of a domain, from its row; the activity's. */
     public java.util.function.BiConsumer<PimDomain, String> chooseSync;
+
+    /** Opens the sign-in again of an account, by address; the activity's. */
+    public java.util.function.Consumer<String> signInAgain = email -> {};
 
     public AccountSettings(
             Host host,
@@ -247,6 +251,7 @@ public final class AccountSettings {
                 SyncPill.of(
                         host,
                         AccountActivation.enabled(host, email),
+                        SignInRefusals.refused(host, email),
                         SyncStamps.at(host, email),
                         sync.bodiesLeft(email)),
                 new FrameLayout.LayoutParams(
@@ -948,6 +953,12 @@ public final class AccountSettings {
         }
 
         List<View> rows = new ArrayList<>();
+        rows.add(
+                sections.row(
+                        host.getString(R.string.sign_in_again),
+                        null,
+                        chevron(),
+                        () -> signInAgain.accept(account.email)));
         for (Map.Entry<String, Server> server : servers.entrySet()) {
             Server named = server.getValue();
             List<String> domains = new ArrayList<>();

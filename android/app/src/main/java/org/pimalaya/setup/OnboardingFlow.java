@@ -37,6 +37,7 @@ import org.pimalaya.client.OauthRequest;
 import org.pimalaya.client.OauthTokens;
 import org.pimalaya.client.ServiceConfig;
 import org.pimalaya.client.Transport;
+import org.pimalaya.contact.BookEntry;
 import org.pimalaya.mail.SenderName;
 import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
@@ -214,6 +215,28 @@ public final class OnboardingFlow {
     /** The same for the calendars ({@link Accounts#calendarsElsewhere}). */
     private boolean calendarsElsewhere;
 
+    /** The stored account a sign-in again runs on, null in the setup. */
+    private AccountEntry again;
+
+    /** Its covered domains' stored settings, Current in their menus. */
+    private final Map<PimDomain, SetupOption> currents =
+            new java.util.EnumMap<>(PimDomain.class);
+
+    /** Where it sends as stored, null when nowhere or over mail's session. */
+    private SubmitOption currentSubmit;
+
+    /** The server each covered domain was confirmed to move to. */
+    private final Map<PimDomain, String> movedTo = new java.util.EnumMap<>(PimDomain.class);
+
+    /** The login each covered domain was confirmed to move to. */
+    private final Map<PimDomain, String> movedAs = new java.util.EnumMap<>(PimDomain.class);
+
+    /** Whether discovery still runs behind the domains page. */
+    private boolean discovering;
+
+    /** Whether Continue waits on discovery for a sign-in it needs. */
+    private boolean continueOnDiscovery;
+
     /** Builds the wizard; {@link #bind} wires its views once laid out. */
     public OnboardingFlow(
             Host host,
@@ -270,6 +293,33 @@ public final class OnboardingFlow {
 
     /** Resets the flow to its first step and shows it. */
     public void open() {
+        reset();
+        ((EditText) host.findViewById(R.id.email_input)).setText("");
+        host.setAuthLoading(R.id.email_continue, R.id.email_progress, false);
+        shell.showAuth(STEP_EMAIL);
+    }
+
+    /** Opens the domains page on a stored account, to sign it in again. */
+    public void openOn(AccountEntry account) {
+        reset();
+        again = account;
+        pendingEmail = account.email;
+        connectedEmail = account.email;
+        planAgain();
+        discovering = true;
+        openServers();
+        search();
+    }
+
+    /** The flow emptied of any earlier run. */
+    private void reset() {
+        again = null;
+        currents.clear();
+        currentSubmit = null;
+        movedTo.clear();
+        movedAs.clear();
+        discovering = false;
+        continueOnDiscovery = false;
         pendingEmail = null;
         searchedConfigs = new ArrayList<>();
         matchedProvider = null;
@@ -294,9 +344,6 @@ public final class OnboardingFlow {
         pickingCalendars = false;
         chosenName = "";
         pickingMailboxes = false;
-        ((EditText) host.findViewById(R.id.email_input)).setText("");
-        host.setAuthLoading(R.id.email_continue, R.id.email_progress, false);
-        shell.showAuth(STEP_EMAIL);
     }
 
     /** Brings a step's own buttons in line with its state, on entering it. */
@@ -395,6 +442,10 @@ public final class OnboardingFlow {
                                 }
                                 searchedConfigs = found;
                                 matchedProvider = matched;
+                                if (again != null) {
+                                    discovered();
+                                    return;
+                                }
                                 host.setAuthLoading(
                                         R.id.email_continue, R.id.email_progress, false);
                                 if (searchFailure != null && found.isEmpty() && matched == null) {
@@ -491,6 +542,198 @@ public final class OnboardingFlow {
                 setup.submitSelected = SetupPlan.firstOffered(setup.selected, setup.submitOptions);
             }
         }
+    }
+
+    /** Each domain's section from what the stored account holds. */
+    private void planAgain() {
+        setups.clear();
+        currents.clear();
+        for (PimDomain domain : PimDomain.values()) {
+            DomainSetup setup = new DomainSetup(domain);
+            setups.put(domain, setup);
+            SetupOption current = again.covers(domain) ? currentOf(domain) : null;
+            setup.selected = current == null ? manualOption() : current;
+            setup.enabled = current != null;
+            if (current != null) {
+                currents.put(domain, current);
+            }
+        }
+        currentSubmit = currentSubmit();
+        setups.get(PimDomain.MAIL).submitSelected = currentSubmit;
+    }
+
+    /** A covered domain's stored settings, its menu's Current. */
+    private SetupOption currentOf(PimDomain domain) {
+        Account server = again.server(domain);
+        AccountCredential credential = again.credential(domain);
+        if (server == null || credential == null) {
+            return null;
+        }
+        String service;
+        boolean api = true;
+        switch (server.info().protocol()) {
+            case GRAPH:
+                service = "msgraph";
+                break;
+            case JMAP:
+                service = "jmap";
+                api = false;
+                break;
+            case GOOGLE:
+                service =
+                        domain == PimDomain.MAIL
+                                ? "gmail"
+                                : domain == PimDomain.CALENDAR ? "gcal" : null;
+                break;
+            default:
+                service =
+                        domain == PimDomain.MAIL
+                                ? "imap"
+                                : domain == PimDomain.CONTACTS ? "carddav" : "caldav";
+                api = false;
+        }
+        AuthMethod method;
+        if (credential.renewal != null) {
+            method = storedGrant(domain, credential.renewal.grant());
+        } else {
+            method = credential.login.isEmpty() ? AuthMethod.bearer() : AuthMethod.password();
+        }
+        return new SetupOption(
+                service,
+                service == null
+                        ? host.getString(R.string.config_google_api)
+                        : protocolName(service),
+                api ? null : SetupPlan.hostOf(server.baseUrl),
+                server.baseUrl,
+                null,
+                method,
+                credential.login.isEmpty() ? emailLogin() : credential.login);
+    }
+
+    /** A stored grant, its server unnamed until discovery finds it. */
+    private static AuthMethod storedGrant(PimDomain domain, OauthGrant grant) {
+        String token = grant == null ? null : grant.tokenEndpoint();
+        String scope = grant == null ? null : grant.scope();
+        if (Oauth.GOOGLE_TOKEN_ENDPOINT.equals(token) && scope != null) {
+            return AuthMethod.codeGrant(
+                    Oauth.GOOGLE_AUTH_ENDPOINT, token, Oauth.domainScope(domain, scope));
+        }
+        if (Oauth.MICROSOFT_TOKEN_ENDPOINT.equals(token) && scope != null) {
+            return AuthMethod.codeGrant(Oauth.MICROSOFT_AUTH_ENDPOINT, token, scope);
+        }
+        return AuthMethod.codeGrant(null, token, scope);
+    }
+
+    /** Whether an option's browser grant waits on discovery for its server. */
+    private static boolean unresolved(SetupOption option) {
+        return option.isOauth()
+                && option.method.authorizationEndpoint() == null
+                && option.method.issuer() == null
+                && option.method.deviceAuthorizationEndpoint() == null;
+    }
+
+    /** Where the stored account sends, as a sending item, or null. */
+    private SubmitOption currentSubmit() {
+        Account mail = again.server(PimDomain.MAIL);
+        if (mail == null
+                || mail.submitUrl == null
+                || mail.submitUrl.isEmpty()
+                || mail.info().submitsOverSession()) {
+            return null;
+        }
+        AccountCredential sending = again.submitCredential(PimDomain.MAIL);
+        AccountCredential signing = sending == null ? again.credential(PimDomain.MAIL) : sending;
+        AuthMethod.Type auth =
+                signing.renewable()
+                        ? AuthMethod.Type.OAUTH_AUTHORIZATION_CODE_GRANT
+                        : signing.login.isEmpty()
+                                ? AuthMethod.Type.BEARER
+                                : AuthMethod.Type.PASSWORD;
+        return new SubmitOption(
+                host.getString(R.string.config_smtp),
+                SetupPlan.hostOf(mail.submitUrl),
+                mail.submitUrl,
+                false,
+                null,
+                null,
+                auth);
+    }
+
+    /** Discovery landed behind a sign-in again: menus and domains filled. */
+    private void discovered() {
+        discovering = false;
+        for (DomainSetup setup : setups.values()) {
+            setup.options.clear();
+            setup.options.addAll(optionsFor(setup.domain));
+            if (currents.containsKey(setup.domain)) {
+                resolveCurrent(setup);
+                continue;
+            }
+            int index = cardIndex(setup.domain, false);
+            if (index < 0 || cards.get(index).ticked) {
+                continue;
+            }
+            SetupOption best = SetupPlan.standardOption(setup.domain, setup.options, pendingEmail);
+            setup.selected = best == null ? manualOption() : best;
+            cards.set(index, new Card(setup.domain, false, setup.selected.isManual(), false));
+        }
+        DomainSetup mail = setups.get(PimDomain.MAIL);
+        mail.submitOptions.clear();
+        mail.submitOptions.addAll(submissionOptions());
+        int sending = cardIndex(PimDomain.MAIL, true);
+        if (!currents.containsKey(PimDomain.MAIL) && sending >= 0 && !cards.get(sending).form) {
+            mail.submitSelected = SetupPlan.firstOffered(mail.selected, mail.submitOptions);
+            cards.set(sending, sendingCard(mail));
+        }
+        cardsChanged = true;
+        if (continueOnDiscovery) {
+            continueOnDiscovery = false;
+            host.setAuthLoading(R.id.signin_continue, R.id.signin_progress, false);
+            serversContinue();
+            return;
+        }
+        if (pageAt < 0 && checking == null && shell.authStep() == STEP_SIGNIN) {
+            showPage();
+        }
+    }
+
+    /** A covered domain's stored grant on the server discovery found it at. */
+    private void resolveCurrent(DomainSetup setup) {
+        SetupOption current = currents.get(setup.domain);
+        if (!unresolved(current)) {
+            return;
+        }
+        for (SetupOption option : setup.options) {
+            if (option.isOauth()
+                    && SetupPlan.hostOf(option.baseUrl)
+                            .equalsIgnoreCase(SetupPlan.hostOf(current.baseUrl))) {
+                SetupOption resolved =
+                        new SetupOption(
+                                current.service,
+                                current.label,
+                                current.detail,
+                                current.baseUrl,
+                                option.resource,
+                                option.method,
+                                current.login);
+                currents.put(setup.domain, resolved);
+                if (setup.selected == current) {
+                    setup.selected = resolved;
+                }
+                return;
+            }
+        }
+    }
+
+    /** Where a domain's section stands on the servers page, -1 for none. */
+    private int cardIndex(PimDomain domain, boolean sending) {
+        for (int index = 0; index < cards.size(); index++) {
+            Card card = cards.get(index);
+            if (card.domain == domain && card.sending == sending) {
+                return index;
+            }
+        }
+        return -1;
     }
 
     /**
@@ -957,6 +1200,9 @@ public final class OnboardingFlow {
         /** What its last sign-in ran into; null when none. */
         String problem;
 
+        /** Whether its last grant signed in another address, said whole. */
+        boolean wrongAccount;
+
         Page(PimDomain domain, boolean sending, SignIn signIn, String url, SetupOption option) {
             this.domain = domain;
             this.sending = sending;
@@ -1101,6 +1347,17 @@ public final class OnboardingFlow {
         return !sendsOverSession(mail) && mail.submitSelected == null;
     }
 
+    /** Whether a section is one the account signing in again has, locked. */
+    private boolean covered(Card card) {
+        if (again == null) {
+            return false;
+        }
+        if (!card.sending) {
+            return currents.containsKey(card.domain);
+        }
+        return currents.containsKey(PimDomain.MAIL) && currentSubmit != null;
+    }
+
     /** The name of a card or of its page: the domain's, or mail's sending. */
     private String nameOf(boolean sending, PimDomain domain) {
         return host.getString(sending ? R.string.signin_sending : domain.label);
@@ -1118,6 +1375,9 @@ public final class OnboardingFlow {
      * the account has it already, or that nothing was found.
      */
     private String cardLine(Card card) {
+        if (again != null && discovering && card.unfound && !card.ticked) {
+            return host.getString(R.string.again_searching);
+        }
         if (!counts(card)) {
             AccountEntry existing = AccountEntry.find(accounts, pendingEmail);
             if (!card.sending && existing != null && existing.covers(card.domain)) {
@@ -1156,6 +1416,9 @@ public final class OnboardingFlow {
      * for it; mail's sending over the session mail reads with has none.
      */
     private boolean hasChoices(Card card) {
+        if (covered(card)) {
+            return true;
+        }
         DomainSetup setup = setups.get(card.domain);
         if (card.sending) {
             return !sendsOverSession(setup) && !setup.submitOptions.isEmpty();
@@ -1175,7 +1438,7 @@ public final class OnboardingFlow {
         DomainSetup setup = setups.get(card.domain);
         boolean locked = card.sending && !setup.enabled;
         // NOTE: sending over mail's session is part of mail, its tick fixed.
-        boolean fixed = card.sending && sendsOverSession(setup);
+        boolean fixed = (card.sending && sendsOverSession(setup)) || covered(card);
         boolean ticked = counts(card);
         float dimmed = disabledAlpha();
         LinearLayout section = new LinearLayout(host);
@@ -1225,14 +1488,29 @@ public final class OnboardingFlow {
     }
 
     /**
-     * A card's settings: Auto, every option discovery found for it by
-     * protocol and sign-in, then the custom settings.
+     * A card's settings: Current when signing in again, Auto, every option
+     * discovery found for it by protocol and sign-in, then the custom settings.
      */
     private void showChoices(Card card, View anchor) {
         android.widget.PopupMenu menu = new android.widget.PopupMenu(host, anchor);
         List<Runnable> actions = new ArrayList<>();
         DomainSetup setup = setups.get(card.domain);
-        addMenuItem(menu, actions, host.getString(R.string.choice_auto), () -> autoChoice(card));
+        if (covered(card)) {
+            addMenuItem(
+                    menu,
+                    actions,
+                    host.getString(R.string.choice_current),
+                    () -> currentChoice(card));
+        }
+        SetupOption auto =
+                card.sending
+                        ? null
+                        : SetupPlan.standardOption(card.domain, setup.options, pendingEmail);
+        addMenuItem(
+                menu,
+                actions,
+                host.getString(R.string.choice_auto),
+                moving(card, auto, () -> autoChoice(card)));
         if (card.sending) {
             List<String> labels = new ArrayList<>();
             for (SubmitOption option : setup.submitOptions) {
@@ -1259,7 +1537,8 @@ public final class OnboardingFlow {
                         java.util.Collections.frequency(labels, labels.get(index)) > 1
                                 ? optionLabel(option)
                                 : labels.get(index);
-                addMenuItem(menu, actions, label, () -> fillForm(card, option));
+                addMenuItem(
+                        menu, actions, label, moving(card, option, () -> fillForm(card, option)));
             }
         }
         addMenuItem(menu, actions, host.getString(R.string.signin_custom), () -> openForm(card));
@@ -1271,6 +1550,105 @@ public final class OnboardingFlow {
                     return true;
                 });
         menu.show();
+    }
+
+    /** Current picked: the section back on what the account stores. */
+    private void currentChoice(Card card) {
+        int index = cards.indexOf(card);
+        if (index < 0) {
+            return;
+        }
+        DomainSetup setup = setups.get(card.domain);
+        if (card.domain == PimDomain.MAIL) {
+            setup.submitSelected = currentSubmit;
+            int sending = cardIndex(PimDomain.MAIL, true);
+            if (sending >= 0 && (card.sending || !cards.get(sending).edited)) {
+                cards.set(sending, sendingCard(setup));
+            }
+        }
+        if (!card.sending) {
+            setup.selected = currents.get(card.domain);
+            movedTo.remove(card.domain);
+            cards.set(index, new Card(card.domain, false, false, true));
+        }
+    }
+
+    /** A pick, confirmed first when it moves a covered domain elsewhere. */
+    private Runnable moving(Card card, SetupOption picked, Runnable pick) {
+        if (card.sending
+                || !covered(card)
+                || picked == null
+                || picked.baseUrl == null
+                || !AccountCommit.moves(currents.get(card.domain).baseUrl, picked.baseUrl)) {
+            return pick;
+        }
+        return () ->
+                confirmMove(
+                        card.domain,
+                        placeOf(picked),
+                        null,
+                        () -> {
+                            movedTo.put(card.domain, picked.baseUrl);
+                            pick.run();
+                            cardsChanged = true;
+                            showPage();
+                        });
+    }
+
+    /** Where an option signs in, as the confirmation names it. */
+    private String placeOf(SetupOption option) {
+        String provider = SetupPlan.provider(option, pendingEmail);
+        return provider != null ? provider : SetupPlan.hostOf(option.baseUrl);
+    }
+
+    /** Asks before a covered domain moves to another server or login. */
+    private void confirmMove(PimDomain domain, String server, String login, Runnable move) {
+        String name = host.getString(domain.label);
+        String email = again.email;
+        String kind =
+                domain == PimDomain.MAIL
+                        ? org.pimalaya.pimdir.PimdirSummary.MAIL
+                        : domain == PimDomain.CONTACTS
+                                ? org.pimalaya.pimdir.PimdirSummary.CONTACT
+                                : org.pimalaya.pimdir.PimdirSummary.CALENDAR;
+        String outbox = domain == PimDomain.MAIL ? parts.mail().outbox().outboxOf(email) : null;
+        host.interactive.execute(
+                () -> {
+                    int owing =
+                            new PimdirCollections(parts.pimdir(), host).owing(email, kind, outbox);
+                    host.postAlive(
+                            () -> {
+                                String message =
+                                        login == null
+                                                ? host.getString(
+                                                        R.string.again_move_message, name, server)
+                                                : host.getString(
+                                                        R.string.again_login_message, name, login);
+                                if (owing > 0) {
+                                    message +=
+                                            " "
+                                                    + host.getResources()
+                                                            .getQuantityString(
+                                                                    R.plurals.again_move_dropped,
+                                                                    owing,
+                                                                    owing);
+                                }
+                                new AlertDialog.Builder(host)
+                                        .setTitle(
+                                                login == null
+                                                        ? host.getString(
+                                                                R.string.again_move_title, name)
+                                                        : host.getString(
+                                                                R.string.again_login_title,
+                                                                name,
+                                                                login))
+                                        .setMessage(message)
+                                        .setPositiveButton(
+                                                R.string.again_move, (dialog, which) -> move.run())
+                                        .setNegativeButton(android.R.string.cancel, null)
+                                        .show();
+                            });
+                });
     }
 
     /** One item of a popup menu and what picking it does. */
@@ -2150,12 +2528,49 @@ public final class OnboardingFlow {
             return;
         }
         resolveForms();
+        if (again != null && !readyAgain()) {
+            return;
+        }
         if (cardsChanged || pages.isEmpty()) {
             buildPages();
             cardsChanged = false;
         }
         pageAt = -1;
         nextPage();
+    }
+
+    /** Whether a sign-in again goes on: grants resolved, moves confirmed. */
+    private boolean readyAgain() {
+        for (Map.Entry<PimDomain, SetupOption> entry : currents.entrySet()) {
+            PimDomain domain = entry.getKey();
+            SetupOption picked = setups.get(domain).selected;
+            if (unresolved(picked)) {
+                if (discovering) {
+                    continueOnDiscovery = true;
+                    host.setAuthLoading(R.id.signin_continue, R.id.signin_progress, true);
+                } else {
+                    host.toast(
+                            host.getString(
+                                    R.string.again_unresolved, host.getString(domain.label)));
+                }
+                return false;
+            }
+            String base = picked.baseUrl;
+            if (base != null
+                    && AccountCommit.moves(entry.getValue().baseUrl, base)
+                    && !base.equals(movedTo.get(domain))) {
+                confirmMove(
+                        domain,
+                        placeOf(picked),
+                        null,
+                        () -> {
+                            movedTo.put(domain, base);
+                            serversContinue();
+                        });
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -2327,7 +2742,7 @@ public final class OnboardingFlow {
         if (pageAt < 0) {
             title.setText(R.string.servers_title);
             message.setText(host.getString(R.string.servers_found, domainOf(pendingEmail)));
-            message.setVisibility(View.VISIBLE);
+            message.setVisibility(again == null ? View.VISIBLE : View.GONE);
             // NOTE: one card, a section per domain under a hairline inset
             // past the tiles.
             LinearLayout group = CardRows.card(host);
@@ -2476,6 +2891,11 @@ public final class OnboardingFlow {
             return null;
         }
         if (identity.signIn == SignIn.BROWSER) {
+            for (Page page : identity.pages) {
+                if (page.wrongAccount) {
+                    return page.problem;
+                }
+            }
             return host.getString(R.string.signin_not_allowed_for, String.join(", ", names));
         }
         return asking > 1
@@ -2860,6 +3280,10 @@ public final class OnboardingFlow {
             signIn(identities.get(next));
             return;
         }
+        if (again != null && next >= identities.size()) {
+            commitAgain();
+            return;
+        }
         pageAt = next;
         showPage();
     }
@@ -2905,6 +3329,28 @@ public final class OnboardingFlow {
      * signed in yet, one after the other, the login and password of the
      * sign-in it reuses when switched so.
      */
+    /** A covered domain signing in under another login, unconfirmed. */
+    private PimDomain reloggedOf(Identity identity, String login) {
+        if (again == null || login.isEmpty()) {
+            return null;
+        }
+        for (Page page : identity.pages) {
+            SetupOption current = page.sending ? null : currents.get(page.domain);
+            AccountCredential stored = page.sending ? null : again.credential(page.domain);
+            if (page.signed
+                    || current == null
+                    || stored == null
+                    || stored.login.isEmpty()
+                    || AccountCommit.moves(current.baseUrl, page.url)
+                    || login.equalsIgnoreCase(stored.login)
+                    || login.equals(movedAs.get(page.domain))) {
+                continue;
+            }
+            return page.domain;
+        }
+        return null;
+    }
+
     private void probe(Identity identity) {
         Identity source = identity;
         // NOTE: a sign-in links only to one before it, so the walk ends.
@@ -2913,6 +3359,19 @@ public final class OnboardingFlow {
         }
         String login = identity.signIn == SignIn.PASSWORD ? source.login.text() : "";
         String secret = source.secret.input.getText().toString();
+        PimDomain relogged = reloggedOf(identity, login);
+        if (relogged != null) {
+            checking = null;
+            confirmMove(
+                    relogged,
+                    null,
+                    login,
+                    () -> {
+                        movedAs.put(relogged, login);
+                        signIn(identity);
+                    });
+            return;
+        }
         List<Page> left = new ArrayList<>();
         for (Page page : identity.pages) {
             if (!page.signed && page.signIn != SignIn.MAIL) {
@@ -3166,14 +3625,60 @@ public final class OnboardingFlow {
         return null;
     }
 
+    /** A redeemed browser grant, landed once its address is checked (L4). */
+    public void connect(String email, OauthTokens tokens, OauthGrant grant) {
+        List<String> bases = new ArrayList<>(oauthGroup.values());
+        host.io.execute(
+                () -> {
+                    String other = null;
+                    if (!bases.isEmpty()) {
+                        try (Transport transport = new Transport()) {
+                            other =
+                                    parts.clients()
+                                            .account()
+                                            .grantRefusal(
+                                                    transport,
+                                                    bases,
+                                                    grant.scope(),
+                                                    tokens.accessToken(),
+                                                    email);
+                        } catch (Exception error) {
+                            Log.w("pimalaya", "grant identity unread", error);
+                        }
+                    }
+                    String signedAs = other;
+                    // NOTE: not postAlive: landing may persist the account.
+                    host.main.post(() -> land(email, signedAs, tokens, grant));
+                });
+    }
+
     /**
-     * Lands a redeemed browser grant on every page it covers.
+     * Lands a redeemed browser grant on every page it covers, or refuses it on
+     * each when it signed in another address, {@code signedAs}.
      *
      * <p>A page whose scopes did not come back (unticked on Google's page)
      * says so and asks again on its Continue. Refresh material and granted
      * scopes are kept, for later refreshes and union grants.
      */
-    public void connect(String email, OauthTokens tokens, OauthGrant grant) {
+    void land(String email, String signedAs, OauthTokens tokens, OauthGrant grant) {
+        if (signedAs != null) {
+            String problem = host.getString(R.string.grant_wrong_account, signedAs, email);
+            for (PimDomain domain : oauthGroup.keySet()) {
+                Page page = readingPage(domain);
+                if (page != null) {
+                    page.signed = false;
+                    page.problem = problem;
+                    page.wrongAccount = true;
+                }
+            }
+            oauthGroup.clear();
+            grantNeeds.clear();
+            if (shell.authStep() == STEP_OAUTH) {
+                shell.showAuth(STEP_SIGNIN);
+            }
+            granted();
+            return;
+        }
         connectedEmail = email;
 
         // NOTE: a browser grant covers every domain that chose the same
@@ -3196,6 +3701,7 @@ public final class OnboardingFlow {
             if (setup == null || page == null) {
                 continue;
             }
+            page.wrongAccount = false;
             Set<String> needs = grantNeeds.get(domain);
             if (granted != null && needs != null && !granted.containsAll(needs)) {
                 page.problem = host.getString(R.string.signin_not_allowed);
@@ -3339,6 +3845,10 @@ public final class OnboardingFlow {
             }
             pageAt = back;
             showPage();
+            return;
+        }
+        if (again != null) {
+            shell.backToAccount(again.email);
             return;
         }
         cards.clear();
@@ -3626,12 +4136,8 @@ public final class OnboardingFlow {
         commitBooks(subscribed);
     }
 
-    /**
-     * Turns what the pages signed in to into one account: its mailboxes and
-     * addressbooks as picked or by default, what the phone already shows said,
-     * then the save.
-     */
-    private void commitConnections() {
+    /** What each signed-in domain connects to, and how it signs in. */
+    private List<AccountCommit.Connection> connections() {
         List<AccountCommit.Connection> connections = new ArrayList<>();
         for (DomainSetup setup : setups.values()) {
             if (setup.credential == null) {
@@ -3649,7 +4155,56 @@ public final class OnboardingFlow {
                             setup.credential,
                             submitUrl == null ? null : ownSending(setup)));
         }
-        connectedAccount = AccountCommit.assemble(connectedEmail, connections);
+        return connections;
+    }
+
+    /** Saves a sign-in again onto the stored account, then its settings. */
+    private void commitAgain() {
+        if (sync.isSyncing()) {
+            host.toast(host.getString(R.string.sync_busy));
+            resetConfigContinue();
+            showPage();
+            return;
+        }
+        AccountEntry connected = AccountCommit.assemble(connectedEmail, connections());
+        if (connected == null) {
+            resetConfigContinue();
+            return;
+        }
+        String email = connected.email;
+        AccountCommit.Again saved = AccountCommit.again(host, parts, again, connected);
+        accounts.removeIf(entry -> entry.email.equals(email));
+        accounts.add(saved.stored());
+        if (!saved.books().isEmpty()) {
+            List<BookEntry> phoneBooks = sync.passes().phoneSyncedBooks();
+            host.io.execute(
+                    () -> {
+                        try {
+                            for (String url : saved.books()) {
+                                Accounts.remove(host, url);
+                            }
+                            Accounts.reconcile(host, BookEntry.accounts(phoneBooks));
+                        } catch (Exception error) {
+                            Log.w("pimalaya", "moved books' phone accounts kept", error);
+                        }
+                    });
+        }
+        if (saved.moved().contains(PimDomain.CALENDAR)) {
+            sync.reconcileCalendars();
+        }
+        for (PimDomain domain : saved.moved()) {
+            shell.reload(domain);
+        }
+        shell.backToAccount(email);
+    }
+
+    /**
+     * Turns what the pages signed in to into one account: its mailboxes and
+     * addressbooks as picked or by default, what the phone already shows said,
+     * then the save.
+     */
+    private void commitConnections() {
+        connectedAccount = AccountCommit.assemble(connectedEmail, connections());
         if (connectedAccount == null) {
             resetConfigContinue();
             return;

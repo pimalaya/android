@@ -1118,6 +1118,7 @@ impl<H: Host> Mail<'_, '_, H> {
                     |err| Refused {
                         permanent: err.is_permanent(),
                         uncertain: err.is_uncertain(),
+                        status: err.is_sign_in().then_some(401),
                         message: err.to_string(),
                     },
                 )?;
@@ -1188,6 +1189,8 @@ pub struct Refused {
     pub permanent: bool,
     /// The whole message went over and no verdict came back.
     pub uncertain: bool,
+    /// 401 for a credential the server refused, else none.
+    pub status: Option<u16>,
 }
 
 impl Refused {
@@ -1198,6 +1201,7 @@ impl Refused {
             message: err.to_string(),
             permanent: false,
             uncertain: false,
+            status: None,
         }
     }
 
@@ -1212,6 +1216,7 @@ impl Refused {
             message: err.to_string(),
             permanent,
             uncertain,
+            status: None,
         }
     }
 }

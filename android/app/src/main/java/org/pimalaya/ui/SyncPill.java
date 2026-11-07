@@ -16,23 +16,29 @@ public final class SyncPill {
      *
      * <p>Plain tone when deactivated or never synced; on an accent tint the
      * bodies its window still downloads ({@code left}, null outside the body
-     * step) or when it last synced.
+     * step) or when it last synced; in the error tone when {@code refused}.
      */
-    public static View of(Host host, boolean enabled, long stamp, Integer left) {
-        boolean downloading = enabled && left != null && left > 0;
-        boolean synced = downloading || (enabled && stamp > 0);
+    public static View of(
+            Host host, boolean enabled, boolean refused, long stamp, Integer left) {
+        boolean signIn = enabled && refused;
+        boolean downloading = enabled && !signIn && left != null && left > 0;
+        boolean synced = downloading || (enabled && !signIn && stamp > 0);
         int color =
-                synced
-                        ? host.resolveColor(android.R.attr.colorAccent)
-                        : host.resolveColor(android.R.attr.textColorSecondary);
+                signIn
+                        ? host.resolveColor(android.R.attr.colorError)
+                        : synced
+                                ? host.resolveColor(android.R.attr.colorAccent)
+                                : host.resolveColor(android.R.attr.textColorSecondary);
 
         android.widget.ImageView glyph = new android.widget.ImageView(host);
-        glyph.setImageResource(R.drawable.ic_sync);
+        glyph.setImageResource(signIn ? R.drawable.ic_error : R.drawable.ic_sync);
         glyph.setImageTintList(ColorStateList.valueOf(color));
 
         TextView label = new TextView(host);
         if (!enabled) {
             label.setText(R.string.drawer_deactivated);
+        } else if (signIn) {
+            label.setText(R.string.sign_in_again);
         } else if (downloading) {
             label.setText(
                     host.getResources().getQuantityString(R.plurals.drawer_downloading, left, left));

@@ -167,6 +167,9 @@ public final class SyncCoordinator implements MailSync {
     /** The calendar-app edit last reloaded after. */
     private volatile long reloadedCalendarIngest;
 
+    /** Opens the sign-in again of an account, by address; the activity's. */
+    public Consumer<String> signInAgain = email -> {};
+
     /** The coordinator over {@code parts}, drawing through {@code screens}. */
     public SyncCoordinator(Host host, SyncPasses.Parts parts, Screens screens) {
         this.host = host;
@@ -393,8 +396,34 @@ public final class SyncCoordinator implements MailSync {
     private void reportSync(SyncPasses.Outcome outcome) {
         if (outcome.failure != null) {
             // NOTE: the last sync's store keeps failing addressbooks usable.
-            host.showError(outcome.failure, R.string.sync_failed);
+            report(outcome.failure);
         }
+    }
+
+    /** A failed pass said: the accounts refused for their sign-in by name. */
+    private void report(Exception failure) {
+        if (failure == null) {
+            return;
+        }
+        List<String> refused = SignInRefusals.accounts(host);
+        if (!SignInRefusals.refusal(failure) || refused.isEmpty()) {
+            host.showError(failure, R.string.sync_failed);
+            return;
+        }
+        Collections.sort(refused);
+        new AlertDialog.Builder(host)
+                .setTitle(R.string.sign_in_refused_title)
+                .setMessage(
+                        host.getResources()
+                                .getQuantityString(
+                                        R.plurals.sign_in_refused_report,
+                                        refused.size(),
+                                        String.join(", ", refused)))
+                .setPositiveButton(
+                        R.string.sign_in_again,
+                        (dialog, which) -> signInAgain.accept(refused.get(0)))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     /**
@@ -427,7 +456,7 @@ public final class SyncCoordinator implements MailSync {
                                 setSyncing(false);
                                 screens.reload(PimDomain.MAIL);
                                 if (pass.failure != null) {
-                                    host.showError(pass.failure, R.string.sync_failed);
+                                    report(pass.failure);
                                 }
                                 if (!listing) {
                                     waitForWifi(() -> syncMail(role));
@@ -460,7 +489,7 @@ public final class SyncCoordinator implements MailSync {
                                 setSyncing(false);
                                 screens.reload(PimDomain.CALENDAR);
                                 if (failure != null) {
-                                    host.showError(failure, R.string.sync_failed);
+                                    report(failure);
                                 }
                             });
                 });
@@ -555,7 +584,7 @@ public final class SyncCoordinator implements MailSync {
                                 // NOTE: one error dialog, the contacts
                                 // one first.
                                 if (other != null && outcome.failure == null) {
-                                    host.showError(other, R.string.sync_failed);
+                                    report(other);
                                 }
                             });
                 });
@@ -691,7 +720,7 @@ public final class SyncCoordinator implements MailSync {
                                 setSyncing(false);
                                 screens.reload(PimDomain.MAIL);
                                 if (outcome != null) {
-                                    host.showError(outcome, R.string.sync_failed);
+                                    report(outcome);
                                 }
                                 fillMail();
                             });
@@ -751,7 +780,7 @@ public final class SyncCoordinator implements MailSync {
                                 setSyncing(false);
                                 screens.reload(PimDomain.CALENDAR);
                                 if (outcome != null) {
-                                    host.showError(outcome, R.string.sync_failed);
+                                    report(outcome);
                                 }
                             });
                 });
@@ -817,7 +846,7 @@ public final class SyncCoordinator implements MailSync {
                                 setSyncing(false);
                                 screens.reload(PimDomain.MAIL);
                                 if (outcome != null) {
-                                    host.showError(outcome, R.string.sync_failed);
+                                    report(outcome);
                                 }
                                 fillMail();
                             });
@@ -1342,7 +1371,7 @@ public final class SyncCoordinator implements MailSync {
                                 setSyncing(false);
                                 screens.reload(PimDomain.MAIL);
                                 if (outcome != null) {
-                                    host.showError(outcome, R.string.sync_failed);
+                                    report(outcome);
                                 }
                                 fillMail();
                             });

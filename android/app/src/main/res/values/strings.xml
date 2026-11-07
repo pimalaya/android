@@ -1161,4 +1161,23 @@
     <string name="widget_description">Capture a task in one tap</string>
     <string name="widget_inbox">Inbox %1$d</string>
     <string name="widget_next_description">Your next actions, due ones first</string>
+    <string name="sign_in_again">Sign in again</string>
+    <string name="sign_in_refused_title">Sign-in refused</string>
+    <plurals name="sign_in_refused_report">
+        <item quantity="one">The server of %1$s refused its sign-in. It syncs again once signed in again.</item>
+        <item quantity="other">The servers of %1$s refused their sign-in. They sync again once signed in again.</item>
+    </plurals>
+    <string name="choice_current">Current</string>
+    <string name="again_searching">Looking for its settings</string>
+    <string name="again_unresolved">The sign-in of %1$s could not be found again. Pick it in its settings.</string>
+    <string name="again_move_title">Move %1$s to a new server?</string>
+    <string name="again_move_message">%1$s on this phone is fetched again from %2$s.</string>
+    <string name="again_login_title">Sign %1$s in as %2$s?</string>
+    <string name="again_login_message">%1$s on this phone is fetched again for %2$s.</string>
+    <plurals name="again_move_dropped">
+        <item quantity="one">%1$d change not synced yet is dropped.</item>
+        <item quantity="other">%1$d changes not synced yet are dropped.</item>
+    </plurals>
+    <string name="again_move">Move</string>
+    <string name="grant_wrong_account">You signed in as %1$s. This account is %2$s: sign in with it.</string>
 </resources>

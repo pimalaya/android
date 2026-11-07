@@ -34,6 +34,7 @@ use io_gcal::{
                 GcalCalendarListEntry,
                 list::{GcalCalendarListList, GcalCalendarListListParams},
             },
+            calendars::get::GcalCalendarGet,
             events::{
                 GcalEvent, GcalEventStatus, GcalEvents, GcalSendUpdates,
                 delete::GcalEventDelete,
@@ -74,6 +75,14 @@ pub struct Gcal<'c, H> {
 }
 
 impl<H: Host> Gcal<'_, H> {
+    /// The primary calendar's id, the address of the account it belongs to.
+    pub fn primary_id(&mut self) -> Result<Option<String>, BridgeError> {
+        let auth = HttpAuthBearer::new(self.token);
+        let coroutine = GcalCalendarGet::new(&auth, "primary").map_err(|err| err.to_string())?;
+
+        Ok(self.run(coroutine)?.id)
+    }
+
     /// Lists the user's calendars. Collection URLs are left empty: the
     /// caller composes them, only it knowing the account they belong to.
     pub fn list_calendars(&mut self) -> Result<Vec<Calendar>, BridgeError> {

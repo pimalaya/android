@@ -24,3 +24,14 @@ The owner's direction (2026-11-07): the onboarding's *Review your domains* page 
 ## Design
 
 On the Pimalaya Android canvas (version 115, 2026-11-07), light and dark, copied in designs/: AccSetSignIn (the *Sign-in* card with its row), DrawerSignIn (the refused card, its pill showing the error glyph), SignAgainDomains (the address under the title, covered tiles locked, their settings still open), SignAgainMenu (*Current* first), SignAgainServer (the confirmation, raised when a server-changing option is picked), SignAgainWrong (the refusal under the browser sign-in's note).
+
+## Built (2026-11-07), decisions the design left open
+
+- **Refusals** are kept per account and per place (mail, sending, contacts, calendar), cleared by a sync that signs in at that place, by a sign-in again and by the account's removal (sync/SignInRefusals). An SMTP AUTH refusal and an OAuth `invalid_grant` now read as a 401, as an IMAP refusal already did; a refused send stays queued. A failed sync that was a refusal shows *Sign-in refused*, naming the accounts, with *Sign in again*.
+- **The page.** A covered domain is locked, its settings still open; *Mail (sending)* is locked when the account sends, offered when it sends nowhere. A domain the account does not cover starts unpicked, "Looking for its settings" until discovery lands, and is added with every mailbox but junk and trash, every book and calendar, no phone mirror. *Current* rebuilds a Google or Microsoft grant from the stored one (Google's scope narrowed to the domain); another provider's grant waits for discovery.
+- **A move** is a base URL that differs past its user part, trailing slash and case, or a password login that differs past case (confirmed on the password page's Continue). Its count is the changes not pushed yet (count_owing.sql), the outbox aside. A mail move keeps the outbox, its staged sent copies dropped with the old mailboxes; a contacts move drops the address books and their phone accounts; a calendar move forgets its phone calendars. Saving waits while a sync runs; a moved or added domain lists again when its tab opens.
+- **The identity (oauth-hardening L4)** is checked on every browser grant, the first setup included: Google by the Gmail profile, else the primary calendar's id (the app asks no `openid` or `email` scope); Graph by `/me`; JMAP by the session's username. Where none can be read the grant is allowed: Google contacts alone, Outlook IMAP and SMTP, Graph without `User.Read` (a 403), generic OIDC (io-oauth drops the `id_token`), a JMAP username without `@`.
+
+## Open
+
+- **Aliases.** The identity compares addresses ignoring case alone, so an account typed under an alias (googlemail.com, a Workspace or Microsoft alias) is refused against its primary address, at the first setup too. Gmail's send-as list (`users.settings.sendAs`, under the mail scope) would accept a Google alias.

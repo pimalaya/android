@@ -216,6 +216,26 @@ public final class Oauth {
         return String.join(" ", apis);
     }
 
+    /** A shared grant's scopes one domain signs in with, all when none is. */
+    public static String domainScope(PimDomain domain, String scope) {
+        java.util.Set<String> kept = new java.util.LinkedHashSet<>();
+        for (String part : scopes(scope)) {
+            boolean own =
+                    switch (domain) {
+                        case MAIL -> part.equals("https://mail.google.com/");
+                        case CALENDAR ->
+                                part.equals("https://www.googleapis.com/auth/calendar")
+                                        || part.equals(GOOGLE_TASKS_SCOPE);
+                        case CONTACTS ->
+                                part.equals(GOOGLE_SCOPE) || part.equals(GOOGLE_PEOPLE_SCOPE);
+                    };
+            if (own) {
+                kept.add(part);
+            }
+        }
+        return kept.isEmpty() ? scope : String.join(" ", kept);
+    }
+
     /** The scopes of a space-separated list, in order, each once. */
     static java.util.Set<String> scopes(String scope) {
         java.util.Set<String> scopes = new java.util.LinkedHashSet<>();

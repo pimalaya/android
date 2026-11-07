@@ -219,7 +219,8 @@ public class MailClient {
             }
             throw reply.optBoolean("uncertain")
                     ? new SubmissionUncertain(error)
-                    : new PimalayaException(error);
+                    : new PimalayaException(
+                            error, reply.has("status") ? reply.optInt("status") : null);
         }
         return reply.isNull("messageId") ? null : reply.optString("messageId", null);
     }

@@ -178,10 +178,16 @@ public final class MailStore {
             queue.acknowledge(action.id());
         }
 
+        forgetMailboxes(accountEmail);
+        MailScope.forget(context, accounts.idOf(accountEmail));
+    }
+
+    /** Drops one account's mailboxes and server facts, its outbox kept. */
+    public void forgetMailboxes(String accountEmail) {
+        outbox.reanchor(accountEmail);
         collections.replace(accountEmail, PimdirSummary.MAIL, List.of());
         new FileStore(context, store).forget(accounts.idOf(accountEmail));
         policy.forgetTrash(accountEmail);
-        MailScope.forget(context, accounts.idOf(accountEmail));
         MailOffline.forget(context, accounts.idOf(accountEmail));
         MailWindow.forget(context, accounts.idOf(accountEmail));
         MailPolicy.markAccountWide(context, accounts.idOf(accountEmail), false);
