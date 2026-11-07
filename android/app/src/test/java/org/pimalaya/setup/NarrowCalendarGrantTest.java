@@ -109,6 +109,7 @@ public class NarrowCalendarGrantTest {
     @Test
     public void theGrantAsksForTheEventsAndTheListInPlaceOfEveryCalendar() {
         host.findViewById(R.id.signin_continue).performClick();
+        GoogleNoticeTest.agree();
 
         Intent browser = Shadows.shadowOf(host).getNextStartedActivity();
         String scope = browser.getData().getQueryParameter("scope");
@@ -121,6 +122,7 @@ public class NarrowCalendarGrantTest {
     @Test
     public void aGrantWithoutTheCalendarListLeavesTheCalendarOut() {
         host.findViewById(R.id.signin_continue).performClick();
+        GoogleNoticeTest.agree();
 
         String granted = EVENTS + " " + TASKS;
         flow.land(ALICE, null, tokens("new", granted), grant(granted));

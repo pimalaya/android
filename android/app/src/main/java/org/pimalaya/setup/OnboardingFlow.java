@@ -3576,7 +3576,23 @@ public final class OnboardingFlow {
                 needs.retainAll(fixed);
                 grantNeeds.put(member.domain, needs);
             }
-            oauth.startGoogleOauth(pendingEmail, asked);
+            // NOTE: Google's user data policy wants the app's own notice of
+            // what the grant reads right before its consent page, agreed by a
+            // tap; the loader waits for it, and declining asks nothing.
+            host.setAuthLoading(R.id.signin_continue, R.id.signin_progress, false);
+            GoogleNotice.show(
+                    host,
+                    fixed,
+                    () -> {
+                        host.setAuthLoading(R.id.signin_continue, R.id.signin_progress, true);
+                        oauth.startGoogleOauth(pendingEmail, asked);
+                    },
+                    () -> {
+                        checking = null;
+                        oauthGroup.clear();
+                        grantNeeds.clear();
+                        resetConfigContinue();
+                    });
             return;
         }
         if (shipped == Oauth.Shipped.MICROSOFT) {

@@ -75,8 +75,11 @@ public final class Oauth {
                     "gmail.googleapis.com",
                     "people.googleapis.com");
 
+    /** Gmail, over its API and over IMAP and SMTP. */
+    public static final String GOOGLE_MAIL_SCOPE = "https://mail.google.com/";
+
     /** Google Tasks, the task lists Google keeps apart from its calendars. */
-    static final String GOOGLE_TASKS_SCOPE = "https://www.googleapis.com/auth/tasks";
+    public static final String GOOGLE_TASKS_SCOPE = "https://www.googleapis.com/auth/tasks";
 
     /**
      * Google's full calendar scope, which io-pim-discovery names and older
@@ -85,10 +88,11 @@ public final class Oauth {
     static final String GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
 
     /** The events of every calendar the user can write to. */
-    static final String GOOGLE_EVENTS_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+    public static final String GOOGLE_EVENTS_SCOPE =
+            "https://www.googleapis.com/auth/calendar.events";
 
     /** The calendar list, which names the calendars and the primary one. */
-    static final String GOOGLE_CALENDAR_LIST_SCOPE =
+    public static final String GOOGLE_CALENDAR_LIST_SCOPE =
             "https://www.googleapis.com/auth/calendar.calendarlist.readonly";
 
     /**
@@ -97,7 +101,7 @@ public final class Oauth {
      */
     private static final java.util.Set<String> GOOGLE_SCOPES =
             java.util.Set.of(
-                    "https://mail.google.com/",
+                    GOOGLE_MAIL_SCOPE,
                     GOOGLE_EVENTS_SCOPE,
                     GOOGLE_CALENDAR_LIST_SCOPE,
                     GOOGLE_TASKS_SCOPE,

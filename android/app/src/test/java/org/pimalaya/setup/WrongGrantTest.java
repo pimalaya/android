@@ -102,6 +102,7 @@ public class WrongGrantTest {
     @Test
     public void aGrantForAnotherAddressIsRefusedAndTheAccountKeepsItsOldSignIn() {
         host.findViewById(R.id.signin_continue).performClick();
+        GoogleNoticeTest.agree();
 
         flow.land(ALICE, BOB, tokens("new"), grant());
 

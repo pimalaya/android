@@ -93,6 +93,7 @@ public class BrowserLeftTest {
     @Test
     public void backWithNoRedirectStopsTheLoader() {
         host.findViewById(R.id.signin_continue).performClick();
+        GoogleNoticeTest.agree();
         assertEquals("the grant is out", Boolean.TRUE, host.loading.get(R.id.signin_continue));
 
         flow.resumed();
@@ -104,6 +105,7 @@ public class BrowserLeftTest {
     @Test
     public void backWithTheRedirectKeepsTheLoader() throws Exception {
         host.findViewById(R.id.signin_continue).performClick();
+        GoogleNoticeTest.agree();
         String state = new PendingGrantStore(host).load().optString("state");
         oauth.handleRedirect(
                 new Intent(

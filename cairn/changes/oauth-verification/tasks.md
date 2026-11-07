@@ -15,16 +15,17 @@ change: oauth-verification
 - [x] Production Android client in "Pimalaya" (`803561575535-v7nav2ev8dvv995g3j3mhnoq5423abco`), package `org.pimalaya` (a package and SHA-1 pair cannot sit in two projects, so the two clients carry different fingerprints; the Play app signing key's belongs on the production one, the one ownership verification checks). Release builds carry it, debug builds the "Pimalaya Debug" client (google-client-per-build, 2026-11-07). One client serves every release channel: the browser flow never presents the signing key, and each extra client costs a video segment and a build flavour; per-key clients only if the reviewer asks
 - [x] The custom URI scheme enabled on the production client (Advanced settings), then a release build's Google sign-in tried through it (owner, 2026-11-07: the CI release build signed in google@pimalaya.org and another Gmail account, both syncing). The "Pimalaya Debug" client stays while testers' accounts hold grants from it (deleting a client fails its refresh tokens; restorable 30 days)
 - [ ] Optional: the Play client's ownership verified through the Play Console (Admin on the app)
-- [ ] In-app disclosure in each interface before its Google sign-in (proposal, Google facts): the data accessed and how it is used, then a confirm step (a button on Android, a prompt in the command-line wizards), before the browser opens
+- [ ] In-app disclosure in each interface before its Google sign-in (proposal, Google facts): the data accessed and how it is used, then a confirm step (a button on Android, a prompt in the command-line wizards), before the browser opens. Android done 2026-11-07 (google-data-notice): a dialog on Continue, Agree or Not now, a privacy policy link
 - [ ] Clients of other interfaces (command-line, terminal, desktop) added to "Pimalaya" only once each is ready for production; each needs its section or link in the privacy policy, its disclosure, and its part in the demo video
 - [x] (owner, 2026-11-07) Branding page filled (submission.md §1), 120x120 logo
 - [x] Data Access page (owner, 2026-11-07): `https://mail.google.com/`, `calendar`, `tasks` and `contacts`, the scopes release builds ask for since drop-google-dav; the Gmail, Calendar, Tasks and People APIs enabled, the CardDAV and CalDAV APIs left off. `calendar` replaced by `calendar.events` and `calendar.calendarlist.readonly` (owner, 2026-11-07, narrow-google-calendar-scope)
-- [ ] Audience: publishing status to In production (verification needs it; ends the 7-day expiry; starts the lifetime 100-user count, closed testers included)
+- [x] (owner, 2026-11-07) Audience: publishing status to In production (verification needs it; ends the 7-day expiry; starts the lifetime 100-user count, closed testers included)
 - [ ] Demo video recorded and uploaded unlisted (submission.md §3)
 
 ## 2. Google, submitting
 
-- [ ] Brand verification passed (2 to 3 business days)
+- [x] (owner, 2026-11-07) Brand verification passed, asked by the console right after publishing, the same day
+- [ ] Verified branding published (Verification Center) before the result expires on 2026-11-14, the console's 7 days; until then the consent screen does not show it
 - [ ] Data access verification submitted: scope justifications and the no-server statement (submission.md §2)
 - [ ] Reviewer questions answered by mail; any CASA demand answered with the developer page's server condition before paying for one
 - [ ] Verified: the cap lifted, logged here, providers.md updated
