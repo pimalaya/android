@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign in again: Mail moves to a new server, dark</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,600..700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}a:hover{color:inherit}
+.app{--bg:#FFFFFF;--surface:#F9F1F3;--menu:#FFFFFF;--divider:#D9BFCB;--divl:#ECD9E1;--track:#D9BFCB;--fg:#301F2A;--fg2:#6F5464;--faint:rgba(48,31,42,.14);--wash:#F7D9EA;--accent-ink:#97156A;--error:#BA1A1A;--star:#F2BE3C;--shadow:48,31,42;--kbd:#F3E8EC;--key:#FFFFFF;width:390px;height:844px;overflow:hidden;position:relative;background:var(--bg);color:var(--fg);font-family:Roboto,system-ui,sans-serif;display:flex;flex-direction:column}
+.app.dark{--bg:#1A0D15;--surface:#23121C;--menu:#2B1824;--divider:#5A4351;--divl:rgba(247,233,240,.1);--track:#5A4351;--fg:#F7E9F0;--fg2:#BB9CAD;--faint:rgba(247,233,240,.14);--wash:#422232;--accent-ink:#F3B6D3;--error:#FFB4AB;--star:#F2BE3C;--shadow:0,0,0;--kbd:#23121C;--key:#3A2532}
+.app *{box-sizing:border-box}
+.ico{width:24px;height:24px;fill:currentColor;flex:none}
+.bar{min-height:60px;padding:0 8px;display:flex;align-items:center;flex:none}
+.tbtn{width:40px;height:40px;margin:4px;border-radius:999px;background:var(--surface);color:var(--fg);display:flex;align-items:center;justify-content:center;flex:none}
+.body{flex:1;min-height:0;overflow:hidden;padding:8px 24px 0;display:flex;flex-direction:column}
+.who{display:flex;align-items:center;gap:6px;min-height:20px;font-size:14px;color:var(--fg2)}
+.who .ico{width:18px;height:18px;color:var(--accent)}
+.h{margin-top:8px;font-size:28px;font-weight:700;line-height:34px}
+.sub{margin-top:8px;font-size:14px;line-height:20px;color:var(--fg2)}
+.card{margin-top:20px;background:var(--surface);border-radius:22px;overflow:hidden;flex:none}
+.sec{position:relative}
+.sec.div::before{content:"";position:absolute;top:0;left:64px;right:0;height:1px;background:var(--divl)}
+.card.c .sec.div::before{left:62px}
+.srow{display:flex;align-items:center;min-height:68px;padding:10px 6px 10px 14px}
+.tap{flex:1;min-width:0;min-height:48px;display:flex;align-items:center;gap:14px;border:0;background:none;padding:0;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.ct{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.n{font-size:16px;font-weight:700}
+.s{font-size:14px;line-height:19px;color:var(--fg2)}
+.tune{width:48px;height:48px;border:0;background:none;color:var(--fg2);display:flex;align-items:center;justify-content:center;border-radius:999px;padding:0;flex:none;cursor:pointer}
+.tk{width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex:none;position:relative;background:var(--bg);color:var(--fg2);box-shadow:inset 0 0 0 1.5px var(--track)}
+.tk>.ico{width:20px;height:20px}
+.tk.on{background:var(--accent);color:var(--on-accent);box-shadow:none}
+.badge{display:none;position:absolute;right:-6px;bottom:-6px;width:20px;height:20px;border-radius:999px;background:var(--surface);color:var(--accent);align-items:center;justify-content:center}
+.tk.on .badge{display:flex}
+.badge .ico{width:16px;height:16px}
+.tile{width:36px;height:36px;border-radius:12px;background:var(--bg);display:flex;align-items:center;justify-content:center;flex:none;color:var(--fg)}
+.tile .ico{width:20px;height:20px}
+.srow.split{padding-right:0}
+.how{display:flex;align-items:center;gap:2px}
+.how .ico{width:18px;height:18px;color:var(--fg2)}
+.vr{width:1px;height:36px;background:var(--divl);flex:none}
+.swb{width:78px;height:56px;display:flex;align-items:center;justify-content:center;border:0;background:none;padding:0;cursor:pointer;flex:none}
+.sw{width:52px;height:32px;border-radius:999px;background:var(--bg);box-shadow:inset 0 0 0 2px var(--track);position:relative;flex:none}
+.sw i{position:absolute;top:8px;left:8px;width:16px;height:16px;border-radius:999px;background:var(--fg2)}
+.sw.on{background:var(--accent);box-shadow:none}
+.sw.on i{top:4px;left:24px;width:24px;height:24px;background:var(--on-accent)}
+.cbx{width:24px;height:24px;flex:none;color:var(--accent);margin:0 4px 0 6px}
+.cbx.off{color:var(--fg2)}
+.cb{padding:0 14px 16px;display:flex;flex-direction:column;gap:10px}
+.note{font-size:13px;line-height:18px;color:var(--fg2);padding:0 4px}
+.pill{height:56px;border-radius:999px;background:var(--bg);border:2px solid transparent;display:flex;align-items:center;gap:12px;padding:0 14px 0 22px}
+.pill.focus{border-color:var(--accent)}
+.pill .k{min-width:72px;flex:none;font-size:15px;color:var(--fg2)}
+.pill input,.pill .v{flex:1;min-width:0;border:0;background:none;font:inherit;font-size:17px;color:var(--fg);outline:none;padding:0}
+.pill input::placeholder{color:var(--fg2)}
+.pill .chev{width:22px;height:22px;color:var(--fg2)}
+.menu{position:absolute;z-index:5;width:236px;background:var(--menu);border-radius:16px;padding:8px 0;box-shadow:0 10px 28px rgba(48,31,42,.22),0 2px 6px rgba(48,31,42,.12)}
+.mi{display:flex;align-items:center;min-height:48px;padding:0 20px;font-size:15px;color:var(--fg)}
+.foot{padding:12px 24px 16px;flex:none;background:var(--bg);display:flex;flex-direction:column;gap:4px}
+.primary{height:56px;border-radius:999px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;gap:8px;font-size:16px;font-weight:700}
+.primary.dis{opacity:.4;pointer-events:none}
+.tune.dis{opacity:.38;pointer-events:none}
+.sec.locked .srow{opacity:.38;pointer-events:none}
+.tap.fixed{cursor:default}
+.scrim{position:absolute;inset:0;background:rgba(var(--shadow),.45);display:flex;align-items:center;justify-content:center;padding:0 24px}
+.dlg{width:100%;background:var(--menu);border-radius:28px;padding:24px 0 12px;box-shadow:0 8px 24px rgba(var(--shadow),.3)}
+.dbtn{border:0;background:none;color:var(--accent);font:inherit;font-size:14px;font-weight:500;padding:10px 12px;border-radius:999px;text-decoration:none}
+.app.serif .lt,.app.serif .h,.app.serif .an,.app.serif .ph{font-family:'Source Serif 4',Georgia,serif;font-weight:600;letter-spacing:-.01em}.app :is(.av,.aav).a0,.app :is(.av,.aav).a1,.app :is(.av,.aav).a2,.app :is(.av,.aav).a3,.app :is(.av,.aav).a4,.app :is(.av,.aav).a5,.app :is(.av,.aav).a6,.app :is(.av,.aav).a7{color:#FFFFFF}.app.av-tonal :is(.av,.aav).a0{background:#FED6D2;color:#773733}.app.av-tonal :is(.av,.aav).a1{background:#F5DDC2;color:#6C4302}.app.av-tonal :is(.av,.aav).a2{background:#DDE6C5;color:#475411}.app.av-tonal :is(.av,.aav).a3{background:#C9EBD7;color:#0C5C3C}.app.av-tonal :is(.av,.aav).a4{background:#BFEBED;color:#04585C}.app.av-tonal :is(.av,.aav).a5{background:#D1E2FF;color:#2F4C7E}.app.av-tonal :is(.av,.aav).a6{background:#E5DBFC;color:#554077}.app.av-tonal :is(.av,.aav).a7{background:#F8D6E8;color:#6F3758}.app.dark.av-tonal :is(.av,.aav).a0{background:#553330;color:#FDC9C4}.app.dark.av-tonal :is(.av,.aav).a1{background:#4E381F;color:#F2D1AD}.app.dark.av-tonal :is(.av,.aav).a2{background:#3A4122;color:#D2DEB2}.app.dark.av-tonal :is(.av,.aav).a3{background:#244534;color:#B6E4CA}.app.dark.av-tonal :is(.av,.aav).a4{background:#164547;color:#A9E4E7}.app.dark.av-tonal :is(.av,.aav).a5{background:#2E3D57;color:#C2D9FF}.app.dark.av-tonal :is(.av,.aav).a6{background:#413754;color:#DDCFFA}.app.dark.av-tonal :is(.av,.aav).a7{background:#503243;color:#F6C8E1}.app.av-brand :is(.av,.aav).a0{background:#F8D1E6;color:#723459}.app.av-brand :is(.av,.aav).a1{background:#F0C4C6;color:#7A323B}.app.av-brand :is(.av,.aav).a2{background:#F0D3F1;color:#68386B}.app.av-brand :is(.av,.aav).a3{background:#F0C6BE;color:#7A342B}.app.av-brand :is(.av,.aav).a4{background:#EDC4D3;color:#763350}.app.av-brand :is(.av,.aav).a5{background:#E5D6F9;color:#5A3D78}.app.av-brand :is(.av,.aav).a6{background:#E7C5DE;color:#6D3562}.app.av-brand :is(.av,.aav).a7{background:#FCD1D9;color:#783246}.app.dark.av-brand :is(.av,.aav).a0{background:#573649;color:#F6C8E1}.app.dark.av-brand :is(.av,.aav).a1{background:#512C2F;color:#FDC8CB}.app.dark.av-brand :is(.av,.aav).a2{background:#513853;color:#ECCBEE}.app.dark.av-brand :is(.av,.aav).a3{background:#512D27;color:#FDCAC0}.app.dark.av-brand :is(.av,.aav).a4{background:#4E2B39;color:#F9C8D9}.app.dark.av-brand :is(.av,.aav).a5{background:#493B5A;color:#E0CEF8}.app.dark.av-brand :is(.av,.aav).a6{background:#4A2D43;color:#F1C9E7}.app.dark.av-brand :is(.av,.aav).a7{background:#5B363E;color:#FBC8D2}.app.av-solid :is(.av,.aav).a0{background:#A05C57}.app.av-solid :is(.av,.aav).a1{background:#936831}.app.av-solid :is(.av,.aav).a2{background:#6B7939}.app.av-solid :is(.av,.aav).a3{background:#3B825F}.app.av-solid :is(.av,.aav).a4{background:#118186}.app.av-solid :is(.av,.aav).a5{background:#5272A6}.app.av-solid :is(.av,.aav).a6{background:#7A659E}.app.av-solid :is(.av,.aav).a7{background:#975B7E}.app.av-before :is(.av,.aav).a0{background:hsl(22,25%,44%)}.app.av-before :is(.av,.aav).a1{background:hsl(67,25%,44%)}.app.av-before :is(.av,.aav).a2{background:hsl(112,25%,44%)}.app.av-before :is(.av,.aav).a3{background:hsl(157,25%,44%)}.app.av-before :is(.av,.aav).a4{background:hsl(202,25%,44%)}.app.av-before :is(.av,.aav).a5{background:hsl(247,25%,44%)}.app.av-before :is(.av,.aav).a6{background:hsl(292,25%,44%)}.app.av-before :is(.av,.aav).a7{background:hsl(337,25%,44%)}
+</style>
+</helmet>
+<div class="{{theme}}" style="{{vars}}">
+  <div class="bar"><a class="tbtn" href="AccSetSignInDark.dc.html" aria-label="Back"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"/></svg></a></div>
+  <div class="body">
+    <div class="h">Review your domains</div>
+    <div class="sub">alex@example.org</div>
+    <div class="card">
+      <div class="sec"><div class="srow">
+        <button class="tap fixed" type="button" role="checkbox" aria-checked="true" aria-disabled="true"><span class="tk on"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm320-280L160-640v400h640v-400L480-440Zm0-80 320-200H160l320 200ZM160-640v-80 480-400Z"/></svg><span class="badge"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/></svg></span></span><span class="ct"><span class="n">Mail</span><span class="s">With your password, at imap.example.org</span></span></button>
+        <a class="tune" href="SignAgainMenuDark.dc.html" aria-label="Mail settings"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z"/></svg></a>
+      </div></div>
+      <div class="sec div"><div class="srow">
+        <button class="tap fixed" type="button" role="checkbox" aria-checked="true" aria-disabled="true"><span class="tk on"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M120-160v-640l760 320-760 320Zm80-120 474-200-474-200v140l240 60-240 60v140Zm0 0v-400 400Z"/></svg><span class="badge"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/></svg></span></span><span class="ct"><span class="n">Mail (sending)</span><span class="s">With your password, at smtp.example.org</span></span></button>
+        <button class="tune" type="button" aria-label="Mail (sending) settings"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z"/></svg></button>
+      </div></div>
+      <div class="sec div"><div class="srow">
+        <button class="tap fixed" type="button" role="checkbox" aria-checked="true" aria-disabled="true"><span class="tk on"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M40-160v-112q0-34 17.5-62.5T104-378q62-31 126-46.5T360-440q66 0 130 15.5T616-378q29 15 46.5 43.5T680-272v112H40Zm720 0v-120q0-44-24.5-84.5T666-434q51 6 96 20.5t84 35.5q36 20 55 44.5t19 53.5v120H760ZM360-480q-66 0-113-47t-47-113q0-66 47-113t113-47q66 0 113 47t47 113q0 66-47 113t-113 47Zm400-160q0 66-47 113t-113 47q-11 0-28-2.5t-28-5.5q27-32 41.5-71t14.5-81q0-42-14.5-81T544-792q14-5 28-6.5t28-1.5q66 0 113 47t47 113ZM120-240h480v-32q0-11-5.5-20T580-306q-54-27-109-40.5T360-360q-56 0-111 13.5T140-306q-9 5-14.5 14t-5.5 20v32Zm240-320q33 0 56.5-23.5T440-640q0-33-23.5-56.5T360-720q-33 0-56.5 23.5T280-640q0 33 23.5 56.5T360-560Zm0 320Zm0-400Z"/></svg><span class="badge"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/></svg></span></span><span class="ct"><span class="n">Contacts</span><span class="s">With your password, at dav.example.org</span></span></button>
+        <button class="tune" type="button" aria-label="Contacts settings"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z"/></svg></button>
+      </div></div>
+      <div class="sec div"><div class="srow">
+        <button class="tap" type="button" role="checkbox" aria-checked="{{cal.on}}" onClick="{{cal.tog}}"><span class="tk {{cal.cls}}"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M180-80q-24 0-42-18t-18-42v-620q0-24 18-42t42-18h65v-60h65v60h340v-60h65v60h65q24 0 42 18t18 42v620q0 24-18 42t-42 18H180Zm0-60h600v-430H180v430Zm0-490h600v-130H180v130Z"/></svg><span class="badge"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/></svg></span></span><span class="ct"><span class="n">Calendar</span><span class="s">With your password, at dav.example.org</span></span></button>
+        <button class="tune {{cal.tuneCls}}" type="button" aria-label="Calendar settings"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z"/></svg></button>
+      </div></div>
+    </div>
+  </div>
+  <div class="foot"><a class="primary" href="OnbSignInDark.dc.html">Continue</a></div>
+  <div class="scrim">
+    <div class="dlg" role="dialog" aria-label="Move mail to a new server?">
+      <div style="font-size: 22px; line-height: 28px; padding: 0 24px 4px">Move mail to a new server?</div>
+      <div style="font-size: 14px; line-height: 20px; color: var(--fg2); padding: 0 24px 12px">Mail on this phone is fetched again from imap.new.org. 3 changes not synced yet are dropped.</div>
+      <div style="display: flex; justify-content: flex-end; gap: 4px; padding: 8px 12px 0"><a class="dbtn" href="SignAgainMenuDark.dc.html">Cancel</a><a class="dbtn" href="SignAgainDomainsDark.dc.html">Move</a></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true},"avatars":{"editor":"enum","options":["tonal","brand","solid","before"],"default":"tonal"},"serif":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#BF1E83","options":["#BF1E83","#97156A","#EFA3C8","#E267A3"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { calendar: false };
+  }
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var serif = this.props.serif ?? false;
+    var accent = this.props.accent ?? '#BF1E83';
+    if (dark && accent.toUpperCase() === '#BF1E83') accent = '#EFA3C8';
+    var h = accent.replace('#', '');
+    var lin = function (v) { v = v / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    var l = 0.2126 * lin(parseInt(h.substr(0, 2), 16)) + 0.7152 * lin(parseInt(h.substr(2, 2), 16)) + 0.0722 * lin(parseInt(h.substr(4, 2), 16));
+    var onAccent = l > 0.179 ? '#410B2B' : '#FFFFFF';
+    var theme = 'app' + (dark ? ' dark' : '') + (serif ? ' serif' : '') + ' av-' + (this.props.avatars ?? 'tonal');
+    var vars = '--accent:' + accent + ';--on-accent:' + onAccent;
+    var self = this;
+    var on = this.state.calendar;
+    var cal = {
+      on: on,
+      cls: on ? "on" : "",
+      tuneCls: on ? "" : "dis",
+      tog: function () { self.setState({ calendar: !on }); }
+    };
+    return { theme: theme, vars: vars, cal: cal };
+  }
+}
+</script>
+</body>
+</html>

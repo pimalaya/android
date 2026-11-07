@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Account settings: Sign in again on the Sign-in card, dark</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,600..700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}a:hover{color:inherit}
+.app{--bg:#FFFFFF;--surface:#F9F1F3;--menu:#FFFFFF;--divider:#D9BFCB;--divl:#ECD9E1;--track:#D9BFCB;--fg:#301F2A;--fg2:#6F5464;--faint:rgba(48,31,42,.14);--wash:#F7D9EA;--accent-ink:#97156A;--error:#BA1A1A;--star:#F2BE3C;--shadow:48,31,42;--kbd:#F3E8EC;--key:#FFFFFF;width:390px;height:844px;overflow:hidden;position:relative;background:var(--bg);color:var(--fg);font-family:Roboto,system-ui,sans-serif;display:flex;flex-direction:column}
+.app.dark{--bg:#1A0D15;--surface:#23121C;--menu:#2B1824;--divider:#5A4351;--divl:rgba(247,233,240,.1);--track:#5A4351;--fg:#F7E9F0;--fg2:#BB9CAD;--faint:rgba(247,233,240,.14);--wash:#422232;--accent-ink:#F3B6D3;--error:#FFB4AB;--star:#F2BE3C;--shadow:0,0,0;--kbd:#23121C;--key:#3A2532}
+.app *{box-sizing:border-box}
+.ico{width:24px;height:24px;fill:currentColor;flex:none}
+.bar{min-height:60px;padding:0 8px;display:flex;align-items:center;flex:none}
+.tbtn{width:40px;height:40px;margin:4px;border-radius:999px;background:var(--surface);color:var(--fg);display:flex;align-items:center;justify-content:center;flex:none}
+.body{flex:1;min-height:0;overflow:hidden;padding:8px 24px 0;display:flex;flex-direction:column}
+.who{display:flex;align-items:center;gap:6px;min-height:20px;font-size:14px;color:var(--fg2)}
+.who .ico{width:18px;height:18px;color:var(--accent)}
+.h{margin-top:8px;font-size:28px;font-weight:700;line-height:34px}
+.sub{margin-top:8px;font-size:14px;line-height:20px;color:var(--fg2)}
+.card{margin-top:20px;background:var(--surface);border-radius:22px;overflow:hidden;flex:none}
+.sec{position:relative}
+.sec.div::before{content:"";position:absolute;top:0;left:64px;right:0;height:1px;background:var(--divl)}
+.card.c .sec.div::before{left:62px}
+.srow{display:flex;align-items:center;min-height:68px;padding:10px 6px 10px 14px}
+.tap{flex:1;min-width:0;min-height:48px;display:flex;align-items:center;gap:14px;border:0;background:none;padding:0;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.ct{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.n{font-size:16px;font-weight:700}
+.s{font-size:14px;line-height:19px;color:var(--fg2)}
+.tune{width:48px;height:48px;border:0;background:none;color:var(--fg2);display:flex;align-items:center;justify-content:center;border-radius:999px;padding:0;flex:none;cursor:pointer}
+.tk{width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex:none;position:relative;background:var(--bg);color:var(--fg2);box-shadow:inset 0 0 0 1.5px var(--track)}
+.tk>.ico{width:20px;height:20px}
+.tk.on{background:var(--accent);color:var(--on-accent);box-shadow:none}
+.badge{display:none;position:absolute;right:-6px;bottom:-6px;width:20px;height:20px;border-radius:999px;background:var(--surface);color:var(--accent);align-items:center;justify-content:center}
+.tk.on .badge{display:flex}
+.badge .ico{width:16px;height:16px}
+.tile{width:36px;height:36px;border-radius:12px;background:var(--bg);display:flex;align-items:center;justify-content:center;flex:none;color:var(--fg)}
+.tile .ico{width:20px;height:20px}
+.srow.split{padding-right:0}
+.how{display:flex;align-items:center;gap:2px}
+.how .ico{width:18px;height:18px;color:var(--fg2)}
+.vr{width:1px;height:36px;background:var(--divl);flex:none}
+.swb{width:78px;height:56px;display:flex;align-items:center;justify-content:center;border:0;background:none;padding:0;cursor:pointer;flex:none}
+.sw{width:52px;height:32px;border-radius:999px;background:var(--bg);box-shadow:inset 0 0 0 2px var(--track);position:relative;flex:none}
+.sw i{position:absolute;top:8px;left:8px;width:16px;height:16px;border-radius:999px;background:var(--fg2)}
+.sw.on{background:var(--accent);box-shadow:none}
+.sw.on i{top:4px;left:24px;width:24px;height:24px;background:var(--on-accent)}
+.cbx{width:24px;height:24px;flex:none;color:var(--accent);margin:0 4px 0 6px}
+.cbx.off{color:var(--fg2)}
+.cb{padding:0 14px 16px;display:flex;flex-direction:column;gap:10px}
+.note{font-size:13px;line-height:18px;color:var(--fg2);padding:0 4px}
+.pill{height:56px;border-radius:999px;background:var(--bg);border:2px solid transparent;display:flex;align-items:center;gap:12px;padding:0 14px 0 22px}
+.pill.focus{border-color:var(--accent)}
+.pill .k{min-width:72px;flex:none;font-size:15px;color:var(--fg2)}
+.pill input,.pill .v{flex:1;min-width:0;border:0;background:none;font:inherit;font-size:17px;color:var(--fg);outline:none;padding:0}
+.pill input::placeholder{color:var(--fg2)}
+.pill .chev{width:22px;height:22px;color:var(--fg2)}
+.menu{position:absolute;z-index:5;width:236px;background:var(--menu);border-radius:16px;padding:8px 0;box-shadow:0 10px 28px rgba(48,31,42,.22),0 2px 6px rgba(48,31,42,.12)}
+.mi{display:flex;align-items:center;min-height:48px;padding:0 20px;font-size:15px;color:var(--fg)}
+.foot{padding:12px 24px 16px;flex:none;background:var(--bg);display:flex;flex-direction:column;gap:4px}
+.primary{height:56px;border-radius:999px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;gap:8px;font-size:16px;font-weight:700}
+.primary.dis{opacity:.4;pointer-events:none}
+.tune.dis{opacity:.38;pointer-events:none}
+.sec.locked .srow{opacity:.38;pointer-events:none}
+.acc{display:flex;align-items:center;gap:14px;margin-top:4px}.disc{width:52px;height:52px;border-radius:999px;background:#5B8DEF;color:#FFFFFF;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;flex:none}.acc .an{font-size:20px;font-weight:700;line-height:26px}.app.serif .acc .an{font-family:'Source Serif 4',Georgia,serif;font-weight:600}.acc .ad{font-size:14px;line-height:19px;color:var(--fg2)}.pill2{margin-top:12px;align-self:flex-start;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;background:var(--wash);color:var(--accent-ink);font-size:13px;font-weight:500}.pill2 .ico{width:16px;height:16px}.lbl{margin:22px 4px 8px;font-size:13px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--fg2)}.card.flat{margin-top:0}.sechead{display:flex;align-items:center;gap:14px;min-height:60px;padding:10px 14px 4px}.row{display:flex;align-items:center;gap:12px;min-height:56px;padding:8px 14px 8px 16px;position:relative}.row+.row::before{content:"";position:absolute;top:0;left:16px;right:0;height:1px;background:var(--divl)}.rt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.rn{font-size:16px}.rv{font-size:14px;line-height:19px;color:var(--fg2)}.rchev{width:22px;height:22px;color:var(--fg2)}.danger{color:#BA1A1A;font-weight:500}.app.dark .danger{color:#FFB4AB}.fnote{margin:8px 4px 0;font-size:13px;line-height:18px;color:var(--fg2)}.bk{display:flex;align-items:center;gap:14px;min-height:56px;padding:8px 14px 8px 16px;position:relative}.bk+.bk::before{content:"";position:absolute;top:0;left:54px;right:0;height:1px;background:var(--divl)}.bk .cbx2{width:24px;height:24px;color:var(--accent);flex:none}.bk .cbx2.off{color:var(--fg2)}.sub2{display:flex;align-items:center;gap:12px;min-height:44px;padding:0 14px 8px 54px;font-size:14px;color:var(--fg2)}.sub2 .sw{transform:scale(.8);transform-origin:right center}.app.serif .lt,.app.serif .h,.app.serif .an,.app.serif .ph{font-family:'Source Serif 4',Georgia,serif;font-weight:600;letter-spacing:-.01em}.app :is(.av,.aav).a0,.app :is(.av,.aav).a1,.app :is(.av,.aav).a2,.app :is(.av,.aav).a3,.app :is(.av,.aav).a4,.app :is(.av,.aav).a5,.app :is(.av,.aav).a6,.app :is(.av,.aav).a7{color:#FFFFFF}.app.av-tonal :is(.av,.aav).a0{background:#FED6D2;color:#773733}.app.av-tonal :is(.av,.aav).a1{background:#F5DDC2;color:#6C4302}.app.av-tonal :is(.av,.aav).a2{background:#DDE6C5;color:#475411}.app.av-tonal :is(.av,.aav).a3{background:#C9EBD7;color:#0C5C3C}.app.av-tonal :is(.av,.aav).a4{background:#BFEBED;color:#04585C}.app.av-tonal :is(.av,.aav).a5{background:#D1E2FF;color:#2F4C7E}.app.av-tonal :is(.av,.aav).a6{background:#E5DBFC;color:#554077}.app.av-tonal :is(.av,.aav).a7{background:#F8D6E8;color:#6F3758}.app.dark.av-tonal :is(.av,.aav).a0{background:#553330;color:#FDC9C4}.app.dark.av-tonal :is(.av,.aav).a1{background:#4E381F;color:#F2D1AD}.app.dark.av-tonal :is(.av,.aav).a2{background:#3A4122;color:#D2DEB2}.app.dark.av-tonal :is(.av,.aav).a3{background:#244534;color:#B6E4CA}.app.dark.av-tonal :is(.av,.aav).a4{background:#164547;color:#A9E4E7}.app.dark.av-tonal :is(.av,.aav).a5{background:#2E3D57;color:#C2D9FF}.app.dark.av-tonal :is(.av,.aav).a6{background:#413754;color:#DDCFFA}.app.dark.av-tonal :is(.av,.aav).a7{background:#503243;color:#F6C8E1}.app.av-brand :is(.av,.aav).a0{background:#F8D1E6;color:#723459}.app.av-brand :is(.av,.aav).a1{background:#F0C4C6;color:#7A323B}.app.av-brand :is(.av,.aav).a2{background:#F0D3F1;color:#68386B}.app.av-brand :is(.av,.aav).a3{background:#F0C6BE;color:#7A342B}.app.av-brand :is(.av,.aav).a4{background:#EDC4D3;color:#763350}.app.av-brand :is(.av,.aav).a5{background:#E5D6F9;color:#5A3D78}.app.av-brand :is(.av,.aav).a6{background:#E7C5DE;color:#6D3562}.app.av-brand :is(.av,.aav).a7{background:#FCD1D9;color:#783246}.app.dark.av-brand :is(.av,.aav).a0{background:#573649;color:#F6C8E1}.app.dark.av-brand :is(.av,.aav).a1{background:#512C2F;color:#FDC8CB}.app.dark.av-brand :is(.av,.aav).a2{background:#513853;color:#ECCBEE}.app.dark.av-brand :is(.av,.aav).a3{background:#512D27;color:#FDCAC0}.app.dark.av-brand :is(.av,.aav).a4{background:#4E2B39;color:#F9C8D9}.app.dark.av-brand :is(.av,.aav).a5{background:#493B5A;color:#E0CEF8}.app.dark.av-brand :is(.av,.aav).a6{background:#4A2D43;color:#F1C9E7}.app.dark.av-brand :is(.av,.aav).a7{background:#5B363E;color:#FBC8D2}.app.av-solid :is(.av,.aav).a0{background:#A05C57}.app.av-solid :is(.av,.aav).a1{background:#936831}.app.av-solid :is(.av,.aav).a2{background:#6B7939}.app.av-solid :is(.av,.aav).a3{background:#3B825F}.app.av-solid :is(.av,.aav).a4{background:#118186}.app.av-solid :is(.av,.aav).a5{background:#5272A6}.app.av-solid :is(.av,.aav).a6{background:#7A659E}.app.av-solid :is(.av,.aav).a7{background:#975B7E}.app.av-before :is(.av,.aav).a0{background:hsl(22,25%,44%)}.app.av-before :is(.av,.aav).a1{background:hsl(67,25%,44%)}.app.av-before :is(.av,.aav).a2{background:hsl(112,25%,44%)}.app.av-before :is(.av,.aav).a3{background:hsl(157,25%,44%)}.app.av-before :is(.av,.aav).a4{background:hsl(202,25%,44%)}.app.av-before :is(.av,.aav).a5{background:hsl(247,25%,44%)}.app.av-before :is(.av,.aav).a6{background:hsl(292,25%,44%)}.app.av-before :is(.av,.aav).a7{background:hsl(337,25%,44%)}
+</style>
+</helmet>
+<div class="{{theme}}" style="{{vars}}">
+  <div class="bar"><a class="tbtn" href="DrawerDark.dc.html" aria-label="Back"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"/></svg></a></div>
+  <div class="body" style="overflow:hidden">
+    <div class="lbl" style="margin-top:8px">Sign-in</div>
+    <div class="card flat">
+      <a class="row" href="SignAgainDomainsDark.dc.html"><span class="rt"><span class="rn">Sign in again</span></span><svg class="ico rchev" viewBox="0 -960 960 960" aria-hidden="true"><path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z"/></svg></a>
+      <div class="row"><span class="rt"><span class="rn">imap.example.org</span><span class="rv">Mail · IMAP · Password</span></span></div>
+      <div class="row"><span class="rt"><span class="rn">smtp.example.org</span><span class="rv">Mail · SMTP · Password</span></span></div>
+      <div class="row"><span class="rt"><span class="rn">dav.example.org</span><span class="rv">Contacts, Calendar · CardDAV, CalDAV · Password</span></span></div>
+    </div>
+    <a class="danger" href="#" style="margin-top:24px;height:56px;border-radius:999px;background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:var(--error)">Remove this account</a>
+    <div class="fnote">Its contacts move to this phone. Its mail and events are removed.</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true},"avatars":{"editor":"enum","options":["tonal","brand","solid","before"],"default":"tonal"},"serif":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#BF1E83","options":["#BF1E83","#97156A","#EFA3C8","#E267A3"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var serif = this.props.serif ?? false;
+    var accent = this.props.accent ?? '#BF1E83';
+    if (dark && accent.toUpperCase() === '#BF1E83') accent = '#EFA3C8';
+    var h = accent.replace('#', '');
+    var lin = function (v) { v = v / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    var l = 0.2126 * lin(parseInt(h.substr(0, 2), 16)) + 0.7152 * lin(parseInt(h.substr(2, 2), 16)) + 0.0722 * lin(parseInt(h.substr(4, 2), 16));
+    var onAccent = l > 0.179 ? '#410B2B' : '#FFFFFF';
+    var theme = 'app' + (dark ? ' dark' : '') + (serif ? ' serif' : '') + ' av-' + (this.props.avatars ?? 'tonal');
+    var vars = '--accent:' + accent + ';--on-accent:' + onAccent;
+    return { theme: theme, vars: vars };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Drawer: an account to sign in again, dark</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Source+Serif+4:opsz,wght@8..60,600..700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.app{--bg:#FFFFFF;--surface:#F9F1F3;--menu:#FFFFFF;--divider:#D9BFCB;--divl:#ECD9E1;--track:#D9BFCB;--fg:#301F2A;--fg2:#6F5464;--faint:rgba(48,31,42,.14);--wash:#F7D9EA;--accent-ink:#97156A;--error:#BA1A1A;--star:#F2BE3C;--shadow:48,31,42;--kbd:#F3E8EC;--key:#FFFFFF;width:390px;height:844px;overflow:hidden;position:relative;background:var(--bg);color:var(--fg);font-family:Roboto,system-ui,sans-serif}
+.app.dark{--bg:#1A0D15;--surface:#23121C;--menu:#2B1824;--divider:#5A4351;--divl:rgba(247,233,240,.1);--track:#5A4351;--fg:#F7E9F0;--fg2:#BB9CAD;--faint:rgba(247,233,240,.14);--wash:#422232;--accent-ink:#F3B6D3;--error:#FFB4AB;--star:#F2BE3C;--shadow:0,0,0;--kbd:#23121C;--key:#3A2532}
+.app *{box-sizing:border-box}
+.ico{width:24px;height:24px;fill:currentColor;flex:none}
+.under{position:absolute;inset:0;padding:68px 0 0}
+.ph{margin:0 12px 12px;background:var(--surface);border-radius:22px}
+.scrim{position:absolute;inset:0;background:rgba(var(--shadow),.6)}
+.panel{position:absolute;left:0;top:0;bottom:0;width:320px;background:var(--bg);display:flex;flex-direction:column;box-shadow:4px 0 16px rgba(var(--shadow),.25)}
+.acard{display:flex;flex-direction:column;gap:12px;padding:14px;margin-bottom:8px;border-radius:22px;background:var(--surface);text-decoration:none}
+.aav{width:42px;height:42px;margin:2px;border-radius:50%;color:#fff;font-size:18px;display:flex;align-items:center;justify-content:center;flex:none}
+.pill{align-self:flex-start;height:30px;border-radius:15px;display:flex;align-items:center;gap:8px;padding:0 12px 0 8px;font-size:13px;font-weight:700;white-space:nowrap}
+.pill .ico{width:16px;height:16px}
+.drow{height:50px;display:flex;align-items:center;gap:12px;padding:0 14px 0 10px;border-radius:16px;text-decoration:none;font-size:15px}
+.tile{width:30px;height:30px;border-radius:9px;background:var(--surface);display:flex;align-items:center;justify-content:center;flex:none}
+.tile .ico{width:18px;height:18px}
+.app.serif .lt,.app.serif .h,.app.serif .an,.app.serif .ph{font-family:'Source Serif 4',Georgia,serif;font-weight:600;letter-spacing:-.01em}.app :is(.av,.aav).a0,.app :is(.av,.aav).a1,.app :is(.av,.aav).a2,.app :is(.av,.aav).a3,.app :is(.av,.aav).a4,.app :is(.av,.aav).a5,.app :is(.av,.aav).a6,.app :is(.av,.aav).a7{color:#FFFFFF}.app.av-tonal :is(.av,.aav).a0{background:#FED6D2;color:#773733}.app.av-tonal :is(.av,.aav).a1{background:#F5DDC2;color:#6C4302}.app.av-tonal :is(.av,.aav).a2{background:#DDE6C5;color:#475411}.app.av-tonal :is(.av,.aav).a3{background:#C9EBD7;color:#0C5C3C}.app.av-tonal :is(.av,.aav).a4{background:#BFEBED;color:#04585C}.app.av-tonal :is(.av,.aav).a5{background:#D1E2FF;color:#2F4C7E}.app.av-tonal :is(.av,.aav).a6{background:#E5DBFC;color:#554077}.app.av-tonal :is(.av,.aav).a7{background:#F8D6E8;color:#6F3758}.app.dark.av-tonal :is(.av,.aav).a0{background:#553330;color:#FDC9C4}.app.dark.av-tonal :is(.av,.aav).a1{background:#4E381F;color:#F2D1AD}.app.dark.av-tonal :is(.av,.aav).a2{background:#3A4122;color:#D2DEB2}.app.dark.av-tonal :is(.av,.aav).a3{background:#244534;color:#B6E4CA}.app.dark.av-tonal :is(.av,.aav).a4{background:#164547;color:#A9E4E7}.app.dark.av-tonal :is(.av,.aav).a5{background:#2E3D57;color:#C2D9FF}.app.dark.av-tonal :is(.av,.aav).a6{background:#413754;color:#DDCFFA}.app.dark.av-tonal :is(.av,.aav).a7{background:#503243;color:#F6C8E1}.app.av-brand :is(.av,.aav).a0{background:#F8D1E6;color:#723459}.app.av-brand :is(.av,.aav).a1{background:#F0C4C6;color:#7A323B}.app.av-brand :is(.av,.aav).a2{background:#F0D3F1;color:#68386B}.app.av-brand :is(.av,.aav).a3{background:#F0C6BE;color:#7A342B}.app.av-brand :is(.av,.aav).a4{background:#EDC4D3;color:#763350}.app.av-brand :is(.av,.aav).a5{background:#E5D6F9;color:#5A3D78}.app.av-brand :is(.av,.aav).a6{background:#E7C5DE;color:#6D3562}.app.av-brand :is(.av,.aav).a7{background:#FCD1D9;color:#783246}.app.dark.av-brand :is(.av,.aav).a0{background:#573649;color:#F6C8E1}.app.dark.av-brand :is(.av,.aav).a1{background:#512C2F;color:#FDC8CB}.app.dark.av-brand :is(.av,.aav).a2{background:#513853;color:#ECCBEE}.app.dark.av-brand :is(.av,.aav).a3{background:#512D27;color:#FDCAC0}.app.dark.av-brand :is(.av,.aav).a4{background:#4E2B39;color:#F9C8D9}.app.dark.av-brand :is(.av,.aav).a5{background:#493B5A;color:#E0CEF8}.app.dark.av-brand :is(.av,.aav).a6{background:#4A2D43;color:#F1C9E7}.app.dark.av-brand :is(.av,.aav).a7{background:#5B363E;color:#FBC8D2}.app.av-solid :is(.av,.aav).a0{background:#A05C57}.app.av-solid :is(.av,.aav).a1{background:#936831}.app.av-solid :is(.av,.aav).a2{background:#6B7939}.app.av-solid :is(.av,.aav).a3{background:#3B825F}.app.av-solid :is(.av,.aav).a4{background:#118186}.app.av-solid :is(.av,.aav).a5{background:#5272A6}.app.av-solid :is(.av,.aav).a6{background:#7A659E}.app.av-solid :is(.av,.aav).a7{background:#975B7E}.app.av-before :is(.av,.aav).a0{background:hsl(22,25%,44%)}.app.av-before :is(.av,.aav).a1{background:hsl(67,25%,44%)}.app.av-before :is(.av,.aav).a2{background:hsl(112,25%,44%)}.app.av-before :is(.av,.aav).a3{background:hsl(157,25%,44%)}.app.av-before :is(.av,.aav).a4{background:hsl(202,25%,44%)}.app.av-before :is(.av,.aav).a5{background:hsl(247,25%,44%)}.app.av-before :is(.av,.aav).a6{background:hsl(292,25%,44%)}.app.av-before :is(.av,.aav).a7{background:hsl(337,25%,44%)}
+</style>
+</helmet>
+<div class="{{theme}}" style="{{vars}}">
+  <div class="under" aria-hidden="true">
+    <div style="margin: 0 20px 120px; font-size: 32px; font-weight: 700">Emails</div>
+    <div class="ph" style="height: 260px"></div>
+    <div class="ph" style="height: 174px"></div>
+  </div>
+  <a class="scrim" href="MainDark.dc.html" aria-label="Close"></a>
+  <div class="panel">
+    <div style="min-height: 60px; display: flex; align-items: center; padding: 0 12px 0 20px; gap: 12px">
+      <svg width="28" height="28" viewBox="0 0 1000 1000" aria-hidden="true"><defs><linearGradient id="lg" gradientUnits="userSpaceOnUse" x1="254.18" y1="564.76" x2="254.18" y2="141.44"><stop offset="0" stop-color="#f193b6"/><stop offset="0.59" stop-color="#e267a3"/><stop offset="1" stop-color="#bf1e83"/></linearGradient></defs><g transform="translate(0.1 0) scale(1.5787)" fill="url(#lg)"><path d="M445.013 229.29c0-34.01-27.57-61.58-61.58-61.58h-163.14c-66.54 0-120.47 53.94-120.47 120.47v286.6c0 32.33 26.21 58.54 58.540 58.54h6.06c32.33 0 58.54-26.21 58.54-58.54V351.67c0-33.580 27.22-60.81 60.81-60.81h99.66c34.01 0 61.58-27.57 61.58-61.58z"/><path d="M487.373 208.71h126.66c.61 0 1.1-.53 1.04-1.14C604.453 91.35 506.503 0 387.553 0H78.993c-33.55 0-60.75 27.2-60.75 60.75v6.17c0 33.55 27.2 60.75 60.75 60.75h308.56c48.51 0 89.11 34.43 98.71 80.13.11.53.57.91 1.12.91z"/><path d="M486.453 249.54c-.15 0-.28.11-.31.25-9.79 45.45-50.26 79.630-98.59 79.630h-62.34c-33.73 0-61.08 27.35-61.08 61.08v5.51c0 33.73 27.35 61.08 61.08 61.08h62.34c118.82 0 216.7-91.15 227.51-207.19a.334.334 0 0 0-.33-.36h-128.27z"/></g></svg>
+      <div style="flex: 1; font-size: 24px; font-weight: 700">Pimalaya</div>
+      <a href="MainDark.dc.html" aria-label="Close" style="width: 40px; height: 40px; border-radius: 999px; background: var(--surface); display: flex; align-items: center; justify-content: center"><svg class="ico" viewBox="0 -960 960 960"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg></a>
+    </div>
+    <div style="flex: 1; min-height: 0; overflow: hidden; padding: 16px 12px 4px">
+      <a class="acard" href="SignAgainDomainsDark.dc.html">
+        <div style="display: flex; align-items: center; gap: 12px">
+          <div class="aav a3">A</div>
+          <div style="min-width: 0; flex: 1">
+            <div style="font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">alex@example.org</div>
+            <div style="font-size: 14px; color: var(--fg2)">Mail · Contacts · Calendar</div>
+          </div>
+        </div>
+        <span class="pill" style="color: var(--error); background: color-mix(in srgb, var(--error) 14%, transparent)"><svg class="ico" viewBox="0 -960 960 960" aria-hidden="true"><path d="M508.5-291.5Q520-303 520-320t-11.5-28.5Q497-360 480-360t-28.5 11.5Q440-337 440-320t11.5 28.5Q463-280 480-280t28.5-11.5ZM440-440h80v-240h-80v240Zm40 360q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z"/></svg>Sign in again</span>
+      </a>
+      <a class="acard" href="AccSetTopDark.dc.html">
+        <div style="display: flex; align-items: center; gap: 12px">
+          <div class="aav a7">A</div>
+          <div style="min-width: 0; flex: 1">
+            <div style="font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">alex@fastmail.example</div>
+            <div style="font-size: 14px; color: var(--fg2)">Mail · Contacts · Calendar</div>
+          </div>
+        </div>
+        <span class="pill" style="color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent)"><svg class="ico" viewBox="0 -960 960 960"><path d="M160-160v-80h110l-16-14q-52-46-73-105t-21-119q0-111 66.5-197.5T400-790v84q-72 26-116 88.5T240-478q0 45 17 87.5t53 78.5l10 10v-98h80v240H160Zm400-10v-84q72-26 116-88.5T720-482q0-45-17-87.5T650-648l-10-10v98h-80v-240h240v80H690l16 14q49 49 71.5 106.5T800-482q0 111-66.5 197.5T560-170Z"/></svg>120 messages left to download</span>
+      </a>
+      <a class="acard" href="AccSetTopDark.dc.html">
+        <div style="display: flex; align-items: center; gap: 12px">
+          <div class="aav a6">W</div>
+          <div style="min-width: 0; flex: 1">
+            <div style="font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">work@corp.example</div>
+            <div style="font-size: 14px; color: var(--fg2)">Contacts</div>
+          </div>
+        </div>
+        <span class="pill" style="color: var(--fg2); background: color-mix(in srgb, var(--fg2) 14%, transparent)"><svg class="ico" viewBox="0 -960 960 960"><path d="M160-160v-80h110l-16-14q-52-46-73-105t-21-119q0-111 66.5-197.5T400-790v84q-72 26-116 88.5T240-478q0 45 17 87.5t53 78.5l10 10v-98h80v240H160Zm400-10v-84q72-26 116-88.5T720-482q0-45-17-87.5T650-648l-10-10v98h-80v-240h240v80H690l16 14q49 49 71.5 106.5T800-482q0 111-66.5 197.5T560-170Z"/></svg>Deactivated</span>
+      </a>
+    </div>
+    <div style="height: 1px; margin: 4px 22px 8px; background: var(--divl)"></div>
+    <div style="padding: 0 12px 8px">
+      <a class="drow" href="OnbAddressDark.dc.html"><span class="tile"><svg class="ico" viewBox="0 -960 960 960"><path d="M600-120h240v-33q-25-23-56-35t-64-12q-33 0-64 12t-56 35v33Zm162.5-137.5Q780-275 780-300t-17.5-42.5Q745-360 720-360t-42.5 17.5Q660-325 660-300t17.5 42.5Q695-240 720-240t42.5-17.5ZM480-480Zm2-140q-58 0-99 41t-41 99q0 48 27 84t71 50q0-23 .5-44t8.5-38q-14-8-20.5-22t-6.5-30q0-25 17.5-42.5T482-540q15 0 28.5 7.5T533-512q11-5 23-7t24-2h36q-13-43-49.5-71T482-620ZM370-80l-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-85 65H696q-1-5-2-10.5t-3-10.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q24 25 54 42t65 22v184h-70Zm210 40q-25 0-42.5-17.5T520-100v-280q0-25 17.5-42.5T580-440h280q25 0 42.5 17.5T920-380v280q0 25-17.5 42.5T860-40H580Z
+"/></svg></span><span style="flex: 1">Add account</span><svg class="ico" style="width: 20px; height: 20px; color: var(--fg2)" viewBox="0 -960 960 960"><path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z"/></svg></a>
+      <a class="drow" href="SyncSheetDark.dc.html"><span class="tile"><svg class="ico" viewBox="0 -960 960 960"><path d="M160-160v-80h110l-16-14q-52-46-73-105t-21-119q0-111 66.5-197.5T400-790v84q-72 26-116 88.5T240-478q0 45 17 87.5t53 78.5l10 10v-98h80v240H160Zm400-10v-84q72-26 116-88.5T720-482q0-45-17-87.5T650-648l-10-10v98h-80v-240h240v80H690l16 14q49 49 71.5 106.5T800-482q0 111-66.5 197.5T560-170Z"/></svg></span><span style="flex: 1">Synchronize accounts</span><svg class="ico" style="width: 20px; height: 20px; color: var(--fg2)" viewBox="0 -960 960 960"><path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z"/></svg></a>
+      <a class="drow" href="DeletedDark.dc.html"><span class="tile"><svg class="ico" viewBox="0 -960 960 960"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg></span><span style="flex: 1">Deleted items</span><svg class="ico" style="width: 20px; height: 20px; color: var(--fg2)" viewBox="0 -960 960 960"><path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z"/></svg></a>
+      <a class="drow" href="SettingsDark.dc.html"><span class="tile"><svg class="ico" viewBox="0 -960 960 960"><path d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm70-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z"/></svg></span><span style="flex: 1">Settings</span><svg class="ico" style="width: 20px; height: 20px; color: var(--fg2)" viewBox="0 -960 960 960"><path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z"/></svg></a>
+      <a class="drow" href="#"><span class="tile"><svg class="ico" viewBox="0 -960 960 960"><path d="M440-280h80v-240h-80v240Zm68.5-331.5Q520-623 520-640t-11.5-28.5Q497-680 480-680t-28.5 11.5Q440-657 440-640t11.5 28.5Q463-600 480-600t28.5-11.5ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z"/></svg></span><span style="flex: 1">About</span><svg class="ico" style="width: 20px; height: 20px; color: var(--fg2)" viewBox="0 -960 960 960"><path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z"/></svg></a>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":true},"avatars":{"editor":"enum","options":["tonal","brand","solid","before"],"default":"tonal"},"serif":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#BF1E83","options":["#BF1E83","#97156A","#EFA3C8","#E267A3"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var accent = this.props.accent ?? '#BF1E83';
+    if (dark && accent.toUpperCase() === '#BF1E83') accent = '#EFA3C8';
+    var h = accent.replace('#', '');
+    var lin = function (v) { v = v / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    var l = 0.2126 * lin(parseInt(h.substr(0, 2), 16)) + 0.7152 * lin(parseInt(h.substr(2, 2), 16)) + 0.0722 * lin(parseInt(h.substr(4, 2), 16));
+    var onAccent = l > 0.179 ? '#410B2B' : '#FFFFFF';
+    return { theme: 'app' + (dark ? ' dark' : '') + ((this.props.serif ?? false) ? ' serif' : '') + ' av-' + (this.props.avatars ?? 'tonal'), vars: '--accent:' + accent + ';--on-accent:' + onAccent };
+  }
+}
+</script>
+</body>
+</html>
