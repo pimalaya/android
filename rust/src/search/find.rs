@@ -16,6 +16,7 @@ use io_pimdir::{
         query::{PimdirQuery, PimdirQueryError, PimdirQueryKind, PimdirQueryPredicate},
     },
 };
+use jiff::tz::TimeZone;
 use serde::Serialize;
 
 use crate::{
@@ -176,7 +177,8 @@ fn run(
 ) -> Result<(Vec<Hit>, Vec<String>), BridgeError> {
     let ends = ends(sql, parsed)?;
     let categories = categories(sql, parsed)?;
-    let mut compiled = Compiled::new(parsed, ends, categories, now);
+    let zone = zone(sql, parsed)?;
+    let mut compiled = Compiled::new(parsed, ends, categories, now, zone);
     // NOTE: the `name` order folds titles in Rust, so it reads every hit
     // and pages here.
     let select = compiled.select(sort, page.filter(|_| sort == Sort::Date));
@@ -207,6 +209,24 @@ fn run(
         .map(|(account, seq, _)| Hit { account, seq })
         .collect();
     Ok((hits, compiled.words))
+}
+
+/// The zone a query's days are read in (SEARCH §8.1): the one the index
+/// reads floating times in, read only for a query holding a date term.
+fn zone(sql: &mut impl IndexSql, parsed: &PimdirQuery) -> Result<TimeZone, BridgeError> {
+    let dated = parsed
+        .terms()
+        .iter()
+        .any(|(term, _)| matches!(term.predicate, PimdirQueryPredicate::Date(_)));
+    if !dated {
+        return Ok(TimeZone::UTC);
+    }
+    // NOTE: floating_zone is load_index_meta's twelfth column.
+    let zone = match query(sql, "LOAD_INDEX_META", &[])?.first() {
+        Some(row) => text(row, 11)?,
+        None => return Ok(TimeZone::UTC),
+    };
+    TimeZone::get(&zone).map_err(|err| format!("search cannot read days in {zone}: {err}").into())
 }
 
 /// The task categories each `category:` term names: every value a task

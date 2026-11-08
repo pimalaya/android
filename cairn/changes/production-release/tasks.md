@@ -40,7 +40,7 @@ Restated against the code on 2026-11-06. Gone since the 2026-10-09 review: the I
 ## 3. Released libraries and supply chain
 
 - [x] io-http 0.6.0, ical-rs 0.7.0, io-imap 0.8.1, io-webdav 0.7.0, io-jmap 0.7.0, io-pim-discovery 0.11.0 released and pinned from crates.io (checked 2026-11-06)
-- [ ] The three git sources left in rust/Cargo.toml released and dropped at the final validation, kept as git pins until then (owner, 2026-11-07): io-pimdir (the pinned b25523d is storage-draft-09, after the v0.9.0 tag 42a2f26; the bridge first follows 5c18a02, the search zone the CLIs moved to on 2026-11-06), io-msgraph past v0.7.0 for the To Do surface (01105a5), io-gtasks 0.1.0 first published; release-pinned-libs/tasks.md restated (it still names io-pimdir 0.8.0 and leaves the done releases open)
+- [ ] The three git sources left in rust/Cargo.toml released and dropped at the final validation, kept as git pins until then (owner, 2026-11-07): io-pimdir (5c18a02 since 2026-11-08, the commit pimdir CI and the CLIs pin: storage-draft-09 with the search zone, after the v0.9.0 tag 42a2f26), io-msgraph past v0.7.0 for the To Do surface (01105a5), io-gtasks 0.1.0 first published; release-pinned-libs/tasks.md restated (it still names io-pimdir 0.8.0 and leaves the done releases open)
 - [ ] A body bound (`max_body_len`) on every HTTP call, none in rust/src as of 2026-11-06 (release-pinned-libs)
 - [ ] CI builds unsigned and signs on `v*` tags only, in a protected environment (release-supply-chain)
 - [ ] Actions pinned by SHA, least `permissions`, a read-only Cachix token outside releases (release-supply-chain)

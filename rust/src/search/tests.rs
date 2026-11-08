@@ -162,7 +162,7 @@ fn served_index_sql_holds_to_the_sqlite_floor() {
             continue;
         };
         let ends = Vec::new();
-        let mut compiled = Compiled::new(&parsed, ends, Vec::new(), 0);
+        let mut compiled = Compiled::new(&parsed, ends, Vec::new(), 0, jiff::tz::TimeZone::UTC);
         for sort in [Sort::Date, Sort::Name] {
             let select = compiled.select(sort, Some((10, 0)));
             texts.extend(checked("statement", case["query"].to_string(), &select));
@@ -547,7 +547,7 @@ fn the_search_vectors_answer_on_the_floor() {
     let _held = PimdirStore::open(dir.path()).unwrap();
     build(&spec, dir.path());
     let vectors = json(&spec.join("vectors/search/queries.json"));
-    assert_eq!(vectors["v"], 2, "queries.json at another version");
+    assert_eq!(vectors["v"], 3, "queries.json at another version");
     let now = unix(vectors["now"].as_str().unwrap());
 
     let mut floor = index(dir.path());
@@ -555,10 +555,15 @@ fn the_search_vectors_answer_on_the_floor() {
 
     let mut failures = Vec::new();
     let mut skipped = Vec::new();
+    let mut zoned = Vec::new();
     let mut ran = 0;
     for case in vectors["cases"].as_array().unwrap() {
         if let Some(why) = unbound(case) {
             skipped.push(format!("{}: {why}", case["query"]));
+            continue;
+        }
+        if case.get("zone").is_some() {
+            zoned.push(case);
             continue;
         }
         ran += 1;
@@ -602,6 +607,15 @@ fn the_search_vectors_answer_on_the_floor() {
         if got != want {
             failures.push(format!("occurrences {start}..{end}: {got:?}, not {want:?}"));
         }
+    }
+    // A zoned case is asked of the index refreshed in its zone, as the app
+    // asks in the zone its index states, its own now in place of the file's.
+    for case in zoned {
+        let zone = case["zone"].as_str().unwrap();
+        refreshed_in(&mut floor, dir.path(), now, 3, zone);
+        let now = case["now"].as_str().map_or(now, unix);
+        ran += 1;
+        failures.extend(answers(&mut floor, now, case).map(|fault| format!("{zone}: {fault}")));
     }
     eprintln!(
         "{ran} cases run, {} not binding the shape:\n{}",

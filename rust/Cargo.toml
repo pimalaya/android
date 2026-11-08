@@ -56,5 +56,5 @@ url = { version = "2", default-features = false }
 vcard-rs = { version = "0.6", default-features = false, features = ["parser", "jscontact"] }
 
 [patch.crates-io]
-io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "b25523df5360a363133e058f34495484b60cb5a2" }
+io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "5c18a026b9c85b470984192452c2aa66e060a3fe" }
 io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "01105a5f9d1f1104a3ff6034be466150d773a5e0" }

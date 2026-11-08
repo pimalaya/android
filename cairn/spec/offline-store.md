@@ -801,6 +801,14 @@ The app SHALL keep a search index, index.db beside the store, in a shape of its 
 - WHEN the app opens its index
 - THEN it neither reads, writes nor deletes it, and the mail search answers from the sender and subject alone
 
+### Requirement: A search's days are the index's zone's
+A date term of a search (pimdir SEARCH §8.1) SHALL read a day, a month, a year, `today` and `yesterday` from midnight in the zone `index_meta.floating_zone` states, the phone's zone the refresh wrote, a day a transition moves lasting 23 or 25 hours; a relative amount (`1d`, `2w`) SHALL stay the instant that long before now. An index stating no zone SHALL read them in UTC, and one stating a zone the time zone database does not know SHALL refuse the query.
+
+#### Scenario: Today turns over at the phone's midnight
+- GIVEN an index stating `Europe/Paris` and an event at 00:30 on 1 January 2027 there (23:30Z the day before)
+- WHEN `date:today` is searched at 2026-12-31T23:30:00Z
+- THEN the event is found, 1 January having started in Paris; at 22:30Z it is not
+
 ### Requirement: The store runs on the platform SQLite
 The app SHALL open every database it owns, the pimdir store and the index included, on the platform's `android.database.sqlite`, the store's statements in the app's own shape (`pimalaya-android`) over the canonical schema, on every Android it supports (API 26 and up).
 
