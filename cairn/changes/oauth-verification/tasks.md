@@ -20,13 +20,13 @@ change: oauth-verification
 - [x] (owner, 2026-11-07) Branding page filled (submission.md §1), 120x120 logo
 - [x] Data Access page (owner, 2026-11-07): `https://mail.google.com/`, `calendar`, `tasks` and `contacts`, the scopes release builds ask for since drop-google-dav; the Gmail, Calendar, Tasks and People APIs enabled, the CardDAV and CalDAV APIs left off. `calendar` replaced by `calendar.events` and `calendar.calendarlist.readonly` (owner, 2026-11-07, narrow-google-calendar-scope)
 - [x] (owner, 2026-11-07) Audience: publishing status to In production (verification needs it; ends the 7-day expiry; starts the lifetime 100-user count, closed testers included)
-- [ ] Demo video recorded and uploaded unlisted (submission.md §3)
+- [x] Demo video recorded and uploaded unlisted (submission.md §3), sent with the data access submission (owner, 2026-11-08)
 
 ## 2. Google, submitting
 
 - [x] (owner, 2026-11-07) Brand verification passed, asked by the console right after publishing, the same day
 - [ ] Verified branding published (Verification Center) before the result expires on 2026-11-14, the console's 7 days; until then the consent screen does not show it
-- [ ] Data access verification submitted: scope justifications and the no-server statement (submission.md §2)
+- [x] Data access verification submitted: scope justifications and the no-server statement (submission.md §2). Submitted 2026-11-08 (owner): Trust and Safety writes to the contact email, first mail expected within 3 to 5 days, review up to 4 to 6 weeks; the last approved consent screen stays in use meanwhile
 - [ ] Reviewer questions answered by mail; any CASA demand answered with the developer page's server condition before paying for one
 - [ ] Verified: the cap lifted, logged here, providers.md updated
 - [ ] Yearly recertification date written down (12 months from the approval)
