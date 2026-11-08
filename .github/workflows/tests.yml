@@ -35,11 +35,16 @@ jobs:
       - name: Clippy
         run: nix develop --command bash -c 'cd rust && cargo clippy --all-targets --locked -- -D warnings'
       # NOTE: the published io-pimdir leaves its spec vectors out, so the
-      # tests read them from its tag at the version Cargo.lock locks.
+      # tests read them from what Cargo.lock locks: the commit of a git
+      # source, else the tag of its version.
       - name: io-pimdir spec
         run: |
-          version=$(grep -A1 '^name = "io-pimdir"$' rust/Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')
-          git clone --depth 1 --branch "v$version" https://github.com/pimalaya/io-pimdir "$RUNNER_TEMP/io-pimdir"
+          lock=$(grep -A2 '^name = "io-pimdir"$' rust/Cargo.lock)
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' <<< "$lock")
+          commit=$(sed -n 's/^source = "git+.*#\(.*\)"$/\1/p' <<< "$lock")
+          git init -q "$RUNNER_TEMP/io-pimdir"
+          git -C "$RUNNER_TEMP/io-pimdir" fetch -q --depth 1 https://github.com/pimalaya/io-pimdir "${commit:-refs/tags/v$version}"
+          git -C "$RUNNER_TEMP/io-pimdir" checkout -q FETCH_HEAD
           echo "PIMALAYA_IO_PIMDIR_SPEC=$RUNNER_TEMP/io-pimdir/spec" >> "$GITHUB_ENV"
       - name: Rust tests
         run: nix develop --command bash -c 'cd rust && cargo test --locked'
