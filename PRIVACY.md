@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: 12 October 2026
+Last updated: 10 November 2026
 
 This privacy policy describes how the **Pimalaya** Android app (package `org.pimalaya`, the "app") handles your data. Pimalaya is a free and open-source mail, contacts and calendar app published by the Pimalaya project. Its source code is available at https://github.com/pimalaya/android. The [Pimalaya privacy policy](https://pimalaya.org/privacy/) covers every Pimalaya app; this one details the Android app.
 
@@ -42,14 +42,47 @@ Each account syncs in the background at the interval its settings pick (every 15
 
 The app makes network connections only to:
 
-- **The servers you configure** (IMAP and SMTP, JMAP, CardDAV, CalDAV, the Gmail, Google People and Google Calendar APIs, or Microsoft Graph), to sync your mail, contacts and calendars, to send the messages you write, and to authenticate. Data you send to those servers is governed by their own privacy policies.
+- **The servers you configure** (IMAP and SMTP, JMAP, CardDAV, CalDAV, the Gmail, Google People, Google Calendar and Google Tasks APIs, or Microsoft Graph), to sync your mail, contacts, calendars and tasks, to send the messages you write, and to authenticate. Data you send to those servers is governed by their own privacy policies.
 - **Identity providers**, when you sign in with OAuth 2.0 (for example Google or Microsoft, or your server's own), to obtain and refresh access tokens, and, for a server that supports it, to discover its sign-in settings and register the app with it.
 - **A public DNS-over-HTTPS resolver**, when you add an account, to locate your provider's servers. The app sends the domain part of your address (for example `example.com`) to Cloudflare's resolver at `https://cloudflare-dns.com/dns-query`. This step is subject to Cloudflare's privacy policy.
 - **Server autoconfiguration**, when you add an account: your full address to your provider's own autoconfiguration endpoint (`autoconfig.<your domain>`), and the domain part alone to the Thunderbird autoconfiguration database at `autoconfig.thunderbird.net`, subject to its operator's privacy policy, and the standard discovery locations of your domain.
 
 ## Google user data
 
-When you connect a Google account, the app accesses, for the parts you choose to connect, your Gmail messages, labels and sending addresses (to read, search, send, mark, move and delete your mail), your Google calendars and their events (to read, create, change and delete events, and to invite the guests you add), your Google Tasks task lists (to read, create, complete, change and delete tasks) and your Google contacts and their labels (to read, create, change and delete contacts), only to provide those features to you on your device. It also reads the account's address, to check that you signed in with the account you entered. Before Google's sign-in page opens, the app shows what it will access and how it uses it, and opens that page only once you agree. This data is stored on your device only, and is sent nowhere but back to Google; no server of Pimalaya receives it. It is never used for advertising, never sold, and never read by a person. It reaches other apps only through the device's Contacts and Calendar apps, when you turn the mirrors described above on.
+This section covers the data the app receives from Google's APIs (Gmail, Google Calendar, Google Tasks and Google People) when you connect a Google account. Before Google's sign-in page opens, the app shows what it will access and how it uses it, and opens that page only once you agree.
+
+### Data accessed
+
+For the parts of the account you choose to connect, the app accesses:
+
+- **Gmail**: your messages, labels and sending addresses;
+- **Google Calendar**: your list of calendars and the events in them;
+- **Google Tasks**: your task lists and their tasks;
+- **Google Contacts**: your contacts and their labels;
+- **your account's address**, to check that you signed in with the account you entered.
+
+The app derives no aggregated or anonymized data from it.
+
+### How the data is used
+
+Only to provide the app's features to you on your device: to read, search, send, mark, move and delete your mail; to read, create, change and delete events, and to invite the guests you add; to read, create, complete, change and delete tasks; to read, create, change and delete contacts and their labels; and to keep the app's copy in sync with your account. It is never used for advertising, never used to develop, improve or train any artificial intelligence or machine learning model, and never read by anyone but you.
+
+### Sharing and transfer
+
+The app shares Google user data with no one. It sends it nowhere but back to Google, to carry out your actions, and never to us, to advertisers, to data brokers, to artificial intelligence services or to any other third party. It is never sold. It reaches other apps on your device only through the device's Contacts and Calendar apps, when you turn the mirrors described above on.
+
+### Protection
+
+- The Pimalaya project runs no server: no copy of your Google data exists outside your device and Google.
+- Every connection to Google is encrypted with TLS.
+- You sign in on Google's own page, so the app never sees your Google password.
+- The data stays in the app's private storage, which Android keeps from other apps, and is excluded from Android's cloud backups and device-to-device transfers. Your OAuth tokens are encrypted with a key held by the Android Keystore.
+
+### Retention and deletion
+
+The app keeps Google user data only while the account exists in the app; "Data retention and deletion" below says what removing the account or uninstalling the app deletes. You can revoke the app's access to your Google account at any time at https://myaccount.google.com/permissions, after which the app can no longer reach it.
+
+### Limited Use
 
 Pimalaya's use and transfer to any other app of information received from Google APIs will adhere to the [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy), including the Limited Use requirements.
 
@@ -68,7 +101,7 @@ The app stores your data only for as long as the corresponding account exists on
 
 - Removing an account inside the app deletes its stored credentials, its mail, including messages not sent yet, its calendar entries, and its device accounts, which removes its copies from the device's Contacts and Calendar apps. Its contacts are not deleted: they move into the app's on-device addressbook, where you can delete them.
 - Freeing space in Deleted items removes the deleted messages, contacts and entries kept there for good.
-- Uninstalling the app removes all data it stored on your device, and Android removes its device accounts with their copies in the Contacts and Calendar apps.
+- Uninstalling the app removes all data it stored on your device, and Android removes its device accounts with their copies in the Contacts and Calendar apps. On Android 10 and later the uninstall dialog offers to keep the app's data for a later reinstall: if you choose to keep it, it stays on the device until you uninstall again without keeping it, or clear the app's storage.
 
 Data already synced to a remote server is not removed by any of these; delete it on the server if you want it gone.
 
