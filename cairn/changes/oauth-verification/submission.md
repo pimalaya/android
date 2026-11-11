@@ -47,18 +47,101 @@ Pimalaya has no server. The app runs the OAuth authorization code flow with PKCE
 
 ## 3. Google demo video
 
-Unlisted on YouTube, the phone in English, recorded with Android's screen recorder on the Play build, then the other clients.
+Recorded as short clips, joined by assemble-video.sh (next to this file), uploaded unlisted on YouTube. The release build, so the "Pimalaya" project's Android client (one client serves every release channel; the debug client stays out). English everywhere: the phone, the browser, Google's sites. No sound needed: the script drops it.
 
-1. Open the app, add an account with the [test account] address, pick the Google sign-in; show the in-app disclosure and tap to confirm it.
-2. In the browser, tap the address bar and scroll the URL to `client_id=`; hold two seconds.
-3. Show the consent screen: the name Pimalaya, every scope listed; tick them and continue.
-4. Mail: the inbox lists, a message opens, a reply is written and sent, a message moves to another label, one is deleted, then deleted from Trash for good (the restricted scope's reason).
-5. Calendar: an event created, edited, deleted; the calendar list.
-6. Tasks: a task created and completed.
-7. Contacts: a contact created and edited.
-8. Optional: the same changes seen in Gmail and Calendar on the web, proving the round trip.
-9. For each other Android client (GitHub APK, F-Droid): install that build, start a Google sign-in, show `client_id=` in the address bar and the consent screen.
-10. For each other interface's client in the project, if any by then: run its account wizard, show its disclosure and confirm, `client_id=` in the address bar, the consent screen, then each scope's feature in that interface.
+What Google's checklist (2026-11-10) asks of it: the consent screen with every scope readable, the scopes exactly the Data Access page's, every scope's feature working, and every write or delete seen in the Google account itself ("if the app demonstrates permanent deletion, the video must also show the email being purged in the Gmail source account").
+
+### Recording
+
+- App clips: Android's screen recorder. Web clips: any desktop recorder, the browser full screen. The script scales and pads both to 1920x1080.
+- Or mirror the phone on the desktop (`nix-shell -p scrcpy --run scrcpy`, USB debugging on) beside the browser and record the desktop: an app clip and the web clip after it then fit in one take, and the write and its proof sit side by side.
+- Name each file `NN-name.mp4` as below, all in one folder; a retake replaces its file, an extra clip slots in with a letter (`06b-calendar-guest.mp4`). The script joins them in name order.
+- Between an app clip and its web clip, pull the app's list down so the sync carries the change to Google, and refresh the web page.
+- In each web clip, open the account menu (the avatar, top right) once so the address shows: it ties the clip to the account the app signed in.
+
+### Before the first clip
+
+- Pimalaya's access to the test account revoked at https://myaccount.google.com/permissions (done 2026-11-10), the address not in the app (removed off camera).
+- On the test account: three messages in the inbox (sent from another test account), a Gmail label `Demo`, a second calendar beside the primary one, a contact label `Demo`.
+- The desktop browser signed in to the same account, one tab each on Gmail, Google Calendar, Google Tasks (https://tasks.google.com) and Google Contacts.
+
+### The clips
+
+**01-signin.mp4** (phone, one take, never cut: the reviewer must see the flow unbroken)
+
+1. Open Pimalaya, tap Add account, type the test address, tap Continue.
+2. Switch on Mail, Contacts and Calendars, tap Continue.
+3. The notice "Pimalaya and your Google data": hold 3 seconds, tap Agree.
+4. In the browser, tap the address bar and scroll the URL to `client_id=803561575535-v7nav2ev8dvv995g3j3mhnoq5423abco`; hold 2 seconds.
+5. Sign in. On the consent screen, hold on the name Pimalaya, then scroll slowly over every permission, expanding any collapsed list, tick every box, tap Continue.
+6. Back in the app, "Which calendars?" lists both calendars (`calendar.calendarlist.readonly`): hold 2 seconds, keep both, go on through "Which addressbooks?" and Finish; let the first sync run.
+
+**02-mail-app.mp4** (phone)
+
+1. The inbox lists; open the first message.
+2. Reply with one line, send.
+3. Open the second message, Move to, `Demo`.
+4. Open the third message, Delete: it goes to Trash. Pull the inbox down.
+
+**03-mail-web.mp4** (Gmail): the account menu; Sent shows the reply; the `Demo` label holds the moved message; Trash holds the deleted one.
+
+**04-mail-delete-app.mp4** (phone): open Trash, open that message, Delete, confirm: "Deleted for good". Pull down.
+
+**05-mail-delete-web.mp4** (Gmail): refresh Trash: the message is gone; search `in:anywhere` with its subject: nothing. This is Google's own example, and the reason for `https://mail.google.com/` (`gmail.modify` cannot delete for good).
+
+**06-calendar-app.mp4** (phone)
+
+1. New event "Demo meeting", tomorrow at 10:00, save.
+2. Open it, change the title to "Demo meeting, moved" and the time to 11:00, save.
+3. New event "Demo call", tomorrow at 15:00, save. Pull down.
+4. Optional, since the justification names invitations: a guest added to "Demo meeting, moved" (another test account).
+
+**07-calendar-web.mp4** (Google Calendar, tomorrow): the account menu; "Demo meeting, moved" at 11:00 and "Demo call" at 15:00.
+
+**08-calendar-delete-app.mp4** (phone): open "Demo call", Delete, confirm. Pull down.
+
+**09-calendar-delete-web.mp4** (Google Calendar): refresh: "Demo call" is gone.
+
+**10-tasks-app.mp4** (phone)
+
+1. New task "Demo task", save; open it, rename it "Demo task, edited", save; Mark done.
+2. New task "Demo task 2", save. Pull down.
+
+**11-tasks-web.mp4** (Google Tasks): the account menu; "Demo task, edited" under Completed, "Demo task 2" open.
+
+**12-tasks-delete-app.mp4** (phone): delete "Demo task 2". Pull down.
+
+**13-tasks-delete-web.mp4** (Google Tasks): refresh: "Demo task 2" is gone.
+
+**14-contacts-app.mp4** (phone)
+
+1. New contact "Demo Contact" with an email address, save.
+2. Open it, add a phone number, save.
+3. "Addressbooks of this contact": add it to `Demo` (the Google label).
+4. New contact "Demo Contact 2", save. Pull down.
+
+**15-contacts-web.mp4** (Google Contacts): the account menu; "Demo Contact" with its phone number and the `Demo` label; "Demo Contact 2".
+
+**16-contacts-delete-app.mp4** (phone): delete "Demo Contact 2". Pull down.
+
+**17-contacts-delete-web.mp4** (Google Contacts): refresh: "Demo Contact 2" is gone.
+
+**18-imap-app.mp4** (phone): IMAP and SMTP, the other reason for `https://mail.google.com/`. Remove the account first, off camera, unless its settings switch mail to IMAP.
+
+1. Add account, the test address, Continue; switch on Mail only.
+2. Tap the sliders icon on the Mail row, pick the IMAP choice, Continue.
+3. The notice, Agree; in the browser, `client_id=` again; the consent screen asks for Gmail; Continue.
+4. The inbox lists over IMAP. Write a new message to another test account, subject "Sent over SMTP", send. Pull down.
+
+**19-imap-web.mp4** (Gmail): Sent shows "Sent over SMTP".
+
+### Joining
+
+```sh
+nix-shell -p ffmpeg --run 'sh cairn/changes/oauth-verification/assemble-video.sh <clips folder>'
+```
+
+It writes demo.mp4 into the clips folder and prints each clip's start time: the timestamps of the reply (§5).
 
 ## 4. Microsoft branding (Entra admin center > App registrations > Pimalaya > Branding & properties)
 
@@ -101,11 +184,13 @@ DEMO VIDEO
 - [mm:ss] the in-app disclosure of the data accessed and its use, accepted with its Agree button before the browser opens;
 - [mm:ss] client_id=803561575535-v7nav2ev8dvv995g3j3mhnoq5423abco in the address bar;
 - [mm:ss] the consent screen naming Pimalaya, every scope listed and expanded;
-- [mm:ss] mail: a message read, a reply sent, a message moved to a label, a message deleted then deleted from Trash for good; then Gmail on the web showing the reply in Sent, the label, and the message gone from Trash;
-- [mm:ss] the advanced mail setup: IMAP and SMTP signing in with the same Google account, a message listed and one sent;
-- [mm:ss] calendar: the calendar list, an event created, edited and deleted, each step seen in Google Calendar on the web;
-- [mm:ss] tasks: a task created and completed, seen in Google Tasks on the web;
-- [mm:ss] contacts: a contact created, edited and labelled, seen in Google Contacts on the web.
+- [mm:ss] the calendar list, read to pick the calendars to sync (calendar.calendarlist.readonly);
+- [mm:ss] mail: a message read, a reply sent, a message moved to a label and one deleted, then Gmail on the web showing the reply in Sent, the label and the message in Trash;
+- [mm:ss] mail: that message deleted from Trash for good in the app, then gone from Gmail's Trash on the web (https://mail.google.com/);
+- [mm:ss] calendar: events created, edited and deleted, each change seen in Google Calendar on the web;
+- [mm:ss] tasks: tasks created, edited, completed and deleted, each change seen in Google Tasks on the web;
+- [mm:ss] contacts: contacts created, edited, labelled and deleted, each change seen in Google Contacts on the web;
+- [mm:ss] the advanced mail setup: IMAP and SMTP signing in with the same Google account, the inbox listed and a message sent, seen in Gmail's Sent on the web.
 
 APP ACCESS
 
