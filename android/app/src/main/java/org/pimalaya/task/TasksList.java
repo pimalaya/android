@@ -111,6 +111,10 @@ public final class TasksList implements SelectionBar.Owner {
     private final Host host;
     private final TaskStore store;
     private final TaskWrites writes;
+
+    /** The pull-down's sync of the calendars, the to-dos' domain. */
+    private final Runnable pull;
+
     private final CardSections<Row> sections = new CardSections<>();
     private final Adapter adapter = new Adapter();
 
@@ -220,11 +224,12 @@ public final class TasksList implements SelectionBar.Owner {
         }
     }
 
-    /** The tab over the calendar store. */
-    public TasksList(Host host, CalendarParts parts) {
+    /** The tab over the calendar store; {@code pull} runs a pull to refresh. */
+    public TasksList(Host host, CalendarParts parts, Runnable pull) {
         this.host = host;
         this.store = new TaskStore(parts);
         this.writes = new TaskWrites(parts);
+        this.pull = pull;
     }
 
     /** The store the tab reads, shared with the screens it opens. */
@@ -273,6 +278,15 @@ public final class TasksList implements SelectionBar.Owner {
                     }
                     toggle(row.stored);
                     return true;
+                });
+
+        androidx.swiperefreshlayout.widget.SwipeRefreshLayout refresh =
+                host.findViewById(R.id.tasks_refresh);
+        refresh.setColorSchemeColors(host.ui.resolveColor(android.R.attr.colorAccent));
+        refresh.setOnRefreshListener(
+                () -> {
+                    refresh.setRefreshing(false);
+                    pull.run();
                 });
 
         batch = new TaskBatch(host, this, writes);

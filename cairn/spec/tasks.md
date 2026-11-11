@@ -282,3 +282,11 @@ On a Google Tasks list, a listed task the store binds to nothing SHALL be named 
 - GIVEN a task created on the phone whose insert reached Google but whose answer did not
 - WHEN the next sync lists the list
 - THEN the task is bound to Google's copy and no second task is created
+
+### Requirement: The Tasks tab follows the calendars' syncs
+Pulling the Tasks list down SHALL sync the calendars, within the filter, as the agenda's pull does, its to-dos being the calendars'. The Tasks tab SHALL be read again whenever a calendar pass ends, as the agenda is, so a row acts on the task as the pass left it: a create the pass pushed is named by the server's id from then on.
+
+#### Scenario: A task ticked after the sync that filed it
+- GIVEN a task created on the phone, on a Google Tasks list, shown in the Tasks tab
+- WHEN a sync pushes it and the task is then ticked in the list
+- THEN the task is closed, no unknown handle being reported

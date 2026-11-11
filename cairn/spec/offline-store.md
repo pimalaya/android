@@ -291,6 +291,11 @@ Pulling a list down SHALL sync that list's domain alone, and within it only the 
 - WHEN the agenda is pulled down
 - THEN only the shown account's calendars are synced, and no mail or contact is
 
+#### Scenario: Pulling the Tasks list
+- GIVEN calendar accounts holding to-dos
+- WHEN the Tasks list is pulled down
+- THEN the calendars are synced as the agenda's pull syncs them, and no mail or contact is
+
 ### Requirement: The filter offers what it can hide
 The filter page SHALL list the accounts that are on and cover the domain on screen, each with its collections, and SHALL list the on-device book under its own entry on contacts alone. An account holding no collection of the domain SHALL NOT be listed.
 

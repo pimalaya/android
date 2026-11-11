@@ -1,21 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The Tasks list; its bar elements and FAB live in the persistent
-     chrome (activity_main.xml). The Files list's shape: the to-dos are
-     the calendars', synced with them, so no pull of its own. -->
+     chrome (activity_main.xml). The agenda's shape: the to-dos are the
+     calendars', so its pull syncs the calendars, as the agenda's does. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <ListView
-        android:id="@+id/tasks_list"
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/tasks_refresh"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:clipToPadding="false"
-        android:divider="@null"
-        android:dividerHeight="0dp"
-        android:listSelector="@android:color/transparent"
-        android:paddingBottom="88dp"
-        android:scrollbars="none" />
+        android:layout_height="match_parent">
+
+        <ListView
+            android:id="@+id/tasks_list"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:divider="@null"
+            android:dividerHeight="0dp"
+            android:listSelector="@android:color/transparent"
+            android:paddingBottom="88dp"
+            android:scrollbars="none" />
+
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
     <!-- Centred in what the list's header leaves below it, which
          ListHeader keeps as this view's top padding. -->

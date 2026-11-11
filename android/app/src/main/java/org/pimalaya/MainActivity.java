@@ -301,7 +301,7 @@ public class MainActivity extends Host
         }
         // NOTE: the task screens open a source mail in the reader, built
         // below, so they read its field late.
-        tasksList = new TasksList(this, calendarParts);
+        tasksList = new TasksList(this, calendarParts, this::syncCalendars);
         taskPage = new TaskPage(this, calendarParts, tasksList, this::openMailAt);
         clarify = new Clarify(this, calendarParts, tasksList, this::openMailAt);
         review = new WeeklyReview(this, tasksList, () -> showInstant(Panels.CALENDAR));
@@ -1133,6 +1133,7 @@ public class MainActivity extends Host
         reloadContacts();
         mailList.reload();
         calendarList.reload();
+        tasksList.reload();
         reloadHome();
     }
 
@@ -1463,6 +1464,9 @@ public class MainActivity extends Host
                 break;
             case CALENDAR:
                 calendarList.reload();
+                // NOTE: a pass binds a create it pushed to the server's
+                // name, so a task row read before it names nothing.
+                tasksList.reload();
                 break;
         }
     }
@@ -1496,7 +1500,10 @@ public class MainActivity extends Host
         sync.syncRemote();
     }
 
-    /** The agenda's pull ({@link SyncCoordinator#syncCalendars}). */
+    /**
+     * The agenda's and the Tasks list's pull ({@link
+     * SyncCoordinator#syncCalendars}).
+     */
     void syncCalendars() {
         sync.syncCalendars();
     }
