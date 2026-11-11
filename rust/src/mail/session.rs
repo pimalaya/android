@@ -944,8 +944,9 @@ impl<H: Host> Mail<'_, '_, H> {
                 }
                 .relocate_message(id, &from, &to)?;
                 // NOTE: dropped rather than patched, so a later read in the
-                // same run asks Gmail what the change left.
-                self.session.gmail_run().forget(id);
+                // same run asks Gmail what the change left, and the target
+                // listed after it lands the message in this pass.
+                self.session.gmail_run().refiled(id);
                 Ok(())
             }
         }
@@ -985,7 +986,7 @@ impl<H: Host> Mail<'_, '_, H> {
                     token: self.session.auth().secret(),
                 }
                 .copy_message(id, &to)?;
-                self.session.gmail_run().forget(id);
+                self.session.gmail_run().refiled(id);
                 Ok(())
             }
         }

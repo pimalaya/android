@@ -44,4 +44,9 @@ public final class MailWire {
     public static JSONObject json(MailRequest request) {
         return request.toJson();
     }
+
+    /** A session of {@code account} opened on nothing, for a faked client. */
+    public static MailSession session(Account account) {
+        return new MailSession(account, null, 0, true);
+    }
 }

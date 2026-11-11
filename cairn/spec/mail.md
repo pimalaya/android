@@ -136,12 +136,19 @@ Deleting a message outside the trash SHALL stage a move into the mailbox the acc
 
 Deleting a message in the trash SHALL stage a removal, pushed as a permanent delete: on IMAP `\Deleted` then `UID EXPUNGE` (RFC 4315); on Graph `permanentDelete`; on Gmail `messages.delete`; on JMAP `Email/set` destroy. Where an IMAP account records no trash, or the message sits in the trash of an account whose last session announced no `UIDPLUS` (an expunge without it is mailbox-wide), a delete SHALL stage `\Deleted` in place: the row stays, its line saying it is marked deleted, and the toast says so. An account no session recorded yet SHALL read as announcing it. A JMAP account recording none SHALL refuse the delete outright: RFC 8621 has no counterpart to `\Deleted`. Deleting a message still in the outbox SHALL cancel its submission and withdraw its staged sent copy, there being nothing on the server to tell.
 
+On an account listed account-wide (Gmail, JMAP), where one id names a message in every mailbox, the trash row SHALL stay through the sync that relocates it, keeping its body, and SHALL be bound to the server's id by the trash's listing in that same sync when the trash is listed after the move; elsewhere it SHALL come back with the trash's next listing. Until it is bound, an action on it stays on the phone (io-pimdir withdraws a pending create): a known gap.
+
 Deleting SHALL ask first, from the reader and from a selection alike. Where the delete removes messages for good and the phone holds no body of some of them, the question SHALL say how many: Deleted items keeps only what was stored, so those cannot be restored, and it SHALL say that opening them or downloading the trash keeps them restorable.
 
 #### Scenario: An account with a trash
 - GIVEN an account recording a mailbox marked `\Trash`
 - WHEN a message is deleted
 - THEN the row leaves the list and shows in the trash at once
+
+#### Scenario: A Gmail delete through the sync that pushes it
+- GIVEN a Gmail account and a message deleted from the inbox
+- WHEN a sync pushes the move and lists the trash after it
+- THEN the trash row stays, bound to Gmail's id with its body, and never leaves the trash in between
 - AND the next sync moves it there
 
 #### Scenario: Emptying a trash never opened

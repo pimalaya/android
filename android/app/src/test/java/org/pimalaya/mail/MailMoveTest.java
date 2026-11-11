@@ -13,10 +13,12 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.calendar.CalendarEngine;
 import org.pimalaya.calendar.RemoteAccount;
+import org.pimalaya.client.Account;
 import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
@@ -35,6 +37,7 @@ import org.pimalaya.client.SyncReport;
 import org.pimalaya.pimdir.ItemFixtures;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirHash;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.robolectric.RobolectricTestRunner;
@@ -42,8 +45,10 @@ import org.robolectric.RuntimeEnvironment;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -74,18 +79,33 @@ public class MailMoveTest {
         /** The handles the server no longer holds: a write on one is a 404. */
         final Set<String> gone = new HashSet<>();
 
+        /** The page a mailbox lists, by name, else {@link #listed} as a round. */
+        final Map<String, JSONObject> pages = new HashMap<>();
+
         /** The account's driver, on this server. */
-        final MailEngine engine =
-                new MailEngine(
-                        pimdir,
-                        new Clients(
-                                new AccountClient(), new ContactClient(), new CalendarClient(),
-                                this, new OfflineClient()),
-                        null,
-                        accountId);
+        final MailEngine engine;
+
+        Server() {
+            this(null);
+        }
+
+        /** A server whose driver holds {@code session}, null for none. */
+        Server(MailSession session) {
+            engine =
+                    new MailEngine(
+                            pimdir,
+                            new Clients(
+                                    new AccountClient(), new ContactClient(),
+                                    new CalendarClient(), this, new OfflineClient()),
+                            session,
+                            accountId);
+        }
 
         @Override
         public MailPage enumerateMailbox(MailSession session, String mailbox, MailRequest request) {
+            if (pages.containsKey(mailbox)) {
+                return MailWire.page(pages.get(mailbox));
+            }
             try {
                 return MailWire.page(new JSONObject()
                         .put("items", listed)
@@ -445,6 +465,191 @@ public class MailMoveTest {
         assertTrue("accepted: " + report, report.pushed() == 1);
         assertNull("nothing moves into the target",
                 scalar("SELECT link_id FROM items WHERE collection = ?", trash));
+    }
+
+    /** A round's only page, closed on {@code checkpoint}. */
+    private static JSONObject round(JSONArray items, String checkpoint) throws JSONException {
+        return new JSONObject()
+                .put("items", items)
+                .put("vanished", new JSONArray())
+                .put("complete", true)
+                .put("last", true)
+                .put("checkpoint", checkpoint);
+    }
+
+    /** A delta page: what the history since the checkpoint names, and went. */
+    private static JSONObject delta(JSONArray items, String checkpoint, String... vanished)
+            throws JSONException {
+        return new JSONObject()
+                .put("items", items)
+                .put("vanished", new JSONArray(List.of(vanished)))
+                .put("complete", false)
+                .put("last", true)
+                .put("checkpoint", checkpoint);
+    }
+
+    /** The body of message 42, stored by opening it. */
+    private static final String OPENED =
+            "Message-ID: <42@example.org>\r\nFrom: a@example.org\r\nSubject: Hello\r\n\r\nbody\r\n";
+
+    /**
+     * A Gmail inbox message opened, then deleted: its server, on a session.
+     *
+     * <p>Both mailboxes closed a round first, so every pass after lists a
+     * delta; the body stored and read staged, as the reader leaves them.
+     */
+    private Server openedThenDeletedOnGmail() throws Exception {
+        MailPolicy.markAccountWide(context, accountId, true);
+        Server server =
+                new Server(MailWire.session(new Account("google://jane@gmail.com", "", "t", null)));
+        server.pages.put("INBOX", round(new JSONArray().put(named("42", "Hello")), "h0"));
+        server.pages.put("Trash", round(new JSONArray(), "h0"));
+        pass(server);
+
+        // NOTE: filed as a fetch lands it, its base moved to it, else the
+        // body reads as a local edit the move would wait on.
+        String hash = PimdirHash.of(OPENED);
+        JSONObject member = named("42", "Hello");
+        write(
+                new JSONObject().put("op", "storeObject").put("hash", hash).put("body", OPENED),
+                new JSONObject()
+                        .put("op", "upsert")
+                        .put("placement", new JSONObject()
+                                .put("collection", inbox)
+                                .put("handle", "42")
+                                .put("linkId", "42")
+                                .put("level", "full")
+                                .put("status", "clean")
+                                .put("object", hash)
+                                .put("summary", member.getJSONObject("summary"))
+                                .put("sortKey", member.getString("sortKey"))
+                                .put("flags", new JSONArray())
+                                .put("base", new JSONObject()
+                                        .put("flags", new JSONArray())
+                                        .put("object", hash))));
+        stager().mutateFlags(inbox, "42", Flags.of(Flags.Marker.SEEN));
+        stager().mutateMove(inbox, "42", trash);
+        return server;
+    }
+
+    /** A pass over the inbox, then the trash, as a Gmail pass orders them. */
+    private void pass(Server server) {
+        sync(server, inbox);
+        sync(server, trash);
+    }
+
+    /** A Gmail delete stays in the trash whole through the pass pushing it. */
+    @Test
+    public void aGmailDeleteStaysInTheTrashThroughThePassPushingIt() throws Exception {
+        Server server = openedThenDeletedOnGmail();
+
+        // NOTE: a Gmail pass replays the account's history once, read by
+        // the inbox's listing before its push: no delta names the move.
+        server.pages.put("INBOX", delta(new JSONArray(), "h1"));
+        server.pages.put("Trash", delta(new JSONArray(), "h1"));
+        pass(server);
+
+        assertEquals("the trash pushed nothing of it", List.of("relocate INBOX 42 Trash"),
+                server.calls);
+        assertNotNull("still in the trash", rowIn("Trash"));
+        assertEquals("with its body", PimdirHash.of(OPENED),
+                scalar("SELECT object_hash FROM items WHERE collection = ? AND link_id = '42'",
+                        trash));
+    }
+
+    /** The next pass's arrival lands the delete, its body kept. */
+    @Test
+    public void aGmailDeleteLandsOnItsArrivalWhole() throws Exception {
+        Server server = openedThenDeletedOnGmail();
+        server.pages.put("INBOX", delta(new JSONArray(), "h1"));
+        server.pages.put("Trash", delta(new JSONArray(), "h1"));
+        pass(server);
+
+        server.pages.put("INBOX", delta(new JSONArray(), "h2", "42"));
+        server.pages.put("Trash", delta(new JSONArray().put(named("42", "Hello")), "h2"));
+        pass(server);
+
+        assertEquals("one message in the trash", "1",
+                scalar("SELECT count(*) FROM items WHERE collection = ?", trash));
+        assertEquals("bound to the message", "42",
+                scalar("SELECT handle FROM bindings WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = '42')",
+                        trash));
+        assertEquals("with its body", PimdirHash.of(OPENED),
+                scalar("SELECT object_hash FROM items WHERE collection = ? AND link_id = '42'",
+                        trash));
+        assertEquals("relocate INBOX 42 Trash", server.calls.get(0));
+        for (String call : server.calls) {
+            assertFalse("never copied nor appended: " + call,
+                    call.startsWith("copy") || call.startsWith("append"));
+        }
+    }
+
+    /** The read marker staged before a Gmail delete reaches the server. */
+    @Ignore("the landing takes the arrival's markers (nameByMessageId): \\Seen never pushed")
+    @Test
+    public void aGmailDeleteOfAnOpenedMessageLandsRead() throws Exception {
+        Server server = openedThenDeletedOnGmail();
+        server.pages.put("INBOX", delta(new JSONArray(), "h1"));
+        server.pages.put("Trash", delta(new JSONArray(), "h1"));
+        pass(server);
+        server.pages.put("INBOX", delta(new JSONArray(), "h2", "42"));
+        server.pages.put("Trash", delta(new JSONArray().put(named("42", "Hello")), "h2"));
+        pass(server);
+
+        assertTrue("pushed: " + server.calls,
+                server.calls.contains("add " + Flags.Marker.SEEN.wire() + " 42"));
+        assertEquals("read", "1", scalar("SELECT marks & 1 FROM items WHERE collection = ?", trash));
+    }
+
+    /**
+     * A Gmail delete pushed by a pass not listing the trash, the inbox's
+     * alone (a pull under the Inbox chip, or the trash unticked): the trash's
+     * row is its pending create, not landed yet.
+     */
+    private Server deletedNotLandedOnGmail() throws Exception {
+        Server server = openedThenDeletedOnGmail();
+        server.pages.put("INBOX", delta(new JSONArray(), "h1"));
+        sync(server, inbox);
+        assertEquals(List.of("relocate INBOX 42 Trash"), server.calls);
+        assertNotNull(rowIn("Trash"));
+        return server;
+    }
+
+    /** The next pass: the history names the message trashed since. */
+    private void passAfterTheTrash(Server server) throws Exception {
+        server.pages.put("INBOX", delta(new JSONArray(), "h2", "42"));
+        server.pages.put("Trash", delta(new JSONArray().put(named("42", "Hello")), "h2"));
+        pass(server);
+    }
+
+    /** Deleting it for good from the trash before it lands is pushed. */
+    @Ignore("io-pimdir withdraws a pending create on Remove, even one a move delivered")
+    @Test
+    public void aGmailDeleteForGoodBeforeTheTrashLandsItIsPushed() throws Exception {
+        Server server = deletedNotLandedOnGmail();
+
+        assertEquals(MailStager.Deletion.ERASED, stager().stageDelete(rowIn("Trash")));
+        assertNull("gone from the trash at once", rowIn("Trash"));
+        passAfterTheTrash(server);
+
+        assertTrue("deleted on the server: " + server.calls,
+                server.calls.contains("destroy Trash 42"));
+        assertNull("not back in the trash", rowIn("Trash"));
+    }
+
+    /** Restoring it from the trash before it lands is pushed. */
+    @Ignore("io-pimdir withdraws a pending create on Move, even one a move delivered")
+    @Test
+    public void aGmailRestoreBeforeTheTrashLandsItIsPushed() throws Exception {
+        Server server = deletedNotLandedOnGmail();
+
+        stager().stageMove(rowIn("Trash"), inbox);
+        assertNotNull("back in the inbox at once", rowIn("INBOX"));
+        passAfterTheTrash(server);
+
+        assertTrue("restored on the server: " + server.calls,
+                server.calls.contains("relocate Trash 42 INBOX"));
+        assertNull("not back in the trash", rowIn("Trash"));
     }
 
     @Test

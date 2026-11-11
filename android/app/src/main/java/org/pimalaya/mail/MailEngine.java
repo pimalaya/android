@@ -1236,8 +1236,10 @@ public final class MailEngine extends PimdirEngine {
     /**
      * A staged removal (pimdir SYNC §4): a move to a destination, or a delete.
      *
-     * <p>A move's pending create is withdrawn once delivered: the message comes
-     * back with the destination's listing under its new handle.
+     * <p>A move's pending create stays, once delivered, on an account listed
+     * account-wide: the destination's listing lands it, its body kept (pimdir
+     * SYNC §5). Elsewhere it is withdrawn, the message coming back with that
+     * listing.
      */
     private JSONObject pushRemove(
             String collection, String mailbox, String handle, JSONObject change)
@@ -1256,11 +1258,20 @@ public final class MailEngine extends PimdirEngine {
         }
 
         // NOTE: a message gone is moved nowhere, so its target's create
-        // goes as a delivered move's does.
+        // goes as a delivered move's does elsewhere.
+        boolean moved = true;
         try {
             clients.mail().relocate(session, new MessageRef(mailbox, handle), mailboxOf(to));
         } catch (RuntimeException failure) {
             gone(mailbox, handle, failure);
+            moved = false;
+        }
+        // NOTE: account-wide, one id names the message in every mailbox, so
+        // the create pushed before it lands files no second copy; and the
+        // target's listing in this pass may predate the move (Gmail replays
+        // one history a pass), which a withdrawn create vanishes for.
+        if (moved && accountWide()) {
+            return result(handle, true, null, null);
         }
         String linkId = change.optString("linkId", null);
         synchronized (locks.store) {

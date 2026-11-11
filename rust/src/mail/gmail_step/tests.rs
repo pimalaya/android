@@ -27,15 +27,17 @@ use io_gmail::v1::rest::{
     users::get_profile::GmailProfile,
 };
 use io_pimdir::{
-    change::PimdirChange,
+    change::{PimdirChange, PimdirChangeKind},
     client::{PimdirSourceStore, PimdirStore, reader::PimdirReader},
     collection::{PimdirCollectionId, PimdirScope},
-    placement::PimdirHandle,
+    hash::hash,
+    mutate::PimdirMutation,
+    placement::{PimdirHandle, PimdirLevel},
     remote::{
-        PimdirEnumerate, PimdirEnumerated, PimdirFetchedItem, PimdirListing, PimdirPushResult,
-        PimdirRemote, PimdirTier,
+        PimdirEnumerate, PimdirEnumerated, PimdirFetchedBody, PimdirFetchedItem, PimdirListing,
+        PimdirPushOutcome, PimdirPushResult, PimdirRemote, PimdirTier,
     },
-    summary::mail::PimdirMailSummary,
+    summary::{PimdirSummary, mail::PimdirMailSummary},
     sync::PimdirSyncOptions,
 };
 use jiff::{SignedDuration, Timestamp};
@@ -246,6 +248,9 @@ impl Account {
         if request.path == "/batch/gmail/v1" {
             return self.batch(request);
         }
+        if request.method == "POST" {
+            return self.trash(request);
+        }
 
         assert_eq!(request.method, "GET", "{}", request.path);
         match request.path.strip_prefix(USER).unwrap() {
@@ -259,6 +264,26 @@ impl Account {
                 FakeResponse::json(status, &message)
             }
         }
+    }
+
+    /// Answers `messages.trash`: the message labelled `TRASH`, recorded.
+    fn trash(&mut self, request: &FakeRequest) -> FakeResponse {
+        let path = request.path.strip_prefix(USER).unwrap();
+        let id = path.strip_prefix("messages/").unwrap();
+        let id = id.strip_suffix("/trash").unwrap().to_string();
+        let mail = self.mails.get_mut(&id).unwrap();
+        mail.labels.push(TRASH.into());
+        let message = GmailMessage {
+            id: id.clone(),
+            label_ids: mail.labels.clone(),
+            ..Default::default()
+        };
+        self.log.push(Event::Moved {
+            id,
+            added: vec![TRASH.into()],
+            removed: Vec::new(),
+        });
+        FakeResponse::json(200, &message)
     }
 
     /// Answers `users.getProfile`: the history id is the history's length.
@@ -572,21 +597,80 @@ impl PimdirRemote for Remote<'_> {
         Ok(enumerated(&serde_json::to_string(&page).unwrap()))
     }
 
+    /// Reads bodies whole, as opening a message does.
     fn fetch(
         &mut self,
         _: &PimdirCollectionId,
-        _: Vec<PimdirHandle>,
+        handles: Vec<PimdirHandle>,
         _: PimdirTier,
     ) -> Result<Vec<PimdirFetchedItem>, String> {
-        Ok(Vec::new())
+        let dir = tempfile::tempdir().unwrap();
+        let ids: Vec<String> = handles.iter().map(|h| h.as_str().to_string()).collect();
+        let sources = self
+            .gmail
+            .serve(|gmail| gmail.sources(&ids, dir.path()))
+            .map_err(|err| err.message)?;
+        Ok(sources
+            .fetched
+            .into_iter()
+            .map(|fetched| {
+                let bytes = std::fs::read(&fetched.path).unwrap();
+                PimdirFetchedItem {
+                    handle: PimdirHandle::from(fetched.id.as_str()),
+                    link_id: fetched.summary.link_id(),
+                    sort_key: fetched.summary.sort_key(),
+                    summary: Some(PimdirSummary::Mail(fetched.summary)),
+                    body: Some(PimdirFetchedBody::Inline {
+                        hash: hash(&bytes),
+                        bytes,
+                    }),
+                    revision: None,
+                }
+            })
+            .collect())
     }
 
+    /// Pushes as `MailEngine` does on Gmail: a move relocated, the run told,
+    /// and a create refused, its message one the server files already.
     fn push(
         &mut self,
-        _: &PimdirCollectionId,
-        _: Vec<PimdirChange>,
+        collection: &PimdirCollectionId,
+        changes: Vec<PimdirChange>,
     ) -> Result<Vec<PimdirPushResult>, String> {
-        Ok(Vec::new())
+        let Answering::Pass(run) = &self.answering else {
+            return Ok(Vec::new());
+        };
+        let mut results = Vec::new();
+        for change in changes {
+            let (handle, outcome) = match change.kind {
+                PimdirChangeKind::Remove {
+                    handle,
+                    to: Some(to),
+                    ..
+                } => {
+                    self.gmail
+                        .serve(|gmail| {
+                            gmail.relocate_message(
+                                handle.as_str(),
+                                collection.as_str(),
+                                to.as_str(),
+                            )
+                        })
+                        .map_err(|err| err.message)?;
+                    run.refiled(handle.as_str());
+                    (handle, PimdirPushOutcome::Accepted)
+                }
+                PimdirChangeKind::Add { handle, .. } => (handle, PimdirPushOutcome::Rejected),
+                other => panic!("no such push here: {other:?}"),
+            };
+            results.push(PimdirPushResult {
+                handle,
+                outcome,
+                assigned: None,
+                revision: None,
+            });
+        }
+        Ok(results)
     }
 
     fn scope_bound(&self) -> bool {
@@ -701,6 +785,47 @@ impl Harness {
         self.labels
             .iter()
             .flat_map(|label| self.held(label))
+            .collect()
+    }
+
+    /// Reads one message of a mailbox whole, as the reader opening it does.
+    fn open(&mut self, label: &str, id: &str) {
+        let run = GmailRun::default();
+        let mut remote = Remote {
+            gmail: self.gmail.clone(),
+            answering: Answering::Pass(&run),
+            held: BTreeSet::new(),
+        };
+        let opts = PimdirSyncOptions::default();
+        self.store
+            .upgrade(
+                label,
+                vec![PimdirHandle::from(id)],
+                PimdirTier::Full,
+                (&opts).into(),
+                &mut remote,
+            )
+            .unwrap();
+    }
+
+    /// The live items a mailbox holds: its link ids, their levels and the
+    /// handles the source binds them under.
+    fn items(&self, label: &str) -> Vec<(String, PimdirLevel, Vec<String>)> {
+        let reader = PimdirReader::open(self.dir.path()).unwrap();
+        reader
+            .list_items(label, None, 100_000)
+            .unwrap()
+            .into_iter()
+            .map(|item| {
+                let link = item.link_id.as_str().to_string();
+                let handles = reader
+                    .item_bindings(label, &link)
+                    .unwrap()
+                    .into_values()
+                    .map(|binding| binding.handle.as_str().to_string())
+                    .collect();
+                (link, item.level, handles)
+            })
             .collect()
     }
 }
@@ -1016,4 +1141,45 @@ fn two_threads_on_one_run_read_each_moved_mail_once() {
         let asked = since(&before, &gmail.counts());
         assert_eq!((asked.reads, asked.histories), (40, 1));
     }
+}
+
+/// A move a pass pushes lands in its target listed after it in that pass,
+/// whole and under the message's id: the app lists the inbox first and the
+/// trash last (`MailEngine.ordered`).
+#[test]
+fn a_move_pushed_in_a_pass_lands_in_the_target_listed_after_it() {
+    let gmail = FakeGmail::new(3, |_| vec![INBOX]);
+    let mut harness = Harness::new(&gmail, &[INBOX, TRASH]);
+    harness.step(None, 50);
+    harness.open(INBOX, "m0000");
+    let (link, _, _) = harness
+        .items(INBOX)
+        .into_iter()
+        .find(|(_, _, handles)| handles == &["m0000"])
+        .unwrap();
+    let delete = PimdirMutation::Move {
+        handle: PimdirHandle::from("m0000"),
+        target: TRASH.into(),
+    };
+    harness.store.mutate(INBOX, delete).unwrap();
+    let before = gmail.counts();
+
+    harness.pass();
+
+    assert!(
+        gmail.lock().mails["m0000"]
+            .labels
+            .contains(&TRASH.to_string())
+    );
+    assert!(!harness.held(INBOX).contains("m0000"));
+    assert_eq!(
+        harness.items(TRASH),
+        [(link, PimdirLevel::Full, vec!["m0000".to_string()])],
+        "landed whole under its id"
+    );
+    assert_eq!(
+        since(&before, &gmail.counts()).fetched,
+        0,
+        "never read again"
+    );
 }

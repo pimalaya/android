@@ -25,7 +25,10 @@
 //! A listing is fresh only from the history id it is replayed from: the
 //! run takes `historyId` before reading anything, every round hands it as
 //! its checkpoint, and an envelope read before a replay is read again for
-//! it. What moves in between is the next delta's, never missed.
+//! it. What moves in between is the next delta's, never missed, save a
+//! move the run pushes itself: a mailbox listed after it replays the
+//! history again ([`GmailRun::refiled`]), so the move's target lands it
+//! in the same pass.
 //!
 //! [`gmail::belongs`]: crate::mail::gmail::belongs
 
@@ -133,8 +136,12 @@ struct State {
     pages: HashMap<String, Slot<GmailIds>>,
     /// The unread and starred ids, by reception floor.
     marks: HashMap<String, Slot<Arc<Marks>>>,
-    /// History replays by start id; [`None`] when Gmail held none that old.
+    /// History replays by epoch and start id; [`None`] when Gmail held none
+    /// that old.
     histories: HashMap<String, Slot<Option<Arc<GmailHistoryDelta>>>>,
+    /// Moves once per move the run pushed, so a replay read before it is
+    /// read again ([`GmailRun::refiled`]).
+    epoch: u64,
     /// Envelopes by message id.
     envelopes: HashMap<String, Read>,
 }
@@ -272,7 +279,7 @@ impl GmailRun {
         Ok(marks)
     }
 
-    /// The account's history from `start`, replayed once per run.
+    /// The account's history from `start`, replayed once per run and epoch.
     ///
     /// With the clock reading it was recorded at. The messages it deleted
     /// for good are recorded gone, never read.
@@ -281,9 +288,10 @@ impl GmailRun {
         gmail: &mut Gmail<'_, H>,
         start: &str,
     ) -> Result<Option<(Arc<GmailHistoryDelta>, u64)>, BridgeError> {
+        let key = format!("{}\u{0}{start}", self.lock().epoch);
         let (history, at) = self.once(
             |state| &mut state.histories,
-            start,
+            &key,
             || Ok(gmail.history(start)?.map(Arc::new)),
         )?;
         let Some(history) = history else {
@@ -389,6 +397,15 @@ impl GmailRun {
                 return Err(err);
             }
         }
+    }
+
+    /// Forgets one message the run filed elsewhere, and every replay read.
+    ///
+    /// A mailbox listed after it replays the move, so the target lands the
+    /// message in this pass rather than the next.
+    pub fn refiled(&self, id: &str) {
+        self.lock().epoch += 1;
+        self.forget(id);
     }
 
     /// Forgets one message's envelope, after the app changed it.
