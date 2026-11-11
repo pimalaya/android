@@ -66,7 +66,7 @@ What the app does: contactGroups.list (books: myContacts and the user's labels),
 
 ## Side findings
 
-- `include_granted_scopes=true` (OauthFlow.java:134): Google's native-app page says incremental authorization is not supported for installed apps; the explicit union of the stored grant's scopes (OnboardingFlow.java:3566) already does what the comment claims. Drop the extra and its comment.
+- `include_granted_scopes=true` (OauthFlow.java:134): Google's native-app page says incremental authorization is not supported for installed apps; the explicit union of the stored grant's scopes (OnboardingFlow.java:3566) already does what the comment claims. Drop the extra and its comment. Done 2026-11-11 (log google-grant-asks-only-its-scopes).
 - A contacts-only sign-in reads no identity (identity.rs returns none for a grant holding neither MGC nor a calendar scope), so the wrong-account guard does not cover it. Closing it would take `openid email` (likely non-sensitive, one more consent line); optional, not needed for verification.
 - Removing an account does not revoke its Google grant. Google's revoke endpoint needs no scope; optional.
 - submission.md wording: contacts' "including contact groups" overstates (the app lists labels and changes memberships, never creates or renames one); calendar's "reminders" names what the app does not show for Google entries (cairn/spec/calendar.md:257), so the video cannot show it.

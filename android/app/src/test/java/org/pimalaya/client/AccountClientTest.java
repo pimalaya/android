@@ -226,13 +226,12 @@ public class AccountClientTest {
         Map<String, String> google = new LinkedHashMap<>();
         google.put("access_type", "offline");
         google.put("prompt", "consent");
-        google.put("include_granted_scopes", "true");
         google.put("login_hint", "jane@gmail.com");
         assertEquals(
                 base
                         + "access_type=offline&"
                         + pkce
-                        + "include_granted_scopes=true&login_hint=jane%40gmail.com&prompt=consent&"
+                        + "login_hint=jane%40gmail.com&prompt=consent&"
                         + tail,
                 session.authorizeUrl("https://auth.example.org/authorize", google));
 

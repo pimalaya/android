@@ -511,7 +511,7 @@ mod tests {
         );
     }
 
-    /// One Google grant asks the three scopes with incremental auth on.
+    /// One Google grant asks the three scopes at once.
     #[test]
     fn authorize_url_asks_google_once_for_every_domain() {
         let url = authorize_url(&AuthorizationRequest {
@@ -521,7 +521,7 @@ mod tests {
             scope: "https://mail.google.com/ https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/contacts",
             state: "stateABCDEF0123456789abcdef012345",
             pkce_verifier: "verifierABCDEF0123456789abcdef0123456789ABCDEF0123456789abcdef01",
-            extras: r#"{"access_type":"offline","prompt":"consent","include_granted_scopes":"true"}"#,
+            extras: r#"{"access_type":"offline","prompt":"consent"}"#,
         })
         .unwrap();
 
@@ -537,7 +537,6 @@ mod tests {
                 "https://www.googleapis.com/auth/contacts",
             ]
         );
-        assert_eq!(pairs["include_granted_scopes"], "true");
         assert_eq!(pairs["access_type"], "offline");
     }
 

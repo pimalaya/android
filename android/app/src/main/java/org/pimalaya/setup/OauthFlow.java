@@ -125,13 +125,12 @@ public final class OauthFlow {
         pendingIssuer = null;
 
         // NOTE: access_type=offline + prompt=consent make Google issue a
-        // refresh token; include_granted_scopes keeps what the account
-        // granted the app before (incremental authorization), so the new
-        // token covers it too; login_hint preselects the entered account.
+        // refresh token; login_hint preselects the entered account. No
+        // include_granted_scopes: it would fold an older grant's scopes, the
+        // full calendar one included, back into the token.
         Map<String, String> extras = new LinkedHashMap<>();
         extras.put("access_type", "offline");
         extras.put("prompt", "consent");
-        extras.put("include_granted_scopes", "true");
         if (email.contains("@")) {
             extras.put("login_hint", email);
         }

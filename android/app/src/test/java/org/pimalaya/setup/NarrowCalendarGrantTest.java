@@ -118,6 +118,17 @@ public class NarrowCalendarGrantTest {
         assertFalse(scope, asked.contains(CALENDAR));
     }
 
+    /** The older grant's full calendar scope does not ride into the token. */
+    @Test
+    public void theGrantDoesNotTakeBackTheOlderGrantsScopes() {
+        host.findViewById(R.id.signin_continue).performClick();
+        GoogleNoticeTest.agree();
+
+        Intent browser = Shadows.shadowOf(host).getNextStartedActivity();
+        String url = browser.getData().toString();
+        assertEquals(url, null, browser.getData().getQueryParameter("include_granted_scopes"));
+    }
+
     /** The user unticked the calendar list on Google's consent page. */
     @Test
     public void aGrantWithoutTheCalendarListLeavesTheCalendarOut() {

@@ -98,10 +98,10 @@ final class AccountCommit {
                             connected.submitCredential(domain));
         }
 
-        // NOTE: a grant that asked for the union (Google's incremental
-        // authorization) covers the domains an earlier grant of the same
-        // client signed in, so they move onto it and the old one is dropped:
-        // one refresh token for the account.
+        // NOTE: a grant that asked for the union of the account's scopes
+        // covers the domains an earlier grant of the same client signed in,
+        // so they move onto it and the old one is dropped: one refresh token
+        // for the account.
         for (AccountCredential granted : connected.credentials().values()) {
             for (PimDomain domain : merged.regrantable(granted)) {
                 merged =
