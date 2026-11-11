@@ -227,7 +227,7 @@ The app requests exactly the five scopes on the Data Access page. Each backs a f
 
 DEMO VIDEO
 
-[URL] (unlisted, 10:01), recorded on the release build, the phone in English, a title card before each part; every change made in the app is then shown in Google's own web app, on the same phone:
+https://youtu.be/tM1TQdgdZqU (unlisted, 10:01), recorded on the release build, the phone in English, a title card before each part; every change made in the app is then shown in Google's own web app, on the same phone:
 
 - 0:18 the in-app disclosure of the data accessed and its use, accepted with its Agree button before the browser opens;
 - 0:23 the consent screen naming Pimalaya, every scope listed, each one's details opened;
@@ -248,9 +248,9 @@ https://pimalaya.org/privacy/, linked from the home page https://pimalaya.org/ a
 
 - Access: Gmail messages, labels and sending addresses; calendars and their events; task lists and tasks; contacts and their labels; the account's address. No aggregated or anonymized data is derived from them.
 - Use: only to show them to the user and to carry out the user's own actions on them, on the device.
-- Sharing: with no one. The data goes only back to Google and, when the user turns the option on, into the phone's own Contacts and Calendar apps. It is never sold, never used for advertising and never read by a person.
+- Sharing: with no one. The data goes only back to Google and, when the user turns the option on, into the phone's own Contacts and Calendar apps. It is never sold, never used for advertising and never read by anyone but the user.
 - Protection: every connection to Google is encrypted with TLS, the data stays in the app's private storage, and the OAuth tokens are encrypted with an Android Keystore key. No server of ours holds any of it.
-- Retention and deletion: kept while the account is in the app; removing the account or uninstalling the app deletes it from the device, and the user can revoke access at any time at https://myaccount.google.com/permissions.
+- Retention and deletion: kept while the account is in the app; removing the account or uninstalling the app deletes it from the device (unless the user keeps the app's data when Android's uninstall dialog offers it), and the user can revoke access at any time at https://myaccount.google.com/permissions.
 
 LIMITED USE AND AI
 
@@ -265,6 +265,6 @@ SECURITY ASSESSMENT
 Pimalaya has no server. The app runs the OAuth authorization code flow with PKCE on the user's device, calls Google's APIs directly from the device, and stores the data and the tokens only in the app's private storage. No restricted scope data and no token is sent to, stored on or processed by any server of ours or of a third party; the source code is public at https://github.com/pimalaya/android. The restricted scope verification requirements apply the security assessment to apps that store or transmit restricted scope data on servers, which this app does not, so we ask you to confirm that no assessment is required.
 
 Best regards,
-[name]
+Clément Douin
 Pimalaya
 ```
