@@ -69,8 +69,8 @@ public class WrongGrantTest {
         store.connect(
                 ALICE,
                 PimDomain.MAIL,
-                "imaps://imap.gmail.com:993",
-                "smtps://smtp.gmail.com:465",
+                AccountClient.googleBase(ALICE),
+                null,
                 AccountCredential.oauth(tokens("old"), grant()));
         SyncPasses.Parts parts =
                 new SyncPasses.Parts(

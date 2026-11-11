@@ -264,6 +264,37 @@ public class SetupPlanTest {
         assertTrue(SetupPlan.discoveredOptions(PimDomain.CONTACTS, discovery, service -> service).isEmpty());
     }
 
+    /**
+     * Google's rule and the autoconfig databases name Gmail's IMAP and SMTP
+     * too; only the Gmail API is offered.
+     */
+    @Test
+    public void gmailConnectsOverItsApiAlone() {
+        AuthMethod grant = oauth(Oauth.GOOGLE_AUTH_ENDPOINT, "mail");
+        ServiceConfig imap = gmailHost("imap", "imap.gmail.com", "provider:google", grant);
+        ServiceConfig smtp = gmailHost("smtp", "smtp.gmail.com", "provider:google", grant);
+        ServiceConfig listed = gmailHost("imap", "imap.gmail.com", "autoconfig", grant);
+        ServiceConfig api = config("gmail", "https://gmail.googleapis.com/", null, "provider:google", grant);
+        List<ServiceConfig> searched = List.of(imap, smtp, listed, api);
+
+        List<String> mail = new ArrayList<>();
+        SetupPlan.Discovery discovery = new SetupPlan.Discovery(searched, EMAIL, EMAIL);
+        for (SetupOption option : SetupPlan.discoveredOptions(PimDomain.MAIL, discovery, service -> service)) {
+            mail.add(option.service + "|" + option.detail);
+        }
+        assertEquals(List.of("gmail|gmail.googleapis.com"), mail);
+        assertFalse(SetupPlan.offered(smtp));
+        assertFalse(SetupPlan.offered(gmailHost("smtp", "smtp.googlemail.com", "autoconfig", grant)));
+        assertTrue(SetupPlan.offered(config("imap", null, "tls", "autoconfig", grant)));
+    }
+
+    /** A TCP config on one of Google's hosts, port as the rule gives it. */
+    private static ServiceConfig gmailHost(
+            String service, String host, String source, AuthMethod auth) {
+        int port = service.equals("imap") ? 993 : 465;
+        return new ServiceConfig(service, null, host, port, "tls", null, List.of(auth), source);
+    }
+
     private static List<String> describe(List<SetupOption> options) {
         List<String> described = new ArrayList<>();
         for (SetupOption option : options) {

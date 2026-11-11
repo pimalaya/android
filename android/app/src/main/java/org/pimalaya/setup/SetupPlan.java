@@ -315,13 +315,31 @@ final class SetupPlan {
     }
 
     /**
-     * Whether the app offers a discovered config: not Google's CardDAV or
-     * CalDAV, its contacts and calendars connecting over its APIs alone.
+     * Whether the app offers a discovered config: none of Google's IMAP, SMTP,
+     * CardDAV or CalDAV, its mail, contacts and calendars connecting over its
+     * APIs alone. Gmail's IMAP and SMTP are told by their hosts too, since the
+     * autoconfig databases list them.
      */
     static boolean offered(ServiceConfig config) {
-        boolean dav = "carddav".equals(config.service()) || "caldav".equals(config.service());
-        return !dav || !"provider:google".equals(config.source());
+        String service = config.service();
+        boolean dav = "carddav".equals(service) || "caldav".equals(service);
+        boolean mail = "imap".equals(service) || "smtp".equals(service);
+        if (!dav && !mail) {
+            return true;
+        }
+        if ("provider:google".equals(config.source())) {
+            return false;
+        }
+        String host = config.host();
+        if (!mail || host == null) {
+            return true;
+        }
+        return !GMAIL_HOSTS.contains(host.toLowerCase(java.util.Locale.ROOT));
     }
+
+    /** Gmail's IMAP and SMTP hosts, the app reaching Gmail over its API. */
+    private static final Set<String> GMAIL_HOSTS =
+            Set.of("imap.gmail.com", "smtp.gmail.com", "imap.googlemail.com", "smtp.googlemail.com");
 
     /** The first labels of a host naming a service rather than whose it is. */
     private static final Set<String> SERVICE_LABELS =

@@ -94,6 +94,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Removed
 
+- Removed Gmail's IMAP and SMTP from the advanced setup: a Google account's mail connects over the Gmail API, sending included, as the recommended setup already did. A Gmail account connected over IMAP keeps syncing until it is next signed in again; remove it and add it again to move it onto the API.
 - Removed Google's CardDAV and CalDAV from the advanced setup: a Google account's contacts connect over the People API and its calendars over the Google Calendar API, as the recommended setup already did, and the app no longer asks Google for the CardDAV permission. An account connected over Google's CardDAV or CalDAV keeps syncing until it is next signed in again; remove it and add it again to move it onto the APIs.
 
 ### Fixed

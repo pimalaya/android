@@ -71,8 +71,8 @@ public class GoogleNoticeTest {
         store.connect(
                 ALICE,
                 PimDomain.MAIL,
-                "imaps://imap.gmail.com:993",
-                "smtps://smtp.gmail.com:465",
+                AccountClient.googleBase(ALICE),
+                null,
                 AccountCredential.oauth(
                         new OauthTokens("old", "Bearer", 3600, "old-refresh", scope, 0),
                         new OauthGrant(

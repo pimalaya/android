@@ -30,10 +30,9 @@ const CALENDAR_SCOPES: [&str; 2] = [
     "https://www.googleapis.com/auth/calendar",
 ];
 
-/// The hosts one token of that authorization server signs in to.
-const GOOGLE_HOSTS: [&str; 5] = [
-    "imap.gmail.com",
-    "smtp.gmail.com",
+/// The hosts one token of that authorization server signs in to: its APIs,
+/// not Gmail's IMAP and SMTP.
+const GOOGLE_HOSTS: [&str; 3] = [
     "www.googleapis.com",
     "gmail.googleapis.com",
     "people.googleapis.com",
@@ -325,9 +324,11 @@ mod tests {
     /// The API a grant's address is read from, by its servers and scope.
     #[test]
     fn a_grant_is_read_where_its_token_is_good() {
-        let gmail = bases(&["google://alice@gmail.com", "imaps://imap.gmail.com:993"]);
+        let gmail = bases(&["google://alice@gmail.com"]);
         let google = "https://mail.google.com/ https://www.googleapis.com/auth/calendar";
         assert_eq!(Identity::of(&gmail, google), Some(Identity::Mailbox));
+        let imap = bases(&["imaps://imap.gmail.com:993"]);
+        assert_eq!(Identity::of(&imap, google), None);
 
         let calendar = bases(&["google://alice@gmail.com"]);
         assert_eq!(

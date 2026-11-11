@@ -64,10 +64,15 @@ public class EndpointsTest {
     public void everyEndpointMustBeTheProvidersOwn() {
         List<String> gmail =
                 List.of(
-                        "imaps://imap.gmail.com:993",
-                        "smtps://smtp.gmail.com:465",
-                        "google://jane@gmail.com");
+                        "google://jane@gmail.com",
+                        "https://www.googleapis.com/calendar/v3/",
+                        "https://people.googleapis.com/");
         assertTrue(Endpoints.allOn(gmail, "google", Oauth.GOOGLE_HOSTS));
+        assertFalse(
+                Endpoints.allOn(
+                        List.of("imaps://imap.gmail.com:993", "google://jane@gmail.com"),
+                        "google",
+                        Oauth.GOOGLE_HOSTS));
         assertFalse(
                 Endpoints.allOn(
                         List.of("https://apidata.googleusercontent.com/caldav/v2/jane%40gmail.com/user"),

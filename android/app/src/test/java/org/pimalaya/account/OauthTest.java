@@ -81,6 +81,12 @@ public class OauthTest {
                 Oauth.Shipped.GOOGLE,
                 Oauth.shipped(
                         Oauth.GOOGLE_AUTH_ENDPOINT,
+                        java.util.List.of(
+                                "google://jane@gmail.com", "https://www.googleapis.com/calendar/v3/")));
+        // NOTE: Gmail is reached over its API alone (drop-google-imap).
+        assertNull(
+                Oauth.shipped(
+                        Oauth.GOOGLE_AUTH_ENDPOINT,
                         java.util.List.of("imaps://imap.gmail.com:993", "smtps://smtp.gmail.com:465")));
         assertNull(
                 Oauth.shipped(

@@ -64,8 +64,8 @@ public class BrowserLeftTest {
         store.connect(
                 ALICE,
                 PimDomain.MAIL,
-                "imaps://imap.gmail.com:993",
-                "smtps://smtp.gmail.com:465",
+                AccountClient.googleBase(ALICE),
+                null,
                 AccountCredential.oauth(
                         tokens,
                         new OauthGrant(

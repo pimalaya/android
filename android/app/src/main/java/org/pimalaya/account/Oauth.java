@@ -64,18 +64,16 @@ public final class Oauth {
             java.util.Set.of("offline_access", "openid", "profile", "email");
 
     /**
-     * The hosts Google's client signs in to: Gmail IMAP/SMTP and its APIs, not
-     * its CardDAV or CalDAV.
+     * The hosts Google's client signs in to: its APIs, not Gmail's IMAP and
+     * SMTP nor its CardDAV or CalDAV.
      */
     static final java.util.Set<String> GOOGLE_HOSTS =
             java.util.Set.of(
-                    "imap.gmail.com",
-                    "smtp.gmail.com",
                     "www.googleapis.com",
                     "gmail.googleapis.com",
                     "people.googleapis.com");
 
-    /** Gmail, over its API and over IMAP and SMTP. */
+    /** Gmail, over its API; deleting for good takes this scope alone. */
     public static final String GOOGLE_MAIL_SCOPE = "https://mail.google.com/";
 
     /** Google Tasks, the task lists Google keeps apart from its calendars. */
