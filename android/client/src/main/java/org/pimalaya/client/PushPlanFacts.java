@@ -6,18 +6,26 @@ import org.json.JSONObject;
 /**
  * The push change a {@link PushPlan} is planned for.
  *
- * <p>Mirrors rs/contact/sync.rs {@code PushPlanFacts} 153. A null component
+ * <p>Mirrors rs/contact/sync.rs {@code PushPlanFacts} 158. A null component
  * is an absent key.
  *
  * @param op what the change does
  * @param collection the collection URL the change targets
  * @param bookId the book id behind the collection, null when unknown
  * @param origin whether a pending create carries an origin (body on account)
- * @param deleted whether a staged removal deletes the card itself
+ * @param deleted whether a staged removal deletes the card itself: no other
+ *     collection of the account holds it, staged ones included
+ * @param bound whether the source already binds the card in another
+ *     collection of the account, a staged removal there included
  */
 public record PushPlanFacts(
-        Op op, String collection, String bookId, boolean origin, boolean deleted) {
-    /** The operation of the change (rs/contact/sync.rs {@code PushOp} 171). */
+        Op op,
+        String collection,
+        String bookId,
+        boolean origin,
+        boolean deleted,
+        boolean bound) {
+    /** The operation of the change (rs/contact/sync.rs {@code PushOp} 180). */
     public enum Op {
         /** A pending create. */
         ADD("add"),
@@ -44,6 +52,7 @@ public record PushPlanFacts(
             facts.put("bookId", bookId);
             facts.put("origin", origin);
             facts.put("deleted", deleted);
+            facts.put("bound", bound);
             return facts;
         } catch (JSONException error) {
             throw new PimalayaException("Unwritable push plan facts: " + error.getMessage());

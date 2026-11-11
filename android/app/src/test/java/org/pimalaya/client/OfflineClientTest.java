@@ -119,27 +119,37 @@ public class OfflineClientTest {
         String dav = "https:\\/\\/dav.example.org\\/x";
         assertSameJson(
                 "{\"op\":\"add\",\"collection\":\"" + google + "\",\"bookId\":\"g1\","
-                        + "\"origin\":true,\"deleted\":false}",
-                plan(PushPlanFacts.Op.ADD, "https://www.googleapis.com/x", "g1", true, false));
+                        + "\"origin\":true,\"deleted\":false,\"bound\":false}",
+                plan(
+                        PushPlanFacts.Op.ADD, "https://www.googleapis.com/x", "g1", true, false,
+                        false));
         assertSameJson(
                 "{\"op\":\"add\",\"collection\":\"" + dav + "\",\"origin\":false,"
-                        + "\"deleted\":false}",
-                plan(PushPlanFacts.Op.ADD, "https://dav.example.org/x", null, false, false));
+                        + "\"deleted\":false,\"bound\":false}",
+                plan(PushPlanFacts.Op.ADD, "https://dav.example.org/x", null, false, false, false));
         assertSameJson(
                 "{\"op\":\"remove\",\"collection\":\"" + dav + "\",\"origin\":false,"
-                        + "\"deleted\":true}",
-                plan(PushPlanFacts.Op.REMOVE, "https://dav.example.org/x", null, false, true));
+                        + "\"deleted\":false,\"bound\":true}",
+                plan(
+                        PushPlanFacts.Op.REMOVE, "https://dav.example.org/x", null, false, false,
+                        true));
     }
 
     private static String plan(
-            PushPlanFacts.Op op, String url, String book, boolean origin, boolean deleted) {
-        return new PushPlanFacts(op, url, book, origin, deleted).toJson().toString();
+            PushPlanFacts.Op op,
+            String url,
+            String book,
+            boolean origin,
+            boolean deleted,
+            boolean bound) {
+        return new PushPlanFacts(op, url, book, origin, deleted, bound).toJson().toString();
     }
 
     @Test
     public void everyPushActionComesFromTheBridge() {
         PushPlanFacts googleAdd =
-                new PushPlanFacts(PushPlanFacts.Op.ADD, "google://a@b/g1", "g1", false, false);
+                new PushPlanFacts(
+                        PushPlanFacts.Op.ADD, "google://a@b/g1", "g1", false, false, false);
         String raw = Native.offlinePushPlan(googleAdd.toJson().toString());
         assertMirrors(PushPlan.class, raw);
         assertEquals(
@@ -150,27 +160,37 @@ public class OfflineClientTest {
                 OfflineClient.pushPlan(
                         new PushPlanFacts(
                                 PushPlanFacts.Op.ADD, "google://a@b/contacts", "myContacts",
-                                false, false)));
+                                false, false, false)));
         assertEquals(
                 new PushPlan(PushAction.MEMBERSHIP, null),
                 OfflineClient.pushPlan(
                         new PushPlanFacts(
-                                PushPlanFacts.Op.ADD, "jmap://host/b1", "b1", true, false)));
+                                PushPlanFacts.Op.ADD, "jmap://host/b1", "b1", true, false,
+                                false)));
         assertEquals(
                 new PushPlan(PushAction.CREATE, null),
                 OfflineClient.pushPlan(
                         new PushPlanFacts(
-                                PushPlanFacts.Op.ADD, "https://dav/b1", null, true, false)));
+                                PushPlanFacts.Op.ADD, "https://dav/b1", null, true, false,
+                                false)));
         assertEquals(
                 new PushPlan(PushAction.MEMBERSHIP, null),
                 OfflineClient.pushPlan(
                         new PushPlanFacts(
-                                PushPlanFacts.Op.REMOVE, "jmap://host/b1", "b1", false, false)));
+                                PushPlanFacts.Op.REMOVE, "jmap://host/b1", "b1", false, false,
+                                true)));
+        assertEquals(
+                new PushPlan(PushAction.HOLD, null),
+                OfflineClient.pushPlan(
+                        new PushPlanFacts(
+                                PushPlanFacts.Op.ADD, "google://a@b/g1", "g1", false, false,
+                                true)));
         assertEquals(
                 new PushPlan(PushAction.DELETE, null),
                 OfflineClient.pushPlan(
                         new PushPlanFacts(
-                                PushPlanFacts.Op.REMOVE, "jmap://host/b1", "b1", false, true)));
+                                PushPlanFacts.Op.REMOVE, "jmap://host/b1", "b1", false, true,
+                                false)));
     }
 
     @Test(expected = PimalayaException.class)

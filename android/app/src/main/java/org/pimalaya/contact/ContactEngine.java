@@ -80,6 +80,17 @@ public final class ContactEngine extends PimdirEngine {
     private Map<String, String> idByUrl;
 
     /**
+     * The books this pass added a card to on an account-level backend, which
+     * it lists again.
+     *
+     * <p>A membership patch and a JMAP create answer no revision, a People
+     * create one its listing does not name: the binding meets the next
+     * listing at another, and a removal staged before that listing would read
+     * as overtaken by a remote edit and be undone (pimdir SYNC §5).
+     */
+    private final Set<String> joined = Collections.synchronizedSet(new HashSet<>());
+
+    /**
      * The bodies the last delta rounds carried (JMAP, Google), by handle.
      *
      * <p>The fetch tier reads them back without a round-trip; any push
@@ -246,11 +257,14 @@ public final class ContactEngine extends PimdirEngine {
      */
     private void syncServer(String url, Report report) throws JSONException {
         tally = report;
+        List<String[]> copies = account.info().accountLevel() ? copiesOf(url) : List.of();
         step(Progress.STAGE_SERVER, 0);
         Log.d(
                 "pimalaya",
                 "server sync " + url + ": " + clients.offline().sync(this, url, false));
         hydrate(url);
+        boolean relist = joined.remove(url);
+        follow(url, copies);
 
         List<JSONObject> conflicts = offline.loadConflicts(url);
         if (!conflicts.isEmpty()) {
@@ -264,9 +278,49 @@ public final class ContactEngine extends PimdirEngine {
         }
         report.conflicts += conflicts.size() - resolved;
 
-        if (resolved > 0) {
+        // NOTE: a book this pass patched a card into is listed again, its
+        // binding then at the revision the server names (see joined).
+        if (resolved > 0 || relist) {
             clients.offline().sync(this, url, false);
             hydrate(url);
+        }
+    }
+
+    /**
+     * The tick copies of this book's cards elsewhere on the account, each
+     * with the body it holds: the collection, the link id and the body.
+     */
+    private List<String[]> copiesOf(String url) throws JSONException {
+        List<String[]> copies = new ArrayList<>();
+        for (String[] copy : offline.cardCopies(url)) {
+            JSONObject row = offline.loadRow(copy[0], offline.handleFor(copy[0], copy[1]));
+            if (row != null) {
+                copies.add(new String[] {copy[0], copy[1], row.getString("vcard")});
+            }
+        }
+        return copies;
+    }
+
+    /**
+     * Restages the tick copies whose card this pass pulled a remote edit of.
+     *
+     * <p>A copy a tick made holds the body agreed here then, no edit of its
+     * own: left at it, it reads as an edit the server lacks and is held for
+     * ever. A copy edited since keeps its body.
+     */
+    private void follow(String url, List<String[]> copies) throws JSONException {
+        for (String[] copy : copies) {
+            JSONObject card = offline.loadRow(url, offline.handleFor(url, copy[1]));
+            String base = card == null ? null : card.optString("baseVcard", null);
+            if (base == null || base.equals(copy[2])) {
+                continue;
+            }
+            JSONObject row = offline.loadRow(copy[0], offline.handleFor(copy[0], copy[1]));
+            if (row != null
+                    && !row.optBoolean("deleted")
+                    && copy[2].equals(row.getString("vcard"))) {
+                new PimdirContacts(pimdir).follow(copy[0], copy[1], base);
+            }
         }
     }
 
@@ -758,15 +812,14 @@ public final class ContactEngine extends PimdirEngine {
                     results[index] = result(handle, false, null, null);
                     continue;
                 }
-                PushPlan plan =
-                        pushPlan(PushPlanFacts.Op.ADD, url, !change.isNull("origin"), false);
+                JSONObject elsewhere = offline.cardElsewhere(url, row.getString("id"));
+                PushPlan plan = addPlan(url, change, elsewhere);
+                if (plan.action() == PushAction.HOLD) {
+                    results[index] = held(handle);
+                    continue;
+                }
                 if (plan.action() == PushAction.MEMBERSHIP) {
-                    clients.contact().updateCardBooks(
-                            primary,
-                            account,
-                            new BooksUpdate(
-                                    row.getString("id"), List.of(bookId(url)), List.of()));
-                    results[index] = result(handle, true, handle, null);
+                    results[index] = pushMembership(primary, url, change, elsewhere);
                     continue;
                 }
                 creates.add(index);
@@ -778,19 +831,16 @@ public final class ContactEngine extends PimdirEngine {
                     results[index] = result(handle, true, null, null);
                     continue;
                 }
-                PushPlan plan =
-                        pushPlan(PushPlanFacts.Op.REMOVE, url, false, row.optBoolean("deleted"));
+                JSONObject elsewhere = offline.cardElsewhere(url, row.getString("id"));
+                PushPlan plan = removePlan(url, elsewhere);
                 if (plan.action() == PushAction.MEMBERSHIP) {
                     clients.contact().updateCardBooks(
-                            primary,
-                            account,
-                            new BooksUpdate(
-                                    row.getString("id"), List.of(), List.of(bookId(url))));
+                            primary, account, leave(url, handle, elsewhere));
                     results[index] = result(handle, true, null, null);
                     continue;
                 }
                 removes.add(index);
-                removeIds.add(row.getString("id"));
+                removeIds.add(handle);
             } else {
                 results[index] = pushOne(primary, url, change);
             }
@@ -798,6 +848,7 @@ public final class ContactEngine extends PimdirEngine {
 
         if (!creates.isEmpty()) {
             List<Card> created = clients.contact().createCards(primary, account, createVcards);
+            joined.add(url);
             for (int at = 0; at < creates.size(); at++) {
                 Card card = created.get(at);
                 int index = creates.get(at);
@@ -843,6 +894,8 @@ public final class ContactEngine extends PimdirEngine {
     private JSONArray pushRound(String url, JSONArray changes) throws JSONException {
         JSONObject[] results = new JSONObject[changes.length()];
         Map<String, Integer> indexByRef = new HashMap<>();
+        Map<String, String> members = new HashMap<>();
+        Map<String, String> updates = new HashMap<>();
         List<PushChange> batch = new ArrayList<>();
 
         for (int index = 0; index < changes.length(); index++) {
@@ -856,19 +909,25 @@ public final class ContactEngine extends PimdirEngine {
                     results[index] = result(handle, false, null, null);
                     continue;
                 }
-                PushPlan plan =
-                        pushPlan(PushPlanFacts.Op.ADD, url, !change.isNull("origin"), false);
+                JSONObject elsewhere = offline.cardElsewhere(url, row.getString("id"));
+                PushPlan plan = addPlan(url, change, elsewhere);
+                if (plan.action() == PushAction.HOLD) {
+                    results[index] = held(handle);
+                    continue;
+                }
                 PushChange item;
                 if (plan.action() == PushAction.MEMBERSHIP) {
+                    String id = change.getJSONObject("origin").getString("handle");
+                    members.put(handle, id);
                     item =
                             new PushChange(
                                     handle,
                                     PushOp.BOOKS,
-                                    row.getString("id"),
+                                    id,
                                     null,
                                     null,
                                     Collections.singletonList(bookId(url)),
-                                    List.of());
+                                    books(elsewhere, "leaving", List.of()));
                 } else {
                     item =
                             new PushChange(
@@ -892,12 +951,13 @@ public final class ContactEngine extends PimdirEngine {
                         new PushChange(
                                 handle,
                                 PushOp.UPDATE,
-                                row.getString("id"),
+                                handle,
                                 row.getString("vcard"),
                                 row.isNull("baseVcard") ? null : row.getString("baseVcard"),
                                 List.of(),
                                 List.of());
                 indexByRef.put(handle, index);
+                updates.put(handle, row.getString("id"));
                 batch.add(item);
             } else if ("remove".equals(op)) {
                 JSONObject row = offline.loadRow(url, handle);
@@ -905,25 +965,26 @@ public final class ContactEngine extends PimdirEngine {
                     results[index] = result(handle, true, null, null);
                     continue;
                 }
-                PushPlan plan =
-                        pushPlan(PushPlanFacts.Op.REMOVE, url, false, row.optBoolean("deleted"));
+                JSONObject elsewhere = offline.cardElsewhere(url, row.getString("id"));
+                PushPlan plan = removePlan(url, elsewhere);
                 PushChange item;
                 if (plan.action() == PushAction.MEMBERSHIP) {
+                    BooksUpdate leave = leave(url, handle, elsewhere);
                     item =
                             new PushChange(
                                     handle,
                                     PushOp.BOOKS,
-                                    row.getString("id"),
+                                    handle,
                                     null,
                                     null,
-                                    List.of(),
-                                    Collections.singletonList(bookId(url)));
+                                    leave.add(),
+                                    leave.remove());
                 } else {
                     item =
                             new PushChange(
                                     handle,
                                     PushOp.DESTROY,
-                                    row.getString("id"),
+                                    handle,
                                     null,
                                     null,
                                     List.of(),
@@ -939,6 +1000,35 @@ public final class ContactEngine extends PimdirEngine {
 
         if (!batch.isEmpty()) {
             List<PushOutcome> replies = clients.contact().pushCards(primary, account, url, batch);
+            List<PushChange> leaves = new ArrayList<>();
+            for (PushOutcome reply : replies) {
+                String linkId = updates.get(reply.ref());
+                if (linkId != null && reply.accepted() && account.info().accountLevel()) {
+                    // NOTE: as leaveWith, for the updates of a round.
+                    List<String> leaving =
+                            books(offline.cardElsewhere(url, linkId), "leaving", List.of());
+                    if (!leaving.isEmpty()) {
+                        leaves.add(
+                                new PushChange(
+                                        reply.ref(),
+                                        PushOp.BOOKS,
+                                        reply.ref(),
+                                        null,
+                                        null,
+                                        List.of(),
+                                        leaving));
+                    }
+                }
+            }
+            if (!leaves.isEmpty()) {
+                List<PushOutcome> lefts =
+                        clients.contact().pushCards(primary, account, url, leaves);
+                for (PushOutcome left : lefts) {
+                    if (!left.accepted()) {
+                        Log.w("pimalaya", "leaving books refused for " + left.ref());
+                    }
+                }
+            }
             for (PushOutcome reply : replies) {
                 String ref = reply.ref();
                 Integer index = indexByRef.get(ref);
@@ -951,11 +1041,15 @@ public final class ContactEngine extends PimdirEngine {
                     Log.w("pimalaya", "push rejected for " + ref + ": " + reply.error());
                 }
 
-                // NOTE: only an add renames its handle, to the created id
-                // or (on a membership add) the handle itself.
+                // NOTE: only an add renames its handle, to the created id or
+                // (on a membership add) the one its origin binds.
+                String member = members.get(ref);
                 String assigned = null;
                 if ("add".equals(changes.getJSONObject(index).getString("op")) && accepted) {
-                    assigned = reply.id() == null ? ref : reply.id();
+                    assigned = member != null ? member : reply.id() == null ? ref : reply.id();
+                    if (account.info().accountLevel()) {
+                        joined.add(url);
+                    }
                 }
                 String revision = reply.etag();
                 results[index] = result(ref, accepted, assigned, revision);
@@ -997,7 +1091,8 @@ public final class ContactEngine extends PimdirEngine {
      * Pushes a pending create as the bridge plans it.
      *
      * <p>A membership patch when the body already lives on the account (add
-     * with an origin), else a create plus any membership patch it needs.
+     * with an origin), held when the account binds the card under another
+     * body, else a create plus any membership patch it needs.
      */
     private JSONObject pushAdd(Transport transport, String url, JSONObject change)
             throws JSONException {
@@ -1007,19 +1102,13 @@ public final class ContactEngine extends PimdirEngine {
             return result(handle, false, null, null);
         }
 
-        PushPlan plan = pushPlan(PushPlanFacts.Op.ADD, url, !change.isNull("origin"), false);
+        JSONObject elsewhere = offline.cardElsewhere(url, row.getString("id"));
+        PushPlan plan = addPlan(url, change, elsewhere);
+        if (plan.action() == PushAction.HOLD) {
+            return held(handle);
+        }
         if (plan.action() == PushAction.MEMBERSHIP) {
-            clients.contact().updateCardBooks(
-                    transport,
-                    account,
-                    new BooksUpdate(
-                            row.getString("id"), List.of(bookId(url)), List.of()));
-            // NOTE: the book now holds the member the origin names; the
-            // provisional handle would bind it to a name the server never
-            // heard of, read as vanished by the next enumerate.
-            JSONObject origin = change.optJSONObject("origin");
-            String assigned = origin == null ? row.getString("id") : origin.getString("handle");
-            return result(handle, true, assigned, null);
+            return pushMembership(transport, url, change, elsewhere);
         }
 
         // NOTE: the resource name, not the handle: a staged create sits under
@@ -1034,6 +1123,9 @@ public final class ContactEngine extends PimdirEngine {
         Card created =
                 clients.contact().createCard(
                         transport, account, url, new NewCard(name, row.getString("vcard")));
+        if (account.info().accountLevel()) {
+            joined.add(url);
+        }
 
         List<String> postCreate = plan.postCreateBooks();
         for (int index = 0; postCreate != null && index < postCreate.size(); index++) {
@@ -1072,7 +1164,9 @@ public final class ContactEngine extends PimdirEngine {
                                             ifMatch,
                                             row.getString("vcard"))),
                             baseVcard);
-            return result(handle, true, null, landed(transport, url, handle, updated.etag()));
+            String revision = landed(transport, url, handle, updated.etag());
+            leaveWith(transport, url, handle, row.getString("id"));
+            return result(handle, true, null, revision);
         } catch (RuntimeException failure) {
             if (!isPreconditionFailure(failure)) {
                 throw failure;
@@ -1099,7 +1193,30 @@ public final class ContactEngine extends PimdirEngine {
                                             null,
                                             row.getString("vcard"))),
                             baseVcard);
-            return result(handle, true, null, landed(transport, url, handle, updated.etag()));
+            String revision = landed(transport, url, handle, updated.etag());
+            leaveWith(transport, url, handle, row.getString("id"));
+            return result(handle, true, null, revision);
+        }
+    }
+
+    /**
+     * Takes an updated card out of the books it is leaving on an
+     * account-level backend.
+     *
+     * <p>The update moved its revision, and a tombstone still listed at
+     * another revision reads as overtaken and is revived (pimdir SYNC §5):
+     * out of its book, it is listed no more and its removal converges. This
+     * book keeps the card, so it is never the last group.
+     */
+    private void leaveWith(Transport transport, String url, String handle, String linkId)
+            throws JSONException {
+        if (!account.info().accountLevel()) {
+            return;
+        }
+        List<String> leaving = books(offline.cardElsewhere(url, linkId), "leaving", List.of());
+        if (!leaving.isEmpty()) {
+            clients.contact().updateCardBooks(
+                    transport, account, new BooksUpdate(handle, List.of(), leaving));
         }
     }
 
@@ -1107,7 +1224,8 @@ public final class ContactEngine extends PimdirEngine {
      * Pushes a staged removal as the bridge plans it.
      *
      * <p>A membership patch when the card survives on an account-level backend,
-     * the card's deletion otherwise.
+     * the card's deletion otherwise. A move's removal never gets here before
+     * its add is pushed: the store holds it (pimdir STORAGE §15.3).
      */
     private JSONObject pushRemove(Transport transport, String url, JSONObject change)
             throws JSONException {
@@ -1118,13 +1236,10 @@ public final class ContactEngine extends PimdirEngine {
             return result(handle, true, null, null);
         }
 
-        PushPlan plan = pushPlan(PushPlanFacts.Op.REMOVE, url, false, row.optBoolean("deleted"));
+        JSONObject elsewhere = offline.cardElsewhere(url, row.getString("id"));
+        PushPlan plan = removePlan(url, elsewhere);
         if (plan.action() == PushAction.MEMBERSHIP) {
-            clients.contact().updateCardBooks(
-                    transport,
-                    account,
-                    new BooksUpdate(
-                            row.getString("id"), List.of(), List.of(bookId(url))));
+            clients.contact().updateCardBooks(transport, account, leave(url, handle, elsewhere));
             return result(handle, true, null, null);
         }
 
@@ -1200,9 +1315,98 @@ public final class ContactEngine extends PimdirEngine {
         return idByUrl.get(url);
     }
 
-    /** One push change's bridge plan. */
-    private PushPlan pushPlan(PushPlanFacts.Op op, String url, boolean origin, boolean deleted) {
-        return OfflineClient.pushPlan(new PushPlanFacts(op, url, bookId(url), origin, deleted));
+    /** A pending create's bridge plan, from where else its card is bound. */
+    private PushPlan addPlan(String url, JSONObject change, JSONObject elsewhere)
+            throws JSONException {
+        return OfflineClient.pushPlan(
+                new PushPlanFacts(
+                        PushPlanFacts.Op.ADD,
+                        url,
+                        bookId(url),
+                        !change.isNull("origin"),
+                        false,
+                        elsewhere.getBoolean("bound")));
+    }
+
+    /** A staged removal's bridge plan, from where else the card lives. */
+    private PushPlan removePlan(String url, JSONObject elsewhere) throws JSONException {
+        return OfflineClient.pushPlan(
+                new PushPlanFacts(
+                        PushPlanFacts.Op.REMOVE,
+                        url,
+                        bookId(url),
+                        false,
+                        !elsewhere.getBoolean("live"),
+                        elsewhere.getBoolean("bound")));
+    }
+
+    /**
+     * A create held back: its card is on the account under another body.
+     *
+     * <p>Rejected, so it stays staged, which the report of what waits reads
+     * back from the store ({@link UnsentContacts}): a patch would place the
+     * card without its body, which the next pull would then erase, and a
+     * create would make a second card.
+     */
+    private static JSONObject held(String handle) throws JSONException {
+        Log.w("pimalaya", "push held for " + handle + ": its card is bound under another body");
+        return result(handle, false, null, null);
+    }
+
+    /**
+     * The book ids of the collections a lookup lists under {@code key},
+     * after {@code books}.
+     */
+    private List<String> books(JSONObject elsewhere, String key, List<String> books)
+            throws JSONException {
+        List<String> ids = new ArrayList<>(books);
+        JSONArray collections = elsewhere.getJSONArray(key);
+        for (int index = 0; index < collections.length(); index++) {
+            String book = bookId(collections.getString(index));
+            if (book != null) {
+                ids.add(book);
+            }
+        }
+        return ids;
+    }
+
+    /**
+     * The patch taking a card out of this book, and of every one it leaves.
+     *
+     * <p>A patch moves the card's revision, and a tombstone still listed at
+     * another revision is revived (pimdir SYNC §5): out of its book, it is
+     * listed no more and its removal converges. With no book binding it yet,
+     * the ones staging it take it in the same patch: Google refuses to remove
+     * a card's last group.
+     */
+    private BooksUpdate leave(String url, String handle, JSONObject elsewhere)
+            throws JSONException {
+        List<String> add =
+                elsewhere.getBoolean("held") ? List.of() : books(elsewhere, "pending", List.of());
+        return new BooksUpdate(handle, add, books(elsewhere, "leaving", List.of(bookId(url))));
+    }
+
+    /**
+     * Patches a pending create's card into this book, from its origin.
+     *
+     * <p>The card is named by the handle its holder binds, never by the link
+     * id: a card the phone created keeps its UID, which no server issued. A
+     * move takes it out of the books it leaves in the same patch.
+     */
+    private JSONObject pushMembership(
+            Transport transport, String url, JSONObject change, JSONObject elsewhere)
+            throws JSONException {
+        String id = change.getJSONObject("origin").getString("handle");
+        clients.contact().updateCardBooks(
+                transport,
+                account,
+                new BooksUpdate(
+                        id, List.of(bookId(url)), books(elsewhere, "leaving", List.of())));
+        joined.add(url);
+        // NOTE: the book now holds the member the origin names; the
+        // provisional handle would bind it to a name the server never heard
+        // of, read as vanished by the next enumerate.
+        return result(change.getString("handle"), true, id, null);
     }
 
     /** Whether the last enumerate proves the handle unchanged at the base. */

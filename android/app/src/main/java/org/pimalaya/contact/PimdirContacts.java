@@ -4,10 +4,13 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.util.Log;
 
+import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.ConflictForm;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.PimdirSql;
@@ -337,6 +340,136 @@ public final class PimdirContacts {
         }
     }
 
+    /**
+     * Stages the card's removal from a book it stays in elsewhere.
+     *
+     * <p>A move: when another book of the account only stages it, that add
+     * supersedes this placement, in the transaction staging the tombstone
+     * (pimdir STORAGE §15.3, as a task filed elsewhere is). The store then
+     * holds the removal until the add is pushed, which takes the card out of
+     * this book, and holds it as long as the add waits.
+     */
+    private void stageLeave(String collection, String linkId) {
+        if (!held(collection, linkId)) {
+            return;
+        }
+        try {
+            JSONArray pending = stager.offline.cardElsewhere(collection, linkId)
+                    .getJSONArray("pending");
+            if (pending.length() == 0) {
+                stageDelete(collection, linkId);
+                return;
+            }
+            // NOTE: one add supersedes an item (the pair is keyed by it), the
+            // first by collection id: once it lands the removal is a plain
+            // patch, the other books still staging the card pushing their own.
+            String target = pending.getString(0);
+            stager.offline.atomically(
+                    () -> {
+                        stager.offline.supersede(collection, linkId, target, linkId);
+                        stager.mutateRemove(
+                                collection, stager.offline.handleFor(collection, linkId));
+                    });
+        } catch (JSONException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    /**
+     * Whether the placement holds the only copy of an edit its server has not
+     * got: what taking the card out of that book would leave in Deleted items
+     * alone, which the editor asks about first.
+     */
+    public boolean unsent(String collection, String linkId) {
+        return unsent(items.readable(), collection, linkId);
+    }
+
+    private static boolean unsent(SQLiteDatabase db, String collection, String linkId) {
+        try (Cursor cursor =
+                PimdirDb.query(
+                        db,
+                        "CARD_UNSENT",
+                        PimdirSql.values(
+                                "collection", collection, "link_id", linkId, "source", SERVER))) {
+            return cursor.moveToFirst();
+        }
+    }
+
+    /**
+     * A book the card stays in where keeping an edit meets one of its own,
+     * with the merge the person resolves: nothing was written.
+     *
+     * @param collection the book the card stays in
+     * @param form the three-way merge, its collisions as alternatives
+     */
+    public record KeepCollision(String collection, ConflictForm form) {}
+
+    /**
+     * Merges the placement's edit into every other book of its account that
+     * keeps the card, before the editor takes it out of this one; null when
+     * each merged cleanly and was staged, else the first collision, nothing
+     * written then.
+     *
+     * <p>Three ways from the base the placement's own binding agreed on with
+     * the server: what the server or the phone changed in a staying book
+     * since stays, the edit's own changes come in, and a property both set
+     * apart is the person's to choose. A placement never sent has no base,
+     * so nothing is merged unseen: the form opens on the staying book, its
+     * own body first and the edit's values beside. The edit then goes out
+     * as an ordinary guarded update.
+     */
+    public KeepCollision keepEdit(String collection, String linkId) {
+        try {
+            JSONObject row = stager.offline.loadRow(
+                    collection, stager.offline.handleFor(collection, linkId));
+            if (row == null) {
+                return null;
+            }
+            String body = row.getString("vcard");
+            String base = row.optString("baseVcard", null);
+            JSONArray staying =
+                    stager.offline.cardElsewhere(collection, linkId).getJSONArray("staying");
+
+            Map<String, String> merged = new java.util.LinkedHashMap<>();
+            for (int index = 0; index < staying.length(); index++) {
+                String book = staying.getString(index);
+                JSONObject now =
+                        stager.offline.loadRow(book, stager.offline.handleFor(book, linkId));
+                if (now == null) {
+                    continue;
+                }
+                String held = now.getString("vcard");
+                if (base == null) {
+                    return new KeepCollision(
+                            book, ContactClient.mergeConflictForm("", held, body));
+                }
+                ConflictForm form = ContactClient.mergeConflictForm(base, body, held);
+                if (!form.resolved()) {
+                    return new KeepCollision(book, form);
+                }
+                if (!form.vcard().equals(held)) {
+                    merged.put(book, form.vcard());
+                }
+            }
+
+            for (Map.Entry<String, String> book : merged.entrySet()) {
+                save(book.getKey(), new Card(linkId, null, null, book.getValue()));
+            }
+            return null;
+        } catch (JSONException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    /** Restages a tick copy that follows a pull of its card. */
+    void follow(String collection, String linkId, String body) {
+        try {
+            stager.edit(collection, stager.offline.handleFor(collection, linkId), body);
+        } catch (JSONException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
     /** Whether the collection holds the card, staged removals included. */
     private boolean held(String collection, String linkId) {
         try (Cursor cursor =
@@ -434,11 +567,12 @@ public final class PimdirContacts {
      *
      * <p>Placing is an item row sharing the link id, so its seq and object: no
      * copy, no new identity. Removing is the usual staged delete, so a round
-     * trip cancels out rather than pushing twice.
+     * trip cancels out rather than pushing twice; a book the card leaves for
+     * one only staging it is superseded by that add ({@link #stageLeave}).
      */
     void stageMembership(String from, String target, String linkId, boolean added) {
         if (!added) {
-            stageDelete(target, linkId);
+            stageLeave(target, linkId);
             return;
         }
 
@@ -465,19 +599,27 @@ public final class PimdirContacts {
     /**
      * Moves an account's cards into the on-device book, dropping sync markers.
      *
-     * <p>Several placements collapse to one local row. Bindings stay behind (no
-     * server, so no agreement to claim) and staged deletes are not carried.
+     * <p>Several placements collapse to one local row: the one holding the
+     * only copy of an edit never sent first ({@link #unsent}), else the first
+     * by collection. Bindings stay behind (no server, so no agreement to
+     * claim) and staged deletes are not carried.
      */
     public void detachToLocal(List<String> collections, String local) {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            for (String collection : collections) {
-                for (String linkId : items.linkIdsOf(db, collection)) {
-                    if (live(db, collection, linkId) && !items.knows(db, local, linkId)) {
-                        copy(db, collection, local, linkId);
+            for (boolean first : new boolean[] {true, false}) {
+                for (String collection : collections) {
+                    for (String linkId : items.linkIdsOf(db, collection)) {
+                        if (live(db, collection, linkId)
+                                && !items.knows(db, local, linkId)
+                                && (!first || unsent(db, collection, linkId))) {
+                            copy(db, collection, local, linkId);
+                        }
                     }
                 }
+            }
+            for (String collection : collections) {
                 PimdirDb.exec(
                         db, "DELETE_COLLECTION", PimdirSql.values("collection", collection));
             }

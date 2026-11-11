@@ -1,6 +1,9 @@
 package org.pimalaya.contact;
 
+import android.app.AlertDialog;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.json.JSONException;
@@ -54,6 +57,11 @@ final class ContactWriter {
             return;
         }
 
+        Runnable done =
+                () -> {
+                    reloadList.run();
+                    host.showBack(Panels.CONTACTS);
+                };
         try {
             ContactFields model = editor.form().collect();
 
@@ -77,15 +85,15 @@ final class ContactWriter {
             }
 
             if (editor.edit().card != null && editor.edit().pendingBookState != null) {
-                applyBookState(ContactClient.applyCard(editor.edit().card.vcard(), model));
+                applyBookState(ContactClient.applyCard(editor.edit().card.vcard(), model), done);
+                return;
             }
         } catch (Exception error) {
             host.showError(error, R.string.save_failed);
             return;
         }
 
-        reloadList.run();
-        host.showBack(Panels.CONTACTS);
+        done.run();
     }
 
     /**
@@ -166,11 +174,17 @@ final class ContactWriter {
 
     /**
      * Applies the addressbooks dialog on save: memberships, copies, removals.
+     *
+     * <p>Every book is placed before any is left: a removal then sees the add
+     * a move goes to, which supersedes it (pimdir STORAGE §15.3). A removal
+     * that would drop the only copy of a change never sent asks first, then
+     * {@code done} runs.
      */
-    private void applyBookState(String vcard) {
+    private void applyBookState(String vcard, Runnable done) {
         Map<String, Boolean> desired = editor.edit().pendingBookState;
         editor.edit().pendingBookState = null;
         if (desired == null) {
+            done.run();
             return;
         }
 
@@ -179,22 +193,107 @@ final class ContactWriter {
             replicaByBook.put(entry.book.url(), entry);
         }
 
+        List<BookEntry> leaving = new ArrayList<>();
         for (BookEntry target : parts.cards().loadSubscribedAddressbooks()) {
             Boolean wanted = desired.get(target.book.url());
-            if (wanted == null || wanted == replicaByBook.containsKey(target.book.url())) {
+            if (wanted == null
+                    || wanted == replicaByBook.containsKey(target.book.url())) {
                 continue;
             }
             AccountEntry account = parts.accountFor(target.accountEmail);
             if (account == null) {
                 continue;
             }
-
             if (wanted) {
                 addToBook(target, account, vcard);
             } else {
-                removeFromBook(target, replicaByBook);
+                leaving.add(target);
             }
         }
+
+        List<Entry> losing = new ArrayList<>();
+        for (BookEntry target : leaving) {
+            Entry replica = replicaByBook.get(target.book.url());
+            AccountEntry owner = parts.accountFor(replica.accountEmail);
+            if (owner != null
+                    && accountLevel(owner)
+                    && parts.contacts().unsent(replica.book.url(), replica.id)) {
+                losing.add(replica);
+            }
+        }
+        if (losing.isEmpty()) {
+            leave(leaving, replicaByBook);
+            done.run();
+            return;
+        }
+
+        // NOTE: the card stays in its other books, so what such an untick
+        // drops is the change alone, kept in Deleted items only: asked rather
+        // than refused, a held change never leaving that book on its own.
+        List<String> names = new ArrayList<>();
+        for (Entry replica : losing) {
+            names.add(replica.book.name());
+        }
+        new AlertDialog.Builder(host)
+                .setTitle(R.string.contact_unsent_keep_title)
+                .setMessage(
+                        host.getString(
+                                R.string.contact_unsent_keep_message,
+                                String.join(", ", names),
+                                losing.get(0).displayName()))
+                .setCancelable(false)
+                .setPositiveButton(
+                        R.string.contact_unsent_keep,
+                        (dialog, which) -> keepThen(losing, leaving, replicaByBook, done))
+                .setNegativeButton(
+                        R.string.contact_unsent_drop,
+                        (dialog, which) -> leaveThen(leaving, replicaByBook, done))
+                .show();
+    }
+
+    /**
+     * Merges each change kept into the books the contact stays in, then
+     * leaves; a collision opens its form instead, nothing written and no
+     * book left, the person choosing before taking it out again.
+     */
+    private void keepThen(
+            List<Entry> losing,
+            List<BookEntry> leaving,
+            Map<String, Entry> replicaByBook,
+            Runnable done) {
+        try {
+            for (Entry replica : losing) {
+                PimdirContacts.KeepCollision collision =
+                        parts.contacts().keepEdit(replica.book.url(), replica.id);
+                if (collision != null) {
+                    editor.openKeepConflict(collision);
+                    return;
+                }
+            }
+        } catch (RuntimeException error) {
+            host.showError(error, R.string.save_failed);
+            return;
+        }
+        leaveThen(leaving, replicaByBook, done);
+    }
+
+    /** Takes the contact out of the books it leaves. */
+    private void leave(List<BookEntry> leaving, Map<String, Entry> replicaByBook) {
+        for (BookEntry target : leaving) {
+            removeFromBook(target, replicaByBook);
+        }
+    }
+
+    /** The same, from the dialog: a failure says so, else {@code done} runs. */
+    private void leaveThen(
+            List<BookEntry> leaving, Map<String, Entry> replicaByBook, Runnable done) {
+        try {
+            leave(leaving, replicaByBook);
+        } catch (RuntimeException error) {
+            host.showError(error, R.string.save_failed);
+            return;
+        }
+        done.run();
     }
 
     /**

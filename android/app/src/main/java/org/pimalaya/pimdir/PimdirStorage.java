@@ -606,9 +606,13 @@ public final class PimdirStorage {
             // its provisional handle, and a pending create of an item another
             // collection already holds on the same source is a membership
             // addition rather than a second upload. Naming where it comes
-            // from is what lets the push adapter tell the two apart.
+            // from is what lets the push adapter tell the two apart. A card's
+            // holder still counts while a move's removal waits there.
+            String object = cursor.isNull(2) ? null : cursor.getString(2);
             JSONObject origin =
-                    originOf(collection, linkId, cursor.isNull(2) ? null : cursor.getString(2));
+                    PimdirSummary.CONTACT.equals(cursor.getString(15))
+                            ? cardOriginOf(collection, linkId, object)
+                            : originOf(collection, linkId, object);
             if (origin != null) {
                 placement.put("origin", origin);
             }
@@ -694,13 +698,174 @@ public final class PimdirStorage {
      */
     private JSONObject originOf(String collection, String linkId, String object)
             throws JSONException {
-        SQLiteDatabase db = store.getReadableDatabase();
-        String stored = collectionOf(collection);
-        Map<String, Object> values =
-                PimdirSql.values("link_id", linkId, "source", sourceOf(collection), "collection", stored);
-        values.put("account", PimdirAccount.accountIdOf(stored) + PimdirAccount.SEPARATOR);
+        Map<String, Object> values = accountWide(collection, linkId);
         values.put("object", object);
-        try (Cursor cursor = PimdirDb.query(db, "BOUND_ELSEWHERE", values)) {
+        return holder("BOUND_ELSEWHERE", values);
+    }
+
+    /**
+     * Where else this source holds the card with the body the create carries,
+     * on its account, or null.
+     *
+     * <p>The canonical origin (pimdir origin_for_link): a holder whose removal
+     * is staged counts, so a move is a membership patch of that member. A
+     * create carrying another body has none: a patch would place the card
+     * without it.
+     */
+    private JSONObject cardOriginOf(String collection, String linkId, String object)
+            throws JSONException {
+        Map<String, Object> values = cardWide(collection, linkId);
+        values.put("object", object);
+        return holder("CARD_BOUND_ELSEWHERE", values);
+    }
+
+    /**
+     * Where else on its account a card lives, and which books it is leaving.
+     *
+     * <p>{@code live} when another collection holds it, staged creates
+     * included, {@code staying} those collections; {@code held} when this
+     * source binds it in one of those; {@code bound} when it binds it anywhere
+     * else, a staged removal included; {@code leaving} the collections it
+     * binds it in under a staged removal, {@code pending} those only staging
+     * it. What plans a membership change on an account-level backend.
+     */
+    public JSONObject cardElsewhere(String engineCollection, String linkId)
+            throws JSONException {
+        boolean held = false;
+        boolean bound = false;
+        JSONArray staying = new JSONArray();
+        JSONArray leaving = new JSONArray();
+        JSONArray pending = new JSONArray();
+        SQLiteDatabase db = store.getReadableDatabase();
+        try (Cursor cursor =
+                PimdirDb.query(db, "CARD_ELSEWHERE", cardWide(engineCollection, linkId))) {
+            while (cursor.moveToNext()) {
+                String collection = cursor.getString(0);
+                boolean removed = cursor.getInt(1) == 1;
+                boolean based = cursor.getInt(2) == 1;
+                held |= !removed && based;
+                bound |= based;
+                if (!removed) {
+                    staying.put(collection);
+                }
+                if (removed && based) {
+                    leaving.put(collection);
+                } else if (!removed && !based) {
+                    pending.put(collection);
+                }
+            }
+        }
+
+        JSONObject elsewhere = new JSONObject();
+        elsewhere.put("live", staying.length() > 0);
+        elsewhere.put("held", held);
+        elsewhere.put("bound", bound);
+        elsewhere.put("staying", staying);
+        elsewhere.put("leaving", leaving);
+        elsewhere.put("pending", pending);
+        return elsewhere;
+    }
+
+    /**
+     * A collection's pending creates holding a body: the link id and body
+     * hash of each ({@code card_pending}).
+     */
+    public List<String[]> pendingCreates(String engineCollection) {
+        List<String[]> pending = new ArrayList<>();
+        Map<String, Object> values =
+                PimdirSql.values(
+                        "collection", collectionOf(engineCollection),
+                        "source", sourceOf(engineCollection));
+        try (Cursor cursor =
+                PimdirDb.query(store.getReadableDatabase(), "CARD_PENDING", values)) {
+            while (cursor.moveToNext()) {
+                pending.add(new String[] {cursor.getString(0), cursor.getString(1)});
+            }
+        }
+        return pending;
+    }
+
+    /**
+     * Whether a pending create of a card has an origin: the same source binds
+     * the card elsewhere on its account with the body it carries.
+     */
+    public boolean hasCardOrigin(String engineCollection, String linkId, String object)
+            throws JSONException {
+        return cardOriginOf(engineCollection, linkId, object) != null;
+    }
+
+    /**
+     * The tick copies of cards this source binds in a collection: the
+     * collection and link id of each placement elsewhere on the account that
+     * only stages a card under the body agreed here ({@code card_copies}).
+     */
+    public List<String[]> cardCopies(String engineCollection) {
+        List<String[]> copies = new ArrayList<>();
+        Map<String, Object> values =
+                PimdirSql.values(
+                        "collection", collectionOf(engineCollection),
+                        "source", sourceOf(engineCollection));
+        try (Cursor cursor =
+                PimdirDb.query(store.getReadableDatabase(), "CARD_COPIES", values)) {
+            while (cursor.moveToNext()) {
+                copies.add(new String[] {cursor.getString(0), cursor.getString(1)});
+            }
+        }
+        return copies;
+    }
+
+    /**
+     * The link ids of a collection's tombstones whose removal is held for an
+     * add superseding them (pimdir STORAGE §15.3), each with the collection
+     * that add goes to.
+     */
+    public Map<String, String> heldRemovals(String collection) {
+        String stored = collectionOf(collection);
+        Map<String, String> held = new LinkedHashMap<>();
+        SQLiteDatabase db = store.getReadableDatabase();
+        PimdirSql.Bound bound =
+                PimdirSql.bind("LIST_SUPERSEDED_PENDING", Map.of("collection", stored));
+        try (Cursor cursor = PimdirDb.query(db, bound)) {
+            while (cursor.moveToNext()) {
+                held.put(cursor.getString(0), null);
+            }
+        }
+        for (String linkId : held.keySet()) {
+            try (Cursor cursor =
+                    PimdirDb.query(
+                            db,
+                            "SUPERSEDING_COLLECTION",
+                            PimdirSql.values("collection", stored, "link_id", linkId))) {
+                held.put(linkId, cursor.moveToFirst() ? cursor.getString(0) : null);
+            }
+        }
+        return held;
+    }
+
+    /** A link id's lookup bindings over its collection's account. */
+    private static Map<String, Object> accountWide(String collection, String linkId) {
+        Map<String, Object> values = cardWide(collection, linkId);
+        values.put(
+                "account",
+                PimdirAccount.accountIdOf(collectionOf(collection)) + PimdirAccount.SEPARATOR);
+        return values;
+    }
+
+    /**
+     * A card's lookup bindings: its collection, link id and source, the
+     * account read from the roster by the statement itself.
+     */
+    private static Map<String, Object> cardWide(String collection, String linkId) {
+        return PimdirSql.values(
+                "link_id", linkId, "source", sourceOf(collection), "collection",
+                collectionOf(collection));
+    }
+
+    /** The first holder a lookup names, as an origin, or null. */
+    private JSONObject holder(String statement, Map<String, Object> values)
+            throws JSONException {
+        SQLiteDatabase db = store.getReadableDatabase();
+        try (Cursor cursor = PimdirDb.query(db, statement, values)) {
             if (!cursor.moveToFirst()) {
                 return null;
             }
@@ -1510,8 +1675,9 @@ public final class PimdirStorage {
     /**
      * The item behind a handle for the push adapter, or null when unknown.
      *
-     * <p>{@code id} is the link id a backend addresses, {@code uri} the
-     * source's handle; they differ only on CardDAV.
+     * <p>{@code id} is the link id the store files the item under, {@code
+     * uri} the source's handle, the name its server knows it by: a card the
+     * phone created keeps its UID while the server names it otherwise.
      */
     public JSONObject loadRow(String engineCollection, String handle) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();

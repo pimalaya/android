@@ -221,6 +221,40 @@ public final class ContactEditor {
     }
 
     /**
+     * Opens the merge of a kept change with the one the staying book holds,
+     * their collisions as choices, in the form conflicts open in.
+     *
+     * <p>Saved as an ordinary edit of that book, which nothing yet holds in
+     * conflict: the book the change came from is left as it was, for the
+     * person to take the contact out of again once settled.
+     */
+    void openKeepConflict(PimdirContacts.KeepCollision collision) {
+        Entry replica = null;
+        for (Entry entry : edit.replicas) {
+            if (entry.book.url().equals(collision.collection())) {
+                replica = entry;
+                break;
+            }
+        }
+        if (replica == null) {
+            host.toast(host.getString(R.string.save_failed));
+            return;
+        }
+
+        ConflictForm resolution = collision.form();
+        edit = new EditSession();
+        edit.book = replica.book;
+        edit.accountEmail = replica.accountEmail;
+        edit.card = replica.card();
+        edit.replicas = new ArrayList<>(java.util.Collections.singletonList(replica));
+        edit.title = replica.displayName();
+
+        form.load(resolution.model(), resolution.alternatives(), resolution.changed());
+        host.show(Panels.CONTACT);
+        host.toast(host.getString(R.string.contact_unsent_merge));
+    }
+
+    /**
      * Starts a new contact in the default book of the account in view.
      *
      * <p>Asks only when there is none ({@link DefaultCollection}). With no

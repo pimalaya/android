@@ -116,18 +116,23 @@ pub struct AccountSnapshot {
     vanished: Vec<String>,
 }
 
-/// Plans one push change as a membership patch, a create or a delete.
+/// Plans one push change as a membership patch, a create, a delete or a
+/// hold.
 ///
 /// On an account-level backend, an add whose body lives on the account and
-/// a removal not deleting the card are patches. A Google create lands in
+/// a removal not deleting the card are patches. An add of a card the account
+/// binds under another body is held: a patch would place it without its
+/// body, a create would make a second card. A Google create lands in
 /// myContacts, so one aimed at another group patches it right after.
 pub fn push_plan(facts: &PushPlanFacts) -> Result<PushPlan, String> {
     let backend = Backend::of(&facts.collection);
+    let account_level = backend.account_level();
 
     let action = match &facts.op {
-        PushOp::Add if facts.origin && backend.account_level() => PushAction::Membership,
+        PushOp::Add if facts.origin && account_level => PushAction::Membership,
+        PushOp::Add if facts.bound && account_level => PushAction::Hold,
         PushOp::Add => PushAction::Create,
-        PushOp::Remove if backend.account_level() && !facts.deleted => PushAction::Membership,
+        PushOp::Remove if account_level && !facts.deleted => PushAction::Membership,
         PushOp::Remove => PushAction::Delete,
         PushOp::Other(op) => return Err(format!("Unknown push op `{op}`")),
     };
@@ -161,8 +166,12 @@ pub struct PushPlanFacts {
     /// Whether a pending create carries an origin (its body lives on
     /// the account already).
     origin: bool,
-    /// Whether a staged removal deletes the card itself.
+    /// Whether a staged removal deletes the card itself: no other
+    /// collection of the account holds it, staged ones included.
     deleted: bool,
+    /// Whether the source already binds the card in another collection of
+    /// the account, a staged removal there included.
+    bound: bool,
 }
 
 /// The operation of a [`PushPlanFacts`] change.
@@ -200,6 +209,9 @@ pub enum PushAction {
     Create,
     /// The card's deletion.
     Delete,
+    /// No call: the create is rejected and stays staged, its card on the
+    /// account under a body it does not carry.
+    Hold,
 }
 
 #[cfg(test)]
@@ -287,14 +299,15 @@ mod tests {
         );
     }
 
-    /// An origin add on an account-level backend patches memberships;
-    /// a Google create aimed outside myContacts patches right after;
-    /// removals patch memberships while other books hold the card.
+    /// An origin add on an account-level backend patches memberships, one
+    /// of a card the account binds under another body is held; a Google
+    /// create aimed outside myContacts patches right after; removals patch
+    /// memberships while other books hold the card.
     #[test]
     fn push_plan_decides_membership_vs_create_and_delete() {
         let origin_add = json!({
             "op": "add", "collection": "jmap://host/b1",
-            "bookId": "b1", "origin": true, "deleted": false,
+            "bookId": "b1", "origin": true, "deleted": false, "bound": false,
         });
         assert_eq!(
             wire(&push_plan(&parse(origin_add)).unwrap())["action"],
@@ -303,7 +316,7 @@ mod tests {
 
         let google_add = json!({
             "op": "add", "collection": "google://a@b/g1",
-            "bookId": "g1", "origin": false, "deleted": false,
+            "bookId": "g1", "origin": false, "deleted": false, "bound": false,
         });
         let plan = wire(&push_plan(&parse(google_add)).unwrap());
         assert_eq!(plan["action"], "create");
@@ -311,7 +324,7 @@ mod tests {
 
         let google_default = json!({
             "op": "add", "collection": "google://a@b/contacts",
-            "bookId": "myContacts", "origin": false, "deleted": false,
+            "bookId": "myContacts", "origin": false, "deleted": false, "bound": false,
         });
         assert!(
             wire(&push_plan(&parse(google_default)).unwrap())
@@ -321,7 +334,7 @@ mod tests {
 
         let carddav_add = json!({
             "op": "add", "collection": "https://dav/b1",
-            "origin": true, "deleted": false,
+            "origin": true, "deleted": false, "bound": false,
         });
         assert_eq!(
             wire(&push_plan(&parse(carddav_add)).unwrap())["action"],
@@ -330,16 +343,42 @@ mod tests {
 
         let membership_remove = json!({
             "op": "remove", "collection": "jmap://host/b1",
-            "bookId": "b1", "origin": false, "deleted": false,
+            "bookId": "b1", "origin": false, "deleted": false, "bound": false,
         });
         assert_eq!(
             wire(&push_plan(&parse(membership_remove)).unwrap())["action"],
             "membership"
         );
 
+        let held_add = json!({
+            "op": "add", "collection": "google://a@b/g1",
+            "bookId": "g1", "origin": false, "deleted": false, "bound": true,
+        });
+        let plan = wire(&push_plan(&parse(held_add)).unwrap());
+        assert_eq!(plan["action"], "hold");
+        assert!(plan.get("postCreateBooks").is_none());
+
+        let carddav_bound_add = json!({
+            "op": "add", "collection": "https://dav/b1",
+            "origin": false, "deleted": false, "bound": true,
+        });
+        assert_eq!(
+            wire(&push_plan(&parse(carddav_bound_add)).unwrap())["action"],
+            "create"
+        );
+
+        let carddav_remove = json!({
+            "op": "remove", "collection": "https://dav/b1",
+            "origin": false, "deleted": false, "bound": false,
+        });
+        assert_eq!(
+            wire(&push_plan(&parse(carddav_remove)).unwrap())["action"],
+            "delete"
+        );
+
         let deleted_remove = json!({
             "op": "remove", "collection": "jmap://host/b1",
-            "bookId": "b1", "origin": false, "deleted": true,
+            "bookId": "b1", "origin": false, "deleted": true, "bound": false,
         });
         assert_eq!(
             wire(&push_plan(&parse(deleted_remove)).unwrap())["action"],

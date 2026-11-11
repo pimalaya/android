@@ -51,3 +51,40 @@ A phone pass finding more than half of at least 20 of a book's members deleted o
 - GIVEN a book of 500 contacts mirrored on the phone
 - WHEN the user deletes 3 of them in the Contacts app
 - THEN the next pass deletes the 3 on the server without asking
+
+### Requirement: A card is pushed by its server handle
+Every push of a contact (update, delete, membership change), on every backend, SHALL name the card by the handle its server gave it, never by the store's link id, which on a card created on the phone is the app's UID. A membership add SHALL name the card by the handle of a book that already holds it.
+
+#### Scenario: A label added to a contact created on the phone
+- GIVEN a Google contact created in the app and synced
+- WHEN it is added to another label
+- THEN the request names the person Google created (`people/c...`), and Google takes it
+
+### Requirement: A card moves between books by its memberships
+On an account whose cards live once and belong to several books (Google's labels, JMAP address books), adding a card to a book SHALL be a membership patch of the card the account already holds under the same body (pimdir's origin_for_link, scoped to the account and the contact kind, a tombstoned holder included), and taking it out of a book SHALL be a membership removal while another book still holds it; a delete SHALL only be sent when the card leaves its last book. A move SHALL hold the source's removal until the target's add lands (pimdir STORAGE §15.3 supersession), and an accepted update or patch SHALL take the card out of the books it is leaving, so their tombstones settle rather than revive. A book that took a card SHALL be listed again in the same pass, the patch answering no revision.
+
+#### Scenario: A move to another label
+- GIVEN a Google contact in Contacts
+- WHEN the user moves it to Seed amis
+- THEN one membership patch adds Seed amis and removes Contacts, the person keeps its id, and the next pass sends nothing
+
+#### Scenario: A label unticked
+- GIVEN a Google contact in Contacts and Seed amis
+- WHEN the user unticks Seed amis
+- THEN Seed amis is removed from its memberships and the person stays in Contacts
+
+### Requirement: An add the server cannot take whole is held and reported
+An add whose body differs from every copy the account holds SHALL NOT be sent as a bare membership patch, nor as a second card, nor over the server's copy: it SHALL be held, staged, and reported. At the end of a sync, and again whenever the set changes, a "Not sent yet" dialog SHALL list each held add and each held move removal by contact and book, and the contact's row SHALL carry the diverged marker, reopening that report. The report SHALL be computed from the store when shown, so it survives a restart and drops what was sent.
+
+#### Scenario: A contact edited and moved in one save
+- GIVEN a Google contact in Contacts
+- WHEN the user renames it and moves it to Seed amis in one save, then syncs
+- THEN nothing overwrites Google's copy, the edit stays on the phone, and "Not sent yet" names it
+
+### Requirement: Unticking a book never drops an unsent change silently
+Unticking the book that holds the only copy of a change the server has not got SHALL ask whether to keep it. Keeping a change of a card already sent SHALL merge it three ways against that card's stored base onto what the staying books hold, staged as an edit when clean and opening the conflict form on a collision, nothing written; keeping a change of a card never sent SHALL open the conflict form. Dropping it SHALL leave it in Deleted items.
+
+#### Scenario: Keeping an edit over a remote edit
+- GIVEN a contact whose label copy holds an unsent rename while Google changed its phone number
+- WHEN the user unticks the label and keeps the change
+- THEN the server ends with the rename and Google's phone number

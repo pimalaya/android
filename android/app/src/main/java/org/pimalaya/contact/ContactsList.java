@@ -49,6 +49,9 @@ public final class ContactsList implements SelectionBar.Owner {
     /** The merged rows as the bridge grouped them, unfiltered. */
     private List<Group> groupedContacts = new ArrayList<>();
 
+    /** The contact changes waiting on this phone ({@link UnsentContacts}). */
+    private List<UnsentContacts.Row> unsent = new ArrayList<>();
+
     /** The merged rows, search-filtered and sorted; backs the adapter. */
     private List<Group> sortedContacts = new ArrayList<>();
 
@@ -219,11 +222,13 @@ public final class ContactsList implements SelectionBar.Owner {
                     Map<String, CardFacts.Indexed> read = parts.contacts().facts();
                     Map<String, CardFacts.Indexed> known =
                             read != null ? read : CardFacts.fromBodies(entries);
+                    List<UnsentContacts.Row> waiting = UnsentContacts.rows(parts.pimdir(), host);
                     host.postAlive(
                             () -> {
                                 contacts = entries;
                                 groupedContacts = groups;
                                 facts = known;
+                                unsent = waiting;
                                 render();
                             });
                 });
@@ -529,8 +534,22 @@ public final class ContactsList implements SelectionBar.Owner {
             danger.setImageTintList(
                     android.content.res.ColorStateList.valueOf(
                             host.ui.resolveColor(android.R.attr.colorError)));
+            List<UnsentContacts.Row> waiting = unsentOf(group);
             danger.setVisibility(
-                    group.conflicted() || group.diverged ? View.VISIBLE : View.GONE);
+                    group.conflicted() || group.diverged || !waiting.isEmpty()
+                            ? View.VISIBLE
+                            : View.GONE);
+            // NOTE: a change waiting on the phone says why again from its
+            // marker, the list's only trace of it after the sync's report.
+            if (waiting.isEmpty()) {
+                danger.setOnClickListener(null);
+                danger.setClickable(false);
+                danger.setContentDescription(null);
+            } else {
+                danger.setOnClickListener(
+                        view -> UnsentContacts.show(host, parts.pimdir(), waiting));
+                danger.setContentDescription(host.getString(R.string.contact_unsent_marker));
+            }
 
             // NOTE: a contact only in the hidden local book (attached to no
             // addressbook) shows muted.
@@ -538,6 +557,23 @@ public final class ContactsList implements SelectionBar.Owner {
 
             return row;
         }
+    }
+
+    /**
+     * The changes of a merged contact waiting on this phone, by its cards'
+     * identities: a removal held for a move waits in a book no longer listed.
+     */
+    private List<UnsentContacts.Row> unsentOf(Group group) {
+        List<UnsentContacts.Row> waiting = new ArrayList<>();
+        for (UnsentContacts.Row row : unsent) {
+            for (Entry entry : group.replicas) {
+                if (entry.id.equals(row.linkId())) {
+                    waiting.add(row);
+                    break;
+                }
+            }
+        }
+        return waiting;
     }
 
     /**

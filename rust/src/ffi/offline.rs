@@ -189,9 +189,9 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineAccountSnapshot<'l
 
 /// `Native.offlinePushPlan`: plans one push change.
 ///
-/// A membership patch or a create or delete, plus Google's post-create
-/// membership. Takes `{"op", "collection", "bookId"?, "origin", "deleted"}`,
-/// answers `{"action", "postCreateBooks"?}`.
+/// A membership patch, a create, a delete or a hold, plus Google's
+/// post-create membership. Takes `{"op", "collection", "bookId"?, "origin",
+/// "deleted", "bound"}`, answers `{"action", "postCreateBooks"?}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_offlinePushPlan<'local>(
     mut env: EnvUnowned<'local>,

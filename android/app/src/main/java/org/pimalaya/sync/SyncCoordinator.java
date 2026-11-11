@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +24,7 @@ import org.pimalaya.client.MailSession;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.contact.ContactPhonePass;
+import org.pimalaya.contact.UnsentContacts;
 import org.pimalaya.mail.BodyPlan;
 import org.pimalaya.mail.MailBodies;
 import org.pimalaya.mail.MailEngine;
@@ -245,8 +247,29 @@ public final class SyncCoordinator implements MailSync {
         if (ended) {
             offerParked();
             offerHeld();
+            offerUnsent();
         }
     }
+
+    /**
+     * Says which contact changes the pass could not send, per contact and book
+     * (UnsentContacts), once, and again when they change; the contact's row
+     * marker shows it again.
+     */
+    private void offerUnsent() {
+        List<UnsentContacts.Row> rows = UnsentContacts.rows(pimdir, host);
+        Set<String> keys = new HashSet<>(UnsentContacts.keys(rows));
+        if (keys.equals(unsentOffered)) {
+            return;
+        }
+        unsentOffered = keys;
+        if (!keys.isEmpty()) {
+            UnsentContacts.show(host, pimdir, rows);
+        }
+    }
+
+    /** The waiting changes last shown, so a set shown as it is is not again. */
+    private Set<String> unsentOffered = Set.of();
 
     /**
      * Asks about the rounds a pass parked rather than closed (pimdir SYNC §5):

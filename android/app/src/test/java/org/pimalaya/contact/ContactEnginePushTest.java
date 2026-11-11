@@ -67,8 +67,10 @@ public class ContactEnginePushTest {
             }
         }
 
+        /** A card in the book, {@code d} in the other one too. */
         Card card(String id) {
-            return new Card(id, id, "e-" + id, held.get(id), List.of(bookId));
+            List<String> books = id.equals("d") ? List.of(bookId, "other") : List.of(bookId);
+            return new Card(id, id, "e-" + id, held.get(id), books);
         }
 
         @Override
@@ -216,7 +218,8 @@ public class ContactEnginePushTest {
     }
 
     /**
-     * An account of one book (and one to copy from), synced once: five cards.
+     * An account of one book (and one to copy from), synced once: five cards,
+     * {@code d} in both on an account-level backend.
      *
      * <p>Then two cards created, {@code b} edited, {@code c} deleted here.
      */
@@ -241,6 +244,7 @@ public class ContactEnginePushTest {
                         null,
                         new Account(base, EMAIL, "token"));
         engine.syncBook(book, true);
+        engine.syncBook(book + "other", true);
         server.calls.clear();
 
         PimdirContacts contacts = new PimdirContacts(pimdir);
@@ -337,10 +341,10 @@ public class ContactEnginePushTest {
                 List.of(
                         List.of(
                                 create("n1", vcard("n1", "New one")),
-                                books("a", "uid-a", List.of("b1"), List.of()),
-                                update("b", "uid-b", vcard("b", "B edited"), vcard("b", "B")),
-                                destroy("c", "uid-c"),
-                                books("d", "uid-d", List.of(), List.of("b1")),
+                                books("a", "a", List.of("b1"), List.of()),
+                                update("b", "b", vcard("b", "B edited"), vcard("b", "B")),
+                                destroy("c", "c"),
+                                books("d", "d", List.of(), List.of("b1")),
                                 update("n2", "n2", vcard("n2", "New two"), null))),
                 server.batches);
 
@@ -359,11 +363,11 @@ public class ContactEnginePushTest {
         assertEquals(
                 List.of(
                         "createCard " + book + " n1 " + quoted("n1", "New one"),
-                        "updateCardBooks uid-a +[b1] -[]",
+                        "updateCardBooks a +[b1] -[]",
                         "updateCard " + book + " uid-b b e-b " + quoted("b", "B edited") + " "
                                 + quoted("b", "B"),
                         "deleteCard " + book + " uid-c c e-c",
-                        "updateCardBooks uid-d +[] -[b1]"),
+                        "updateCardBooks d +[] -[b1]"),
                 server.calls);
     }
 
@@ -388,9 +392,9 @@ public class ContactEnginePushTest {
                         List.of(
                                 create("n1", vcard("n1", "New one")),
                                 create("a", vcard("a", "A")),
-                                update("b", "uid-b", vcard("b", "B edited"), vcard("b", "B")),
-                                destroy("c", "uid-c"),
-                                destroy("d", "uid-d"),
+                                update("b", "b", vcard("b", "B edited"), vcard("b", "B")),
+                                destroy("c", "c"),
+                                destroy("d", "d"),
                                 update("n2", "n2", vcard("n2", "New two"), null))),
                 server.batches);
 
@@ -437,15 +441,15 @@ public class ContactEnginePushTest {
                 round(book));
         assertEquals(
                 List.of(
-                        "updateCardBooks uid-a +[friends] -[]",
+                        "updateCardBooks a +[friends] -[]",
                         "updateCard " + book + " uid-b b e-b " + quoted("b", "B edited") + " "
                                 + quoted("b", "B"),
-                        "updateCardBooks uid-d +[] -[friends]",
+                        "updateCardBooks d +[] -[friends]",
                         "updateCard " + book + " n2 n2 null " + quoted("n2", "New two")
                                 + " null",
                         "createCards 1",
                         "updateCardBooks g1 +[friends] -[]",
-                        "deleteCards [uid-c]"),
+                        "deleteCards [c]"),
                 server.calls);
 
         server.calls.clear();
@@ -464,11 +468,11 @@ public class ContactEnginePushTest {
                 List.of(
                         "createCard " + book + " n1 " + quoted("n1", "New one"),
                         "updateCardBooks srv-n1 +[friends] -[]",
-                        "updateCardBooks uid-a +[friends] -[]",
+                        "updateCardBooks a +[friends] -[]",
                         "updateCard " + book + " uid-b b e-b " + quoted("b", "B edited") + " "
                                 + quoted("b", "B"),
                         "deleteCard " + book + " uid-c c e-c",
-                        "updateCardBooks uid-d +[] -[friends]"),
+                        "updateCardBooks d +[] -[friends]"),
                 server.calls);
     }
 }

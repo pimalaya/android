@@ -490,6 +490,16 @@
     <string name="sync_held_delete">Supprimer sur le serveur</string>
     <string name="sync_held_restore">Les remettre</string>
     <string name="sync_held_later">Plus tard</string>
+    <string name="sync_unsent_title">Pas encore envoyés</string>
+    <string name="sync_unsent_body">Ces modifications de contacts restent sur ce téléphone jusqu\'à ce qu\'elles puissent partir.</string>
+    <string name="sync_unsent_add">%1$s, dans %2$s (%3$s) : porte une modification que le serveur n\'a pas, donc attend</string>
+    <string name="sync_unsent_move">%1$s, quittant %2$s (%3$s) : attend que son déplacement vers %4$s soit envoyé</string>
+    <string name="contact_unsent_marker">Pas encore envoyé, voir pourquoi</string>
+    <string name="contact_unsent_keep_title">Garder la modification ?</string>
+    <string name="contact_unsent_keep_message">%1$s contient une modification de %2$s qui n\'a pas été envoyée. Retirer le contact de ce carnet la supprime, et elle ne reste que dans les éléments supprimés.</string>
+    <string name="contact_unsent_keep">Garder la modification</string>
+    <string name="contact_unsent_drop">L\'abandonner</string>
+    <string name="contact_unsent_merge">Les deux versions ont changé les mêmes champs : choisissez quoi garder et enregistrez, puis retirez à nouveau le contact du carnet</string>
     <string name="conflict_auto_resolved">Conflit résolu automatiquement ; les modifications partent à la prochaine synchronisation</string>
     <string name="contact_diverged_pending">Des champs divergents attendent une revue</string>
     <string name="sync_busy">Attendez la fin de la synchronisation</string>
