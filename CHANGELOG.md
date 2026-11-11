@@ -99,6 +99,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed contacts on Google and JMAP accounts being deleted from the server when unticked from one of their address books, and replaced by a new contact when moved to another: a move now changes the contact's labels or address books only, keeping it, and a contact created on the phone can be added to a Google label (it failed with HTTP 400). A change the server cannot take whole is held and listed in a "Not sent yet" dialog after the sync, its contact marked in the list, and unticking the address book holding the only copy of an unsent change asks whether to keep it, merging it with the server's copy or opening the conflict form.
+- Fixed a Gmail message deleted from the inbox leaving the trash on the next sync and coming back on the sync after without its body: it now stays in the trash, its body kept, and the sync that moves it binds it there.
+- Fixed ticking a task in the Tasks list right after the sync that filed it, or after a rename synced, failing with "unknown handle" until the task was opened: the Tasks list now refreshes whenever the calendars sync, as the agenda does, and can be pulled down to sync them like the agenda.
 - Fixed a message sent from a Gmail account showing twice in Sent after the next sync when it was sent seconds after being written: Gmail dates its copy when it sends it, which kept the phone's own copy from being recognised as the same message.
 - Fixed the *New message* button flashing on the mail tab right after connecting an account: it stays away until the first sync has run.
 - Fixed the sign-in page staying on its loader after leaving the browser's consent page without consenting: back in the app, Continue is offered again.
