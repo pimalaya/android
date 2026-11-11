@@ -23,7 +23,9 @@ Drafts to paste into the consoles. Google's are in English, as the review is. Br
 
 **`https://mail.google.com/`**
 
-Pimalaya is an open-source mail, contacts and calendar client for Android (https://github.com/pimalaya/android). Users read, search, compose, send, label, move, archive and delete their Gmail messages in the app. The scope is needed for two reasons no narrower scope covers: the app connects over IMAP and SMTP, which accept only this scope, and it permanently deletes messages when the user empties Trash or deletes a message from Trash (Gmail API `users.messages.delete`), which `gmail.modify` does not permit. This is the "email client that allows users to compose, send, read, and process email via a user interface" use case of the Gmail API policy.
+Updated 2026-11-11 (drop-google-imap): the submitted text also named IMAP and SMTP, which the app no longer offers for Google; paste this one into the Data Access page.
+
+Pimalaya is an open-source mail, contacts and calendar client for Android (https://github.com/pimalaya/android). Users read, search, compose, send, label, move, archive and delete their Gmail messages in the app, over the Gmail API alone. The scope is needed for one reason no narrower scope covers: the app permanently deletes messages when the user empties Trash or deletes a message from Trash (Gmail API `users.messages.delete`), which `gmail.modify` does not permit. This is the "email client that allows users to compose, send, read, and process email via a user interface" use case of the Gmail API policy.
 
 **`https://www.googleapis.com/auth/calendar.events`**
 
@@ -41,9 +43,23 @@ Users list, create, complete, edit and delete the tasks of their Google Tasks li
 
 Users list, create, edit and delete their Google contacts (People API), including which labels a contact carries, and may mirror them into the phone's own Contacts app.
 
+**One paragraph per class** (2026-11-11, for the Data Access page's one box per class, each under 1000 characters)
+
+Restricted scopes (609 characters):
+
+```text
+Pimalaya is an open-source mail, contacts and calendar client for Android (https://github.com/pimalaya/android). Users read, search, compose, send, label, move, archive and delete their Gmail messages in the app, over the Gmail API alone. The scope is needed for one reason no narrower scope covers: the app permanently deletes messages when the user empties Trash or deletes a message from Trash (Gmail API users.messages.delete), which gmail.modify does not permit. This is the "email client that allows users to compose, send, read, and process email via a user interface" use case of the Gmail API policy.
+```
+
+Sensitive scopes (888 characters):
+
+```text
+Pimalaya syncs the user's Google calendars, tasks and contacts with the app, on the device only. calendar.events: users list, create, edit and delete events, recurring ones and attendees included, in the calendars they own and in those shared with them for writing (calendar.events.owned would leave the shared ones out); the app never creates, renames, deletes or shares a calendar, so the full calendar scope is not requested. calendar.calendarlist.readonly: the app lists the user's calendars so the user picks which to sync, and reads the primary calendar's id to check that the signed-in account is the one entered; it never changes the list. tasks: users list, create, rename, complete and delete their tasks; tasks.readonly would make them read-only. contacts: users list, create, edit and delete their contacts and change their labels; contacts.readonly would make them read-only.
+```
+
 **Security assessment statement** (in the notes field)
 
-Pimalaya has no server. The app runs the OAuth authorization code flow with PKCE on the user's device, calls Google's APIs, IMAP and SMTP directly from the device, and stores the data and the tokens only in the app's private storage, the tokens encrypted with an Android Keystore key. No restricted data and no token is sent to, stored on or processed by any server of ours or of a third party. The source code is public at https://github.com/pimalaya/android. Per the restricted scope verification requirements, the security assessment applies to apps that store or transmit restricted scope data on servers, which this app does not.
+Pimalaya has no server. The app runs the OAuth authorization code flow with PKCE on the user's device, calls Google's APIs directly from the device, and stores the data and the tokens only in the app's private storage, the tokens encrypted with an Android Keystore key. No restricted data and no token is sent to, stored on or processed by any server of ours or of a third party. The source code is public at https://github.com/pimalaya/android. Per the restricted scope verification requirements, the security assessment applies to apps that store or transmit restricted scope data on servers, which this app does not.
 
 ## 3. Google demo video
 
@@ -74,7 +90,7 @@ What Google's checklist (2026-11-10) asks of it: the consent screen with every s
 3. The notice "Pimalaya and your Google data": hold 3 seconds, tap Agree.
 4. In the browser, tap the address bar and scroll the URL to `client_id=803561575535-v7nav2ev8dvv995g3j3mhnoq5423abco`; hold 2 seconds.
 5. Sign in. On the consent screen, hold on the name Pimalaya, then scroll slowly over every permission, expanding any collapsed list, tick every box, tap Continue.
-6. Back in the app, "Which calendars?" lists both calendars (`calendar.calendarlist.readonly`): hold 2 seconds, keep both, go on through "Which addressbooks?" and Finish; let the first sync run.
+6. Back in the app, "Review your settings", Finish; let the first sync run. (Recorded 2026-11-11, 2:01: "Review your domains" comes before the notice, and the calendars show only as "Subscribed calendars: All", so clip 06 opens on the list.)
 
 **02-mail-app.mp4** (phone)
 
@@ -91,6 +107,7 @@ What Google's checklist (2026-11-10) asks of it: the consent screen with every s
 
 **06-calendar-app.mp4** (phone)
 
+0. The account's settings, Subscribed calendars: both calendars listed by name (`calendar.calendarlist.readonly`); hold 2 seconds, back.
 1. New event "Demo meeting", tomorrow at 10:00, save.
 2. Open it, change the title to "Demo meeting, moved" and the time to 11:00, save.
 3. New event "Demo call", tomorrow at 15:00, save. Pull down.
@@ -126,14 +143,11 @@ What Google's checklist (2026-11-10) asks of it: the consent screen with every s
 
 **17-contacts-delete-web.mp4** (Google Contacts): refresh: "Demo Contact 2" is gone.
 
-**18-imap-app.mp4** (phone): IMAP and SMTP, the other reason for `https://mail.google.com/`. Remove the account first, off camera, unless its settings switch mail to IMAP.
+No IMAP clips: the app no longer offers Gmail over IMAP and SMTP (drop-google-imap, 2026-11-11), so `https://mail.google.com/` keeps deleting for good as its one reason, filmed in 02.
 
-1. Add account, the test address, Continue; switch on Mail only.
-2. Tap the sliders icon on the Mail row, pick the IMAP choice, Continue.
-3. The notice, Agree; in the browser, `client_id=` again; the consent screen asks for Gmail; Continue.
-4. The inbox lists over IMAP. Write a new message to another test account, subject "Sent over SMTP", send. Pull down.
+### Recorded (2026-11-11, ~/Videos/pimalaya-oauth-demo/, superseded takes in takes/)
 
-**19-imap-web.mp4** (Gmail): Sent shows "Sent over SMTP".
+Each domain's web proof was filmed in the same clip, on the phone's browser, so the plan's web clips merged into their app clips: 01-signin.mp4 (1:43), 02-mail-app.mp4 (2:10, covers 02 to 05), 06-calendar.mp4 (1:25, covers 06 to 09; the calendar list itself is in 01), 10-tasks.mp4 (1:38, covers 10 to 13, each change confirmed on the web before the next), 14-contacts.mp4 (2:41, covers 14 to 17, the label through Seed amis).
 
 ### Joining
 
@@ -141,7 +155,41 @@ What Google's checklist (2026-11-10) asks of it: the consent screen with every s
 nix-shell -p ffmpeg --run 'sh cairn/changes/oauth-verification/assemble-video.sh <clips folder>'
 ```
 
-It writes demo.mp4 into the clips folder and prints each clip's start time: the timestamps of the reply (§5).
+It writes demo.mp4 into the clips folder, never touching the clips, and prints where each title card and clip starts: the timestamps of the reply (§5). A `NN-name.txt` beside a clip becomes a 4-second title card before it, one with no clip of its name a card in its own place (00-intro.txt). Joined 2026-11-11: 10:01, six cards (intro, then one per part, naming its scope).
+
+### Upload
+
+Unlisted on YouTube. Title: Pimalaya for Android: Google OAuth verification demo. Description (its timestamps are the title cards' starts, which YouTube turns into chapters):
+
+```text
+Demo video for the Google OAuth verification of Pimalaya, an open-source mail, contacts and calendar app for Android.
+
+Google Cloud project: pimalaya-513918 (803561575535)
+OAuth client: 803561575535-v7nav2ev8dvv995g3j3mhnoq5423abco.apps.googleusercontent.com
+App: org.pimalaya, release build 0.2.0, recorded on a phone in English
+
+Scopes shown in use:
+- https://mail.google.com/ : read, reply, label, delete, and delete for good from Trash (purged in Gmail)
+- https://www.googleapis.com/auth/calendar.events : create, edit and delete an event
+- https://www.googleapis.com/auth/calendar.calendarlist.readonly : the calendar list, to pick the calendars to sync
+- https://www.googleapis.com/auth/tasks : create, rename, complete and delete a task
+- https://www.googleapis.com/auth/contacts : create, edit, label and delete a contact
+
+Each change made in the app is then shown in Google's own web app (Gmail, Google Calendar, Google Tasks, Google Contacts), signed in to the same account.
+
+Pimalaya has no server: the app signs in with OAuth and PKCE on the device and talks to Google's APIs directly.
+
+Home page: https://pimalaya.org/
+Privacy policy: https://pimalaya.org/privacy/
+Source code: https://github.com/pimalaya/android
+
+00:00 Intro
+00:04 Sign-in: in-app notice, Google consent screen, client ID, calendar list
+01:51 Gmail
+04:05 Google Calendar
+05:34 Google Tasks
+07:16 Google Contacts
+```
 
 ## 4. Microsoft branding (Entra admin center > App registrations > Pimalaya > Branding & properties)
 
@@ -171,7 +219,7 @@ SCOPES
 
 The app requests exactly the five scopes on the Data Access page. Each backs a feature the app ships today; none is requested for a future feature. Pimalaya is a single mail, contacts and calendar app, not an integration platform.
 
-- https://mail.google.com/ (restricted): the user deletes a message from Trash for good (Gmail API users.messages.delete), which gmail.modify does not permit, and the app's advanced mail setup signs in to IMAP and SMTP over OAuth, which accept only this scope.
+- https://mail.google.com/ (restricted): the user deletes a message from Trash for good (Gmail API users.messages.delete), which gmail.modify does not permit. Since our submission the app reaches Gmail over the Gmail API alone: it no longer offers IMAP and SMTP, which the submitted justification also named, so this is now the scope's one reason.
 - calendar.events: the user lists, creates, edits and deletes events in the calendars they own and in those shared with them for writing; calendar.events.owned would leave the shared ones out. The app never creates, renames, deletes or shares a calendar, so it does not request calendar.
 - calendar.calendarlist.readonly: the app lists the user's calendars so the user picks which to sync, and reads the primary calendar's id to check that the signed-in account is the one entered. It never changes the list.
 - tasks: the user lists, creates, completes, edits and deletes tasks; tasks.readonly would make them read-only.
@@ -179,18 +227,16 @@ The app requests exactly the five scopes on the Data Access page. Each backs a f
 
 DEMO VIDEO
 
-[URL] (unlisted), recorded on the release build, the phone in English:
+[URL] (unlisted, 10:01), recorded on the release build, the phone in English, a title card before each part; every change made in the app is then shown in Google's own web app, on the same phone:
 
-- [mm:ss] the in-app disclosure of the data accessed and its use, accepted with its Agree button before the browser opens;
-- [mm:ss] client_id=803561575535-v7nav2ev8dvv995g3j3mhnoq5423abco in the address bar;
-- [mm:ss] the consent screen naming Pimalaya, every scope listed and expanded;
-- [mm:ss] the calendar list, read to pick the calendars to sync (calendar.calendarlist.readonly);
-- [mm:ss] mail: a message read, a reply sent, a message moved to a label and one deleted, then Gmail on the web showing the reply in Sent, the label and the message in Trash;
-- [mm:ss] mail: that message deleted from Trash for good in the app, then gone from Gmail's Trash on the web (https://mail.google.com/);
-- [mm:ss] calendar: events created, edited and deleted, each change seen in Google Calendar on the web;
-- [mm:ss] tasks: tasks created, edited, completed and deleted, each change seen in Google Tasks on the web;
-- [mm:ss] contacts: contacts created, edited, labelled and deleted, each change seen in Google Contacts on the web;
-- [mm:ss] the advanced mail setup: IMAP and SMTP signing in with the same Google account, the inbox listed and a message sent, seen in Gmail's Sent on the web.
+- 0:18 the in-app disclosure of the data accessed and its use, accepted with its Agree button before the browser opens;
+- 0:23 the consent screen naming Pimalaya, every scope listed, each one's details opened;
+- 0:56 client_id=803561575535-v7nav2ev8dvv995g3j3mhnoq5423abco in the address bar;
+- 1:31 the calendar list, read to pick the calendars to sync (calendar.calendarlist.readonly);
+- 1:55 mail: a message read, a reply sent, a message moved to a label and one deleted, then deleted from Trash for good (2:55); Gmail on the web shows the label, the message purged from its Bin (3:31) and the reply in Sent (https://mail.google.com/);
+- 4:09 calendar: an event created, edited and deleted, each change seen in Google Calendar on the web (calendar.events);
+- 5:38 tasks: a task created, renamed, completed and deleted, each change seen in Google Tasks on the web (tasks);
+- 7:20 contacts: a contact created, edited, given a label and deleted, each change seen in Google Contacts on the web (contacts).
 
 APP ACCESS
 
@@ -216,7 +262,7 @@ A mail client in which users read, compose, send and organize their own mail, th
 
 SECURITY ASSESSMENT
 
-Pimalaya has no server. The app runs the OAuth authorization code flow with PKCE on the user's device, calls Google's APIs, IMAP and SMTP directly from the device, and stores the data and the tokens only in the app's private storage. No restricted scope data and no token is sent to, stored on or processed by any server of ours or of a third party; the source code is public at https://github.com/pimalaya/android. The restricted scope verification requirements apply the security assessment to apps that store or transmit restricted scope data on servers, which this app does not, so we ask you to confirm that no assessment is required.
+Pimalaya has no server. The app runs the OAuth authorization code flow with PKCE on the user's device, calls Google's APIs directly from the device, and stores the data and the tokens only in the app's private storage. No restricted scope data and no token is sent to, stored on or processed by any server of ours or of a third party; the source code is public at https://github.com/pimalaya/android. The restricted scope verification requirements apply the security assessment to apps that store or transmit restricted scope data on servers, which this app does not, so we ask you to confirm that no assessment is required.
 
 Best regards,
 [name]
