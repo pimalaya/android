@@ -5,7 +5,9 @@ import org.json.JSONException;
 import org.pimalaya.calendar.CalendarParts;
 import org.pimalaya.calendar.CalendarStager;
 import org.pimalaya.calendar.EventStore;
+import org.pimalaya.calendar.StaleEdit;
 import org.pimalaya.calendar.Zones;
+import org.pimalaya.client.BodyReplaced;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.EventDraft;
 import org.pimalaya.client.Flags;
@@ -111,14 +113,45 @@ public final class TaskWrites {
      * Applies {@code edit} to a stored to-do.
      *
      * <p>Nothing is staged when the to-do already holds what the edit writes
-     * (pimdir GUIDE §17): the bridge hands its bytes back as they were.
+     * (pimdir GUIDE §17): the bridge hands its bytes back as they were. The
+     * write reaches the to-do by the handle it holds now and names the body
+     * it was read as: one a sync replaced since is refused ({@link
+     * BodyReplaced}), nothing staged, and {@link #merge} goes on with it.
      */
     public void edit(TaskStore.Stored stored, TaskEdit edit) throws JSONException {
-        String written = CalendarClient.writeTask(stored.event.ical(), edit);
-        if (written.equals(stored.event.ical())) {
+        String read = bodyOf(stored);
+        String written = CalendarClient.writeTask(read, edit);
+        if (written.equals(read)) {
             return;
         }
-        stager().mutateEdit(stored.event.collectionId, stored.event.handle, written, null, "");
+        CalendarStager stager = stager();
+        String collection = stored.event.collectionId;
+        stager.mutateEdit(
+                collection,
+                stager.offline.handleFor(collection, stored.event.id),
+                written,
+                null,
+                "",
+                stored.event.object);
+    }
+
+    /**
+     * After {@link #edit} was refused: {@code edit} merged three ways onto the
+     * to-do as the sync left it ({@link StaleEdit}), staged when the merge
+     * asks nothing, else for the entry page's conflict mode; null when the
+     * store holds the to-do no more. Off the main thread.
+     */
+    public StaleEdit merge(TaskStore.Stored stored, TaskEdit edit) throws JSONException {
+        StaleEdit stale =
+                StaleEdit.of(
+                        parts.events(),
+                        stored.event,
+                        stored.calendar,
+                        CalendarClient.writeTask(bodyOf(stored), edit));
+        if (stale != null && stale.clean()) {
+            stale.stage(stager());
+        }
+        return stale;
     }
 
     /**
@@ -129,24 +162,68 @@ public final class TaskWrites {
      * the pair: a load holds the tombstone's delete while the add is a
      * pending create, so a create the server refuses leaves the capture on
      * it. The {@code UID} and the link id stay, the link id being the name
-     * the target's server is asked to file it by.
+     * the target's server is asked to file it by. Refused as {@link #edit}
+     * is when a sync replaced the body it was read as.
      */
     public void moveTo(TaskStore.Stored stored, EventStore.StoredCalendar target, TaskEdit edit)
             throws JSONException {
         refuseUnlessTasks(target);
-        String written = CalendarClient.writeTask(stored.event.ical(), edit);
-        String linkId = stored.event.id;
+        move(stored.event, target, CalendarClient.writeTask(bodyOf(stored), edit));
+    }
+
+    /**
+     * After {@link #moveTo} was refused: the edit merged onto the to-do as
+     * the sync left it, moved when the merge asks nothing, as {@link #merge}
+     * does otherwise.
+     */
+    public StaleEdit mergeMove(
+            TaskStore.Stored stored, EventStore.StoredCalendar target, TaskEdit edit)
+            throws JSONException {
+        refuseUnlessTasks(target);
+        StaleEdit stale =
+                StaleEdit.of(
+                        parts.events(),
+                        stored.event,
+                        stored.calendar,
+                        CalendarClient.writeTask(bodyOf(stored), edit));
+        if (stale != null && stale.clean()) {
+            move(stale.fresh, target, stale.merged());
+        }
+        return stale;
+    }
+
+    /** Moves {@code read} into {@code target} as {@code written}, in one go. */
+    private void move(EventStore.StoredEvent read, EventStore.StoredCalendar target,
+            String written) throws JSONException {
+        String collection = read.collectionId;
+        String linkId = read.id;
         CalendarStager stager = stager();
         stager.offline.atomically(
                 () -> {
+                    // NOTE: an add and a remove name no body they were made
+                    // over, so the move checks its own, in its transaction.
+                    stager.requireHeld(collection, linkId, read.object);
                     stager.mutateAdd(target.id, linkId, written, Flags.none(), null, "");
                     // NOTE: before the remove, both items then being rows: a
                     // source never pushed is withdrawn rather than marked,
                     // and the pair goes with it, there being nothing to hold.
-                    stager.offline.supersede(
-                            stored.event.collectionId, stored.event.id, target.id, linkId);
-                    stager.mutateRemove(stored.event.collectionId, stored.event.handle);
+                    stager.offline.supersede(collection, linkId, target.id, linkId);
+                    stager.mutateRemove(collection, stager.offline.handleFor(collection, linkId));
                 });
+    }
+
+    /**
+     * The body {@code stored} was read as; refused ({@link BodyReplaced})
+     * when the store holds it no more, a list row a sync replaced the body
+     * of since it was loaded.
+     */
+    private static String bodyOf(TaskStore.Stored stored) {
+        String read = stored.event.ical();
+        if (read.isEmpty() && stored.event.object != null) {
+            throw new BodyReplaced(
+                    "The task " + stored.event.id + " no longer holds " + stored.event.object);
+        }
+        return read;
     }
 
     /**
@@ -162,9 +239,13 @@ public final class TaskWrites {
     /**
      * Deletes a stored to-do: a tombstone the next sync pushes, the item
      * restorable from Deleted items until a purge.
+     *
+     * <p>By the handle it holds now, refused as {@link #edit} is when a sync
+     * replaced the body it was read as: the person deletes what they saw.
      */
     public void remove(TaskStore.Stored stored) throws JSONException {
-        stager().mutateRemove(stored.event.collectionId, stored.event.handle);
+        stager().mutateRemoveOver(
+                stored.event.collectionId, stored.event.id, stored.event.object);
     }
 
     private CalendarStager stager() {

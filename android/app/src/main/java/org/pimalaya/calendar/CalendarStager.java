@@ -2,11 +2,13 @@ package org.pimalaya.calendar;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.client.BodyReplaced;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.Derived;
 import org.pimalaya.client.Flags;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirItems;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.Stager;
 
@@ -29,8 +31,8 @@ public final class CalendarStager extends Stager {
      */
     @Override
     public void mutateResolve(String collection, String handle, String body,
-            JSONObject summary, String sortKey, java.util.List<String> resolves)
-            throws JSONException {
+            JSONObject summary, String sortKey, java.util.List<String> resolves,
+            String ifMatch) throws JSONException {
         Derived derived = summary == null ? CalendarSummaries.of(body) : null;
         super.mutateResolve(
                 collection,
@@ -38,7 +40,8 @@ public final class CalendarStager extends Stager {
                 body,
                 derived == null ? summary : derived.summary(),
                 derived == null ? sortKey : derived.sortKey(),
-                resolves);
+                resolves,
+                ifMatch);
     }
 
     /** Stages a create, as {@link #mutateResolve} derives its summary. */
@@ -59,6 +62,39 @@ public final class CalendarStager extends Stager {
                 flags,
                 derived == null ? summary : derived.summary(),
                 derived == null ? sortKey : derived.sortKey());
+    }
+
+    /**
+     * Stages the removal of the entry {@code linkId} by the handle it holds
+     * now, refused as an edit is ({@link BodyReplaced}) when it no longer
+     * holds {@code object}, the body it was read as; null checks nothing.
+     */
+    public void mutateRemoveOver(String collection, String linkId, String object)
+            throws JSONException {
+        offline.atomically(
+                () -> {
+                    requireHeld(collection, linkId, object);
+                    mutateRemove(collection, offline.handleFor(collection, linkId));
+                });
+    }
+
+    /**
+     * Refuses ({@link BodyReplaced}) when the entry {@code linkId} no longer
+     * holds {@code object}; null checks nothing.
+     *
+     * <p>For a write the engine takes no {@code if_match} on (a removal, a
+     * move's add): called in the transaction that stages it.
+     */
+    public void requireHeld(String collection, String linkId, String object) {
+        if (object == null) {
+            return;
+        }
+        PimdirItems items = new PimdirItems(pimdir);
+        String held = items.objectOf(items.readable(), collection, linkId);
+        if (!object.equals(held)) {
+            throw new BodyReplaced(
+                    "The entry " + linkId + " was read as " + object + " and holds " + held);
+        }
     }
 
     @Override

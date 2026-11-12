@@ -13,6 +13,8 @@ import android.widget.TextView;
 
 import org.pimalaya.R;
 import org.pimalaya.calendar.EventStore;
+import org.pimalaya.calendar.StaleEdit;
+import org.pimalaya.client.BodyReplaced;
 import org.pimalaya.client.DateEdit;
 import org.pimalaya.client.EventTimeKind;
 import org.pimalaya.client.Task;
@@ -67,6 +69,11 @@ final class TaskBatch {
         void run(TaskStore.Stored stored) throws Exception;
     }
 
+    /** The edit a batch makes of one task, read off it. */
+    private interface Edit {
+        TaskEdit of(TaskStore.Stored stored);
+    }
+
     private final Host host;
     private final TasksList list;
     private final TaskWrites writes;
@@ -75,6 +82,44 @@ final class TaskBatch {
         this.host = host;
         this.list = list;
         this.writes = writes;
+    }
+
+    /**
+     * Writes {@code edit}; on a task a sync changed meanwhile, merged onto it
+     * as the sync left it ({@link TaskWrites#merge}), refused as changed
+     * ({@link BodyReplaced}) when the merge asks something.
+     */
+    private Write merging(Edit edit) {
+        return stored -> {
+            TaskEdit wanted = edit.of(stored);
+            try {
+                writes.edit(stored, wanted);
+            } catch (BodyReplaced replaced) {
+                StaleEdit stale = writes.merge(stored, wanted);
+                if (stale == null || !stale.clean()) {
+                    throw replaced;
+                }
+            }
+        };
+    }
+
+    /**
+     * Writes {@code edit}; on a task a sync changed meanwhile, applied again
+     * to it as the sync left it: completion, which a batch sets whatever the
+     * task held.
+     */
+    private Write reapplying(Edit edit) {
+        return stored -> {
+            try {
+                writes.edit(stored, edit.of(stored));
+            } catch (BodyReplaced replaced) {
+                TaskStore.Stored fresh = list.store().reread(stored);
+                if (fresh == null) {
+                    throw replaced;
+                }
+                writes.edit(fresh, edit.of(fresh));
+            }
+        };
     }
 
     /**
@@ -212,19 +257,23 @@ final class TaskBatch {
                             String state = on;
                             each(
                                     tasks,
-                                    stored -> {
-                                        TaskEdit edit = TaskEdit.at(TaskWrites.now());
-                                        String moved = stateAfter(stored.task, state, cleared);
-                                        if (moved != null) {
-                                            edit = edit.withList(moved);
-                                        }
-                                        List<String> own = stored.task.categories();
-                                        List<String> merged = merged(own, ticked, blank);
-                                        if (!merged.equals(own)) {
-                                            edit = edit.withCategories(String.join(",", merged));
-                                        }
-                                        writes.edit(stored, edit);
-                                    });
+                                    merging(
+                                            stored -> {
+                                                TaskEdit edit = TaskEdit.at(TaskWrites.now());
+                                                String moved =
+                                                        stateAfter(stored.task, state, cleared);
+                                                if (moved != null) {
+                                                    edit = edit.withList(moved);
+                                                }
+                                                List<String> own = stored.task.categories();
+                                                List<String> merged = merged(own, ticked, blank);
+                                                if (!merged.equals(own)) {
+                                                    edit =
+                                                            edit.withCategories(
+                                                                    String.join(",", merged));
+                                                }
+                                                return edit;
+                                            }));
                         })
                 .show();
     }
@@ -243,9 +292,8 @@ final class TaskBatch {
                 picked ->
                         each(
                                 tasks,
-                                stored ->
-                                        writes.edit(
-                                                stored,
+                                reapplying(
+                                        stored ->
                                                 TaskPage.withStatus(
                                                         TaskEdit.at(TaskWrites.now()),
                                                         STATES[picked],
@@ -260,9 +308,8 @@ final class TaskBatch {
                 day ->
                         each(
                                 tasks,
-                                stored ->
-                                        writes.edit(
-                                                stored,
+                                merging(
+                                        stored ->
                                                 TaskEdit.at(TaskWrites.now())
                                                         .withDue(
                                                                 new DateEdit(
@@ -282,9 +329,17 @@ final class TaskBatch {
                         each(
                                 tasks,
                                 stored -> {
-                                    if (!stored.calendar.id.equals(target.id)) {
-                                        writes.moveTo(
-                                                stored, target, TaskEdit.at(TaskWrites.now()));
+                                    if (stored.calendar.id.equals(target.id)) {
+                                        return;
+                                    }
+                                    TaskEdit edit = TaskEdit.at(TaskWrites.now());
+                                    try {
+                                        writes.moveTo(stored, target, edit);
+                                    } catch (BodyReplaced replaced) {
+                                        StaleEdit stale = writes.mergeMove(stored, target, edit);
+                                        if (stale == null || !stale.clean()) {
+                                            throw replaced;
+                                        }
                                     }
                                 }));
     }
@@ -359,14 +414,21 @@ final class TaskBatch {
     /**
      * Runs {@code write} on each task in turn off the main thread, then
      * reports the first refusal, ends the selection and reloads.
+     *
+     * <p>A task a sync changed meanwhile that the write leaves ({@link
+     * BodyReplaced}) stays as the sync left it, and the batch says so.
      */
     private void each(List<TaskStore.Stored> tasks, Write write) {
         host.io.execute(
                 () -> {
                     Exception first = null;
+                    int changed = 0;
                     for (TaskStore.Stored stored : tasks) {
                         try {
                             write.run(stored);
+                        } catch (BodyReplaced replaced) {
+                            Log.i("pimalaya", "task batch left a changed task: " + stored.event.id);
+                            changed++;
                         } catch (Exception error) {
                             Log.w("pimalaya", "task batch write failed: " + stored.event.id, error);
                             if (first == null) {
@@ -375,10 +437,13 @@ final class TaskBatch {
                         }
                     }
                     Exception outcome = first;
+                    boolean left = changed > 0;
                     host.postAlive(
                             () -> {
                                 if (outcome != null) {
                                     host.showError(outcome, R.string.task_save_failed);
+                                } else if (left) {
+                                    host.toast(host.getString(R.string.task_batch_changed));
                                 }
                                 list.exitSelection();
                                 list.reload();

@@ -14,6 +14,8 @@ import android.widget.ScrollView;
 import org.pimalaya.R;
 import org.pimalaya.calendar.CalendarParts;
 import org.pimalaya.calendar.EventStore;
+import org.pimalaya.calendar.StaleEdit;
+import org.pimalaya.client.BodyReplaced;
 import org.pimalaya.client.DateEdit;
 import org.pimalaya.client.EventTimeKind;
 import org.pimalaya.client.Task;
@@ -43,6 +45,15 @@ import java.util.function.BiConsumer;
  * not show survives (the bridge patches the object, never rebuilds it).
  */
 public final class TaskPage {
+    /**
+     * Opens the entry page on a task write a sync made stale whose merge asks
+     * something, going back to {@code back}, {@code then} run once it is
+     * saved (null for nothing).
+     */
+    public interface Conflicted {
+        void open(StaleEdit stale, int back, Runnable then);
+    }
+
     /** The GTD lists a task can move to, none being a next action. */
     private static final String[] LISTS = {
         Task.NEXT, Task.INBOX, Task.WAITING, Task.SOMEDAY,
@@ -97,6 +108,9 @@ public final class TaskPage {
     /** Opens a mail by its collection and link id. */
     private final BiConsumer<String, String> openMail;
 
+    /** Opens the entry page on a stale save's collision, going back as told. */
+    private final Conflicted conflicted;
+
     /** The task on the page, null while a new one is written. */
     private TaskStore.Stored opened;
 
@@ -122,13 +136,22 @@ public final class TaskPage {
     /** The empty fields an add button revealed since the page opened. */
     private final Set<String> revealed = new HashSet<>();
 
-    /** The page over {@code list}'s load; {@code openMail} opens a source. */
+    /**
+     * The page over {@code list}'s load; {@code openMail} opens a source,
+     * {@code conflicted} the entry page on a save a sync made stale whose
+     * merge asks something, going back to the panel given.
+     */
     public TaskPage(
-            Host host, CalendarParts parts, TasksList list, BiConsumer<String, String> openMail) {
+            Host host,
+            CalendarParts parts,
+            TasksList list,
+            BiConsumer<String, String> openMail,
+            Conflicted conflicted) {
         this.host = host;
         this.list = list;
         this.writes = new TaskWrites(parts);
         this.openMail = openMail;
+        this.conflicted = conflicted;
         this.sections = new Sections(host, (LinearLayout) host.findViewById(R.id.task_page));
     }
 
@@ -206,14 +229,29 @@ public final class TaskPage {
         status = statusOf(task);
         listed = task.list();
         categories = new ArrayList<>(task.categories());
-        parent = task.parent() == null ? "" : task.parent();
-        due = task.due() == null ? "" : task.due().time().substring(0, 8);
-        priority = task.priority() == 0 ? "" : String.valueOf(task.priority());
+        parent = parentOf(task);
+        due = dueOf(task);
+        priority = priorityOf(task);
         contactName = task.contactName();
         contactAddress = task.contactAddress();
         revealed.clear();
         render();
         host.show(Panels.TASK);
+    }
+
+    /** A task's parent {@code UID} as the page holds it, empty for none. */
+    private static String parentOf(Task task) {
+        return task.parent() == null ? "" : task.parent();
+    }
+
+    /** A task's due day as the page holds it, {@code YYYYMMDD} or empty. */
+    private static String dueOf(Task task) {
+        return task.due() == null ? "" : task.due().time().substring(0, 8);
+    }
+
+    /** A task's priority as the page holds it, empty for none. */
+    private static String priorityOf(Task task) {
+        return task.priority() == 0 ? "" : String.valueOf(task.priority());
     }
 
     /** A task's status as the page offers it, none read as not started. */
@@ -794,15 +832,13 @@ public final class TaskPage {
         if (!categories.equals(task.categories())) {
             edit = edit.withCategories(String.join(",", categories));
         }
-        if (!parent.equals(task.parent() == null ? "" : task.parent())) {
+        if (!parent.equals(parentOf(task))) {
             edit = edit.withParent(parent);
         }
-        String openedDue = task.due() == null ? "" : task.due().time().substring(0, 8);
-        if (!due.equals(openedDue)) {
+        if (!due.equals(dueOf(task))) {
             edit = edit.withDue(new DateEdit(due, due.isEmpty() ? null : EventTimeKind.DATE, ""));
         }
-        String openedPriority = task.priority() == 0 ? "" : String.valueOf(task.priority());
-        if (!priority.equals(openedPriority)) {
+        if (!priority.equals(priorityOf(task))) {
             edit = edit.withPriority(priority);
         }
         if (!Objects.equals(contactName, task.contactName())
@@ -812,9 +848,54 @@ public final class TaskPage {
         write(edit);
     }
 
+    /**
+     * Saves {@code edit}; one a sync made stale is merged onto the task as
+     * the sync left it ({@link TaskWrites#merge}), staged when the merge asks
+     * nothing, else asked on the entry page's conflict mode.
+     */
     private void write(TaskEdit edit) {
         TaskStore.Stored stored = opened;
-        run(() -> writes.edit(stored, edit), stored.event.id);
+        host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+        host.io.execute(
+                () -> {
+                    Exception failure = null;
+                    StaleEdit stale = null;
+                    try {
+                        try {
+                            writes.edit(stored, edit);
+                        } catch (BodyReplaced replaced) {
+                            Log.i("pimalaya", "task save made stale: " + stored.event.id);
+                            stale = writes.merge(stored, edit);
+                            if (stale == null) {
+                                throw replaced;
+                            }
+                        }
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "task save failed: " + stored.event.id, error);
+                        failure = error;
+                    }
+                    Exception outcome = failure;
+                    StaleEdit merged = stale;
+                    host.postAlive(
+                            () -> {
+                                host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
+                                if (outcome != null) {
+                                    host.showError(outcome, R.string.task_save_failed);
+                                    return;
+                                }
+                                if (merged != null && !merged.clean()) {
+                                    if (opened == stored) {
+                                        conflicted.open(merged, back, null);
+                                    }
+                                    return;
+                                }
+                                if (merged != null) {
+                                    host.toast(host.getString(R.string.conflict_auto_resolved));
+                                }
+                                list.reload();
+                                host.showBack(back);
+                            });
+                });
     }
 
     /** A write the page waits on: off the main thread, then back on success. */

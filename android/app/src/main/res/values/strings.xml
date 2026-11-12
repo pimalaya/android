@@ -243,6 +243,8 @@
     <string name="contact_unsent_drop">Drop it</string>
     <string name="contact_unsent_merge">Both versions changed the same fields: choose what to keep and save, then take the contact out of the address book again</string>
     <string name="conflict_auto_resolved">Conflict resolved automatically; changes push on the next sync</string>
+    <string name="changed_meanwhile">A sync changed this while it was open: nothing was changed, it now shows as the sync left it. Make your change again</string>
+    <string name="task_batch_changed">A sync changed some of these tasks meanwhile: they stay as the sync left them. Make your change on them again</string>
     <string name="contact_diverged_pending">Diverged fields await review</string>
     <string name="sync_busy">Wait for the sync to finish</string>
     <string name="sync_line_starting">Connecting</string>
@@ -834,6 +836,7 @@
     <string name="event_delete_confirm">Delete this entry?</string>
     <string name="event_delete_selected_confirm">Delete the selected entries? A repeating one goes whole, every occurrence with it.</string>
     <string name="event_delete_conflict_confirm">This entry was also changed elsewhere. Delete it, and the version changed there with it?</string>
+    <string name="event_discard_confirm">Discard your changes? It stays as the sync left it.</string>
     <string name="event_delete_failed">Could not delete the entry</string>
     <string name="event_no_calendar">No calendar to put it in</string>
     <string name="event_read_only">This calendar takes no edits from the app</string>

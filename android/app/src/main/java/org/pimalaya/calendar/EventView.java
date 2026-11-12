@@ -26,6 +26,7 @@ import org.pimalaya.R;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.client.BodyReplaced;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.DateEdit;
 import org.pimalaya.client.EventConflictKind;
@@ -246,6 +247,12 @@ public final class EventView {
 
     private final Sections sections;
 
+    /** The panel the page goes back to: the agenda, else the tasks. */
+    private int back = Panels.CALENDAR;
+
+    /** What a write runs after the agenda's reload, null for nothing. */
+    private Runnable afterWrite;
+
     /** What is open: the row that was tapped, and where it lives. */
     private Occurrence occurrence;
 
@@ -370,6 +377,8 @@ public final class EventView {
 
         String id = uid + ".ics";
         leaveConflict();
+        back = Panels.CALENDAR;
+        afterWrite = null;
         this.targets = targets;
         open(
                 null,
@@ -432,6 +441,8 @@ public final class EventView {
             EventStore.StoredEvent event,
             EventStore.StoredCalendar calendar) {
         leaveConflict();
+        back = Panels.CALENDAR;
+        afterWrite = null;
         if (event.conflicted) {
             openConflict(occurrence, event, calendar);
         } else {
@@ -542,6 +553,75 @@ public final class EventView {
                         event.collectionId, event.id, event.handle, merged.ical(), event.etag),
                 calendar,
                 false);
+    }
+
+    /**
+     * Opens the page in conflict mode on a write a sync made stale whose
+     * merge asks something ({@link StaleEdit}), on {@code at}, going back to
+     * {@code back} and running {@code written} once saved: each collision's
+     * newer side pre-filled, both offered, nothing staged until every one is
+     * reviewed. The save is an ordinary edit made over what the sync left.
+     */
+    public void openStale(StaleEdit stale, Occurrence at, int back, Runnable written) {
+        leaveConflict();
+        this.back = back;
+        this.afterWrite = written;
+        conflict = stale.sides;
+        merge = stale.merge;
+        EventStore.StoredEvent fresh = stale.fresh;
+        open(
+                at,
+                new EventStore.StoredEvent(
+                        fresh.collectionId, fresh.id, fresh.handle, stale.merged(), fresh.etag),
+                stale.calendar,
+                false);
+        host.toast(host.getString(R.string.contact_diverged_pending));
+    }
+
+    /**
+     * Goes on after the store refused a write a sync made stale that no
+     * merge carries (a delete, a split): the page on the entry as the sync
+     * left it, for the person to make the change again.
+     */
+    private void reopen(EventStore.StoredEvent fresh) {
+        Occurrence at = occurrenceIn(fresh.ical(), occurrence);
+        leaveConflict();
+        if (fresh.conflicted) {
+            openConflict(at, fresh, calendar);
+        } else {
+            open(at, fresh, calendar, false);
+        }
+        host.toast(host.getString(R.string.changed_meanwhile));
+    }
+
+    /**
+     * The occurrence of {@code ical} standing for {@code was}, by its {@code
+     * RECURRENCE-ID}, at the time the object gives it now; null for one its
+     * series no longer has, which opens as the series. {@code was} itself on
+     * an entry that does not recur.
+     */
+    private static Occurrence occurrenceIn(String ical, Occurrence was) {
+        if (was == null || was.recurrenceId() == null) {
+            return was;
+        }
+        String id = was.recurrenceId().time();
+        java.time.format.DateTimeFormatter civil =
+                java.time.format.DateTimeFormatter.BASIC_ISO_DATE;
+        java.time.LocalDate day = java.time.LocalDate.parse(id.substring(0, 8), civil);
+        try {
+            for (Occurrence one :
+                    CalendarClient.expandEvent(
+                            ical,
+                            day.minusDays(400).format(civil),
+                            day.plusDays(400).format(civil))) {
+                if (one.recurrenceId() != null && id.equals(one.recurrenceId().time())) {
+                    return one;
+                }
+            }
+        } catch (Exception error) {
+            Log.w("pimalaya", "event expand failed", error);
+        }
+        return null;
     }
 
     /** Leaves conflict mode, before the page opens on anything else. */
@@ -2333,27 +2413,59 @@ public final class EventView {
         host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
         host.io.execute(
                 () -> {
+                    CalendarStager stager = new CalendarStager(parts.pimdir(), parts.clients());
+                    EventWrites writes = new EventWrites(stager);
+                    EventWrites.Save asked =
+                            new EventWrites.Save(
+                                    scope,
+                                    edited,
+                                    uid,
+                                    target,
+                                    collection,
+                                    isNew,
+                                    rewritten,
+                                    settling,
+                                    chosen,
+                                    alarmed);
                     Exception failure = null;
+                    StaleEdit stale = null;
+                    EventStore.StoredEvent fresh = null;
                     try {
-                        new EventWrites(new CalendarStager(parts.pimdir(), parts.clients()))
-                                .save(
-                                        new EventWrites.Save(
-                                                scope,
-                                                edited,
-                                                uid,
+                        try {
+                            writes.save(asked);
+                        } catch (BodyReplaced replaced) {
+                            // NOTE: a sync replaced the body the page read:
+                            // the save merges onto what it left, a split and
+                            // a conflict's save reopening on it instead.
+                            Log.i("pimalaya", "event save made stale: " + target.id);
+                            if (settling != null || isNew || scope == EventScope.FOLLOWING) {
+                                fresh = parts.events().loadEvent(target.collectionId, target.id);
+                                if (fresh == null) {
+                                    throw replaced;
+                                }
+                            } else {
+                                stale =
+                                        StaleEdit.of(
+                                                parts.events(),
                                                 target,
                                                 collection,
-                                                isNew,
-                                                rewritten,
-                                                settling,
-                                                chosen,
-                                                alarmed));
+                                                writes.written(asked));
+                                if (stale == null) {
+                                    throw replaced;
+                                }
+                                if (stale.clean()) {
+                                    stale.stage(stager);
+                                }
+                            }
+                        }
                     } catch (Exception error) {
                         Log.w("pimalaya", "event save failed: " + target.id, error);
                         failure = error;
                     }
 
                     Exception outcome = failure;
+                    StaleEdit merged = stale;
+                    EventStore.StoredEvent left = fresh;
                     host.postAlive(
                             () -> {
                                 host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
@@ -2361,11 +2473,55 @@ public final class EventView {
                                     host.showError(outcome, R.string.event_save_failed);
                                     return;
                                 }
+                                if (left != null) {
+                                    if (event == target) {
+                                        reopen(left);
+                                    }
+                                    return;
+                                }
+                                if (merged != null && !merged.clean()) {
+                                    if (event == target) {
+                                        openStale(
+                                                merged,
+                                                occurrenceIn(merged.merged(), occurrence),
+                                                back,
+                                                afterWrite);
+                                    }
+                                    return;
+                                }
+                                if (merged != null) {
+                                    host.toast(host.getString(R.string.conflict_auto_resolved));
+                                }
                                 creating = false;
-                                list.reload();
-                                host.showBack(Panels.CALENDAR);
+                                written();
                             });
                 });
+    }
+
+    /**
+     * Leaves the page by its back, where it came from; on a write a sync
+     * made stale ({@link #openStale}), whose edit only the page holds, it
+     * asks first.
+     */
+    public void leave() {
+        if (conflict == null || conflict.ifMatch == null) {
+            host.showBack(back);
+            return;
+        }
+        new AlertDialog.Builder(host)
+                .setMessage(R.string.event_discard_confirm)
+                .setPositiveButton(R.string.compose_discard, (dialog, which) -> host.showBack(back))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /** After a write landed: the lists reloaded, back where the page was. */
+    private void written() {
+        list.reload();
+        if (afterWrite != null) {
+            afterWrite.run();
+        }
+        host.showBack(back);
     }
 
     /**
@@ -2459,17 +2615,31 @@ public final class EventView {
         host.io.execute(
                 () -> {
                     Exception failure = null;
+                    EventStore.StoredEvent fresh = null;
                     try {
-                        new EventWrites(new CalendarStager(parts.pimdir(), parts.clients()))
-                                .delete(
-                                        new EventWrites.Delete(
-                                                scope, edit, target, collection, settling, chosen));
+                        try {
+                            new EventWrites(new CalendarStager(parts.pimdir(), parts.clients()))
+                                    .delete(
+                                            new EventWrites.Delete(
+                                                    scope, edit, target, collection, settling,
+                                                    chosen));
+                        } catch (BodyReplaced replaced) {
+                            // NOTE: a delete is not merged: the page shows
+                            // the entry the sync changed, for the person to
+                            // delete again.
+                            Log.i("pimalaya", "event delete made stale: " + target.id);
+                            fresh = parts.events().loadEvent(target.collectionId, target.id);
+                            if (fresh == null) {
+                                throw replaced;
+                            }
+                        }
                     } catch (Exception error) {
                         Log.w("pimalaya", "event delete failed: " + target.id, error);
                         failure = error;
                     }
 
                     Exception outcome = failure;
+                    EventStore.StoredEvent left = fresh;
                     host.postAlive(
                             () -> {
                                 host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
@@ -2477,8 +2647,13 @@ public final class EventView {
                                     host.showError(outcome, R.string.event_delete_failed);
                                     return;
                                 }
-                                list.reload();
-                                host.showBack(Panels.CALENDAR);
+                                if (left != null) {
+                                    if (event == target) {
+                                        reopen(left);
+                                    }
+                                    return;
+                                }
+                                written();
                             });
                 });
     }

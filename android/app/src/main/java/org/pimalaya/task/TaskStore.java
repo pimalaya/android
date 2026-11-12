@@ -108,6 +108,18 @@ public final class TaskStore {
     }
 
     /**
+     * {@code stored} as the store holds it now, null when it holds it no
+     * more: what a page goes on with after a sync replaced the body it read.
+     *
+     * <p>Off the main thread: it reads the body.
+     */
+    public Stored reread(Stored stored) {
+        EventStore.StoredEvent event =
+                parts.events().loadEvent(stored.event.collectionId, stored.event.id);
+        return event == null ? null : read(event, stored.calendar);
+    }
+
+    /**
      * One to-do read the GTD way, null when it does not read as one.
      *
      * <p>What an agenda row opens: the row holds the object already.

@@ -24,6 +24,9 @@ import org.json.JSONObject;
  * @param summary the derived summary, opaque (the pimdir persistence
  *     format), read-only by contract
  * @param sortKey the derived sort key
+ * @param ifMatch the body an edit was made over, its store hash: the edit is
+ *     refused, staging nothing, once another write replaced it (SYNC §7,
+ *     {@link BodyReplaced}); null applies it over whatever is held
  * @param resolves the diverging bodies a resolution was decided over, for an
  *     edit settling a conflict (SYNC §7); null for an ordinary edit, which a
  *     conflict refuses, and for every other op
@@ -42,6 +45,7 @@ public record Mutation(
         String bodyBase64,
         JSONObject summary,
         String sortKey,
+        String ifMatch,
         java.util.List<String> resolves,
         Boolean syncsTarget) {
     /** The operation of a mutation, as the wire tags it. */
@@ -74,25 +78,25 @@ public record Mutation(
     /** A flag set on one placement. */
     public static Mutation setFlags(String handle, Flags flags) {
         return new Mutation(Op.SET_FLAGS, handle, null, null, flags, null, null, null, null, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     /** A removal of one placement. */
     public static Mutation remove(String handle) {
         return new Mutation(Op.REMOVE, handle, null, null, null, null, null, null, null, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     /** A move of one placement into {@code target}. */
     public static Mutation move(String handle, String target, boolean syncsTarget) {
         return new Mutation(Op.MOVE, handle, null, target, null, null, null, null, null, null,
-                null, null, syncsTarget);
+                null, null, null, syncsTarget);
     }
 
     /** A copy of one placement into {@code target}. */
     public static Mutation copy(String handle, String target, boolean syncsTarget) {
         return new Mutation(Op.COPY, handle, null, target, null, null, null, null, null, null,
-                null, null, syncsTarget);
+                null, null, null, syncsTarget);
     }
 
     /**
@@ -111,6 +115,15 @@ public record Mutation(
      */
     public static Mutation edit(String handle, String hash, String body, JSONObject summary,
             String sortKey, java.util.List<String> resolves) {
+        return edit(handle, hash, body, summary, sortKey, resolves, null);
+    }
+
+    /**
+     * A content edit made over the body {@code ifMatch} names, refused once
+     * another write replaced it (SYNC §7); null for none, as above.
+     */
+    public static Mutation edit(String handle, String hash, String body, JSONObject summary,
+            String sortKey, java.util.List<String> resolves, String ifMatch) {
         return new Mutation(
                 Op.EDIT,
                 handle,
@@ -123,6 +136,7 @@ public record Mutation(
                 null,
                 summary,
                 sortKey,
+                ifMatch,
                 resolves == null ? null : java.util.List.copyOf(resolves),
                 null);
     }
@@ -142,6 +156,7 @@ public record Mutation(
                 null,
                 summary,
                 sortKey,
+                null,
                 null,
                 null);
     }
@@ -166,6 +181,7 @@ public record Mutation(
                 summary,
                 sortKey,
                 null,
+                null,
                 null);
     }
 
@@ -185,6 +201,7 @@ public record Mutation(
             // NOTE: an edit changing what the key derives from has to say so,
             // or the item keeps the position its old key gave it.
             mutation.put("sortKey", sortKey);
+            mutation.put("ifMatch", ifMatch);
             // NOTE: an absent key for an ordinary edit, never null nor an
             // empty array, which the bridge reads as a resolution of nothing.
             if (resolves != null) {

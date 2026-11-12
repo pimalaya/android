@@ -295,6 +295,12 @@ public final class EventStore {
         /** The iCalendar text once read, null before. */
         private String ical;
 
+        /**
+         * The store's hash of the body it was read as, the one an edit names
+         * (SYNC §7); null for an entry the store did not hand out.
+         */
+        public final String object;
+
         /** The server's validator, empty when it sent none. */
         final String etag;
 
@@ -302,7 +308,7 @@ public final class EventStore {
         final boolean conflicted;
 
         StoredEvent(String collectionId, String id, String handle, String ical, String etag) {
-            this(collectionId, id, handle, ical, etag, false);
+            this(collectionId, id, handle, ical, null, etag, false);
         }
 
         StoredEvent(
@@ -310,9 +316,10 @@ public final class EventStore {
                 String id,
                 String handle,
                 String ical,
+                String object,
                 String etag,
                 boolean conflicted) {
-            this(collectionId, id, handle, () -> ical, etag, conflicted);
+            this(collectionId, id, handle, () -> ical, object, etag, conflicted);
             this.ical = ical;
         }
 
@@ -325,12 +332,14 @@ public final class EventStore {
                 String id,
                 String handle,
                 java.util.function.Supplier<String> body,
+                String object,
                 String etag,
                 boolean conflicted) {
             this.collectionId = collectionId;
             this.id = id;
             this.handle = handle;
             this.body = body;
+            this.object = object;
             this.etag = etag;
             this.conflicted = conflicted;
         }
@@ -360,6 +369,7 @@ public final class EventStore {
                 id,
                 PimdirStorage.rowHandle(handle, id),
                 () -> items.body(object),
+                object,
                 etag == null ? "" : etag,
                 conflicted);
     }
@@ -377,6 +387,12 @@ public final class EventStore {
     /** Every stored object, conflicted ones marked. */
     public List<StoredEvent> loadEvents() {
         return loadEvents(key -> true);
+    }
+
+    /** One stored object as the store holds it now, null for none. */
+    public StoredEvent loadEvent(String collection, String linkId) {
+        List<StoredEvent> found = loadEvents(key -> key.equals(collection + "\n" + linkId));
+        return found.isEmpty() ? null : found.get(0);
     }
 
     /**
@@ -427,6 +443,7 @@ public final class EventStore {
                                 PimdirStorage.rowHandle(
                                         cursor.isNull(4) ? null : cursor.getString(4), id),
                                 () -> items.body(object),
+                                object,
                                 cursor.isNull(3) ? "" : cursor.getString(3),
                                 conflicted.contains(key)));
             }
@@ -557,6 +574,7 @@ public final class EventStore {
                                 id,
                                 PimdirStorage.rowHandle(cursor.isNull(4) ? null : cursor.getString(4), id),
                                 items.body(cursor.getString(2)),
+                                cursor.getString(2),
                                 cursor.isNull(3) ? "" : cursor.getString(3),
                                 conflicted.contains(cursor.getString(0) + "\n" + id)));
             }
@@ -617,6 +635,13 @@ public final class EventStore {
          */
         final List<String> resolves;
 
+        /**
+         * The body the store held, for sides no store recorded: a write a
+         * sync made stale ({@link StaleEdit}), settled as an ordinary edit
+         * made over it; null for a recorded conflict.
+         */
+        final String ifMatch;
+
         StoredConflict(
                 String collection,
                 String handle,
@@ -625,6 +650,18 @@ public final class EventStore {
                 String local,
                 String remote,
                 List<String> resolves) {
+            this(collection, handle, linkId, base, local, remote, resolves, null);
+        }
+
+        StoredConflict(
+                String collection,
+                String handle,
+                String linkId,
+                String base,
+                String local,
+                String remote,
+                List<String> resolves,
+                String ifMatch) {
             this.collection = collection;
             this.handle = handle;
             this.linkId = linkId;
@@ -632,6 +669,7 @@ public final class EventStore {
             this.local = local;
             this.remote = remote;
             this.resolves = resolves;
+            this.ifMatch = ifMatch;
         }
     }
 

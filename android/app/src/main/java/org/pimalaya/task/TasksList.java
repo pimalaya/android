@@ -13,6 +13,7 @@ import org.pimalaya.R;
 import org.pimalaya.calendar.CalendarParts;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.Zones;
+import org.pimalaya.client.BodyReplaced;
 import org.pimalaya.client.Task;
 import org.pimalaya.client.TaskEdit;
 import org.pimalaya.ui.AvatarSlot;
@@ -560,11 +561,24 @@ public final class TasksList implements SelectionBar.Owner {
         write(stored, TaskEdit.at(TaskWrites.now()).withDone(done));
     }
 
+    /**
+     * Writes {@code edit}, then reloads; one a sync made stale is applied
+     * again to the task as the sync left it, a tick asking nothing a merge
+     * would.
+     */
     private void write(TaskStore.Stored stored, TaskEdit edit) {
         host.io.execute(
                 () -> {
                     try {
-                        writes.edit(stored, edit);
+                        try {
+                            writes.edit(stored, edit);
+                        } catch (BodyReplaced replaced) {
+                            TaskStore.Stored fresh = store().reread(stored);
+                            if (fresh == null) {
+                                throw replaced;
+                            }
+                            writes.edit(fresh, edit);
+                        }
                     } catch (Exception error) {
                         Log.w("pimalaya", "task edit failed: " + stored.event.id, error);
                         host.postAlive(() -> host.showError(error, R.string.task_save_failed));

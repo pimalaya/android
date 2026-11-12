@@ -502,6 +502,8 @@
     <string name="contact_unsent_drop">L\'abandonner</string>
     <string name="contact_unsent_merge">Les deux versions ont changé les mêmes champs : choisissez quoi garder et enregistrez, puis retirez à nouveau le contact du carnet</string>
     <string name="conflict_auto_resolved">Conflit résolu automatiquement ; les modifications partent à la prochaine synchronisation</string>
+    <string name="changed_meanwhile">Une synchronisation l\'a modifié pendant son ouverture : rien n\'a été changé, il s\'affiche tel que la synchronisation l\'a laissé. Refaites votre modification</string>
+    <string name="task_batch_changed">Une synchronisation a modifié certaines de ces tâches entre-temps : elles restent telles qu\'elle les a laissées. Refaites votre modification sur elles</string>
     <string name="contact_diverged_pending">Des champs divergents attendent une revue</string>
     <string name="sync_busy">Attendez la fin de la synchronisation</string>
     <string name="sync_line_starting">Connexion</string>
@@ -766,6 +768,7 @@
     <string name="event_delete_confirm">Supprimer cette entrée ?</string>
     <string name="event_delete_selected_confirm">Supprimer les entrées sélectionnées ? Une entrée qui se répète part entière, avec toutes ses occurrences.</string>
     <string name="event_delete_conflict_confirm">Cette entrée a aussi été modifiée ailleurs. La supprimer, avec la version modifiée là-bas ?</string>
+    <string name="event_discard_confirm">Abandonner vos modifications ? Elle reste telle que la synchronisation l\'a laissée.</string>
     <string name="event_delete_failed">Impossible de supprimer l\'entrée</string>
     <string name="event_no_calendar">Aucun calendrier où la placer</string>
     <string name="event_read_only">Ce calendrier n\'accepte aucune modification depuis l\'application</string>

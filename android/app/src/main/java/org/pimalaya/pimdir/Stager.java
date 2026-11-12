@@ -317,7 +317,18 @@ public abstract class Stager implements OfflineDriver {
      */
     public void mutateEdit(String collection, String handle, String body, JSONObject summary,
             String sortKey) throws JSONException {
-        mutateResolve(collection, handle, body, summary, sortKey, null);
+        mutateResolve(collection, handle, body, summary, sortKey, null, null);
+    }
+
+    /**
+     * Stages an ordinary content edit made over the body {@code ifMatch}
+     * names, the store's hash of what the page read: refused, staging nothing,
+     * once another write replaced it ({@link
+     * org.pimalaya.client.BodyReplaced}, SYNC §7).
+     */
+    public void mutateEdit(String collection, String handle, String body, JSONObject summary,
+            String sortKey, String ifMatch) throws JSONException {
+        mutateResolve(collection, handle, body, summary, sortKey, null, ifMatch);
     }
 
     /**
@@ -328,12 +339,24 @@ public abstract class Stager implements OfflineDriver {
      * the diverging body of each conflict the edit meets, or when it meets
      * none. Null stages an ordinary edit.
      */
-    public void mutateResolve(String collection, String handle, String body,
+    public final void mutateResolve(String collection, String handle, String body,
             JSONObject summary, String sortKey, java.util.List<String> resolves)
             throws JSONException {
+        mutateResolve(collection, handle, body, summary, sortKey, resolves, null);
+    }
+
+    /**
+     * Stages a content edit as {@link #mutateResolve(String, String, String,
+     * JSONObject, String, java.util.List)} does, made over the body {@code
+     * ifMatch} names when not null.
+     */
+    public void mutateResolve(String collection, String handle, String body,
+            JSONObject summary, String sortKey, java.util.List<String> resolves,
+            String ifMatch) throws JSONException {
         mutate(
                 collection,
-                Mutation.edit(handle, PimdirHash.of(body), body, summary, sortKey, resolves));
+                Mutation.edit(
+                        handle, PimdirHash.of(body), body, summary, sortKey, resolves, ifMatch));
     }
 
     /** Stages a local item the remote never saw; the next sync appends it. */

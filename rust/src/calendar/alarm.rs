@@ -115,8 +115,10 @@ pub fn apply(ical: &str, edit: &str) -> Result<String, BridgeError> {
             changed = true;
         }
     }
+    // NOTE: a new alarm is named (RFC 9074 §4), so a three-way merge matches
+    // it by its UID rather than its place: one added on each side keeps both.
     for alarm in edit.alarms.iter().filter(|alarm| alarm.index.is_none()) {
-        component.push_component(built(alarm));
+        component.push_component(built(alarm, &uuid()));
         changed = true;
     }
 
@@ -293,11 +295,28 @@ fn patch(alarm: &mut IcalCst<'static>, wanted: &Alarm) -> bool {
     changed
 }
 
+/// A random UUID (RFC 9562 §5.4, version 4), what RFC 9074 §4 names a new
+/// alarm by.
+fn uuid() -> String {
+    let random: u128 = rand::random();
+    let bits = (random & !(0xF << 76) & !(0x3 << 62)) | (0x4 << 76) | (0x2 << 62);
+    let hex = format!("{bits:032x}");
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    )
+}
+
 /// A new alarm, as RFC 5545 3.6.6 asks of its action: a display one shows
 /// its description, an email one carries a description, a subject and
 /// its recipients.
-fn built(wanted: &Alarm) -> IcalCst<'static> {
+fn built(wanted: &Alarm, uid: &str) -> IcalCst<'static> {
     let mut alarm = IcalCst::empty("VALARM");
+    alarm.push(prop(IcalPropKind::Uid, Vec::new(), plain(uid)));
     let action = match wanted.action.is_empty() {
         true => "DISPLAY",
         false => wanted.action.as_str(),
@@ -474,10 +493,40 @@ mod tests {
 
         assert!(!written.contains("Write the notes"));
         assert!(written.contains(
-            "BEGIN:VALARM\r\nACTION:EMAIL\r\nTRIGGER:-P1D\r\nDESCRIPTION:Tomorrow: Review\r\n\
+            "\r\nACTION:EMAIL\r\nTRIGGER:-P1D\r\nDESCRIPTION:Tomorrow: Review\r\n\
              SUMMARY:Review\r\nATTENDEE:mailto:jane@example.org\r\nEND:VALARM\r\n"
         ));
         assert_eq!(3, alarms(&written).unwrap().len());
+    }
+
+    /// A new alarm is named by a UID of its own (RFC 9074 §4), a random
+    /// UUID: two added in one save at one stamp still differ.
+    #[test]
+    fn each_new_alarm_is_named_by_a_uuid_of_its_own() {
+        let mut read = alarms(EVENT).unwrap();
+        for minutes in [5, 10] {
+            read.push(Alarm {
+                action: "DISPLAY".into(),
+                minutes: Some(minutes),
+                description: "Soon".into(),
+                ..Default::default()
+            });
+        }
+
+        let written = apply(EVENT, &edit(read)).unwrap();
+
+        let uids: Vec<&str> = written
+            .split("\r\n")
+            .filter_map(|line| line.strip_prefix("UID:"))
+            .filter(|uid| *uid != "a")
+            .collect();
+        assert_eq!(2, uids.len(), "{written}");
+        assert_ne!(uids[0], uids[1]);
+        for uid in uids {
+            let groups: Vec<usize> = uid.split('-').map(str::len).collect();
+            assert_eq!(vec![8, 4, 4, 4, 12], groups, "{uid}");
+            assert_eq!(Some('4'), uid.chars().nth(14), "a version 4 UUID: {uid}");
+        }
     }
 
     #[test]

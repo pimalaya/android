@@ -253,7 +253,9 @@ public class EventWritesTest {
                                         EventAlarm.DISPLAY, 15, "Dentist", "", List.of()))));
 
         String ical = stored(id).ical();
-        assertTrue(ical.contains("BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\n"));
+        // NOTE: named, so a merge keeps it beside an alarm added elsewhere.
+        assertTrue(ical.contains("BEGIN:VALARM\r\nUID:"));
+        assertTrue(ical.contains("\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\n"));
     }
 
     @Test

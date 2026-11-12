@@ -850,3 +850,21 @@ The contacts list SHALL read its rows from the store's summaries (STORAGE Annex 
 - GIVEN a card whose note alone says `met at the crag`
 - WHEN `crag` is searched
 - THEN the card is listed
+
+### Requirement: A calendar or task save names what it read
+A save of a calendar entry or a task (its page, a Clarify step, a list tick, a batch action, an occurrence delete, a split, a move to another calendar, a delete) SHALL reach the item by its current handle at write time and SHALL name the body it read (`if_match`, a remove or a move checking it in its own transaction), so a sync that bound or changed the item meanwhile makes the save refused, never applied over it. A refused save SHALL merge three ways (the body read, the body the save would write, the body the sync left): a clean merge is saved, a collision opens the entry page's conflict mode with both values, nothing stored until settled. A batch action SHALL skip and report an item whose merge collides; a task's completion alone is re-applied, last writer winning. Leaving a conflict page with an unsaved edit SHALL ask first. Contacts are not covered yet (change guarded-contact-updates).
+
+#### Scenario: A task page saved after the sync filed it
+- GIVEN a task page open on a task created on the phone
+- WHEN a sync pushes the task and the page is then saved
+- THEN the save lands on the task as Google now names it
+
+#### Scenario: Both sides changed the notes
+- GIVEN a task page open while a sync brings new notes for it
+- WHEN the page saves different notes
+- THEN the conflict page offers both notes and nothing is stored until the user picks
+
+#### Scenario: Each side added a category
+- GIVEN an event page adding "work" while a sync adds "home"
+- WHEN the page saves
+- THEN the event carries both categories, saved without asking

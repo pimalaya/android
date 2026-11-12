@@ -2,6 +2,7 @@ package org.pimalaya.client;
 
 import java.util.List;
 import org.json.JSONArray;
+import org.json.JSONObject;
 
 /**
  * The io-pimdir engine verbs of the bridge (rs/ffi/offline.rs).
@@ -72,9 +73,20 @@ public class OfflineClient {
                                 driver, collection, new JSONArray(handles).toString(), content)));
     }
 
-    /** Stages a local mutation; storage yields only, the remote untouched. */
+    /**
+     * Stages a local mutation; storage yields only, the remote untouched.
+     *
+     * @throws BodyReplaced when an edit names a body the item no longer holds
+     */
     public void mutate(OfflineDriver driver, String collection, Mutation mutation) {
-        Replies.object(Native.offlineMutate(driver, collection, mutation.toJson().toString()));
+        String reply = Native.offlineMutate(driver, collection, mutation.toJson().toString());
+        if (Replies.failed(reply)) {
+            JSONObject failure = Replies.read(reply);
+            if (BodyReplaced.CODE.equals(failure.optString("refused"))) {
+                throw new BodyReplaced(failure.optString("error"));
+            }
+        }
+        Replies.object(reply);
     }
 
     /**

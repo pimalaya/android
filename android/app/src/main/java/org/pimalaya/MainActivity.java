@@ -34,6 +34,7 @@ import org.pimalaya.calendar.CalendarList;
 import org.pimalaya.calendar.CalendarParts;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.EventView;
+import org.pimalaya.calendar.StaleEdit;
 import org.pimalaya.client.Clients;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.ContactEditor;
@@ -302,8 +303,8 @@ public class MainActivity extends Host
         // NOTE: the task screens open a source mail in the reader, built
         // below, so they read its field late.
         tasksList = new TasksList(this, calendarParts, this::syncCalendars);
-        taskPage = new TaskPage(this, calendarParts, tasksList, this::openMailAt);
-        clarify = new Clarify(this, calendarParts, tasksList, this::openMailAt);
+        taskPage = new TaskPage(this, calendarParts, tasksList, this::openMailAt, this::openStale);
+        clarify = new Clarify(this, calendarParts, tasksList, this::openMailAt, this::openStale);
         review = new WeeklyReview(this, tasksList, () -> showInstant(Panels.CALENDAR));
         capture = new CaptureSheet(this, calendarParts, this::tasksChanged);
         taskWrites = new TaskWrites(calendarParts);
@@ -577,6 +578,24 @@ public class MainActivity extends Host
     private void tasksChanged() {
         tasksList.reload();
         CaptureWidget.refresh(this);
+    }
+
+    /**
+     * Opens the entry page on a task write a sync made stale whose merge asks
+     * something, going back to {@code back}; once it is saved, the Tasks list
+     * reloads and {@code then} runs, when not null.
+     */
+    private void openStale(StaleEdit stale, int back, Runnable then) {
+        eventView.openStale(
+                stale,
+                null,
+                back,
+                () -> {
+                    tasksList.reload();
+                    if (then != null) {
+                        then.run();
+                    }
+                });
     }
 
     /** Opens the mail filed under a collection and link id in the reader. */
@@ -2315,8 +2334,8 @@ public class MainActivity extends Host
                     }
                 };
         entry.fab = () -> eventView.save();
-        entry.barBack = () -> showBack(Panels.CALENDAR);
-        entry.systemBack = () -> showBack(Panels.CALENDAR);
+        entry.barBack = () -> eventView.leave();
+        entry.systemBack = () -> eventView.leave();
         screens.put(Panels.EVENT_VIEW, entry);
 
         Screen contact = new Screen();

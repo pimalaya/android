@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use io_pimdir::{
     change::{PimdirChange, PimdirChangeKind, PimdirDropReason, PimdirWriteOp},
     collection::{PimdirCheckpoint, PimdirCursor, PimdirScope},
-    mutate::{PimdirMutateReport, PimdirMutation},
+    mutate::{PimdirMutateError, PimdirMutateReport, PimdirMutation},
     object::{PimdirHash, PimdirObject},
     placement::{
         PimdirBase, PimdirFlags, PimdirHandle, PimdirLevel, PimdirLinkId, PimdirOrigin,
@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize, Serializer, ser::Error as _};
 use serde_json::to_value;
 
 use crate::{
+    error::BridgeError,
     mail::{base64, unbase64},
     offline::summary::SummaryJson,
 };
@@ -1310,6 +1311,43 @@ impl From<&PimdirMutateReport> for MutateReportJson {
         Self {
             overruled: overruled(&report.events),
         }
+    }
+}
+
+/// A mutation's failure on the JSON wire (engine to Java only): the
+/// bridge's `{"error", "status"?}`, and the engine's refusal code when the
+/// engine refused it, which Java branches on rather than the message.
+#[derive(Debug, Serialize)]
+pub struct MutateFailureJson {
+    #[serde(flatten)]
+    pub error: BridgeError,
+    /// io-pimdir's stable code for the refusal (`body-replaced`...), absent
+    /// for a failure of the driver or the wire.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refused: Option<&'static str>,
+}
+
+impl From<&PimdirMutateError> for MutateFailureJson {
+    fn from(err: &PimdirMutateError) -> Self {
+        Self {
+            error: err.to_string().into(),
+            refused: Some(err.code()),
+        }
+    }
+}
+
+impl From<BridgeError> for MutateFailureJson {
+    fn from(error: BridgeError) -> Self {
+        Self {
+            error,
+            refused: None,
+        }
+    }
+}
+
+impl From<String> for MutateFailureJson {
+    fn from(message: String) -> Self {
+        BridgeError::from(message).into()
     }
 }
 

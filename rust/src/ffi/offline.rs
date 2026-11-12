@@ -121,7 +121,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
 /// `Native.offlineMutate`: stages a local mutation, the remote untouched.
 ///
 /// The mutation is a JSON object, e.g. `{"op": "edit", "handle", "hash",
-/// "size", "body", "summary"}`. Answers `{"overruled"}`.
+/// "size", "body", "summary"}`. Answers `{"overruled"}`, or `{"error",
+/// "refused"?}`, `refused` the engine's code when it refused the mutation.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_offlineMutate<'local>(
     mut env: EnvUnowned<'local>,
@@ -137,7 +138,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineMutate<'local>(
         let json = match Driver::new(JniHost::offline(env, &driver)).mutate(&collection, &mutation)
         {
             Ok(report) => to_string(&report).unwrap_or_else(|err| error_json(err.to_string())),
-            Err(err) => error_json(err),
+            Err(failure) => to_string(&failure).unwrap_or_else(|err| error_json(err.to_string())),
         };
 
         Ok(env.new_string(json)?.into())

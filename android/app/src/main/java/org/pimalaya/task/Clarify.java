@@ -9,8 +9,11 @@ import android.widget.TextView;
 import org.pimalaya.R;
 import org.pimalaya.calendar.CalendarParts;
 import org.pimalaya.calendar.EventStore;
+import org.pimalaya.calendar.StaleEdit;
+import org.pimalaya.client.BodyReplaced;
 import org.pimalaya.client.DateEdit;
 import org.pimalaya.client.EventTimeKind;
+import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.Task;
 import org.pimalaya.client.TaskEdit;
 import org.pimalaya.ui.Host;
@@ -47,6 +50,9 @@ public final class Clarify {
     private final Sections sections;
     private final BiConsumer<String, String> openMail;
 
+    /** Opens the entry page on a stale write's collision, back as told. */
+    private final TaskPage.Conflicted conflicted;
+
     /** The items left to clarify, the shown one first. */
     private final List<TaskStore.Stored> queue = new ArrayList<>();
 
@@ -57,13 +63,22 @@ public final class Clarify {
     private Step step;
     private Clarification answer;
 
-    /** The flow over {@code list}'s Inbox; {@code openMail} opens a source. */
+    /**
+     * The flow over {@code list}'s Inbox; {@code openMail} opens a source,
+     * {@code conflicted} the entry page on a write a sync made stale whose
+     * merge asks something, going back to the panel given.
+     */
     public Clarify(
-            Host host, CalendarParts parts, TasksList list, BiConsumer<String, String> openMail) {
+            Host host,
+            CalendarParts parts,
+            TasksList list,
+            BiConsumer<String, String> openMail,
+            TaskPage.Conflicted conflicted) {
         this.host = host;
         this.list = list;
         this.writes = new TaskWrites(parts);
         this.openMail = openMail;
+        this.conflicted = conflicted;
         this.sections = new Sections(host, (LinearLayout) host.findViewById(R.id.clarify_page));
     }
 
@@ -392,45 +407,82 @@ public final class Clarify {
         next();
     }
 
-    /** Writes what the answers decide, then moves to the next item. */
+    /**
+     * Writes what the answers decide, then moves to the next item.
+     *
+     * <p>A write a sync made stale is merged onto the item as the sync left
+     * it, moving on when the merge asks nothing, else opening the entry page
+     * on what it asks (the item stays in the Inbox meanwhile); a delete stays
+     * on the item as the sync left it, to be decided again.
+     */
     private void apply() {
         TaskStore.Stored item = queue.get(0);
         Clarification decided = answer;
         String now = TaskWrites.now();
         host.io.execute(
                 () -> {
+                    StaleEdit stale;
                     try {
-                        write(item, decided, now);
+                        stale = write(item, decided, now);
+                    } catch (BodyReplaced replaced) {
+                        Log.i("pimalaya", "clarify delete made stale: " + item.event.id);
+                        TaskStore.Stored fresh = list.store().reread(item);
+                        host.postAlive(
+                                () -> {
+                                    if (fresh == null || queue.isEmpty() || queue.get(0) != item) {
+                                        host.showError(replaced, R.string.task_save_failed);
+                                        return;
+                                    }
+                                    queue.set(0, fresh);
+                                    begin();
+                                    host.toast(host.getString(R.string.changed_meanwhile));
+                                });
+                        return;
                     } catch (Exception error) {
                         Log.w("pimalaya", "clarify failed: " + item.event.id, error);
                         host.postAlive(() -> host.showError(error, R.string.task_save_failed));
                         return;
                     }
+                    EventStore.StoredCalendar into = movedTo(item, decided);
                     host.postAlive(
                             () -> {
+                                if (stale != null && !stale.clean()) {
+                                    // NOTE: the move waits for what the page
+                                    // settles, then files the item as asked.
+                                    conflicted.open(
+                                            stale,
+                                            Panels.TASKS,
+                                            into == null ? null : () -> moveSettled(item, into));
+                                    return;
+                                }
+                                if (stale != null) {
+                                    host.toast(host.getString(R.string.conflict_auto_resolved));
+                                }
                                 queue.remove(0);
                                 next();
                             });
                 });
     }
 
-    /** The write a clarification makes; off the main thread. */
-    private void write(TaskStore.Stored item, Clarification decided, String now) throws Exception {
+    /**
+     * The write a clarification makes; off the main thread. Null when it
+     * staged as decided, else the merge a sync made it ({@link #written}).
+     */
+    private StaleEdit write(TaskStore.Stored item, Clarification decided, String now)
+            throws Exception {
         if (decided.kept == Clarification.Kept.DELETED) {
             writes.remove(item);
-            return;
+            return null;
         }
         TaskEdit edit = TaskEdit.at(now);
         if (!decided.title.equals(item.task.summary())) {
             edit = edit.withText(decided.title, null);
         }
         if (decided.kept == Clarification.Kept.SOMEDAY) {
-            writes.edit(item, edit.withList(Task.SOMEDAY));
-            return;
+            return written(item, edit.withList(Task.SOMEDAY), null);
         }
         if (Boolean.TRUE.equals(decided.twoMinutes)) {
-            writes.edit(item, edit.withList(Task.NEXT).withDone(true));
-            return;
+            return written(item, edit.withList(Task.NEXT).withDone(true), null);
         }
         if (Boolean.TRUE.equals(decided.delegated)) {
             String who = decided.delegateTo == null ? "" : decided.delegateTo;
@@ -439,8 +491,7 @@ public final class Clarify {
                 boolean address = who.contains("@") && !who.contains(" ");
                 edit = edit.withContact(address ? "" : who, address ? who : "");
             }
-            writes.edit(item, edit);
-            return;
+            return written(item, edit, null);
         }
 
         edit =
@@ -450,10 +501,75 @@ public final class Clarify {
         if (!decided.due.isEmpty()) {
             edit = edit.withDue(new DateEdit(decided.due, EventTimeKind.DATE, ""));
         }
-        if (decided.target.id.equals(item.calendar.id)) {
-            writes.edit(item, edit);
-        } else {
-            writes.moveTo(item, decided.target, edit);
+        return written(item, edit, movedTo(item, decided));
+    }
+
+    /**
+     * The calendar a clarification files {@code item} in when not its own,
+     * a next action's alone; null otherwise.
+     */
+    private static EventStore.StoredCalendar movedTo(
+            TaskStore.Stored item, Clarification decided) {
+        boolean next =
+                decided.kept == null
+                        && !Boolean.TRUE.equals(decided.twoMinutes)
+                        && !Boolean.TRUE.equals(decided.delegated);
+        return next && !decided.target.id.equals(item.calendar.id) ? decided.target : null;
+    }
+
+    /**
+     * Files {@code item} in {@code into} once the entry page settled what a
+     * sync made its move ask: the to-do as the store holds it now, moved as
+     * {@link TaskWrites#moveTo} moves; a refusal is said, the item staying.
+     */
+    private void moveSettled(TaskStore.Stored item, EventStore.StoredCalendar into) {
+        host.io.execute(
+                () -> {
+                    Exception failure = null;
+                    try {
+                        TaskStore.Stored settled = list.store().reread(item);
+                        if (settled == null) {
+                            throw new PimalayaException("The task " + item.event.id + " is gone");
+                        }
+                        writes.moveTo(settled, into, TaskEdit.at(TaskWrites.now()));
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "clarify move failed: " + item.event.id, error);
+                        failure = error;
+                    }
+                    Exception outcome = failure;
+                    host.postAlive(
+                            () -> {
+                                if (outcome != null) {
+                                    host.showError(outcome, R.string.task_save_failed);
+                                }
+                                list.reload();
+                            });
+                });
+    }
+
+    /**
+     * Stages {@code edit}, moving the item into {@code into} when not null;
+     * one a sync made stale is merged onto the item as the sync left it
+     * ({@link TaskWrites#merge}), the merge handed back.
+     */
+    private StaleEdit written(
+            TaskStore.Stored item, TaskEdit edit, EventStore.StoredCalendar into)
+            throws Exception {
+        try {
+            if (into == null) {
+                writes.edit(item, edit);
+            } else {
+                writes.moveTo(item, into, edit);
+            }
+            return null;
+        } catch (BodyReplaced replaced) {
+            Log.i("pimalaya", "clarify made stale: " + item.event.id);
+            StaleEdit stale =
+                    into == null ? writes.merge(item, edit) : writes.mergeMove(item, into, edit);
+            if (stale == null) {
+                throw new PimalayaException(replaced.getMessage());
+            }
+            return stale;
         }
     }
 

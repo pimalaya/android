@@ -348,3 +348,6 @@ A phone pass finding more than half of at least 20 of a calendar's entries delet
 - GIVEN a calendar of 20 entries mirrored on the phone
 - WHEN another app deletes all 20
 - THEN the server keeps the 20, and putting them back shows the 20 again in the phone's calendar app
+
+### Requirement: A new alarm carries its own UID
+An alarm added on the phone SHALL carry a UID of its own, a random UUID (RFC 9074), so a merge matches it by identity rather than by position; alarms read without one are kept as they are.

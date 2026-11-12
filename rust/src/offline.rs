@@ -45,9 +45,9 @@ use crate::{
     mail::unbase64,
     offline::wire::{
         ChangeJson, ErrorJson, FetchedJson, ListingJson, LoadSelectionJson, LoadedJson, LookupJson,
-        MutateReportJson, MutationJson, PushedJson, ScopeJson, SnapshotJson, SyncReportJson,
-        TierJson, UpgradeReportJson, VerifiedJson, WriteOpJson, WrittenJson, YieldJson,
-        checkpoint_str, cursor_str,
+        MutateFailureJson, MutateReportJson, MutationJson, PushedJson, ScopeJson, SnapshotJson,
+        SyncReportJson, TierJson, UpgradeReportJson, VerifiedJson, WriteOpJson, WrittenJson,
+        YieldJson, checkpoint_str, cursor_str,
     },
 };
 
@@ -133,17 +133,22 @@ impl<H: Host> Driver<H> {
     }
 
     /// Applies a local mutation to `collection`, never touching the remote.
+    ///
+    /// A refusal of the engine's keeps its code: an edit made over a body
+    /// another write replaced since is `body-replaced` (SYNC §7).
     pub fn mutate(
         &mut self,
         collection: &str,
         mutation: &str,
-    ) -> Result<MutateReportJson, BridgeError> {
+    ) -> Result<MutateReportJson, MutateFailureJson> {
         let mutation: MutationJson =
             from_str(mutation).map_err(|err| format!("Invalid mutation: {err}"))?;
         let syncs_target = mutation.syncs_target();
         let mutation = PimdirMutation::try_from(mutation)?;
         let mutate = PimdirMutate::new(collection, mutation).syncs_target(syncs_target);
-        let report = self.run(mutate)?;
+        let report = self
+            .drive(mutate)?
+            .map_err(|err| MutateFailureJson::from(&err))?;
 
         Ok(MutateReportJson::from(&report))
     }
@@ -254,17 +259,25 @@ impl<H: Host> Driver<H> {
     }
 
     /// Runs an offline coroutine to completion through the Java driver.
-    fn run<C, T, E>(&mut self, mut coroutine: C) -> Result<T, BridgeError>
+    fn run<C, T, E>(&mut self, coroutine: C) -> Result<T, BridgeError>
     where
         C: PimdirCoroutine<Yield = PimdirYield, Return = Result<T, E>>,
         E: Display,
+    {
+        self.drive(coroutine)?.map_err(|err| err.to_string().into())
+    }
+
+    /// Runs an offline coroutine to completion, answering what it returned,
+    /// its own failure included; the driver's or the wire's fails the run.
+    fn drive<C, R>(&mut self, mut coroutine: C) -> Result<R, BridgeError>
+    where
+        C: PimdirCoroutine<Yield = PimdirYield, Return = R>,
     {
         let mut arg: Option<PimdirArg> = None;
 
         loop {
             match coroutine.resume(arg.take()) {
-                PimdirCoroutineState::Complete(Ok(value)) => return Ok(value),
-                PimdirCoroutineState::Complete(Err(err)) => return Err(err.to_string().into()),
+                PimdirCoroutineState::Complete(returned) => return Ok(returned),
                 PimdirCoroutineState::Yielded(yielded) => {
                     let yielded = self.dated.strip(yielded);
                     let reply = self.host.serve(&yield_json(&yielded))?;
@@ -995,5 +1008,62 @@ pub(crate) mod tests {
             edit_over(&edit(r#", "resolves": ["b7", "b9"]"#), binding(), item).unwrap(),
             ["storeObject", "settle", "upsert"],
         );
+    }
+
+    /// A store answering every load with one placement, and nothing else.
+    struct Holding(Value);
+
+    impl crate::client::Host for Holding {
+        fn read(&mut self, _: &str) -> Result<Vec<u8>, crate::error::BridgeError> {
+            unreachable!("a mutation reads no stream")
+        }
+
+        fn write(&mut self, _: &str, _: &[u8]) -> Result<(), crate::error::BridgeError> {
+            unreachable!("a mutation writes no stream")
+        }
+
+        fn begin(&mut self, _: &str) -> bool {
+            unreachable!("a mutation opens no request")
+        }
+
+        fn settle(&mut self, _: &str) {}
+
+        fn reset(&mut self, _: &str) {}
+
+        fn starttls(&mut self, _: &str) -> Result<(), crate::error::BridgeError> {
+            unreachable!("a mutation opens no stream")
+        }
+
+        fn serve(&mut self, request: &str) -> Result<String, crate::error::BridgeError> {
+            let request: Value = from_str(request).unwrap();
+            assert_eq!(request["op"], "load", "a refused edit writes nothing");
+            Ok(serde_json::json!({"placements": [self.0.clone()]}).to_string())
+        }
+    }
+
+    /// An edit naming the body it was made over is refused once another
+    /// write replaced it, the failure keeping io-pimdir's code for Java to
+    /// branch on; a failure of the wire states none.
+    #[test]
+    fn an_edit_over_a_replaced_body_is_refused_with_its_code() {
+        let edit = |read: &str| {
+            format!(
+                r#"{{"op": "edit", "handle": "a.vcf", "hash": "b2", "size": 2,
+                "body": "b2", "ifMatch": "{read}"}}"#
+            )
+        };
+        let mut driver = crate::offline::Driver::new(Holding(card("clean", None)));
+
+        let Err(failure) = driver.mutate("acct/book", &edit("b0")) else {
+            panic!("an edit over a replaced body is refused");
+        };
+        let reply = to_value(&failure).unwrap();
+        assert_eq!(reply["refused"], "body-replaced", "{reply}");
+        assert!(reply["error"].as_str().unwrap().contains("b0"), "{reply}");
+
+        let Err(invalid) = driver.mutate("acct/book", "{}") else {
+            panic!("a mutation of no op is refused");
+        };
+        assert_eq!(to_value(&invalid).unwrap().get("refused"), None);
     }
 }
