@@ -6,7 +6,7 @@ import org.json.JSONObject;
 /**
  * The push change a {@link PushPlan} is planned for.
  *
- * <p>Mirrors rs/contact/sync.rs {@code PushPlanFacts} 158. A null component
+ * <p>Mirrors rs/contact/sync.rs {@code PushPlanFacts} 169. A null component
  * is an absent key.
  *
  * @param op what the change does
@@ -17,6 +17,9 @@ import org.json.JSONObject;
  *     collection of the account holds it, staged ones included
  * @param bound whether the source already binds the card in another
  *     collection of the account, a staged removal there included
+ * @param supersedes whether a pending create supersedes a member of its card
+ *     the source binds with a base in another collection: a move it may
+ *     deliver by moving that member
  */
 public record PushPlanFacts(
         Op op,
@@ -24,8 +27,20 @@ public record PushPlanFacts(
         String bookId,
         boolean origin,
         boolean deleted,
-        boolean bound) {
-    /** The operation of the change (rs/contact/sync.rs {@code PushOp} 180). */
+        boolean bound,
+        boolean supersedes) {
+    /** The facts of a change superseding no member. */
+    public PushPlanFacts(
+            Op op,
+            String collection,
+            String bookId,
+            boolean origin,
+            boolean deleted,
+            boolean bound) {
+        this(op, collection, bookId, origin, deleted, bound, false);
+    }
+
+    /** The operation of the change (rs/contact/sync.rs {@code PushOp} 194). */
     public enum Op {
         /** A pending create. */
         ADD("add"),
@@ -53,6 +68,7 @@ public record PushPlanFacts(
             facts.put("origin", origin);
             facts.put("deleted", deleted);
             facts.put("bound", bound);
+            facts.put("supersedes", supersedes);
             return facts;
         } catch (JSONException error) {
             throw new PimalayaException("Unwritable push plan facts: " + error.getMessage());

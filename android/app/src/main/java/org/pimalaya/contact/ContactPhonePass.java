@@ -1,7 +1,9 @@
 package org.pimalaya.contact;
 
 import android.util.Log;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -28,6 +30,9 @@ public final class ContactPhonePass extends PhonePass {
     /** The report the running sync tallies into; null outside syncs. */
     private ContactEngine.Report tally;
 
+    /** The store's contacts. */
+    private final PimdirContacts contacts;
+
     /** A phone pass over the store and the bridge. */
     public ContactPhonePass(PimdirDb pimdir, Clients clients) {
         this(pimdir, clients, new PhoneRemote(pimdir.context(), pimdir));
@@ -36,6 +41,7 @@ public final class ContactPhonePass extends PhonePass {
     private ContactPhonePass(PimdirDb pimdir, Clients clients, PhoneRemote phone) {
         super(pimdir, clients, phone, PimdirSummary.CONTACT);
         this.phone = phone;
+        this.contacts = new PimdirContacts(pimdir);
     }
 
     /**
@@ -95,6 +101,32 @@ public final class ContactPhonePass extends PhonePass {
         } catch (PimalayaException refused) {
             Log.w("pimalaya", "phone triage refused: " + refused.getMessage());
         }
+    }
+
+    /** Defers what {@link PimdirContacts#withdrawalWaits} holds back. */
+    @Override
+    protected Set<String> deferred(String collection, List<String> handles)
+            throws JSONException {
+        return waiting(offline, contacts, collection, handles);
+    }
+
+    /** The phone deletions of {@code handles} {@link #deferred} leaves. */
+    static Set<String> waiting(
+            PimdirStorage offline,
+            PimdirContacts contacts,
+            String collection,
+            List<String> handles)
+            throws JSONException {
+        String hub = CardStore.serverUrl(collection);
+        Set<String> deferred = new HashSet<>();
+        for (String handle : handles) {
+            JSONObject row = offline.loadRow(collection, handle);
+            if (row != null && contacts.withdrawalWaits(hub, row.getString("id"))) {
+                Log.i("pimalaya", "phone deletion waits for its change: " + handle);
+                deferred.add(handle);
+            }
+        }
+        return deferred;
     }
 
     @Override

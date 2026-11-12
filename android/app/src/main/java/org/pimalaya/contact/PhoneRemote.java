@@ -199,6 +199,27 @@ final class PhoneRemote implements PhoneSpoke {
         return reply;
     }
 
+    /** The handles of the raw contacts deleted on the phone, not erased yet. */
+    @Override
+    public List<String> deleted(String collection) {
+        Account account = requireAccount(CardStore.serverUrl(collection));
+        List<String> handles = new ArrayList<>();
+        try (Cursor cursor =
+                context.getContentResolver()
+                        .query(
+                                rawContactsUri(account),
+                                new String[] {RawContacts.SOURCE_ID},
+                                RawContacts.DELETED + " = 1 AND " + RawContacts.SOURCE_ID
+                                        + " IS NOT NULL AND " + RawContacts.SOURCE_ID + " != ''",
+                                null,
+                                null)) {
+            while (cursor != null && cursor.moveToNext()) {
+                handles.add(cursor.getString(0));
+            }
+        }
+        return handles;
+    }
+
     /** Erases the raw contacts of {@code handles} deleted on the phone. */
     @Override
     public void purge(String collection, List<String> handles) {

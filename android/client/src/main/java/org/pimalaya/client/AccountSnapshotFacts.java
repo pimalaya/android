@@ -8,7 +8,7 @@ import org.json.JSONObject;
 /**
  * The account-wide delta (JMAP, Google) projected onto one book.
  *
- * <p>Mirrors rs/contact/sync.rs {@code AccountSnapshotFacts} 85.
+ * <p>Mirrors rs/contact/sync.rs {@code AccountSnapshotFacts} 92.
  *
  * @param bookId the book to project onto, null (absent) when unknown
  * @param complete whether the delta is a complete listing

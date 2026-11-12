@@ -7,9 +7,10 @@ import org.json.JSONObject;
 /**
  * The facts a 412-rejected push's retry is decided over.
  *
- * <p>Mirrors rs/contact/sync.rs {@code RetryFacts} 36. A null component is
+ * <p>Mirrors rs/contact/sync.rs {@code RetryFacts} 40. A null component is
  * an absent key.
  *
+ * @param collection the collection URL the rejected push targets
  * @param listed the last enumerate's ETag per handle (a null ETag sent as
  *     JSON null); null when nothing was listed
  * @param complete whether the last enumerate listed the whole collection
@@ -17,10 +18,15 @@ import org.json.JSONObject;
  * @param ifMatch the staged base revision the push was guarded with, or null
  */
 public record RetryFacts(
-        Map<String, String> listed, boolean complete, String handle, String ifMatch) {
+        String collection,
+        Map<String, String> listed,
+        boolean complete,
+        String handle,
+        String ifMatch) {
     JSONObject toJson() {
         try {
             JSONObject facts = new JSONObject();
+            facts.put("collection", collection);
             if (listed != null) {
                 JSONObject etags = new JSONObject();
                 for (Map.Entry<String, String> etag : listed.entrySet()) {

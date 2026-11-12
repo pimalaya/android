@@ -33,4 +33,9 @@ public interface PhoneSpoke {
 
     /** Erases the rows of {@code handles} deleted on the phone. */
     void purge(String spoke, List<String> handles) throws JSONException;
+
+    /** The members deleted on the phone and not let go yet. */
+    default List<String> deleted(String spoke) throws JSONException {
+        return List.of();
+    }
 }

@@ -237,23 +237,15 @@ impl<H: Host> Gpeople<'_, H> {
 
     /// Reads the People contact `id`, projected onto a vCard document.
     pub fn read_card(&mut self, id: &str) -> Result<Card, BridgeError> {
-        let auth = HttpAuthBearer::new(self.token);
-        let coroutine = GpeoplePersonGet::new(
-            &auth,
-            &format!("people/{id}"),
-            GPEOPLE_PERSON_VCARD_FIELDS,
-            &[],
-        )
-        .map_err(|err| err.to_string())?;
-
-        Ok(google_card(self.run(coroutine)?))
+        Ok(google_card(self.read_person(&format!("people/{id}"))?))
     }
 
     /// Updates the contact `id`, masked to the fields changed since the
     /// base, else every [`MANAGED_FIELDS`].
     ///
-    /// People requires the current etag, so a missing one is fetched; a
-    /// stale one fails the update (no silent last-write-wins).
+    /// A missing or refused etag reads the person again (People refuses a
+    /// listing's), merged three ways against the base: a field both changed
+    /// apart is a conflict (412), never written over.
     pub fn update_card(
         &mut self,
         id: &str,
@@ -261,17 +253,17 @@ impl<H: Host> Gpeople<'_, H> {
         base_vcard: Option<&str>,
         etag: Option<&str>,
     ) -> Result<Card, BridgeError> {
-        let auth = HttpAuthBearer::new(self.token);
         let resource_name = format!("people/{id}");
 
-        let mut person = GpeoplePerson::from_vcard(vcard)?;
-        person.resource_name = resource_name.clone();
+        let mut edit = GpeoplePerson::from_vcard(vcard)?;
+        edit.resource_name = resource_name.clone();
+        let base = base_vcard.map(GpeoplePerson::from_vcard).transpose()?;
 
-        let fields = match base_vcard {
-            Some(base) => person.changed_fields(&GpeoplePerson::from_vcard(base)?),
+        let changed = match &base {
+            Some(base) => edit.changed_fields(base),
             None => MANAGED_FIELDS.to_vec(),
         };
-        if fields.is_empty() {
+        if changed.is_empty() {
             return Ok(Card {
                 id: id.to_string(),
                 uri: id.to_string(),
@@ -281,69 +273,60 @@ impl<H: Host> Gpeople<'_, H> {
             });
         }
 
-        // NOTE: a masked clientData update replaces the whole list, so
-        // the server's foreign entries are merged in first (the etag
-        // guards the race); the same fetch sources a missing etag.
-        let needs_merge = fields.contains(&GpeoplePersonField::ClientData);
-        if needs_merge || etag.is_none() {
-            let coroutine = GpeoplePersonGet::new(
-                &auth,
-                &resource_name,
-                &[GpeoplePersonField::ClientData],
-                &[],
-            )
-            .map_err(|err| err.to_string())?;
-            let current = self.run(coroutine)?;
+        let mut etag = etag.map(str::to_string);
+        let mut fields = changed.clone();
+        for last in [false, true] {
+            // NOTE: a masked clientData update replaces the whole list, so
+            // the server's foreign entries are merged in first (the etag
+            // guards the race); the same read sources a missing etag.
+            let stash = changed.contains(&GpeoplePersonField::ClientData);
+            let read = match etag.is_none() || stash {
+                true => Some(self.read_person(&resource_name)?),
+                false => None,
+            };
+            if etag.is_none()
+                && let Some(read) = &read
+            {
+                fields = merged_fields(read, &edit, base.as_ref(), &changed)?
+                    .ok_or_else(|| changed_since_base(id))?;
+                if fields.is_empty() {
+                    return Ok(google_card(read.clone()));
+                }
+                etag = Some(read.etag.clone());
+            }
 
-            if needs_merge {
-                let mut merged: Vec<_> = current
+            let mut person = edit.clone();
+            person.etag = etag.clone().unwrap_or_default();
+            if let Some(read) = read
+                && fields.contains(&GpeoplePersonField::ClientData)
+            {
+                let mut kept: Vec<_> = read
                     .client_data
                     .into_iter()
                     .filter(|entry| entry.key.as_deref() != Some(GPEOPLE_PERSON_STASH_KEY))
                     .collect();
-                merged.append(&mut person.client_data);
-                person.client_data = merged;
+                kept.append(&mut person.client_data);
+                person.client_data = kept;
             }
-            person.etag = match etag {
-                Some(etag) => etag.to_string(),
-                None => current.etag,
-            };
-        } else {
-            person.etag = etag.unwrap_or_default().to_string();
+
+            let auth = HttpAuthBearer::new(self.token);
+            let coroutine = GpeopleContactUpdate::new(
+                &auth,
+                &person,
+                &fields,
+                GPEOPLE_PERSON_VCARD_FIELDS,
+                &[],
+            )
+            .map_err(|err| err.to_string())?;
+            match self.run(coroutine) {
+                Ok(updated) => return Ok(google_card(updated)),
+                Err(err) if is_stale_etag(&err) && !last => etag = None,
+                Err(err) if is_stale_etag(&err) => return Err(changed_since_base(id)),
+                Err(err) => return Err(err),
+            }
         }
 
-        let coroutine =
-            GpeopleContactUpdate::new(&auth, &person, &fields, GPEOPLE_PERSON_VCARD_FIELDS, &[])
-                .map_err(|err| err.to_string())?;
-        match self.run(coroutine) {
-            Ok(updated) => Ok(google_card(updated)),
-            // NOTE: updateContact accepts a people.get etag only, not the
-            // connections.list one the engine carries: retry once on a
-            // fresh one, the engine still re-conflicting a changed row.
-            Err(err)
-                if err.status == Some(400) && err.message.to_ascii_lowercase().contains("etag") =>
-            {
-                let coroutine = GpeoplePersonGet::new(
-                    &auth,
-                    &resource_name,
-                    &[GpeoplePersonField::ClientData],
-                    &[],
-                )
-                .map_err(|err| err.to_string())?;
-                person.etag = self.run(coroutine)?.etag;
-
-                let coroutine = GpeopleContactUpdate::new(
-                    &auth,
-                    &person,
-                    &fields,
-                    GPEOPLE_PERSON_VCARD_FIELDS,
-                    &[],
-                )
-                .map_err(|err| err.to_string())?;
-                Ok(google_card(self.run(coroutine)?))
-            }
-            Err(err) => Err(err),
-        }
+        Err(changed_since_base(id))
     }
 
     /// Deletes the People contact `id`.
@@ -560,6 +543,15 @@ impl<H: Host> Gpeople<'_, H> {
         self.try_run(coroutine)
     }
 
+    /// Reads one person, at an etag an update takes.
+    fn read_person(&mut self, resource_name: &str) -> Result<GpeoplePerson, BridgeError> {
+        let auth = HttpAuthBearer::new(self.token);
+        let coroutine =
+            GpeoplePersonGet::new(&auth, resource_name, GPEOPLE_PERSON_VCARD_FIELDS, &[])
+                .map_err(|err| err.to_string())?;
+        self.run(coroutine)
+    }
+
     /// Reads at most [`GOOGLE_BATCH_GET_CHUNK`] persons by resource name,
     /// everything the vCard projection reads.
     fn batch_get(&mut self, names: &[String]) -> Result<Vec<GpeoplePersonResponse>, BridgeError> {
@@ -567,6 +559,47 @@ impl<H: Host> Gpeople<'_, H> {
         let coroutine = GpeoplePersonsBatchGet::new(&auth, names, GPEOPLE_PERSON_VCARD_FIELDS, &[])
             .map_err(|err| err.to_string())?;
         Ok(self.run(coroutine)?.responses)
+    }
+}
+
+/// The fields an update still sends over `held`, [`None`] on a collision.
+fn merged_fields(
+    held: &GpeoplePerson,
+    edit: &GpeoplePerson,
+    base: Option<&GpeoplePerson>,
+    changed: &[GpeoplePersonField],
+) -> Result<Option<Vec<GpeoplePersonField>>, BridgeError> {
+    // NOTE: through the projection, so the metadata People adds reads equal.
+    let held = GpeoplePerson::from_vcard(&held.to_vcard())?;
+    let apart = held.changed_fields(edit);
+    let moved = match base {
+        Some(base) => held.changed_fields(base),
+        None => MANAGED_FIELDS.to_vec(),
+    };
+
+    let mut fields = Vec::new();
+    for field in changed {
+        if !apart.contains(field) {
+            continue;
+        }
+        if moved.contains(field) {
+            return Ok(None);
+        }
+        fields.push(*field);
+    }
+    Ok(Some(fields))
+}
+
+/// Whether People refused an update for its etag.
+fn is_stale_etag(err: &BridgeError) -> bool {
+    err.status == Some(400) && err.message.to_ascii_lowercase().contains("etag")
+}
+
+/// The conflict of an edit of `id` changed apart on People since its base.
+fn changed_since_base(id: &str) -> BridgeError {
+    BridgeError {
+        message: format!("People contact {id} changed since the base of its edit"),
+        status: Some(412),
     }
 }
 
@@ -983,6 +1016,155 @@ mod tests {
             panic!("the read went through");
         };
         assert!(err.message.contains("people/c1"));
+    }
+
+    /// A person as People answers it, with a phone when one is given.
+    fn named(name: &str, phone: Option<&str>) -> Value {
+        let mut person = json!({
+            "resourceName": "people/c1",
+            "names": [{"displayName": name, "unstructuredName": name}],
+        });
+        if let Some(phone) = phone {
+            person["phoneNumbers"] = json!([{"value": phone}]);
+        }
+        person
+    }
+
+    /// The vCard the engine stores of a person People answered.
+    fn vcard_of(person: &Value) -> String {
+        google_card(serde_json::from_value(person.clone()).unwrap()).vcard
+    }
+
+    /// People holding `held` at `e-<n>`, refusing an update of another etag.
+    fn holding(held: Value) -> impl FnMut(&FakeRequest) -> FakeResponse {
+        let mut held = held;
+        let mut revision = 1;
+        move |request| match (request.method.as_str(), request.path.as_str()) {
+            ("GET", "/v1/people/c1") => {
+                held["etag"] = json!(format!("e-{revision}"));
+                FakeResponse::json(200, &held)
+            }
+            ("PATCH", "/v1/people/c1:updateContact") => {
+                let sent: Value = request.json();
+                if sent["etag"] != json!(format!("e-{revision}")) {
+                    return FakeResponse::json(
+                        400,
+                        &json!({"error": {
+                            "code": 400,
+                            "message": "Request person.etag is different than the current person.etag. Clear local cache and get the latest person.",
+                            "status": "FAILED_PRECONDITION",
+                        }}),
+                    );
+                }
+                for field in request.param("updatePersonFields").unwrap().split(',') {
+                    match sent.get(field) {
+                        Some(value) => held[field] = value.clone(),
+                        None => {
+                            held.as_object_mut().unwrap().remove(field);
+                        }
+                    }
+                }
+                revision += 1;
+                held["etag"] = json!(format!("e-{revision}"));
+                FakeResponse::json(200, &held)
+            }
+            other => panic!("unexpected request {other:?}: {}", request.text),
+        }
+    }
+
+    /// The updates a run sent.
+    fn updates(requests: &[FakeRequest]) -> usize {
+        requests
+            .iter()
+            .filter(|request| request.method == "PATCH")
+            .count()
+    }
+
+    /// The edit of `base`, under `etag`, sent to People holding `held`.
+    fn update(
+        held: Value,
+        edit: &Value,
+        base: &Value,
+        etag: Option<&str>,
+    ) -> (Result<Card, BridgeError>, Vec<FakeRequest>) {
+        let mut client = Client::new(FakeServer::new(holding(held)));
+        let updated = Gpeople {
+            client: &mut client,
+            token: "token",
+        }
+        .update_card("c1", &vcard_of(edit), Some(&vcard_of(base)), etag);
+        (updated, client.host.requests)
+    }
+
+    /// A listing's etag refused, the edit goes under the read's.
+    #[test]
+    fn a_listing_etag_is_read_again_and_the_edit_sent_under_it() {
+        let base = named("Jane", None);
+        let (updated, requests) =
+            update(base.clone(), &named("Jane Edit", None), &base, Some("l-1"));
+
+        assert!(updated.unwrap().vcard.contains("FN:Jane Edit"));
+        assert_eq!(updates(&requests), 2);
+    }
+
+    /// An edit made elsewhere of the same field is a conflict, not written.
+    #[test]
+    fn an_edit_made_elsewhere_since_the_base_is_never_written_over() {
+        let (updated, requests) = update(
+            named("Jane Remote", None),
+            &named("Jane Edit", None),
+            &named("Jane", None),
+            Some("l-1"),
+        );
+
+        let Err(err) = updated else {
+            panic!("the edit was written over Jane Remote");
+        };
+        assert_eq!(err.status, Some(412));
+        assert_eq!(updates(&requests), 1);
+    }
+
+    /// With no etag, the read guards the update the same way.
+    #[test]
+    fn an_update_with_no_etag_is_guarded_by_its_read() {
+        let (updated, requests) = update(
+            named("Jane Remote", None),
+            &named("Jane Edit", None),
+            &named("Jane", None),
+            None,
+        );
+
+        let Err(err) = updated else {
+            panic!("the edit was written over Jane Remote");
+        };
+        assert_eq!(err.status, Some(412));
+        assert_eq!(updates(&requests), 0);
+    }
+
+    /// An edit made elsewhere of another field merges.
+    #[test]
+    fn an_edit_elsewhere_of_another_field_merges() {
+        let (updated, requests) = update(
+            named("Jane", Some("+2")),
+            &named("Jane Edit", None),
+            &named("Jane", None),
+            Some("l-1"),
+        );
+
+        let vcard = updated.unwrap().vcard;
+        assert!(vcard.contains("FN:Jane Edit"), "{vcard}");
+        assert!(vcard.contains("+2"), "{vcard}");
+        assert_eq!(updates(&requests), 2);
+    }
+
+    /// A person already holding the edit is not written again.
+    #[test]
+    fn an_edit_the_server_holds_already_is_not_sent_again() {
+        let edit = named("Jane Edit", None);
+        let (updated, requests) = update(edit.clone(), &edit, &named("Jane", None), Some("l-1"));
+
+        assert_eq!(updated.unwrap().etag.as_deref(), Some("e-1"));
+        assert_eq!(updates(&requests), 1);
     }
 
     /// myContacts is the default book, and a user group a book beside it;

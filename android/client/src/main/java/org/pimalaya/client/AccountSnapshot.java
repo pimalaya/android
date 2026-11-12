@@ -6,7 +6,7 @@ import org.json.JSONObject;
 /**
  * An account-wide delta projected onto one book.
  *
- * <p>Mirrors rs/contact/sync.rs {@code AccountSnapshot} 111.
+ * <p>Mirrors rs/contact/sync.rs {@code AccountSnapshot} 121.
  *
  * @param members the book's members, as indexes in the facts' {@code changed}
  * @param vanished the handles gone from the book: the delta's own, then the

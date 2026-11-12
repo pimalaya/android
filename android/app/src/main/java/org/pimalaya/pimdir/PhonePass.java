@@ -10,6 +10,7 @@ import org.pimalaya.client.SyncReport;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -101,6 +102,11 @@ public abstract class PhonePass extends PimdirEngine {
     /** Settles the spoke's conflicts; answers whether to exchange again. */
     protected abstract boolean settle(String spoke) throws JSONException;
 
+    /** The phone deletions left deleted for a later pass; none by default. */
+    protected Set<String> deferred(String spoke, List<String> handles) throws JSONException {
+        return Set.of();
+    }
+
     /** The accepted pushes of one round, for a pass reporting them. */
     protected void pushed(String spoke, JSONArray changes, JSONArray results)
             throws JSONException {}
@@ -131,6 +137,11 @@ public abstract class PhonePass extends PimdirEngine {
         List<String> handles = new ArrayList<>(vanished.length());
         for (int index = 0; index < vanished.length(); index++) {
             handles.add(vanished.getString(index));
+        }
+        Set<String> deferred = deferred(collection, handles);
+        if (!deferred.isEmpty()) {
+            handles.removeAll(deferred);
+            reply.put("vanished", new JSONArray(handles));
         }
         int members = offline.memberCount(collection);
         boolean hold =

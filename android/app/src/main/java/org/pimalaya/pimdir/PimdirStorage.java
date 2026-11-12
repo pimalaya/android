@@ -794,6 +794,84 @@ public final class PimdirStorage {
         return cardOriginOf(engineCollection, linkId, object) != null;
     }
 
+    /** Whether another book stages a pending create's body as its edit. */
+    public boolean cardCarried(String engineCollection, String linkId) {
+        try (Cursor cursor =
+                PimdirDb.query(
+                        store.getReadableDatabase(),
+                        "CARD_CARRIED",
+                        cardWide(engineCollection, linkId))) {
+            return cursor.moveToFirst();
+        }
+    }
+
+    /** The link ids of the pending creates superseding a bound member. */
+    public Set<String> supersedingCreates(String engineCollection) {
+        Set<String> creates = new HashSet<>();
+        PimdirSql.Bound bound =
+                PimdirSql.bind(
+                        "LIST_SUPERSEDED_BINDINGS",
+                        Map.of(
+                                "collection", collectionOf(engineCollection),
+                                "source", sourceOf(engineCollection)));
+        try (Cursor cursor = PimdirDb.query(store.getReadableDatabase(), bound)) {
+            while (cursor.moveToNext()) {
+                creates.add(cursor.getString(0));
+            }
+        }
+        return creates;
+    }
+
+    /** The handles bound here whose card another book stages to create. */
+    public Set<String> awaitedHandles(String engineCollection) {
+        Set<String> handles = new HashSet<>();
+        try (Cursor cursor =
+                PimdirDb.query(
+                        store.getReadableDatabase(),
+                        "CARD_AWAITED",
+                        PimdirSql.values(
+                                "collection", collectionOf(engineCollection),
+                                "source", sourceOf(engineCollection)))) {
+            while (cursor.moveToNext()) {
+                handles.add(cursor.getString(0));
+            }
+        }
+        return handles;
+    }
+
+    /**
+     * A staged removal of a card live elsewhere on its account.
+     *
+     * @param revision the base revision its binding agreed
+     * @param agreed the hashes of the bodies this source agreed for the card
+     *     on the account, its own base included
+     */
+    public record Leaving(String revision, Set<String> agreed) {}
+
+    /** The staged removals of cards live elsewhere on the account. */
+    public Map<String, Leaving> leavingAgreed(String engineCollection) {
+        Map<String, Leaving> leaving = new HashMap<>();
+        try (Cursor cursor =
+                PimdirDb.query(
+                        store.getReadableDatabase(),
+                        "CARD_LEAVING",
+                        PimdirSql.values(
+                                "collection", collectionOf(engineCollection),
+                                "source", sourceOf(engineCollection)))) {
+            while (cursor.moveToNext()) {
+                leaving.computeIfAbsent(
+                                cursor.getString(0),
+                                handle ->
+                                        new Leaving(
+                                                cursor.isNull(1) ? null : cursor.getString(1),
+                                                new HashSet<>()))
+                        .agreed()
+                        .add(cursor.getString(2));
+            }
+        }
+        return leaving;
+    }
+
     /**
      * The tick copies of cards this source binds in a collection: the
      * collection and link id of each placement elsewhere on the account that
@@ -1949,6 +2027,19 @@ public final class PimdirStorage {
                                 "object", object,
                                 "diverging", diverging));
         return agreed == null ? "" : bodyOf(agreed);
+    }
+
+    /** Marks a binding conflicted at a revision, its body left to upgrade. */
+    public void markConflicted(String engineCollection, String handle, String revision) {
+        SQLiteDatabase db = store.getWritableDatabase();
+        String collection = collectionOf(engineCollection);
+        String source = sourceOf(engineCollection);
+        String linkId = linkFor(db, collection, source, handle);
+        if (linkId != null) {
+            Map<String, Object> values = binding(collection, linkId, source);
+            values.put("conflict_revision", revision);
+            PimdirDb.exec(db, "MARK_CONFLICTED", values);
+        }
     }
 
     /**

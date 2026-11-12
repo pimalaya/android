@@ -104,11 +104,12 @@ final class ContactWriter {
      */
     private void saveFanOut(ContactFields model) throws JSONException {
         ContactStager engine = new ContactStager(parts.pimdir(), parts.clients());
-        java.util.Set<String> staged = new java.util.HashSet<>();
+        Map<String, String> first = new HashMap<>();
 
         for (Entry entry : editor.edit().replicas) {
-            // NOTE: an m:n replica appears once per book; stage it once.
-            if (!staged.add(parts.pool().replicaRef(entry))) {
+            // NOTE: an m:n card's placements agreeing with the first take it.
+            String agreed = first.putIfAbsent(parts.pool().replicaRef(entry), entry.object());
+            if (agreed != null && !agreed.equals(entry.object())) {
                 continue;
             }
 

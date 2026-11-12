@@ -15,10 +15,14 @@ use crate::account::Backend;
 
 /// Whether a 412-rejected push may retry unguarded.
 ///
-/// Only when the last enumerate proves the handle unchanged: listed with
-/// the staged ETag, or unlisted by a delta. Some servers (posteo's
-/// SabreDAV) list ETags their If-Match never matches.
+/// Only on CardDAV, when the last enumerate proves the handle unchanged:
+/// listed with the staged ETag, or unlisted by a delta. Some servers
+/// (posteo's SabreDAV) list ETags their If-Match never matches.
 pub fn retry_unguarded(facts: &RetryFacts) -> RetryVerdict {
+    if Backend::of(&facts.collection) != Backend::Carddav {
+        return RetryVerdict { retry: false };
+    }
+
     let retry = match (&facts.listed, &facts.if_match) {
         (Some(listed), Some(if_match)) => match listed.get(&facts.handle) {
             Some(etag) => etag.as_ref() == Some(if_match),
@@ -34,6 +38,8 @@ pub fn retry_unguarded(facts: &RetryFacts) -> RetryVerdict {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RetryFacts {
+    /// The collection URL the rejected push targets.
+    collection: String,
     /// The last enumerate's ETag per handle (null when unknown), absent
     /// when nothing was listed.
     #[serde(default)]
@@ -58,16 +64,17 @@ pub struct RetryVerdict {
 /// Projects an account-wide delta (JMAP, Google) onto one book.
 ///
 /// On an incremental round, a known card that left the book rides as
-/// vanished.
+/// vanished, unless another book stages it as a pending create.
 pub fn account_snapshot(facts: &AccountSnapshotFacts) -> AccountSnapshot {
     let mut members: Vec<usize> = Vec::new();
     let mut vanished = facts.vanished.clone();
 
     for (index, card) in facts.changed.iter().enumerate() {
-        let member = match &facts.book_id {
-            Some(id) => card.books.contains(id),
-            None => false,
-        };
+        let member = card.awaited
+            || match &facts.book_id {
+                Some(id) => card.books.contains(id),
+                None => false,
+            };
 
         if member {
             members.push(index);
@@ -104,6 +111,9 @@ pub struct AccountSnapshotCard {
     books: Vec<String>,
     /// Whether the card is held locally.
     known: bool,
+    /// Whether another book of the account stages the card as a pending create.
+    #[serde(default)]
+    awaited: bool,
 }
 
 /// The decision of [`account_snapshot`].
@@ -116,13 +126,13 @@ pub struct AccountSnapshot {
     vanished: Vec<String>,
 }
 
-/// Plans one push change as a membership patch, a create, a delete or a
-/// hold.
+/// Plans one push change as a membership patch, a move, a create, a delete
+/// or a hold.
 ///
 /// On an account-level backend, an add whose body lives on the account and
 /// a removal not deleting the card are patches. An add of a card the account
-/// binds under another body is held: a patch would place it without its
-/// body, a create would make a second card. A Google create lands in
+/// binds under another body is held, unless a Google move delivers it as a
+/// guarded update of the member it supersedes. A Google create lands in
 /// myContacts, so one aimed at another group patches it right after.
 pub fn push_plan(facts: &PushPlanFacts) -> Result<PushPlan, String> {
     let backend = Backend::of(&facts.collection);
@@ -130,6 +140,7 @@ pub fn push_plan(facts: &PushPlanFacts) -> Result<PushPlan, String> {
 
     let action = match &facts.op {
         PushOp::Add if facts.origin && account_level => PushAction::Membership,
+        PushOp::Add if facts.supersedes && backend == Backend::Google => PushAction::Move,
         PushOp::Add if facts.bound && account_level => PushAction::Hold,
         PushOp::Add => PushAction::Create,
         PushOp::Remove if account_level && !facts.deleted => PushAction::Membership,
@@ -172,6 +183,9 @@ pub struct PushPlanFacts {
     /// Whether the source already binds the card in another collection of
     /// the account, a staged removal there included.
     bound: bool,
+    /// Whether a pending create supersedes a member of its card elsewhere.
+    #[serde(default)]
+    supersedes: bool,
 }
 
 /// The operation of a [`PushPlanFacts`] change.
@@ -205,6 +219,8 @@ pub struct PushPlan {
 pub enum PushAction {
     /// A membership patch on the account-level card.
     Membership,
+    /// A guarded update of the superseded member, then its membership patch.
+    Move,
     /// A genuine create.
     Create,
     /// The card's deletion.
@@ -230,13 +246,16 @@ mod tests {
         to_value(decision).unwrap()
     }
 
+    /// A CardDAV collection.
+    const DAV: &str = "https://dav.example/book/";
+
     /// A listed matching ETag proves the remote unchanged, a listed
     /// mismatch disproves it, and an unlisted handle only counts on an
-    /// incremental round.
+    /// incremental round; off CardDAV, a 412 never retries.
     #[test]
     fn retry_unguarded_reads_the_listing() {
         let listed = json!({
-            "listed": { "a.vcf": "e1" }, "complete": true,
+            "collection": DAV, "listed": { "a.vcf": "e1" }, "complete": true,
             "handle": "a.vcf", "ifMatch": "e1",
         });
         assert_eq!(
@@ -245,31 +264,40 @@ mod tests {
         );
 
         let mismatch = json!({
-            "listed": { "a.vcf": "e2" }, "complete": false,
+            "collection": DAV, "listed": { "a.vcf": "e2" }, "complete": false,
             "handle": "a.vcf", "ifMatch": "e1",
         });
         assert!(!retry_unguarded(&parse(mismatch)).retry);
 
         let unlisted_delta = json!({
-            "listed": {}, "complete": false, "handle": "a.vcf", "ifMatch": "e1",
+            "collection": DAV, "listed": {}, "complete": false, "handle": "a.vcf", "ifMatch": "e1",
         });
         assert!(retry_unguarded(&parse(unlisted_delta)).retry);
 
         let unlisted_complete = json!({
-            "listed": {}, "complete": true, "handle": "a.vcf", "ifMatch": "e1",
+            "collection": DAV, "listed": {}, "complete": true, "handle": "a.vcf", "ifMatch": "e1",
         });
         assert!(!retry_unguarded(&parse(unlisted_complete)).retry);
 
-        let no_listing = json!({ "complete": false, "handle": "a.vcf", "ifMatch": "e1" });
+        let no_listing =
+            json!({ "collection": DAV, "complete": false, "handle": "a.vcf", "ifMatch": "e1" });
         assert!(!retry_unguarded(&parse(no_listing)).retry);
 
-        let no_guard = json!({ "listed": {}, "complete": false, "handle": "a.vcf" });
+        let no_guard =
+            json!({ "collection": DAV, "listed": {}, "complete": false, "handle": "a.vcf" });
         assert!(!retry_unguarded(&parse(no_guard)).retry);
+
+        let google = json!({
+            "collection": "google://jane@example.com/myContacts",
+            "listed": { "c1": "e1" }, "complete": true,
+            "handle": "c1", "ifMatch": "e1",
+        });
+        assert!(!retry_unguarded(&parse(google)).retry);
     }
 
     /// Members of the book are items; on an incremental round a known
     /// card that left the book rides as vanished, an unknown one is
-    /// skipped.
+    /// skipped, and one awaited by a pending create elsewhere stays.
     #[test]
     fn account_snapshot_projects_the_delta() {
         let facts = json!({
@@ -297,12 +325,23 @@ mod tests {
             wire(&account_snapshot(&parse(complete)))["vanished"],
             json!([])
         );
+
+        let awaited = json!({
+            "bookId": "b1",
+            "complete": false,
+            "changed": [{ "handle": "c2", "books": ["b3"], "known": true, "awaited": true }],
+            "vanished": [],
+        });
+        let reply = wire(&account_snapshot(&parse(awaited)));
+        assert_eq!(reply["members"], json!([0]));
+        assert_eq!(reply["vanished"], json!([]));
     }
 
     /// An origin add on an account-level backend patches memberships, one
-    /// of a card the account binds under another body is held; a Google
-    /// create aimed outside myContacts patches right after; removals patch
-    /// memberships while other books hold the card.
+    /// of a card the account binds under another body is held, a move
+    /// carrying one on Google moves its member; a Google create aimed
+    /// outside myContacts patches right after; removals patch memberships
+    /// while other books hold the card.
     #[test]
     fn push_plan_decides_membership_vs_create_and_delete() {
         let origin_add = json!({
@@ -357,6 +396,24 @@ mod tests {
         let plan = wire(&push_plan(&parse(held_add)).unwrap());
         assert_eq!(plan["action"], "hold");
         assert!(plan.get("postCreateBooks").is_none());
+
+        let google_move = json!({
+            "op": "add", "collection": "google://a@b/g1", "bookId": "g1",
+            "origin": false, "deleted": false, "bound": true, "supersedes": true,
+        });
+        assert_eq!(
+            wire(&push_plan(&parse(google_move)).unwrap())["action"],
+            "move"
+        );
+
+        let jmap_move = json!({
+            "op": "add", "collection": "jmap://host/b1", "bookId": "b1",
+            "origin": false, "deleted": false, "bound": true, "supersedes": true,
+        });
+        assert_eq!(
+            wire(&push_plan(&parse(jmap_move)).unwrap())["action"],
+            "hold"
+        );
 
         let carddav_bound_add = json!({
             "op": "add", "collection": "https://dav/b1",

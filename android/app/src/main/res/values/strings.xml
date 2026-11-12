@@ -234,6 +234,7 @@
     <string name="sync_unsent_body">These contact changes stay on this phone until they can be sent.</string>
     <string name="sync_unsent_add">%1$s, in %2$s (%3$s): carries a change the server has not got, so it waits</string>
     <string name="sync_unsent_move">%1$s, leaving %2$s (%3$s): waits for its move to %4$s to be sent</string>
+    <string name="sync_unsent_phone">%1$s, deleted from %2$s (%3$s) on this phone: kept until its change is sent</string>
     <string name="contact_unsent_marker">Not sent yet, show why</string>
     <!-- Asked before an untick drops a change's only copy (ContactWriter). -->
     <string name="contact_unsent_keep_title">Keep the change?</string>

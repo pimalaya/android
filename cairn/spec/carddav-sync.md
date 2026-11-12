@@ -61,7 +61,17 @@ Every push of a contact (update, delete, membership change), on every backend, S
 - THEN the request names the person Google created (`people/c...`), and Google takes it
 
 ### Requirement: A card moves between books by its memberships
-On an account whose cards live once and belong to several books (Google's labels, JMAP address books), adding a card to a book SHALL be a membership patch of the card the account already holds under the same body (pimdir's origin_for_link, scoped to the account and the contact kind, a tombstoned holder included), and taking it out of a book SHALL be a membership removal while another book still holds it; a delete SHALL only be sent when the card leaves its last book. A move SHALL hold the source's removal until the target's add lands (pimdir STORAGE §15.3 supersession), and an accepted update or patch SHALL take the card out of the books it is leaving, so their tombstones settle rather than revive. A book that took a card SHALL be listed again in the same pass, the patch answering no revision.
+On an account whose cards live once and belong to several books (Google's labels, JMAP address books), adding a card to a book SHALL be a membership patch of the card the account already holds under the same body (pimdir's origin_for_link, scoped to the account and the contact kind, a tombstoned holder included), and taking it out of a book SHALL be a membership removal while another book still holds it; a delete SHALL only be sent when the card leaves its last book. A move SHALL hold the source's removal until the target's add lands (pimdir STORAGE §15.3 supersession), and an accepted update or patch SHALL take the card out of the books it is leaving, so their tombstones settle rather than revive. A book that took a card SHALL be listed again in the same pass, the patch answering no revision. A card the account's listing moved out of a book SHALL stay listed there while another book stages its add, so the add is a membership patch, never a second card. A staged removal whose card is listed with a body already agreed on the account (the superseding add's included) SHALL be read at its base revision, not revived; an edit made elsewhere still revives it.
+
+#### Scenario: A tick while the web moved the contact
+- GIVEN a Google contact the web moved from Contacts to a label the phone does not sync
+- WHEN the phone ticks Seed amis on its old copy, then syncs
+- THEN one membership patch adds Seed amis, and no second person is created
+
+#### Scenario: A move landing half
+- GIVEN a move whose edit reached Google but whose membership patch failed
+- WHEN the next pass syncs the source book first
+- THEN the source's removal is not revived, and the move completes
 
 #### Scenario: A move to another label
 - GIVEN a Google contact in Contacts
@@ -74,15 +84,26 @@ On an account whose cards live once and belong to several books (Google's labels
 - THEN Seed amis is removed from its memberships and the person stays in Contacts
 
 ### Requirement: An add the server cannot take whole is held and reported
-An add whose body differs from every copy the account holds SHALL NOT be sent as a bare membership patch, nor as a second card, nor over the server's copy: it SHALL be held, staged, and reported. At the end of a sync, and again whenever the set changes, a "Not sent yet" dialog SHALL list each held add and each held move removal by contact and book, and the contact's row SHALL carry the diverged marker, reopening that report. The report SHALL be computed from the store when shown, so it survives a restart and drops what was sent.
+An add whose body differs from every copy the account holds SHALL NOT be sent as a bare membership patch, nor as a second card, nor over the server's copy. On Google, an add superseding a removal (a move carrying an edit) SHALL be delivered as an update of the card the server holds, guarded by that card's base, then the membership patch; a conflict keeps it held. Any other such add SHALL be held, staged, and reported. At the end of a sync, and again whenever the set changes, a "Not sent yet" dialog SHALL list each held add, each held move removal and each deletion made in the phone's own Contacts app that waits for a held change, by contact and book, and the contact's row SHALL carry the diverged marker, reopening that report. An add whose body another book stages as its own unsent edit SHALL NOT be reported. The report SHALL be computed from the store (and the phone's deleted raw contacts) when shown, so it survives a restart and drops what was sent.
 
 #### Scenario: A contact edited and moved in one save
 - GIVEN a Google contact in Contacts
 - WHEN the user renames it and moves it to Seed amis in one save, then syncs
+- THEN Google's person is updated under its etag, then moved, and nothing is reported
+
+#### Scenario: A move whose edit meets a remote edit
+- GIVEN a Google contact renamed and moved on the phone while the web edited the same name
+- WHEN the phone syncs
 - THEN nothing overwrites Google's copy, the edit stays on the phone, and "Not sent yet" names it
 
+### Requirement: A contact update never writes over a remote change
+A Google contact update refused for a stale or missing etag SHALL re-read the person and send only the fields the phone changed and the server did not, under the fresh etag; a field both sides changed differently SHALL NOT be written, the update being refused as a conflict. An update refused with no change listed after it SHALL become a conflict of its binding, whose body the next hydrate reads, merged three ways or left for the conflict form. Only CardDAV SHALL retry an update unguarded. JMAP and Microsoft Graph updates are not guarded yet (change guarded-contact-updates).
+
+### Requirement: An edit reaches every copy of the contact
+The editor's save of a card held in several books of one account SHALL be staged on every book copy whose body equals the edited copy's, and SHALL leave alone a copy holding an unsent change of its own.
+
 ### Requirement: Unticking a book never drops an unsent change silently
-Unticking the book that holds the only copy of a change the server has not got SHALL ask whether to keep it. Keeping a change of a card already sent SHALL merge it three ways against that card's stored base onto what the staying books hold, staged as an edit when clean and opening the conflict form on a collision, nothing written; keeping a change of a card never sent SHALL open the conflict form. Dropping it SHALL leave it in Deleted items.
+Unticking the book that holds the only copy of a change the server has not got SHALL ask whether to keep it. Keeping a change of a card already sent SHALL merge it three ways against that card's stored base onto what the staying books hold, staged as an edit when clean and opening the conflict form on a collision, nothing written; keeping a change of a card never sent SHALL open the conflict form. Dropping it SHALL leave it in Deleted items. A deletion of that copy made in the phone's own Contacts app SHALL wait on the phone until the change is sent, the copy kept in the app and the wait reported in "Not sent yet".
 
 #### Scenario: Keeping an edit over a remote edit
 - GIVEN a contact whose label copy holds an unsent rename while Google changed its phone number

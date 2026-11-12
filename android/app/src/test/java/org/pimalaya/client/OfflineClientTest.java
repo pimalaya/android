@@ -23,6 +23,9 @@ import org.robolectric.RobolectricTestRunner;
  */
 @RunWith(RobolectricTestRunner.class)
 public class OfflineClientTest {
+    /** A CardDAV book, where a 412 may be the If-Match quirk. */
+    private static final String DAV = "https://dav.example/book/";
+
     /** A driver over an empty collection on an empty remote. */
     private static final OfflineDriver EMPTY =
             yielded -> {
@@ -77,13 +80,14 @@ public class OfflineClientTest {
                         "b1",
                         false,
                         List.of(
-                                new SnapshotCard("a.vcf", List.of("b1", "b2"), true),
-                                new SnapshotCard("b.vcf", List.of(), false)),
+                                new SnapshotCard("a.vcf", List.of("b1", "b2"), true, false),
+                                new SnapshotCard("b.vcf", List.of(), false, false)),
                         List.of("gone.vcf"));
         assertSameJson(
                 "{\"bookId\":\"b1\",\"complete\":false,\"changed\":[{\"handle\":\"a.vcf\","
-                        + "\"books\":[\"b1\",\"b2\"],\"known\":true},{\"handle\":\"b.vcf\","
-                        + "\"books\":[],\"known\":false}],\"vanished\":[\"gone.vcf\"]}",
+                        + "\"books\":[\"b1\",\"b2\"],\"known\":true,\"awaited\":false},"
+                        + "{\"handle\":\"b.vcf\",\"books\":[],\"known\":false,"
+                        + "\"awaited\":false}],\"vanished\":[\"gone.vcf\"]}",
                 facts.toJson().toString());
         assertEquals(
                 new AccountSnapshot(List.of(0), List.of("gone.vcf")),
@@ -97,19 +101,20 @@ public class OfflineClientTest {
     }
 
     @Test
-    public void aKnownCardLeavingTheBookRidesAsVanished() {
+    public void aKnownCardLeavingTheBookRidesAsVanishedUnlessAwaited() {
         AccountSnapshotFacts facts =
                 new AccountSnapshotFacts(
                         "b1",
                         false,
                         List.of(
-                                new SnapshotCard("a.vcf", List.of("b1"), true),
-                                new SnapshotCard("c.vcf", List.of("b2"), true)),
+                                new SnapshotCard("a.vcf", List.of("b1"), true, false),
+                                new SnapshotCard("c.vcf", List.of("b2"), true, false),
+                                new SnapshotCard("d.vcf", List.of("b2"), true, true)),
                         List.of("gone.vcf"));
         String raw = Native.offlineAccountSnapshot(facts.toJson().toString());
         assertMirrors(AccountSnapshot.class, raw);
         assertEquals(
-                new AccountSnapshot(List.of(0), List.of("gone.vcf", "c.vcf")),
+                new AccountSnapshot(List.of(0, 2), List.of("gone.vcf", "c.vcf")),
                 OfflineClient.accountSnapshot(facts));
     }
 
@@ -119,17 +124,17 @@ public class OfflineClientTest {
         String dav = "https:\\/\\/dav.example.org\\/x";
         assertSameJson(
                 "{\"op\":\"add\",\"collection\":\"" + google + "\",\"bookId\":\"g1\","
-                        + "\"origin\":true,\"deleted\":false,\"bound\":false}",
+                        + "\"origin\":true,\"deleted\":false,\"bound\":false,\"supersedes\":false}",
                 plan(
                         PushPlanFacts.Op.ADD, "https://www.googleapis.com/x", "g1", true, false,
                         false));
         assertSameJson(
                 "{\"op\":\"add\",\"collection\":\"" + dav + "\",\"origin\":false,"
-                        + "\"deleted\":false,\"bound\":false}",
+                        + "\"deleted\":false,\"bound\":false,\"supersedes\":false}",
                 plan(PushPlanFacts.Op.ADD, "https://dav.example.org/x", null, false, false, false));
         assertSameJson(
                 "{\"op\":\"remove\",\"collection\":\"" + dav + "\",\"origin\":false,"
-                        + "\"deleted\":false,\"bound\":true}",
+                        + "\"deleted\":false,\"bound\":true,\"supersedes\":false}",
                 plan(
                         PushPlanFacts.Op.REMOVE, "https://dav.example.org/x", null, false, false,
                         true));
@@ -191,6 +196,12 @@ public class OfflineClientTest {
                         new PushPlanFacts(
                                 PushPlanFacts.Op.REMOVE, "jmap://host/b1", "b1", false, true,
                                 false)));
+        assertEquals(
+                new PushPlan(PushAction.MOVE, null),
+                OfflineClient.pushPlan(
+                        new PushPlanFacts(
+                                PushPlanFacts.Op.ADD, "google://a@b/g1", "g1", false, false,
+                                true, true)));
     }
 
     @Test(expected = PimalayaException.class)
@@ -204,36 +215,41 @@ public class OfflineClientTest {
         etags.put("a.vcf", "e1");
         etags.put("b.vcf", null);
         String listed = "\"listed\":{\"a.vcf\":\"e1\",\"b.vcf\":null}";
+        String head = "{\"collection\":\"" + DAV + "\",";
 
-        RetryFacts unchanged = new RetryFacts(etags, true, "a.vcf", "e1");
+        RetryFacts unchanged = new RetryFacts(DAV, etags, true, "a.vcf", "e1");
         assertSameJson(
-                "{" + listed + ",\"complete\":true,\"handle\":\"a.vcf\",\"ifMatch\":\"e1\"}",
+                head + listed + ",\"complete\":true,\"handle\":\"a.vcf\",\"ifMatch\":\"e1\"}",
                 unchanged.toJson().toString());
         assertTrue(OfflineClient.retryUnguarded(unchanged));
 
-        RetryFacts noEtag = new RetryFacts(etags, false, "b.vcf", "e1");
+        RetryFacts noEtag = new RetryFacts(DAV, etags, false, "b.vcf", "e1");
         assertSameJson(
-                "{" + listed + ",\"complete\":false,\"handle\":\"b.vcf\",\"ifMatch\":\"e1\"}",
+                head + listed + ",\"complete\":false,\"handle\":\"b.vcf\",\"ifMatch\":\"e1\"}",
                 noEtag.toJson().toString());
         assertFalse(OfflineClient.retryUnguarded(noEtag));
 
-        RetryFacts unlisted = new RetryFacts(etags, false, "c.vcf", "e1");
+        RetryFacts unlisted = new RetryFacts(DAV, etags, false, "c.vcf", "e1");
         assertSameJson(
-                "{" + listed + ",\"complete\":false,\"handle\":\"c.vcf\",\"ifMatch\":\"e1\"}",
+                head + listed + ",\"complete\":false,\"handle\":\"c.vcf\",\"ifMatch\":\"e1\"}",
                 unlisted.toJson().toString());
         assertTrue(OfflineClient.retryUnguarded(unlisted));
 
-        RetryFacts unguarded = new RetryFacts(etags, false, "a.vcf", null);
+        RetryFacts unguarded = new RetryFacts(DAV, etags, false, "a.vcf", null);
         assertSameJson(
-                "{" + listed + ",\"complete\":false,\"handle\":\"a.vcf\"}",
+                head + listed + ",\"complete\":false,\"handle\":\"a.vcf\"}",
                 unguarded.toJson().toString());
         assertFalse(OfflineClient.retryUnguarded(unguarded));
 
-        RetryFacts nothingListed = new RetryFacts(null, false, "a.vcf", "e1");
+        RetryFacts nothingListed = new RetryFacts(DAV, null, false, "a.vcf", "e1");
         assertSameJson(
-                "{\"complete\":false,\"handle\":\"a.vcf\",\"ifMatch\":\"e1\"}",
+                head + "\"complete\":false,\"handle\":\"a.vcf\",\"ifMatch\":\"e1\"}",
                 nothingListed.toJson().toString());
         assertFalse(OfflineClient.retryUnguarded(nothingListed));
+
+        RetryFacts google =
+                new RetryFacts("google://jane@example.com/myContacts", etags, true, "a.vcf", "e1");
+        assertFalse(OfflineClient.retryUnguarded(google));
     }
 
     @Test

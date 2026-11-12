@@ -395,6 +395,16 @@ public final class PimdirContacts {
         }
     }
 
+    /** Whether a phone deletion of this copy waits for its unsent change. */
+    public boolean withdrawalWaits(String collection, String linkId) {
+        try {
+            return unsent(collection, linkId)
+                    && stager.offline.cardElsewhere(collection, linkId).getBoolean("live");
+        } catch (JSONException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
     /**
      * A book the card stays in where keeping an edit meets one of its own,
      * with the merge the person resolves: nothing was written.

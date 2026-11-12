@@ -107,6 +107,9 @@ public final class ContactEngine extends PimdirEngine {
      */
     private final Map<String, CardDelta> accountDeltas = new HashMap<>();
 
+    /** The handles whose update People refused as a conflict this sync. */
+    private final Set<String> refused = Collections.synchronizedSet(new HashSet<>());
+
     /** Per-collection card cache of the Graph listing, by handle. */
     private final Map<String, Map<String, Card>> graphCards = new HashMap<>();
 
@@ -262,6 +265,7 @@ public final class ContactEngine extends PimdirEngine {
         Log.d(
                 "pimalaya",
                 "server sync " + url + ": " + clients.offline().sync(this, url, false));
+        conflictRefused(url);
         hydrate(url);
         boolean relist = joined.remove(url);
         follow(url, copies);
@@ -282,7 +286,19 @@ public final class ContactEngine extends PimdirEngine {
         // binding then at the revision the server names (see joined).
         if (resolved > 0 || relist) {
             clients.offline().sync(this, url, false);
+            conflictRefused(url);
             hydrate(url);
+        }
+    }
+
+    /** Marks conflicted the cards People refused, for hydrate to capture. */
+    private void conflictRefused(String url) {
+        synchronized (refused) {
+            Map<String, String> listed = listedEtags.get(url);
+            for (String handle : refused) {
+                offline.markConflicted(url, handle, listed == null ? null : listed.get(handle));
+            }
+            refused.clear();
         }
     }
 
@@ -443,28 +459,42 @@ public final class ContactEngine extends PimdirEngine {
      * Projects an account-wide delta (JMAP, Google) onto one book's enumerate.
      *
      * <p>On an incremental round, a changed card that left the book rides as
-     * vanished.
+     * vanished, unless another book stages it as a pending create.
      */
     private JSONObject accountSnapshot(String url, CardDelta delta) throws JSONException {
+        Set<String> awaited = offline.awaitedHandles(url);
         List<SnapshotCard> changed = new ArrayList<>();
         for (Card card : delta.changed()) {
             changed.add(
                     new SnapshotCard(
                             card.uri(),
                             card.books(),
-                            !delta.complete() && offline.loadRow(url, card.uri()) != null));
+                            !delta.complete() && offline.loadRow(url, card.uri()) != null,
+                            awaited.contains(card.uri())));
         }
         AccountSnapshotFacts facts =
                 new AccountSnapshotFacts(bookId(url), delta.complete(), changed, delta.vanished());
 
         AccountSnapshot projected = OfflineClient.accountSnapshot(facts);
+        Map<String, PimdirStorage.Leaving> leaving = offline.leavingAgreed(url);
         List<Card> members = new ArrayList<>();
         for (int index : projected.members()) {
-            members.add(delta.changed().get(index));
+            members.add(standing(delta.changed().get(index), leaving));
         }
         List<String> vanished = projected.vanished();
 
         return snapshot(url, new CardDelta(members, vanished, delta.token(), delta.complete()));
+    }
+
+    /** A member, at its staged removal's revision when its body was agreed. */
+    private static Card standing(Card card, Map<String, PimdirStorage.Leaving> leaving) {
+        PimdirStorage.Leaving removal = leaving.get(card.uri());
+        if (removal == null
+                || card.vcard().isEmpty()
+                || !removal.agreed().contains(CardStore.byteHash(card.vcard()))) {
+            return card;
+        }
+        return new Card(card.id(), card.uri(), removal.revision(), card.vcard(), card.books());
     }
 
     /** Builds an enumerate reply, recording the ETags for the 412 quirk. */
@@ -822,6 +852,10 @@ public final class ContactEngine extends PimdirEngine {
                     results[index] = pushMembership(primary, url, change, elsewhere);
                     continue;
                 }
+                if (plan.action() == PushAction.MOVE) {
+                    results[index] = pushMove(primary, url, change, row, elsewhere);
+                    continue;
+                }
                 creates.add(index);
                 createVcards.add(row.getString("vcard"));
                 createBooks.add(plan.postCreateBooks());
@@ -1110,6 +1144,9 @@ public final class ContactEngine extends PimdirEngine {
         if (plan.action() == PushAction.MEMBERSHIP) {
             return pushMembership(transport, url, change, elsewhere);
         }
+        if (plan.action() == PushAction.MOVE) {
+            return pushMove(transport, url, change, row, elsewhere);
+        }
 
         // NOTE: the resource name, not the handle: a staged create sits under
         // the provisional handle until this push assigns a real one (SYNC §2),
@@ -1172,6 +1209,9 @@ public final class ContactEngine extends PimdirEngine {
                 throw failure;
             }
             if (!listingUnchanged(url, handle, ifMatch)) {
+                if (account.info().accountLevel()) {
+                    refused.add(handle);
+                }
                 return result(handle, false, null, null);
             }
 
@@ -1325,7 +1365,8 @@ public final class ContactEngine extends PimdirEngine {
                         bookId(url),
                         !change.isNull("origin"),
                         false,
-                        elsewhere.getBoolean("bound")));
+                        elsewhere.getBoolean("bound"),
+                        change.optJSONObject("supersedes") != null));
     }
 
     /** A staged removal's bridge plan, from where else the card lives. */
@@ -1409,10 +1450,58 @@ public final class ContactEngine extends PimdirEngine {
         return result(change.getString("handle"), true, id, null);
     }
 
+    /** Delivers a move as a guarded update of its member, then a patch. */
+    private JSONObject pushMove(
+            Transport transport,
+            String url,
+            JSONObject change,
+            JSONObject row,
+            JSONObject elsewhere)
+            throws JSONException {
+        String handle = change.getString("handle");
+        JSONObject member = change.getJSONObject("supersedes");
+        String from = member.getString("collection");
+        String id = member.getString("handle");
+        String ifMatch = member.isNull("ifMatch") ? null : member.getString("ifMatch");
+        JSONObject moved = offline.loadRow(from, id);
+        if (moved == null || moved.isNull("baseVcard")) {
+            return held(handle);
+        }
+
+        Card updated;
+        try {
+            updated =
+                    clients.contact().updateCard(
+                            transport,
+                            account,
+                            new BookCard(
+                                    from,
+                                    new Card(
+                                            row.getString("id"),
+                                            id,
+                                            ifMatch,
+                                            row.getString("vcard"))),
+                            moved.getString("baseVcard"));
+        } catch (RuntimeException failure) {
+            if (!isPreconditionFailure(failure)) {
+                throw failure;
+            }
+            Log.w("pimalaya", "move held for " + handle + ": " + failure.getMessage());
+            return result(handle, false, null, null);
+        }
+        clients.contact().updateCardBooks(
+                transport,
+                account,
+                new BooksUpdate(id, List.of(bookId(url)), books(elsewhere, "leaving", List.of())));
+        joined.add(url);
+        return result(handle, true, id, updated.etag());
+    }
+
     /** Whether the last enumerate proves the handle unchanged at the base. */
     private boolean listingUnchanged(String url, String handle, String ifMatch) {
         return OfflineClient.retryUnguarded(
                 new RetryFacts(
+                        url,
                         listedEtags.get(url),
                         Boolean.TRUE.equals(listedComplete.get(url)),
                         handle,

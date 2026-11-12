@@ -8,9 +8,7 @@ import static org.junit.Assert.assertTrue;
 import android.content.Context;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -22,18 +20,11 @@ import org.pimalaya.account.LocalBook;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Addressbook;
-import org.pimalaya.client.BookCard;
-import org.pimalaya.client.BooksUpdate;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Card;
-import org.pimalaya.client.CardDelta;
 import org.pimalaya.client.Clients;
-import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.MailClient;
-import org.pimalaya.client.NewCard;
 import org.pimalaya.client.OfflineClient;
-import org.pimalaya.client.PimalayaException;
-import org.pimalaya.client.Transport;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
@@ -65,157 +56,7 @@ public class ContactEngineGoogleBooksTest {
     private PimdirDb pimdir;
     private CardStore store;
     private PimdirContacts contacts;
-    private People people;
-
-    /** A People account: persons in groups, refusing as Google does. */
-    private static final class People extends ContactClient {
-        final List<String> calls = new ArrayList<>();
-        final Map<String, String> bodies = new LinkedHashMap<>();
-        final Map<String, Set<String>> groups = new LinkedHashMap<>();
-        final Map<String, Integer> revisions = new HashMap<>();
-        int created;
-
-        Card card(String id) {
-            return new Card(
-                    id,
-                    id,
-                    "e-" + id + "-" + revisions.get(id),
-                    bodies.get(id),
-                    new ArrayList<>(groups.get(id)));
-        }
-
-        /** The person a resource name addresses; Google refuses any other. */
-        private void person(String id) {
-            if (!id.startsWith("c")) {
-                throw new PimalayaException(
-                        "People API returned HTTP 400: Resource name \"people/" + id
-                                + "\" is not a valid contact person resource",
-                        400);
-            }
-            if (!bodies.containsKey(id)) {
-                throw new PimalayaException(
-                        "People API returned HTTP 404: Requested entity was not found", 404);
-            }
-        }
-
-        private Card create(String vcard) {
-            String id = "c" + ++created;
-            bodies.put(id, vcard);
-            groups.put(id, new LinkedHashSet<>(List.of("myContacts")));
-            revisions.put(id, 0);
-            calls.add("createCard " + id);
-            return card(id);
-        }
-
-        /** An edit made on the server: the person at a new revision. */
-        void edit(String id, String vcard) {
-            bodies.put(id, vcard);
-            revisions.put(id, revisions.get(id) + 1);
-        }
-
-        /** Listings answered before they fail; negative never fails. */
-        int failAfter = -1;
-
-        @Override
-        public CardDelta syncCards(
-                Transport transport, Account account, String addressbookUrl, String syncToken) {
-            if (failAfter == 0) {
-                throw new PimalayaException("People API returned HTTP 503: unavailable", 503);
-            }
-            if (failAfter > 0) {
-                failAfter--;
-            }
-            List<Card> cards = new ArrayList<>();
-            for (String id : bodies.keySet()) {
-                cards.add(card(id));
-            }
-            return new CardDelta(cards, List.of(), "t", true);
-        }
-
-        @Override
-        public List<Card> readGoogleCards(
-                Transport transport, Account account, List<String> ids) {
-            List<Card> cards = new ArrayList<>();
-            for (String id : ids) {
-                if (bodies.containsKey(id)) {
-                    cards.add(card(id));
-                }
-            }
-            return cards;
-        }
-
-        @Override
-        public Card createCard(
-                Transport transport, Account account, String addressbookUrl, NewCard card) {
-            return create(card.vcard());
-        }
-
-        @Override
-        public List<Card> createCards(Transport transport, Account account, List<String> vcards) {
-            List<Card> cards = new ArrayList<>();
-            for (String vcard : vcards) {
-                cards.add(create(vcard));
-            }
-            return cards;
-        }
-
-        /** Refuses the next guarded update once, as a stale If-Match is. */
-        boolean refuseGuard;
-
-        /** As the bridge: the resource name when known, else the id. */
-        @Override
-        public Card updateCard(
-                Transport transport, Account account, BookCard target, String baseVcard) {
-            Card card = target.card();
-            String id = card.uri() == null || card.uri().isEmpty() ? card.id() : card.uri();
-            person(id);
-            if (refuseGuard && card.etag() != null) {
-                refuseGuard = false;
-                calls.add("updateCard " + id + " refused");
-                throw new PimalayaException("People API returned HTTP 412", 412);
-            }
-            calls.add("updateCard " + id);
-            edit(id, card.vcard());
-            return card(id);
-        }
-
-        /** As the bridge: adds first, then removals, never the last group. */
-        @Override
-        public void updateCardBooks(Transport transport, Account account, BooksUpdate update) {
-            String id = update.cardId();
-            person(id);
-            calls.add("updateCardBooks " + id + " +" + update.add() + " -" + update.remove());
-            Set<String> held = groups.get(id);
-            held.addAll(update.add());
-            for (String group : update.remove()) {
-                if (held.size() == 1 && held.contains(group)) {
-                    throw new PimalayaException(
-                            "Google refused to remove the contact from its last group");
-                }
-                held.remove(group);
-            }
-            // NOTE: memberships are person fields; the next listing names
-            // the person at a new revision, and People answers none.
-            revisions.put(id, revisions.get(id) + 1);
-        }
-
-        @Override
-        public void deleteCard(Transport transport, Account account, BookCard target) {
-            Card card = target.card();
-            String id = card.uri() == null || card.uri().isEmpty() ? card.id() : card.uri();
-            deleteCards(transport, account, List.of(id));
-        }
-
-        @Override
-        public void deleteCards(Transport transport, Account account, List<String> ids) {
-            for (String id : ids) {
-                person(id);
-                calls.add("deleteCard " + id);
-                bodies.remove(id);
-                groups.remove(id);
-            }
-        }
-    }
+    private FakePeople people;
 
     private static String vcard(String uid, String name) {
         return "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:" + uid + "\r\nFN:" + name + "\r\nEND:VCARD\r\n";
@@ -242,7 +83,7 @@ public class ContactEngineGoogleBooksTest {
         new PimdirCollections(pimdir, context).replace(
                 EMAIL, PimdirSummary.CONTACT, PimdirCollections.of(EMAIL, books));
 
-        people = new People();
+        people = new FakePeople();
         pass(CONTACTS, L1, SEED);
         contacts.save(CONTACTS, new Card(JANE, null, null, vcard(JANE, "Jane")));
         contacts.save(CONTACTS, new Card(JOE, null, null, vcard(JOE, "Joe")));
@@ -425,16 +266,35 @@ public class ContactEngineGoogleBooksTest {
     }
 
     @Test
-    public void aMoveCarryingAnEditWaitsWithIt() throws Exception {
+    public void aMoveCarryingAnEditDeliversItGuarded() throws Exception {
         rename(CONTACTS, JANE, "Jane Edit");
         move(CONTACTS, SEED, JANE);
         pass(CONTACTS, L1, SEED);
-        pass(CONTACTS, L1, SEED);
 
-        assertEquals(List.of(), people.calls);
-        assertEquals(List.of("myContacts"), held().get("c1"));
-        assertEquals(vcard(JANE, "Jane"), people.bodies.get("c1"));
-        assertEquals(vcard(JANE, "Jane Edit"), stored(SEED, JANE));
+        // NOTE: the edit goes as a guarded update of the person moved.
+        assertEquals(
+                List.of("updateCard c1", "updateCardBooks c1 +[seed] -[myContacts]"),
+                people.calls);
+        assertSettled();
+        assertEquals(List.of("seed"), held().get("c1"));
+        assertEquals(vcard(JANE, "Jane Edit"), people.bodies.get("c1"));
+        assertEquals(List.of(SEED), contacts.collectionsOf(JANE));
+        assertEquals(List.of(), UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+    }
+
+    @Test
+    public void aMoveCarryingAnEditLabelFirstDeliversItGuarded() throws Exception {
+        rename(CONTACTS, JANE, "Jane Edit");
+        move(CONTACTS, SEED, JANE);
+        pass(SEED, CONTACTS, L1);
+
+        assertEquals(
+                List.of("updateCard c1", "updateCardBooks c1 +[seed] -[myContacts]"),
+                people.calls);
+        assertSettled();
+        assertEquals(List.of("seed"), held().get("c1"));
+        assertEquals(vcard(JANE, "Jane Edit"), people.bodies.get("c1"));
+        assertEquals(List.of(SEED), contacts.collectionsOf(JANE));
     }
 
     @Test
@@ -465,23 +325,23 @@ public class ContactEngineGoogleBooksTest {
     }
 
     @Test
-    public void anEditedMoveBesideContactsWaitsWithItsEdit() throws Exception {
+    public void anEditedMoveBesideContactsDeliversItsEdit() throws Exception {
         tick(CONTACTS, L1, JANE);
         pass(L1, CONTACTS, SEED);
         assertSettled();
 
-        // NOTE: the editor stages the edit on its first replica, l1, then
-        // moves l1 to Seed amis: the edit rides the move alone.
         rename(L1, JANE, "Jane Edit");
         move(L1, SEED, JANE);
         people.calls.clear();
         pass(L1, CONTACTS, SEED);
-        pass(L1, CONTACTS, SEED);
 
-        assertEquals(List.of(), people.calls);
-        assertEquals(List.of("myContacts", "l1"), held().get("c1"));
-        assertEquals(vcard(JANE, "Jane"), people.bodies.get("c1"));
-        assertEquals(vcard(JANE, "Jane Edit"), stored(SEED, JANE));
+        assertEquals(
+                List.of("updateCard c1", "updateCardBooks c1 +[seed] -[l1]"), people.calls);
+        assertSettled();
+        assertEquals(List.of("myContacts", "seed"), held().get("c1"));
+        assertEquals(vcard(JANE, "Jane Edit"), people.bodies.get("c1"));
+        assertEquals(vcard(JANE, "Jane Edit"), stored(CONTACTS, JANE));
+        assertEquals(List.of(CONTACTS, SEED), contacts.collectionsOf(JANE));
     }
 
     @Test
@@ -500,17 +360,21 @@ public class ContactEngineGoogleBooksTest {
     }
 
     @Test
-    public void aRoundOfMovesHoldsTheOneCarryingAnEdit() throws Exception {
+    public void aRoundOfMovesDeliversTheOneCarryingAnEdit() throws Exception {
         rename(CONTACTS, JANE, "Jane Edit");
         move(CONTACTS, SEED, JANE);
         move(CONTACTS, SEED, JOE);
         pass(SEED, CONTACTS, L1);
-        pass(SEED, CONTACTS, L1);
 
-        assertEquals(List.of("updateCardBooks c2 +[seed] -[myContacts]"), people.calls);
-        assertEquals(Map.of("c1", List.of("myContacts"), "c2", List.of("seed")), held());
-        assertEquals(vcard(JANE, "Jane"), people.bodies.get("c1"));
-        assertEquals(vcard(JANE, "Jane Edit"), stored(SEED, JANE));
+        assertEquals(
+                List.of(
+                        "updateCard c1",
+                        "updateCardBooks c1 +[seed] -[myContacts]",
+                        "updateCardBooks c2 +[seed] -[myContacts]"),
+                people.calls);
+        assertSettled();
+        assertEquals(Map.of("c1", List.of("seed"), "c2", List.of("seed")), held());
+        assertEquals(vcard(JANE, "Jane Edit"), people.bodies.get("c1"));
     }
 
     @Test
@@ -757,14 +621,12 @@ public class ContactEngineGoogleBooksTest {
     }
 
     @Test
-    public void anUpdateRetriedUnguardedTakesTheCardOutOfTheBookItLeaves() throws Exception {
+    public void aRefusedUpdateIsMergedAsAConflictNeverSentUnguarded() throws Exception {
         tick(CONTACTS, SEED, JANE);
         pass(CONTACTS, L1, SEED);
         assertSettled();
 
-        // NOTE: the guarded update is refused while the listing proves the
-        // card unchanged, so it is sent again unguarded: that write moves
-        // the revision as much as the first, Seed's tombstone with it.
+        // NOTE: a 412 from People is a conflict, merged and sent in the pass.
         rename(CONTACTS, JANE, "Jane Edit");
         untick(SEED, JANE);
         people.refuseGuard = true;
@@ -778,8 +640,225 @@ public class ContactEngineGoogleBooksTest {
                         "updateCardBooks c1 +[] -[seed]"),
                 people.calls);
         assertSettled();
+        assertEquals(vcard(JANE, "Jane Edit"), people.bodies.get("c1"));
         assertEquals(List.of("myContacts"), held().get("c1"));
         assertEquals(List.of(CONTACTS), contacts.collectionsOf(JANE));
+    }
+
+    @Test
+    public void anAddWaitingOnlyForAnotherBooksEditIsNotReported() throws Exception {
+        tick(CONTACTS, SEED, JANE);
+        rename(CONTACTS, JANE, "Jane Edit");
+        rename(SEED, JANE, "Jane Edit");
+        pass(SEED);
+
+        // NOTE: Contacts sends the same edit on its own, then Seed patches.
+        assertEquals(List.of(), people.calls);
+        assertEquals(List.of(), UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+        pass(CONTACTS, L1, SEED);
+
+        assertEquals(List.of("updateCard c1", "updateCardBooks c1 +[seed] -[]"), people.calls);
+        assertSettled();
+        assertEquals(vcard(JANE, "Jane Edit"), people.bodies.get("c1"));
+    }
+
+    @Test
+    public void aMoveCarryingAnEditIntoABookNotSyncedYetReportsItsRemovalAlone()
+            throws Exception {
+        rename(CONTACTS, JANE, "Jane Edit");
+        move(CONTACTS, SEED, JANE);
+        pass(CONTACTS, L1);
+
+        assertEquals(
+                List.of(new UnsentContacts.Row(JANE, "Jane Edit", CONTACTS, SEED)),
+                UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+    }
+
+    @Test
+    public void anEditLandingAfterTheListingIsNeverWrittenOver() throws Exception {
+        rename(CONTACTS, JANE, "Jane Edit");
+        people.afterListing = () -> people.edit("c1", vcard(JANE, "Jane Remote"));
+        pass(CONTACTS, L1, SEED);
+
+        assertEquals(List.of("updateCard c1 refused"), people.calls);
+        assertEquals(vcard(JANE, "Jane Remote"), people.bodies.get("c1"));
+        people.calls.clear();
+        pass(CONTACTS, L1, SEED);
+
+        assertEquals(List.of(), people.calls);
+        assertEquals(vcard(JANE, "Jane Remote"), people.bodies.get("c1"));
+        assertEquals(1, new PimdirStorage(pimdir).loadConflicts(CONTACTS).size());
+    }
+
+    @Test
+    public void anEditLandingAfterTheListingOfAnotherFieldMerges() throws Exception {
+        rename(CONTACTS, JANE, "Jane Edit");
+        people.afterListing = () -> people.edit("c1", vcard(JANE, "Jane\r\nTEL:2"));
+        pass(CONTACTS, L1, SEED);
+        people.calls.clear();
+        pass(CONTACTS, L1, SEED);
+
+        assertEquals(List.of("updateCard c1"), people.calls);
+        String body = people.bodies.get("c1");
+        assertTrue(body, body.contains("FN:Jane Edit\r\n"));
+        assertTrue(body, body.contains("TEL:2\r\n"));
+        assertSettled();
+    }
+
+    /** The web moves Jane out of every book into one this phone skips. */
+    private void movedAwayOnTheWeb() {
+        people.groups.get("c1").clear();
+        people.groups.get("c1").add("other");
+        people.edit("c1", people.bodies.get("c1"));
+    }
+
+    @Test
+    public void aTickWhileTheWebMovesTheCardAwayMakesNoSecondPerson() throws Exception {
+        tick(CONTACTS, SEED, JANE);
+        movedAwayOnTheWeb();
+        pass(CONTACTS, L1, SEED);
+
+        // NOTE: the web's move and the phone's tick merge on the one person.
+        assertEquals(List.of("updateCardBooks c1 +[seed] -[]"), people.calls);
+        assertSettled();
+        assertEquals(List.of("other", "seed"), held().get("c1"));
+        assertEquals(List.of(SEED), contacts.collectionsOf(JANE));
+    }
+
+    @Test
+    public void aTickCarryingAnEditWhileTheWebMovesTheCardAwayIsHeld() throws Exception {
+        tick(CONTACTS, SEED, JANE);
+        rename(SEED, JANE, "Jane Edit");
+        movedAwayOnTheWeb();
+        pass(CONTACTS, L1, SEED);
+        pass(CONTACTS, L1, SEED);
+
+        assertEquals(List.of(), people.calls);
+        assertEquals(List.of("other"), held().get("c1"));
+        assertEquals(
+                List.of(new UnsentContacts.Row(JANE, "Jane Edit", SEED, null)),
+                UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+    }
+
+    @Test
+    public void aMoveWhileTheWebMovesTheCardAwayMakesNoSecondPerson() throws Exception {
+        move(CONTACTS, SEED, JANE);
+        movedAwayOnTheWeb();
+        pass(CONTACTS, L1, SEED);
+
+        assertEquals(List.of("updateCardBooks c1 +[seed] -[myContacts]"), people.calls);
+        assertSettled();
+        assertEquals(List.of("other", "seed"), held().get("c1"));
+        assertEquals(List.of(SEED), contacts.collectionsOf(JANE));
+    }
+
+    @Test
+    public void anUntickRightAfterAnEditMovedTheRevisionIsKept() throws Exception {
+        tick(CONTACTS, SEED, JANE);
+        pass(CONTACTS, L1, SEED);
+        assertSettled();
+
+        // NOTE: Seed's binding is left a revision behind the phone's own write.
+        rename(CONTACTS, JANE, "Jane Edit");
+        pass(SEED, CONTACTS, L1);
+        untick(SEED, JANE);
+        people.calls.clear();
+        pass(SEED, CONTACTS, L1);
+
+        assertEquals(List.of("updateCardBooks c1 +[] -[seed]"), people.calls);
+        assertSettled();
+        assertEquals(List.of("myContacts"), held().get("c1"));
+        assertEquals(List.of(CONTACTS), contacts.collectionsOf(JANE));
+        assertEquals(vcard(JANE, "Jane Edit"), people.bodies.get("c1"));
+    }
+
+    @Test
+    public void anUntickRightAfterAPatchMovedTheRevisionIsKept() throws Exception {
+        tick(CONTACTS, SEED, JANE);
+        pass(CONTACTS, L1, SEED);
+        assertSettled();
+        tick(CONTACTS, L1, JANE);
+        pass(SEED, CONTACTS, L1);
+        untick(SEED, JANE);
+        people.calls.clear();
+        pass(SEED, CONTACTS, L1);
+
+        assertEquals(List.of("updateCardBooks c1 +[] -[seed]"), people.calls);
+        assertSettled();
+        assertEquals(List.of("myContacts", "l1"), held().get("c1"));
+        assertEquals(List.of(CONTACTS, L1), contacts.collectionsOf(JANE));
+    }
+
+    @Test
+    public void anUntickOverAnEditMadeElsewhereIsStillRevived() throws Exception {
+        tick(CONTACTS, SEED, JANE);
+        pass(CONTACTS, L1, SEED);
+        assertSettled();
+        untick(SEED, JANE);
+        people.edit("c1", vcard(JANE, "Jane Remote"));
+        people.calls.clear();
+        pass(SEED, CONTACTS, L1);
+
+        assertEquals(List.of(), people.calls);
+        assertEquals(List.of(CONTACTS, SEED), contacts.collectionsOf(JANE));
+        assertEquals(vcard(JANE, "Jane Remote"), stored(SEED, JANE));
+    }
+
+    /** A move with an edit whose update lands, its patch failing (a 503). */
+    private void halfLandedMove() throws Exception {
+        rename(CONTACTS, JANE, "Jane Edit");
+        move(CONTACTS, SEED, JANE);
+        people.failBooks = 1;
+        try {
+            pass(SEED);
+        } catch (Exception failed) {
+            // the patch failing after the update is the case
+        }
+        assertEquals(vcard(JANE, "Jane Edit"), people.bodies.get("c1"));
+        assertEquals(List.of("myContacts"), held().get("c1"));
+        people.calls.clear();
+    }
+
+    @Test
+    public void aHalfLandedMoveCompletesWhenItsSourceSyncsFirst() throws Exception {
+        halfLandedMove();
+        pass(CONTACTS, L1, SEED);
+
+        assertEquals(List.of("updateCardBooks c1 +[seed] -[myContacts]"), people.calls);
+        assertSettled();
+        assertEquals(List.of("seed"), held().get("c1"));
+        assertEquals(List.of(SEED), contacts.collectionsOf(JANE));
+    }
+
+    @Test
+    public void aHalfLandedMoveCompletesWhenItsTargetSyncsFirst() throws Exception {
+        halfLandedMove();
+        pass(SEED, CONTACTS, L1);
+
+        assertEquals(List.of("updateCardBooks c1 +[seed] -[myContacts]"), people.calls);
+        assertSettled();
+        assertEquals(List.of("seed"), held().get("c1"));
+        assertEquals(List.of(SEED), contacts.collectionsOf(JANE));
+    }
+
+    @Test
+    public void anUpdateRefusedWithNoListedChangeIsAConflict() throws Exception {
+        rename(CONTACTS, JANE, "Jane Edit");
+        people.refuseAll = true;
+        pass(CONTACTS, L1, SEED);
+        pass(CONTACTS, L1, SEED);
+
+        // NOTE: refused again and again, the update reads as a conflict.
+        assertEquals(vcard(JANE, "Jane"), people.bodies.get("c1"));
+        assertEquals(1, new PimdirStorage(pimdir).loadConflicts(CONTACTS).size());
+        people.refuseAll = false;
+        people.calls.clear();
+        pass(CONTACTS, L1, SEED);
+
+        assertEquals(List.of("updateCard c1"), people.calls);
+        assertSettled();
+        assertEquals(vcard(JANE, "Jane Edit"), people.bodies.get("c1"));
+        assertEquals(0, new PimdirStorage(pimdir).loadConflicts(CONTACTS).size());
     }
 
     @Test
