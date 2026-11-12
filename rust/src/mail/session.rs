@@ -926,7 +926,11 @@ impl<H: Host> Mail<'_, '_, H> {
                     session_url: url,
                     auth: self.session.auth(),
                 }
-                .relocate_message(id, &from, &to)
+                .relocate_message(id, &from, &to)?;
+                // NOTE: as Gmail's below, so the target listed after the
+                // move in this pass replays it and lands the message.
+                self.session.jmap_run().refiled();
+                Ok(())
             }
             MailKind::Graph(_) => {
                 let (_, to) = self.mailbox_ids(mailbox, target)?;
@@ -969,7 +973,9 @@ impl<H: Host> Mail<'_, '_, H> {
                     session_url: url,
                     auth: self.session.auth(),
                 }
-                .copy_message(id, &to)
+                .copy_message(id, &to)?;
+                self.session.jmap_run().refiled();
+                Ok(())
             }
             MailKind::Graph(_) => {
                 let to = self.mailbox_id(target)?;
@@ -1005,7 +1011,9 @@ impl<H: Host> Mail<'_, '_, H> {
                     session_url: url,
                     auth: self.session.auth(),
                 }
-                .detach_message(id, &from)
+                .detach_message(id, &from)?;
+                self.session.jmap_run().refiled();
+                Ok(())
             }
             MailKind::Gmail(_) => {
                 let from = self.mailbox_id(mailbox)?;

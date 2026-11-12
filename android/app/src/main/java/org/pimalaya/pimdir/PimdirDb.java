@@ -63,6 +63,9 @@ public final class PimdirDb extends SQLiteOpenHelper {
     /** The deletions its phone passes held back, for the user to settle. */
     private final HeldDeletions held = new HeldDeletions();
 
+    /** The actions staged on delivered creates, told once each (SYNC §2). */
+    private final HeldActions heldActions;
+
     /**
      * The per-domain databases this store replaced, deleted on open.
      *
@@ -70,6 +73,9 @@ public final class PimdirDb extends SQLiteOpenHelper {
      * contacts database survives: it holds the app's own book state.
      */
     private static final String[] SUPERSEDED = {"events.db", "mail.db"};
+
+    /** The file the waiting notice keeps what it told in, out of the store. */
+    private static final String HELD_TOLD = "held-actions-told";
 
     /**
      * Opens the app's store, creating it as needed.
@@ -93,6 +99,8 @@ public final class PimdirDb extends SQLiteOpenHelper {
         this.context = context.getApplicationContext() == null
                 ? context
                 : context.getApplicationContext();
+        this.heldActions =
+                new HeldActions(this, new File(this.context.getNoBackupFilesDir(), HELD_TOLD));
         for (String superseded : SUPERSEDED) {
             context.deleteDatabase(superseded);
         }
@@ -276,6 +284,11 @@ public final class PimdirDb extends SQLiteOpenHelper {
     /** The deletions this store's phone passes held back, process-wide. */
     public HeldDeletions held() {
         return held;
+    }
+
+    /** The actions staged on this store's delivered creates, told once each. */
+    public HeldActions heldActions() {
+        return heldActions;
     }
 
     /** The content-addressed blob directory beside the database. */

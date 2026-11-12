@@ -576,7 +576,7 @@ A drawer row SHALL open Deleted items: every item the store holds deleted, acros
 - THEN the retained items and their bodies go for good, and the waiting one stays
 
 ### Requirement: A sync that went through says nothing
-A sync that went through SHALL NOT pop up a report: no count of what came in or went out, no count of messages sent from the outbox, no count of conflicts left, the lists showing what the pass brought and a conflicted row carrying its own mark. A pull turned down because a background run holds the sync SHALL say nothing either, that run's dock already showing. A failure SHALL still open its error dialog, and a parked round its question (A round finding most of a collection gone asks first).
+A sync that went through SHALL NOT pop up a report: no count of what came in or went out, no count of messages sent from the outbox, no count of conflicts left, the lists showing what the pass brought and a conflicted row carrying its own mark. A pull turned down because a background run holds the sync SHALL say nothing either, that run's dock already showing. A failure SHALL still open its error dialog, a parked round its question (A round finding most of a collection gone asks first), and a delete or a move held for the server its notice, once (A message is deleted into the account's trash): an action held on the phone is never silent.
 
 #### Scenario: A quiet pass
 - GIVEN a contacts pass bringing three cards and leaving one conflict
@@ -666,10 +666,15 @@ A body moved into the blob store before the write naming it (a downloaded messag
 - THEN it is refused, and the message stays at meta, its body owed
 
 ### Requirement: A store of another draft is not opened
-The app SHALL create its store at storage-draft-09 (`store_meta.format_version`, a `store_id` and an `incarnation` by the canonical text, `derivation` 3) and record `sync_version` with the first engine write. It SHALL decide whether an existing store opens by io-pimdir's rules (STORAGE §6) over facts read off the file read-only, and SHALL NOT read, write nor reconcile a store another draft, another program or another sync version wrote: start-up stands aside on a screen saying the app has to be reinstalled, and the background job, the sync adapters and the time-zone receiver do nothing.
+The app SHALL create its store at storage-draft-09 (`store_meta.format_version`, a `store_id` and an `incarnation` by the canonical text, `derivation` 3) and record `sync_version`, sync-draft-09, with the first engine write. It SHALL decide whether an existing store opens by io-pimdir's rules (STORAGE §6) over facts read off the file read-only, and SHALL NOT read, write nor reconcile a store another draft, another program or another sync version wrote: start-up stands aside on a screen saying the app has to be reinstalled, and the background job, the sync adapters and the time-zone receiver do nothing.
 
 #### Scenario: A store an earlier version wrote
 - GIVEN a store created before draft-09, a draft-08 store among them
+- WHEN the app starts
+- THEN it opens on the reinstall screen, and nothing in the store is written
+
+#### Scenario: Sync state an earlier sync draft wrote
+- GIVEN a store at storage-draft-09 whose `sync_version` is sync-draft-08
 - WHEN the app starts
 - THEN it opens on the reinstall screen, and nothing in the store is written
 

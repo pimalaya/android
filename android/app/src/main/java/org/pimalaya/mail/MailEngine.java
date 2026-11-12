@@ -695,12 +695,17 @@ public final class MailEngine extends PimdirEngine {
         return collections;
     }
 
-    /** Readies provider-filed sent copies to land on their creates. */
+    /**
+     * Readies arrivals to land on the creates staged under their Message-ID.
+     *
+     * <p>A provider-filed sent copy takes the provider's markers; a move's
+     * target keeps the user's, which the landing pushes.
+     */
     List<Named> nameByMessageId(String collection, List<Named> items) {
         if (items.isEmpty()) {
             return items;
         }
-        Map<String, String> creates;
+        Map<String, PimdirStorage.PendingCreate> creates;
         synchronized (locks.store) {
             creates = offline.pendingCreatesByMessageId(collection);
         }
@@ -726,7 +731,7 @@ public final class MailEngine extends PimdirEngine {
                 named.add(item);
                 continue;
             }
-            String create = creates.remove(messageId);
+            PimdirStorage.PendingCreate create = creates.remove(messageId);
             boolean restamped = false;
             if (create == null) {
                 // NOTE: a provider that stamped a Message-ID of its own on
@@ -742,19 +747,32 @@ public final class MailEngine extends PimdirEngine {
                 named.add(item);
                 continue;
             }
-            // NOTE: the provider's markers, or \Seen would reach every label.
-            try {
-                mutateFlags(
-                        collection, offline.handleFor(collection, create), new Flags(item.flags()));
-            } catch (JSONException failure) {
-                throw new PimalayaException("Unwritable markers: " + failure.getMessage());
+            // NOTE: a sent copy takes the provider's markers, or \Seen would
+            // reach every label. A move's target keeps the user's, a \Seen
+            // staged by opening among them: its source still bound, or the
+            // create delivered, by the relocation or by an append that carried
+            // its markers (pimdir SYNC §2).
+            boolean moved;
+            synchronized (locks.store) {
+                moved = create.delivered
+                        || offline.moveSourceOf(collection, create.linkId) != null;
+            }
+            if (!moved) {
+                try {
+                    mutateFlags(
+                            collection,
+                            offline.handleFor(collection, create.linkId),
+                            new Flags(item.flags()));
+                } catch (JSONException failure) {
+                    throw new PimalayaException("Unwritable markers: " + failure.getMessage());
+                }
             }
             // NOTE: Gmail restamps the Date with the Message-ID, and the
             // engine lands a create only on an arrival of the same subject,
             // date and sender (SYNC 6). The copy read back for this very send
             // is that create's, so its summary is left out, which says
             // nothing against: kept, it would file a second copy.
-            named.add(restamped ? item.bare(create) : item.linked(create));
+            named.add(restamped ? item.bare(create.linkId) : item.linked(create.linkId));
         }
         return named;
     }
@@ -1236,9 +1254,10 @@ public final class MailEngine extends PimdirEngine {
     /**
      * A staged removal (pimdir SYNC §4): a move to a destination, or a delete.
      *
-     * <p>A move's pending create stays, once delivered, on an account listed
-     * account-wide: the destination's listing lands it, its body kept (pimdir
-     * SYNC §5). Elsewhere it is withdrawn, the message coming back with that
+     * <p>A move's pending create stays on an account listed account-wide, and
+     * the engine records it delivered (pimdir SYNC §2, §4): pushed nowhere, an
+     * action on it held until the destination's listing lands it, its body
+     * kept. Elsewhere it is withdrawn, the message coming back with that
      * listing. A delete there leaves its mailbox alone while the account
      * holds the message in another ({@link #heldElsewhere}).
      */
@@ -1263,6 +1282,24 @@ public final class MailEngine extends PimdirEngine {
             return result(handle, false, null, null);
         }
 
+        String linkId = change.optString("linkId", null);
+        synchronized (locks.store) {
+            if (linkId == null) {
+                String[] held = offline.bound(collection, List.of(handle)).get(handle);
+                linkId = held == null ? handle : held[0];
+            }
+            // NOTE: account-wide, the target's create is delivered before
+            // the relocation leaves (pimdir SYNC §4), so a delete or a
+            // restore staged on it while the push is in flight is held for
+            // its landing rather than withdrawing it; it stays the
+            // tombstone's destination, so a relocation that never went is
+            // pushed again.
+            String create = accountWide() ? offline.pendingCreateOf(to, linkId) : null;
+            if (create != null) {
+                offline.deliver(to, PimdirStorage.provisionalOf(create));
+            }
+        }
+
         // NOTE: a message gone is moved nowhere, so its target's create
         // goes as a delivered move's does elsewhere.
         boolean moved = true;
@@ -1272,25 +1309,23 @@ public final class MailEngine extends PimdirEngine {
             gone(mailbox, handle, failure);
             moved = false;
         }
-        // NOTE: account-wide, one id names the message in every mailbox, so
-        // the create pushed before it lands files no second copy; and the
-        // target's listing in this pass may predate the move (Gmail replays
-        // one history a pass), which a withdrawn create vanishes for.
+        // NOTE: account-wide, the target's listing in this pass may predate
+        // the move (Gmail replays one history a pass), which a withdrawn
+        // create vanishes for; kept, it is delivered, so a delete or a
+        // restore staged on it waits for its arrival rather than staying
+        // on the phone.
+        // NOTE: the outcome states whether the member moved (pimdir SYNC
+        // §4): only a relocation delivers the target's create.
         if (moved && accountWide()) {
-            return result(handle, true, null, null);
+            return result(handle, true, null, null).put("relocated", true);
         }
-        String linkId = change.optString("linkId", null);
         synchronized (locks.store) {
-            if (linkId == null) {
-                String[] held = offline.bound(collection, List.of(handle)).get(handle);
-                linkId = held == null ? handle : held[0];
-            }
             String create = offline.pendingCreateOf(to, linkId);
             if (create != null) {
                 offline.withdrawCreate(to, create);
             }
         }
-        return result(handle, true, null, null);
+        return result(handle, true, null, null).put("relocated", moved);
     }
 
     /**

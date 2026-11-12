@@ -30,7 +30,10 @@ use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex, MutexGuard, Weak},
+    sync::{
+        Arc, Condvar, Mutex, MutexGuard, Weak,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use io_jmap::rfc8621::email::{JmapEmail, query::JmapEmailFilter};
@@ -400,12 +403,15 @@ pub struct JmapDelta {
 /// What one pool run read of a JMAP account's changes, shared by its
 /// workers' sessions.
 ///
-/// Each replay is keyed by the state it starts from, read by whichever
-/// worker asks first while the others wait for it.
+/// Each replay is keyed by the state it starts from and the run's epoch,
+/// read by whichever worker asks first while the others wait for it.
 #[derive(Default)]
 pub struct JmapRun {
     deltas: Mutex<HashMap<String, Slot>>,
     ready: Condvar,
+    /// Moves once per move the run pushed, so a replay read before it is
+    /// read again ([`JmapRun::refiled`]).
+    epoch: AtomicU64,
 }
 
 /// One replay, being read or read; [`None`] when the server can no longer
@@ -427,6 +433,8 @@ impl JmapRun {
         state: &str,
         read: impl FnOnce() -> Result<Option<JmapDelta>, BridgeError>,
     ) -> Result<Option<Arc<JmapDelta>>, BridgeError> {
+        let key = format!("{}\u{0}{state}", self.epoch.load(Ordering::SeqCst));
+        let state = key.as_str();
         let mut deltas = self.lock();
         loop {
             match deltas.get(state) {
@@ -460,6 +468,13 @@ impl JmapRun {
         drop(deltas);
         self.ready.notify_all();
         answer
+    }
+
+    /// Forgets every replay read, after the run filed a message elsewhere:
+    /// a mailbox listed after it replays the move, so the target lands the
+    /// message in this pass rather than the next.
+    pub fn refiled(&self) {
+        self.epoch.fetch_add(1, Ordering::SeqCst);
     }
 }
 

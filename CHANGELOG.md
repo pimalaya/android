@@ -54,6 +54,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Changed the store to the pimdir sync draft 09: a store an older build wrote is refused on open, and the app asks to be reinstalled; changes not yet sent from that store are lost.
 - Changed the dates a search reads: `date:today`, `date:yesterday` and a day, month or year now start at midnight in the phone's time zone, not in UTC, so an event at 00:30 is found on its own day.
 - Changed what Google sign-in asks for calendars: to see and edit the events of your calendars and to see their list, no longer to manage every calendar (share or delete one), which the app never did. An account signed in before keeps syncing, and its next sign-in asks for the narrower access.
 - Changed what a task on a Google task list says about Google Tasks: its page, the capture sheet and the account's Tasks row now say what Google keeps (title, notes, due day, done), and a tap lists what it does not: the state, categories and links staying on the phone, the due time, In progress and Cancelled, a task changed on both sides, and subtasks made on Google.
@@ -99,6 +100,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a delete for good or a restore of a Gmail or JMAP message in the trash, made before the next sync listed the trash, staying on the phone and the message coming back: it now waits on the phone and reaches the server once the trash is listed, a "Waiting for the server" notice naming what waits. An opened message moved to the trash keeps its read marker, and a move on a JMAP account lands in the same sync.
 - Fixed a Gmail or JMAP message deleted on the phone being destroyed for good, bypassing the trash, when another app had already trashed it and the trash synced first: a removal from one mailbox now only takes the message out of that mailbox while it lives in another, and destroys it only when it is held nowhere else.
 - Fixed a task or calendar entry saved from a screen left open during a sync failing, or silently writing over what the sync brought: the save now merges with the sync's version, asks on the conflict page when both changed the same thing, and keeps both sides' categories and alarms; batch actions skip and report a task that changed meanwhile, and a stale delete is refused.
 - Fixed a Google contact edited and moved to another label in one save waiting unsent: the edit is now sent under the contact's version, then the move. A Google contact update no longer writes over a change made on the web meanwhile, an edit reaches every label the contact is in, ticking a label while the web moved the contact no longer creates a second one, and a deletion made in the phone's Contacts app of a change not yet sent waits and is listed in "Not sent yet".

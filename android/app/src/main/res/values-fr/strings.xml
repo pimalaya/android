@@ -490,6 +490,9 @@
     <string name="sync_held_delete">Supprimer sur le serveur</string>
     <string name="sync_held_restore">Les remettre</string>
     <string name="sync_held_later">Plus tard</string>
+    <string name="sync_waiting_title">En attente du serveur</string>
+    <string name="sync_waiting_body">Ces suppressions et déplacements sont encore sur ce téléphone : le serveur n\'a pas encore listé les messages. Ils partent dès qu\'il le fait.</string>
+    <string name="sync_waiting_row">%1$s, %2$s : %3$d</string>
     <string name="sync_unsent_title">Pas encore envoyés</string>
     <string name="sync_unsent_body">Ces modifications de contacts restent sur ce téléphone jusqu\'à ce qu\'elles puissent partir.</string>
     <string name="sync_unsent_add">%1$s, dans %2$s (%3$s) : porte une modification que le serveur n\'a pas, donc attend</string>

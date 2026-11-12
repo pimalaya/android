@@ -13,7 +13,6 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.calendar.CalendarEngine;
@@ -34,6 +33,7 @@ import org.pimalaya.client.MessageRef;
 import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.SyncReport;
+import org.pimalaya.pimdir.HeldActions;
 import org.pimalaya.pimdir.ItemFixtures;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
@@ -72,7 +72,7 @@ public class MailMoveTest {
     private String sent;
 
     /** A mail driver recording its server verbs, listing what it is told. */
-    private final class Server extends MailClient {
+    private class Server extends MailClient {
         final List<String> calls = new ArrayList<>();
         JSONArray listed = new JSONArray();
 
@@ -544,6 +544,37 @@ public class MailMoveTest {
         sync(server, trash);
     }
 
+    /**
+     * An ordinary Gmail delete whose trash listing predates the move: its
+     * create waits with nothing staged on it, which tells nobody anything.
+     */
+    @Test
+    public void anOrdinaryGmailDeleteTellsNothingWaiting() throws Exception {
+        Server server = openedThenDeletedOnGmail();
+        server.pages.put("INBOX", delta(new JSONArray(), "h1"));
+        server.pages.put("Trash", delta(new JSONArray(), "h1"));
+        pass(server);
+
+        assertEquals("nothing the user did waits", List.of(), pimdir.heldActions().untold());
+    }
+
+    /** A delete for good held on the trash row is told once, a restart too. */
+    @Test
+    public void aDeleteForGoodHeldOnTheTrashIsToldOnceAcrossARestart() throws Exception {
+        Server server = deletedNotLandedOnGmail();
+        assertEquals("an ordinary delete", List.of(), pimdir.heldActions().untold());
+
+        stager().stageDelete(rowIn("Trash"));
+        assertEquals(List.of(new HeldActions.Held(trash, 1)), pimdir.heldActions().untold());
+        assertEquals("told once", List.of(), pimdir.heldActions().untold());
+        assertEquals("a restart tells it no second time",
+                List.of(), new PimdirDb(context).heldActions().untold());
+
+        passAfterTheTrash(server);
+        assertTrue("pushed: " + server.calls, server.calls.contains("destroy Trash 42"));
+        assertEquals("nothing held any more", List.of(), pimdir.heldActions().untold());
+    }
+
     /** A Gmail delete stays in the trash whole through the pass pushing it. */
     @Test
     public void aGmailDeleteStaysInTheTrashThroughThePassPushingIt() throws Exception {
@@ -660,7 +691,6 @@ public class MailMoveTest {
     }
 
     /** The read marker staged before a Gmail delete reaches the server. */
-    @Ignore("the landing takes the arrival's markers (nameByMessageId): \\Seen never pushed")
     @Test
     public void aGmailDeleteOfAnOpenedMessageLandsRead() throws Exception {
         Server server = openedThenDeletedOnGmail();
@@ -670,6 +700,21 @@ public class MailMoveTest {
         server.pages.put("INBOX", delta(new JSONArray(), "h2", "42"));
         server.pages.put("Trash", delta(new JSONArray().put(named("42", "Hello")), "h2"));
         pass(server);
+
+        assertTrue("pushed: " + server.calls,
+                server.calls.contains("add " + Flags.Marker.SEEN.wire() + " 42"));
+        assertEquals("read", "1", scalar("SELECT marks & 1 FROM items WHERE collection = ?", trash));
+    }
+
+    /**
+     * A move's target listed before its source pushed it (moved on another
+     * client too) keeps the read marker staged before the move.
+     */
+    @Test
+    public void aMoveTargetListedBeforeItsPushKeepsItsMarkers() throws Exception {
+        Server server = openedThenDeletedOnGmail();
+        server.pages.put("Trash", delta(new JSONArray().put(named("42", "Hello")), "h1"));
+        sync(server, trash);
 
         assertTrue("pushed: " + server.calls,
                 server.calls.contains("add " + Flags.Marker.SEEN.wire() + " 42"));
@@ -698,7 +743,6 @@ public class MailMoveTest {
     }
 
     /** Deleting it for good from the trash before it lands is pushed. */
-    @Ignore("io-pimdir withdraws a pending create on Remove, even one a move delivered")
     @Test
     public void aGmailDeleteForGoodBeforeTheTrashLandsItIsPushed() throws Exception {
         Server server = deletedNotLandedOnGmail();
@@ -713,7 +757,6 @@ public class MailMoveTest {
     }
 
     /** Restoring it from the trash before it lands is pushed. */
-    @Ignore("io-pimdir withdraws a pending create on Move, even one a move delivered")
     @Test
     public void aGmailRestoreBeforeTheTrashLandsItIsPushed() throws Exception {
         Server server = deletedNotLandedOnGmail();
@@ -724,6 +767,60 @@ public class MailMoveTest {
 
         assertTrue("restored on the server: " + server.calls,
                 server.calls.contains("relocate Trash 42 INBOX"));
+        assertNull("not back in the trash", rowIn("Trash"));
+    }
+
+    /**
+     * A restore held on the trash row whose target another client restored
+     * first: the trash's removal leaves the trash, never destroying it.
+     */
+    @Test
+    public void aGmailRestoreWhoseTargetLandedFirstIsNeverDestroyed() throws Exception {
+        Server server = deletedNotLandedOnGmail();
+        stager().stageMove(rowIn("Trash"), inbox);
+        server.pages.put("INBOX", delta(new JSONArray().put(named("42", "Hello")), "h2"));
+        sync(server, inbox);
+        server.pages.put("Trash", delta(new JSONArray().put(named("42", "Hello")), "h2"));
+        sync(server, trash);
+
+        assertFalse("destroyed: " + server.calls, server.calls.contains("destroy Trash 42"));
+        assertTrue("left the trash: " + server.calls, server.calls.contains("detach Trash 42"));
+        assertNotNull("in the inbox", rowIn("INBOX"));
+    }
+
+    /** A delete for good staged while the move into the trash is in flight. */
+    @Test
+    public void aGmailDeleteForGoodDuringTheRelocationIsPushed() throws Exception {
+        openedThenDeletedOnGmail();
+        boolean[] staged = {false};
+        Server server =
+                new Server(MailWire.session(new Account("google://jane@gmail.com", "", "t", null))) {
+                    @Override
+                    public void relocate(MailSession session, MessageRef message, String target) {
+                        super.relocate(session, message, target);
+                        if (staged[0]) {
+                            return;
+                        }
+                        staged[0] = true;
+                        try {
+                            assertEquals(MailStager.Deletion.ERASED,
+                                    stager().stageDelete(rowIn("Trash")));
+                        } catch (JSONException failure) {
+                            throw new AssertionError(failure);
+                        }
+                    }
+                };
+        server.pages.put("INBOX", delta(new JSONArray(), "h1"));
+        sync(server, inbox);
+        assertNull("gone from the trash at once", rowIn("Trash"));
+
+        server.pages.put("INBOX", delta(new JSONArray(), "h2", "42"));
+        server.pages.put("Trash", delta(new JSONArray().put(named("42", "Hello")), "h2"));
+        sync(server, inbox);
+        sync(server, trash);
+
+        assertTrue("deleted on the server: " + server.calls,
+                server.calls.contains("destroy Trash 42"));
         assertNull("not back in the trash", rowIn("Trash"));
     }
 

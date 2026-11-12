@@ -642,6 +642,7 @@ impl PimdirRemote for Remote<'_> {
         };
         let mut results = Vec::new();
         for change in changes {
+            let relocated = matches!(change.kind, PimdirChangeKind::Remove { to: Some(_), .. });
             let (handle, outcome) = match change.kind {
                 PimdirChangeKind::Remove {
                     handle,
@@ -668,6 +669,7 @@ impl PimdirRemote for Remote<'_> {
                 outcome,
                 assigned: None,
                 revision: None,
+                relocated,
             });
         }
         Ok(results)

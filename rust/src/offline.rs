@@ -478,6 +478,7 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
                     },
                     assigned: result.assigned.map(PimdirHandle),
                     revision: result.revision,
+                    relocated: result.relocated,
                 })
                 .collect();
             PimdirArg::Push(results)

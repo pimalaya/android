@@ -1079,6 +1079,9 @@ public final class PimdirStorage {
                     case "drop":
                         applyBatchDrop(db, op, released, effects);
                         break;
+                    case "deliverPlacement":
+                        deliver(db, op);
+                        break;
                     case "setCheckpoint":
                         setCheckpoint(db, op);
                         break;
@@ -1729,6 +1732,24 @@ public final class PimdirStorage {
                 db, "ENSURE_COLLECTION", PimdirSql.values("collection", collection, "account", null));
     }
 
+    /**
+     * Records a create delivered (pimdir SYNC §2, §4) through the canonical
+     * {@code deliver_binding}: its binding, under its provisional handle,
+     * gains a base naming nothing while it holds none, so the create derives
+     * nothing until the page naming its member lands it. A relocation names
+     * its destination's collection, which the batch holds apart.
+     */
+    private static void deliver(SQLiteDatabase db, JSONObject op) throws JSONException {
+        String collection = op.getString("collection");
+        PimdirDb.exec(
+                db,
+                "DELIVER_BINDING",
+                PimdirSql.values(
+                        "collection", collectionOf(collection),
+                        "source", sourceOf(collection),
+                        "handle", op.getString("handle")));
+    }
+
     private void setCheckpoint(SQLiteDatabase db, JSONObject op) throws JSONException {
         String collection = collectionOf(op.getString("collection"));
         String source = sourceOf(op.getString("collection"));
@@ -2229,6 +2250,22 @@ public final class PimdirStorage {
         }
     }
 
+    /**
+     * Records the create under the provisional {@code handle} delivered
+     * (pimdir SYNC §2, §4) through the canonical {@code deliver_binding}: a
+     * relocation into it is about to leave, and its binding gains a base
+     * naming nothing while it holds none.
+     */
+    public void deliver(String engineCollection, String handle) {
+        PimdirDb.exec(
+                store.getWritableDatabase(),
+                "DELIVER_BINDING",
+                PimdirSql.values(
+                        "collection", collectionOf(engineCollection),
+                        "source", sourceOf(engineCollection),
+                        "handle", handle));
+    }
+
     /** The pending create a move staged here, own or minted key, or null. */
     public String pendingCreateOf(String engineCollection, String linkId) {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -2296,23 +2333,42 @@ public final class PimdirStorage {
         }
     }
 
+    /** A pending create of a collection, by its link id. */
+    public static final class PendingCreate {
+        /** Its link id. */
+        public final String linkId;
+
+        /**
+         * Whether its source took it before a listing named it (pimdir SYNC
+         * §2): an append accepted, or a relocation into it.
+         */
+        public final boolean delivered;
+
+        PendingCreate(String linkId, boolean delivered) {
+            this.linkId = linkId;
+            this.delivered = delivered;
+        }
+    }
+
     /**
      * A collection's pending mail creates by bare {@code Message-ID}.
      *
      * <p>Lands a staged copy on the provider's own arrival (a sent message).
      * Read off the provisional handle range, so cost follows the creates, not
-     * the mailbox.
+     * the mailbox; a delivered one included.
      */
-    public Map<String, String> pendingCreatesByMessageId(String engineCollection) {
+    public Map<String, PendingCreate> pendingCreatesByMessageId(String engineCollection) {
         SQLiteDatabase db = store.getReadableDatabase();
-        Map<String, String> creates = new HashMap<>();
+        Map<String, PendingCreate> creates = new HashMap<>();
         Map<String, Object> values =
                 source(collectionOf(engineCollection), sourceOf(engineCollection));
         values.put("low", PROVISIONAL);
         values.put("high", String.valueOf((char) (PROVISIONAL.charAt(0) + 1)));
         try (Cursor cursor = PimdirDb.query(db, "PENDING_CREATES_BY_MESSAGE_ID", values)) {
             while (cursor.moveToNext()) {
-                creates.put(cursor.getString(1), cursor.getString(0));
+                creates.put(
+                        cursor.getString(1),
+                        new PendingCreate(cursor.getString(0), cursor.getInt(2) != 0));
             }
         }
         return creates;

@@ -677,6 +677,33 @@ fn a_run_reads_the_changes_from_one_state_once() {
     assert!(Arc::ptr_eq(&first, &second));
 }
 
+/// A move the run pushed is replayed by a mailbox listed after it, so its
+/// target lands it in the same pass, as `GmailRun::refiled` has it.
+#[test]
+fn a_move_the_run_pushed_reads_the_changes_again() {
+    let run = JmapRun::default();
+    let reads = AtomicUsize::new(0);
+    let read = || {
+        reads.fetch_add(1, Ordering::SeqCst);
+        Ok(Some(JmapDelta {
+            next: "s2".into(),
+            emails: vec![email(0, &["trash"])],
+            gone: Vec::new(),
+        }))
+    };
+
+    run.delta("s1", read).unwrap();
+    run.delta("s1", read).unwrap();
+    run.refiled();
+    run.delta("s1", read).unwrap();
+
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        2,
+        "read again after the move alone"
+    );
+}
+
 #[test]
 fn a_run_keeps_no_failure_and_remembers_an_expired_state() {
     let run = JmapRun::default();

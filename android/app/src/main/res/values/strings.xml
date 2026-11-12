@@ -229,6 +229,9 @@
     <string name="sync_held_delete">Delete on the server</string>
     <string name="sync_held_restore">Put them back</string>
     <string name="sync_held_later">Later</string>
+    <string name="sync_waiting_title">Waiting for the server</string>
+    <string name="sync_waiting_body">These deletes and moves are still on this phone: the server has not listed the messages yet. They are sent once it does.</string>
+    <string name="sync_waiting_row">%1$s, %2$s: %3$d</string>
     <!-- The contact changes a sync could not send yet (UnsentContacts). -->
     <string name="sync_unsent_title">Not sent yet</string>
     <string name="sync_unsent_body">These contact changes stay on this phone until they can be sent.</string>

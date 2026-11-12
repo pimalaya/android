@@ -375,6 +375,12 @@ pub enum WriteOpJson {
         handle: String,
         reason: DropReasonJson,
     },
+    /// Records the create under a provisional handle delivered (pimdir SYNC
+    /// §2, §4): its binding gains a base naming nothing while it holds none.
+    DeliverPlacement {
+        collection: String,
+        handle: String,
+    },
     /// A body, as text when UTF-8 and base64 otherwise.
     ///
     /// Base64 stores a message's 8-bit bytes as fetched; `persisted`, with no
@@ -459,6 +465,10 @@ impl From<&PimdirWriteOp> for WriteOpJson {
                 collection: collection.as_str().into(),
                 handle: handle.as_str().into(),
                 reason: (*reason).into(),
+            },
+            PimdirWriteOp::DeliverPlacement { collection, handle } => Self::DeliverPlacement {
+                collection: collection.as_str().into(),
+                handle: handle.as_str().into(),
             },
             PimdirWriteOp::StoreObject { object, body } => {
                 let Some(bytes) = body.as_deref() else {
@@ -1106,6 +1116,10 @@ pub struct PushResultJson {
     pub assigned: Option<String>,
     #[serde(default)]
     pub revision: Option<String>,
+    /// Whether an accepted removal carrying `to` relocated the member, which
+    /// alone delivers the target's create (pimdir SYNC §4).
+    #[serde(default)]
+    pub relocated: bool,
 }
 
 /// One engine yield on the JSON wire (engine to Java only), tagged by `op`.

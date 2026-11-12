@@ -36,6 +36,7 @@ import org.pimalaya.mail.MailSync;
 import org.pimalaya.mail.MailTally;
 import org.pimalaya.mail.MailWindow;
 import org.pimalaya.phone.Accounts;
+import org.pimalaya.pimdir.HeldActions;
 import org.pimalaya.pimdir.HeldDeletions;
 import org.pimalaya.pimdir.ParkedRounds;
 import org.pimalaya.pimdir.PimdirCollections;
@@ -247,6 +248,7 @@ public final class SyncCoordinator implements MailSync {
         if (ended) {
             offerParked();
             offerHeld();
+            offerWaiting();
             offerUnsent();
         }
     }
@@ -314,6 +316,35 @@ public final class SyncCoordinator implements MailSync {
                             syncAll();
                         })
                 .setNegativeButton(R.string.sync_parked_keep, null)
+                .show();
+    }
+
+    /**
+     * Tells which deletes and moves wait on the phone for the server to list
+     * the message they apply to (pimdir SYNC §2, {@link HeldActions}): each
+     * told once, a restart included; a create waiting with nothing staged on
+     * it tells nothing.
+     */
+    private void offerWaiting() {
+        List<HeldActions.Held> waiting = pimdir.heldActions().untold();
+        if (waiting.isEmpty()) {
+            return;
+        }
+        Map<String, PimdirCollections.Stored> stored = storedCollections();
+        StringBuilder rows = new StringBuilder(host.getString(R.string.sync_waiting_body));
+        for (HeldActions.Held changes : waiting) {
+            PimdirCollections.Stored one = stored.get(changes.collection());
+            rows.append("\n\n")
+                    .append(host.getString(
+                            R.string.sync_waiting_row,
+                            one == null ? changes.collection() : one.name,
+                            one == null ? "" : one.accountEmail,
+                            changes.actions()));
+        }
+        new AlertDialog.Builder(host)
+                .setTitle(R.string.sync_waiting_title)
+                .setMessage(rows.toString())
+                .setPositiveButton(android.R.string.ok, null)
                 .show();
     }
 
