@@ -100,6 +100,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a Google Calendar event created with a start and no end failing to sync with "Google needs an end on every event": it now ends at its start, or lasts the day for an all-day event.
 - Fixed a delete for good or a restore of a Gmail or JMAP message in the trash, made before the next sync listed the trash, staying on the phone and the message coming back: it now waits on the phone and reaches the server once the trash is listed, a "Waiting for the server" notice naming what waits. An opened message moved to the trash keeps its read marker, and a move on a JMAP account lands in the same sync.
 - Fixed a Gmail or JMAP message deleted on the phone being destroyed for good, bypassing the trash, when another app had already trashed it and the trash synced first: a removal from one mailbox now only takes the message out of that mailbox while it lives in another, and destroys it only when it is held nowhere else.
 - Fixed a task or calendar entry saved from a screen left open during a sync failing, or silently writing over what the sync brought: the save now merges with the sync's version, asks on the conflict page when both changed the same thing, and keeps both sides' categories and alarms; batch actions skip and report a task that changed meanwhile, and a stale delete is refused.

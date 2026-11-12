@@ -560,9 +560,9 @@ dependencies = [
 
 [[package]]
 name = "io-gcal"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0d23bf4c6cc8c4adfc657e2438698084128350787761dac5d2e7da66e664cc1"
+checksum = "97f3e22d8e035908025d797b6f62d87f0be32f4933b587803550aadede4395f6"
 dependencies = [
  "ical-rs",
  "io-http",
@@ -721,8 +721,8 @@ dependencies = [
 
 [[package]]
 name = "io-pimdir"
-version = "0.9.0"
-source = "git+https://github.com/pimalaya/io-pimdir?rev=3a51ae759353928dc6f184e2839f6580efc739bc#3a51ae759353928dc6f184e2839f6580efc739bc"
+version = "0.10.0"
+source = "git+https://github.com/pimalaya/io-pimdir?rev=816df1e16142f2fd2156fb3ef6b26f00f9baf5d4#816df1e16142f2fd2156fb3ef6b26f00f9baf5d4"
 dependencies = [
  "blake3",
  "encoding_rs",
