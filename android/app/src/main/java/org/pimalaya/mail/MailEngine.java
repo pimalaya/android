@@ -1239,15 +1239,21 @@ public final class MailEngine extends PimdirEngine {
      * <p>A move's pending create stays, once delivered, on an account listed
      * account-wide: the destination's listing lands it, its body kept (pimdir
      * SYNC §5). Elsewhere it is withdrawn, the message coming back with that
-     * listing.
+     * listing. A delete there leaves its mailbox alone while the account
+     * holds the message in another ({@link #heldElsewhere}).
      */
     private JSONObject pushRemove(
             String collection, String mailbox, String handle, JSONObject change)
             throws JSONException {
         String to = change.isNull("to") ? null : change.optString("to", null);
         if (to == null) {
+            MessageRef message = new MessageRef(mailbox, handle);
             try {
-                clients.mail().destroy(session, new MessageRef(mailbox, handle));
+                if (heldElsewhere(collection, handle)) {
+                    clients.mail().detach(session, message);
+                } else {
+                    clients.mail().destroy(session, message);
+                }
             } catch (RuntimeException failure) {
                 gone(mailbox, handle, failure);
             }
@@ -1285,6 +1291,25 @@ public final class MailEngine extends PimdirEngine {
             }
         }
         return result(handle, true, null, null);
+    }
+
+    /**
+     * Whether a removal from a mailbox must leave the message on the server.
+     *
+     * <p>Account-wide, one handle names the message in every mailbox, so a
+     * delete from one takes it from all: while the account holds that handle
+     * live in another mailbox, Gmail's All Mail aside, the removal only leaves
+     * this one (a move whose target landed first, a restore out of the
+     * trash). Held nowhere else, it is a delete for good. A Message-ID names
+     * none: a sent copy and a list copy share one, as two messages.
+     */
+    private boolean heldElsewhere(String collection, String handle) {
+        if (!accountWide()) {
+            return false;
+        }
+        synchronized (locks.store) {
+            return offline.liveElsewhere(collection, handle, MailStore.allMailOf(accountId));
+        }
     }
 
     /**

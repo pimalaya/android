@@ -992,6 +992,37 @@ impl<H: Host> Mail<'_, '_, H> {
         }
     }
 
+    /// Takes one message out of one mailbox alone, on a source listing its
+    /// account as a whole (Gmail, JMAP), where one id names the message in
+    /// every mailbox and a destroy would take it from all of them.
+    pub fn detach(&mut self, mailbox: &str, id: &str) -> Result<(), BridgeError> {
+        match self.session.kind {
+            MailKind::Jmap(_) => {
+                let from = self.mailbox_id(mailbox)?;
+                let url = self.session.jmap_url()?;
+                Jmap {
+                    client: self.client,
+                    session_url: url,
+                    auth: self.session.auth(),
+                }
+                .detach_message(id, &from)
+            }
+            MailKind::Gmail(_) => {
+                let from = self.mailbox_id(mailbox)?;
+                Gmail {
+                    client: self.client,
+                    token: self.session.auth().secret(),
+                }
+                .detach_message(id, &from)?;
+                self.session.gmail_run().refiled(id);
+                Ok(())
+            }
+            MailKind::Imap(_) | MailKind::Graph(_) => {
+                Err("Only a source listed account-wide takes a message out of one mailbox".into())
+            }
+        }
+    }
+
     /// Deletes one message for good.
     pub fn destroy(&mut self, mailbox: &str, id: &str) -> Result<(), BridgeError> {
         match self.session.kind {

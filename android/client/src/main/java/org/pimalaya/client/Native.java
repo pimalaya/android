@@ -449,6 +449,15 @@ final class Native {
             Transport transport, long session, String mailbox, String id, String target);
 
     /**
+     * Takes one message out of {@code mailbox} alone, returning {@code {}}.
+     *
+     * <p>On a source listed account-wide (Gmail, JMAP), where one id names
+     * the message in every mailbox: a label or a mailbox removed.
+     */
+    static native String detachMessage(
+            Transport transport, long session, String mailbox, String id);
+
+    /**
      * Deletes one message for good, returning {@code {}}.
      *
      * <p>The push of a removal naming no destination: on IMAP {@code \Deleted}

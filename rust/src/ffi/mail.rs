@@ -568,6 +568,37 @@ pub extern "system" fn Java_org_pimalaya_client_Native_destroyMessage<'local>(
     .resolve::<ErrorReply>()
 }
 
+/// `Native.detachMessage`: takes one message out of `mailbox` alone.
+///
+/// The push of a removal naming no destination on a source listed
+/// account-wide while the account holds the message in another mailbox.
+/// Returns `{}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_detachMessage<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    handle: i64,
+    mailbox: JString<'local>,
+    id: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let mailbox = read_string(env, &mailbox);
+        let id = read_string(env, &id);
+
+        let mut client = Client::new(JniHost::new(env, &transport, None));
+        let json = match unsafe { bind(handle, &mut client) }
+            .and_then(|mut mail| mail.detach(&mailbox, &id))
+        {
+            Ok(()) => String::from("{}"),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
 /// `Native.appendMessage`: appends one message to `mailbox`, IMAP only.
 ///
 /// The push of a create staged with no origin, `flags` a JSON array of

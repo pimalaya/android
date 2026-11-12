@@ -840,6 +840,22 @@ impl<H: Host> Gmail<'_, H> {
         self.modify_labels(id, &[to.to_string()], &[])
     }
 
+    /// Takes one message out of the label `from` alone, every other label it
+    /// holds kept: out of the trash by `untrash`, which owns that label.
+    ///
+    /// A message gone stays gone ([`converged`]).
+    pub fn detach_message(&mut self, id: &str, from: &str) -> Result<(), BridgeError> {
+        if from == TRASH {
+            let auth = HttpAuthBearer::new(self.token);
+            let coroutine =
+                GmailMessageUntrash::new(&auth, "me", id).map_err(|err| err.to_string())?;
+            converged(self.run(quota::MESSAGES_UNTRASH, coroutine))?;
+            return Ok(());
+        }
+        converged(self.modify_labels(id, &[], &[from.to_string()]))?;
+        Ok(())
+    }
+
     /// Deletes one message for good, bypassing the trash ([`converged`]).
     pub fn destroy_message(&mut self, id: &str) -> Result<(), BridgeError> {
         let auth = HttpAuthBearer::new(self.token);

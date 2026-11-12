@@ -134,7 +134,7 @@ Opening a message SHALL mark it read in the store, once its body has arrived, an
 ### Requirement: A message is deleted into the account's trash
 Deleting a message outside the trash SHALL stage a move into the mailbox the account records as its trash: the row SHALL leave its mailbox and show in the trash at once. The next sync SHALL relocate it as staged: on IMAP with MOVE, or where the server implements no MOVE with COPY and `\Deleted`, then `UID EXPUNGE` where it announces `UIDPLUS`; on Graph into the folder Graph names `deleteditems`, recognised by id when the roster is read; on Gmail with `messages.trash`; on JMAP through `mailboxIds`.
 
-Deleting a message in the trash SHALL stage a removal, pushed as a permanent delete: on IMAP `\Deleted` then `UID EXPUNGE` (RFC 4315); on Graph `permanentDelete`; on Gmail `messages.delete`; on JMAP `Email/set` destroy. Where an IMAP account records no trash, or the message sits in the trash of an account whose last session announced no `UIDPLUS` (an expunge without it is mailbox-wide), a delete SHALL stage `\Deleted` in place: the row stays, its line saying it is marked deleted, and the toast says so. An account no session recorded yet SHALL read as announcing it. A JMAP account recording none SHALL refuse the delete outright: RFC 8621 has no counterpart to `\Deleted`. Deleting a message still in the outbox SHALL cancel its submission and withdraw its staged sent copy, there being nothing on the server to tell.
+Deleting a message in the trash SHALL stage a removal, pushed as a permanent delete: on IMAP `\Deleted` then `UID EXPUNGE` (RFC 4315); on Graph `permanentDelete`; on Gmail `messages.delete`; on JMAP `Email/set` destroy. On an account listed account-wide (Gmail, JMAP), where one id names a message in every mailbox, a removal SHALL take the message out of its mailbox alone while the account holds the same server id live in another mailbox (Gmail's All Mail aside; a Message-ID, which two messages may share, tells nothing): a Gmail label removed, `messages.untrash` out of the trash, a JMAP mailbox removed from `mailboxIds`; only a message held nowhere else SHALL be deleted for good. Where an IMAP account records no trash, or the message sits in the trash of an account whose last session announced no `UIDPLUS` (an expunge without it is mailbox-wide), a delete SHALL stage `\Deleted` in place: the row stays, its line saying it is marked deleted, and the toast says so. An account no session recorded yet SHALL read as announcing it. A JMAP account recording none SHALL refuse the delete outright: RFC 8621 has no counterpart to `\Deleted`. Deleting a message still in the outbox SHALL cancel its submission and withdraw its staged sent copy, there being nothing on the server to tell.
 
 On an account listed account-wide (Gmail, JMAP), where one id names a message in every mailbox, the trash row SHALL stay through the sync that relocates it, keeping its body, and SHALL be bound to the server's id by the trash's listing in that same sync when the trash is listed after the move; elsewhere it SHALL come back with the trash's next listing. Until it is bound, an action on it stays on the phone (io-pimdir withdraws a pending create): a known gap.
 
@@ -150,6 +150,11 @@ Deleting SHALL ask first, from the reader and from a selection alike. Where the 
 - WHEN a sync pushes the move and lists the trash after it
 - THEN the trash row stays, bound to Gmail's id with its body, and never leaves the trash in between
 - AND the next sync moves it there
+
+#### Scenario: A Gmail delete the trash listed first
+- GIVEN a Gmail message deleted from the inbox, the trash's listing naming it before the inbox pushed the move
+- WHEN the inbox pushes its removal
+- THEN the inbox label is removed and the message is never deleted for good
 
 #### Scenario: Emptying a trash never opened
 - GIVEN a selection of 12 messages in the trash, 9 of them never opened

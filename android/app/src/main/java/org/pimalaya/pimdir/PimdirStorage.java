@@ -691,6 +691,26 @@ public final class PimdirStorage {
     }
 
     /**
+     * Whether this source binds the server {@code handle} live in another
+     * collection of its account than {@code engineCollection} and {@code
+     * engineHidden}.
+     *
+     * <p>On a source listed account-wide, where one handle names a message in
+     * every mailbox, what a removal from one mailbox must leave in place; a
+     * Message-ID names none, two messages sharing one.
+     */
+    public boolean liveElsewhere(String engineCollection, String handle, String engineHidden) {
+        Map<String, Object> values = accountWide(engineCollection, null);
+        values.remove("link_id");
+        values.put("handle", handle);
+        values.put("hidden", collectionOf(engineHidden));
+        SQLiteDatabase db = store.getReadableDatabase();
+        try (Cursor cursor = PimdirDb.query(db, "LIVE_ELSEWHERE", values)) {
+            return cursor.moveToFirst();
+        }
+    }
+
+    /**
      * Where else this source holds the item, as its origin, or null.
      *
      * <p>Adding a contact to a second book is then a membership patch on

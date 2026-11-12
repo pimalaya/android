@@ -257,6 +257,25 @@ public class MailClient {
     }
 
     /**
+     * Takes one message out of its mailbox alone, every other kept.
+     *
+     * <p>Gmail removes the label ({@code untrash} out of the trash), JMAP the
+     * mailbox from {@code mailboxIds}: one id names the message in every
+     * mailbox there, so a delete would take it from all of them.
+     */
+    public void detach(MailSession session, MessageRef message) {
+        Replies.object(
+                on(
+                        session,
+                        open ->
+                                Native.detachMessage(
+                                        open.transport(),
+                                        open.handle(),
+                                        message.mailbox(),
+                                        message.id())));
+    }
+
+    /**
      * Deletes one message for good.
      *
      * <p>On IMAP {@code \Deleted} then {@code UID EXPUNGE} with UIDPLUS, the

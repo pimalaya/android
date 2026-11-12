@@ -137,6 +137,12 @@ public class MailMoveTest {
         }
 
         @Override
+        public void detach(MailSession session, MessageRef message) {
+            refuseGone(message.id());
+            calls.add("detach " + message.mailbox() + " " + message.id());
+        }
+
+        @Override
         public void append(MailSession session, String mailbox, byte[] source, Flags flags) {
             calls.add("append " + mailbox);
         }
@@ -582,6 +588,75 @@ public class MailMoveTest {
             assertFalse("never copied nor appended: " + call,
                     call.startsWith("copy") || call.startsWith("append"));
         }
+    }
+
+    /**
+     * A Gmail delete the trash's listing landed before the inbox pushed the
+     * move: the inbox's removal never destroys what the trash holds.
+     */
+    @Test
+    public void aGmailDeleteLandedInTheTrashFirstIsNeverDestroyed() throws Exception {
+        Server server = openedThenDeletedOnGmail();
+        server.pages.put("Trash", delta(new JSONArray().put(named("42", "Hello")), "h1"));
+        sync(server, trash);
+        server.pages.put("INBOX", delta(new JSONArray(), "h1"));
+        sync(server, inbox);
+
+        assertFalse("destroyed: " + server.calls, server.calls.contains("destroy INBOX 42"));
+        assertTrue("left the inbox: " + server.calls, server.calls.contains("detach INBOX 42"));
+        assertNotNull("still in the trash", rowIn("Trash"));
+    }
+
+    /** A Gmail delete for good from the trash, held nowhere else, destroys. */
+    @Test
+    public void aGmailDeleteForGoodFromTheTrashDestroys() throws Exception {
+        MailPolicy.markAccountWide(context, accountId, true);
+        file(trash, named("7", "Old"));
+        stager().mutateRemove(trash, "7");
+
+        Server server = new Server();
+        server.listed = new JSONArray().put(named("7", "Old"));
+        sync(server, trash);
+
+        assertEquals(List.of("destroy Trash 7"), server.calls);
+    }
+
+    /**
+     * A Gmail delete for good from the trash beside another message sharing
+     * its Message-ID in the inbox: that one is not this message, which goes.
+     */
+    @Test
+    public void aGmailDeleteForGoodBesideAnotherMessageOfItsIdDestroys() throws Exception {
+        MailPolicy.markAccountWide(context, accountId, true);
+        file(inbox, named("8", "Other").put("linkId", "m@example.org"));
+        file(trash, named("7", "Old").put("linkId", "m@example.org"));
+        stager().mutateRemove(trash, "7");
+
+        Server server = new Server();
+        server.listed = new JSONArray().put(named("7", "Old").put("linkId", "m@example.org"));
+        sync(server, trash);
+
+        assertEquals(List.of("destroy Trash 7"), server.calls);
+    }
+
+    /**
+     * A Gmail removal from one mailbox of a message another holds under
+     * another key: one id is one message, which only leaves that mailbox.
+     */
+    @Test
+    public void aGmailRemovalOfAMessageHeldElsewhereUnderAnotherKeyLeaves() throws Exception {
+        MailPolicy.markAccountWide(context, accountId, true);
+        String archive = store.collectionOf(EMAIL, "Archive");
+        file(inbox, named("7", "Old").put("linkId", "dup:m@example.org#7"));
+        file(archive, named("7", "Old").put("linkId", "m@example.org"));
+        synced(archive);
+        stager().mutateRemove(archive, "7");
+
+        Server server = new Server();
+        server.listed = new JSONArray().put(named("7", "Old").put("linkId", "m@example.org"));
+        sync(server, archive);
+
+        assertEquals(List.of("detach Archive 7"), server.calls);
     }
 
     /** The read marker staged before a Gmail delete reaches the server. */

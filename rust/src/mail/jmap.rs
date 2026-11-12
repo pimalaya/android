@@ -519,6 +519,15 @@ impl<H: Host> Jmap<'_, H> {
         self.write_message(id, args)
     }
 
+    /// Takes one message out of the mailbox `from` (an id) alone, every
+    /// other mailbox holding it kept (RFC 8621 section 4.1.1).
+    pub fn detach_message(&mut self, id: &str, from: &str) -> Result<(), BridgeError> {
+        let mut args = JmapEmailSetArgs::default();
+        args.remove_from_mailbox(id, from);
+        converged(self.write_message(id, args))?;
+        Ok(())
+    }
+
     /// Destroys one message for good.
     pub fn destroy_message(&mut self, id: &str) -> Result<(), BridgeError> {
         let args = destroy_args(id);
