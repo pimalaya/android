@@ -22,6 +22,7 @@ use std::{
 
 use io_http::rfc6750::bearer::HttpAuthBearer;
 use io_msgraph::v1::{
+    field::MsgraphField,
     rest::{
         batch::{
             MSGRAPH_BATCH_MAX_REQUESTS, MsgraphBatch, MsgraphBatchRequest, MsgraphBatchResponse,
@@ -857,10 +858,19 @@ fn graph_summary(message: &MsgraphMessage) -> PimdirMailSummary {
         attachment: message.has_attachments,
         invitation: None,
         from,
-        to: message.to_recipients.iter().filter_map(address).collect(),
-        cc: message.cc_recipients.iter().filter_map(address).collect(),
+        to: addresses(&message.to_recipients),
+        cc: addresses(&message.cc_recipients),
         bcc: Vec::new(),
     }
+}
+
+/// The addresses of a recipient list, none when Graph sent no list.
+fn addresses(recipients: &MsgraphField<Vec<MsgraphRecipient>>) -> Vec<PimdirAddress> {
+    let recipients = recipients
+        .as_option()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    recipients.iter().filter_map(address).collect()
 }
 
 /// One Graph recipient as Annex A.6 stores an address.

@@ -27,7 +27,8 @@ use crate::{
     mail::{
         imap::{
             BODY_BATCH, Capability, Disposal, ImapSession, ImapState, MAILBOX_REFUSED,
-            MAX_MESSAGE_SIZE, Relocation, batches, disposal, header, literal_bound, relocation,
+            MAX_MESSAGE_SIZE, Relocation, batches, disposal, header, list_mailboxes, literal_bound,
+            relocation,
         },
         listing::{Floor, MailRequest},
         message_id,
@@ -78,6 +79,10 @@ struct Scripted {
     /// UIDs a search still names whose header fetch Gmail refuses (`NO`),
     /// gone meanwhile.
     gone: Vec<u32>,
+    /// UIDs whose FETCH line no client can decode ([`unreadable`]).
+    garbled: Vec<u32>,
+    /// The commands, by prefix, answered with an undecodable line more.
+    noisy: Vec<&'static str>,
     pending: VecDeque<u8>,
     commands: Vec<String>,
     /// Every UID whose header fields were fetched, in order.
@@ -100,6 +105,8 @@ impl Scripted {
             refuse_batches: false,
             examine_refused: None,
             gone: Vec::new(),
+            garbled: Vec::new(),
+            noisy: Vec::new(),
             pending: VecDeque::new(),
             commands: Vec::new(),
             headers_read: Vec::new(),
@@ -145,9 +152,36 @@ impl Scripted {
     }
 
     fn answer(&mut self, line: &str) -> String {
+        let (_, command) = line.trim_end().split_once(' ').unwrap();
+        let noise = match self.noisy.iter().any(|noisy| command.starts_with(noisy)) {
+            true => unreadable(99, 99),
+            false => String::new(),
+        };
+        noise + &self.served(line)
+    }
+
+    fn served(&mut self, line: &str) -> String {
         let (tag, command) = line.trim_end().split_once(' ').unwrap();
         self.commands.push(command.to_string());
 
+        if command.starts_with("LIST ") {
+            return format!(
+                "* LIST (\\HasNoChildren) \"/\" INBOX\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Archive\r\n{tag} OK listed\r\n"
+            );
+        }
+        if command.starts_with("SELECT INBOX (QRESYNC ") {
+            return format!(
+                "* {} EXISTS\r\n* OK [UIDVALIDITY 7] v\r\n* OK [UIDNEXT {}] n\r\n\
+                 * OK [HIGHESTMODSEQ {}] m\r\n* VANISHED (EARLIER) 2\r\n\
+                 * 3 FETCH (UID 3 FLAGS (\\Seen) MODSEQ ({}))\r\n\
+                 {tag} OK [READ-WRITE] done\r\n",
+                self.messages.len(),
+                self.uid_next,
+                self.modseq,
+                self.modseq
+            );
+        }
         if command.starts_with("EXAMINE") {
             if let Some(reply) = self.examine_refused {
                 return reply.replace("TAG", tag);
@@ -186,6 +220,10 @@ impl Scripted {
         let mut reply = String::new();
         if items == "(UID RFC822.SIZE)" {
             for uid in uids {
+                if self.garbled.contains(&uid) {
+                    reply += &unreadable(self.seq(uid), uid);
+                    continue;
+                }
                 let size = self.message(uid).unwrap().body().len();
                 reply += &format!(
                     "* {} FETCH (UID {uid} RFC822.SIZE {size})\r\n",
@@ -211,6 +249,10 @@ impl Scripted {
             let refused = uids.iter().any(|uid| self.gone.contains(uid));
             for uid in uids {
                 if self.gone.contains(&uid) {
+                    continue;
+                }
+                if self.garbled.contains(&uid) {
+                    reply += &unreadable(self.seq(uid), uid);
                     continue;
                 }
                 self.headers_read.push(uid);
@@ -263,6 +305,11 @@ impl Host for Scripted {
     fn serve(&mut self, _request: &str) -> Result<String, BridgeError> {
         Err("Unscripted".into())
     }
+}
+
+/// A FETCH line whose keyword is no flag IMAP allows, as Gmail has sent.
+fn unreadable(seq: usize, uid: u32) -> String {
+    format!("* {seq} FETCH (UID {uid} FLAGS (OIB-Seen-[Gmail]/All Mail))\r\n")
 }
 
 /// A sequence set as the UIDs it names.
@@ -726,6 +773,138 @@ fn a_narrowed_round_hands_every_uid_on_its_last_page() {
         .unwrap();
     assert!(!page.narrowed, "no date filter");
     assert_eq!(page.enumerated, None);
+}
+
+/// A roster lacking a line it could not read would drop that mailbox.
+#[test]
+fn a_roster_that_skipped_a_line_is_refused() {
+    let mut client = Client::new(Scripted::new(daily(3)));
+    let mut state = state(Vec::new());
+
+    let roster = list_mailboxes(&mut ImapSession::bind(&mut client, &mut state)).unwrap();
+    assert_eq!(roster.len(), 2);
+
+    client.host.noisy = vec!["LIST"];
+    let err = list_mailboxes(&mut ImapSession::bind(&mut client, &mut state))
+        .err()
+        .expect("no roster");
+    assert_eq!(err.message, "IMAP LIST is not whole, responses unread: 1");
+}
+
+/// A round ends on what its search names: one that skipped a line names
+/// too few, and what it lacks would read as gone.
+#[test]
+fn a_round_whose_search_skipped_a_line_is_refused() {
+    let mut client = Client::new(Scripted::new(daily(3)));
+    client.host.noisy = vec!["UID SEARCH"];
+    let mut state = state(Vec::new());
+    let whole: MailRequest = from_str(r#"{"listing":{"kind":"round"}}"#).unwrap();
+
+    let err = ImapSession::bind(&mut client, &mut state)
+        .list_page("INBOX", &whole)
+        .err()
+        .expect("no page");
+    assert_eq!(
+        err.message,
+        "IMAP UID SEARCH is not whole, responses unread: 1"
+    );
+}
+
+/// A UID a page asked for and got no line for is gone, unless a line was
+/// skipped: it may be that one's.
+#[test]
+fn a_header_line_unread_is_not_a_message_gone() {
+    let whole: MailRequest = from_str(r#"{"listing":{"kind":"round"}}"#).unwrap();
+
+    let mut client = Client::new(Scripted::new(daily(3)));
+    client.host.noisy = vec!["UID FETCH"];
+    let mut held = state(Vec::new());
+    let page = ImapSession::bind(&mut client, &mut held)
+        .list_page("INBOX", &whole)
+        .unwrap();
+    assert_eq!(page.items.len(), 3, "every UID asked was read");
+
+    let mut client = Client::new(Scripted::new(daily(3)));
+    client.host.garbled = vec![2];
+    let mut held = state(Vec::new());
+    let err = ImapSession::bind(&mut client, &mut held)
+        .list_page("INBOX", &whole)
+        .err()
+        .expect("no page");
+    assert_eq!(
+        err.message,
+        "IMAP UID FETCH is not whole, responses unread: 1"
+    );
+}
+
+/// A message with no size is gone to a body read, unless its line was
+/// skipped.
+#[test]
+fn a_size_line_unread_is_not_a_message_gone() {
+    let dir = tempdir().unwrap();
+    let ids: Vec<String> = ["1", "2", "9"].map(String::from).to_vec();
+
+    let mut client = Client::new(Scripted::new(daily(3)));
+    let mut held = state(Vec::new());
+    let read = ImapSession::bind(&mut client, &mut held)
+        .fetch_sources("INBOX", &ids, dir.path())
+        .unwrap();
+    assert_eq!(read.gone, ["9"]);
+
+    let mut client = Client::new(Scripted::new(daily(3)));
+    client.host.garbled = vec![2];
+    let mut held = state(Vec::new());
+    let err = ImapSession::bind(&mut client, &mut held)
+        .fetch_sources("INBOX", &ids, dir.path())
+        .unwrap_err();
+    assert_eq!(
+        err.message,
+        "IMAP UID FETCH is not whole, responses unread: 1"
+    );
+}
+
+/// A mailbox whose count was not read is not an empty one.
+#[test]
+fn a_mailbox_opened_without_its_count_is_not_empty() {
+    let mut client = Client::new(Scripted::new(daily(3)));
+    client.host.examine_refused = Some("* OK [UIDVALIDITY 7] v\r\nTAG OK [READ-ONLY] done\r\n");
+    client.host.noisy = vec!["EXAMINE"];
+    let mut state = state(Vec::new());
+    let whole: MailRequest = from_str(r#"{"listing":{"kind":"round"}}"#).unwrap();
+
+    let err = ImapSession::bind(&mut client, &mut state)
+        .list_page("INBOX", &whole)
+        .err()
+        .expect("no page");
+    assert_eq!(
+        err.message,
+        "IMAP EXAMINE is not whole, responses unread: 1"
+    );
+}
+
+/// A QRESYNC reply that skipped a line hands what it read and keeps its
+/// checkpoint, so the next delta asks again for what the line held.
+#[test]
+fn a_delta_that_skipped_a_line_keeps_its_checkpoint() {
+    let mut client = Client::new(Scripted::new(daily(3)));
+    client.host.modseq = 12;
+    let mut state = state(vec![Capability::QResync]);
+    let delta: MailRequest =
+        from_str(r#"{"listing":{"kind":"delta","checkpoint":"7:9"}}"#).unwrap();
+
+    let page = ImapSession::bind(&mut client, &mut state)
+        .list_page("INBOX", &delta)
+        .unwrap();
+    assert_eq!(page.checkpoint.as_deref(), Some("7:12"));
+
+    client.host.noisy = vec!["SELECT"];
+    let page = ImapSession::bind(&mut client, &mut state)
+        .list_page("INBOX", &delta)
+        .unwrap();
+    assert_eq!(page.checkpoint.as_deref(), Some("7:9"));
+    assert_eq!(page.vanished, ["2"]);
+    let changed: Vec<&str> = page.items.iter().map(|item| item.handle.as_str()).collect();
+    assert_eq!(changed, ["3"]);
 }
 
 /// A member is named by its header, its UID only its handle.

@@ -142,8 +142,10 @@ pub fn validate_redirect(redirect_url: &str, state: &str, issuer: &str) -> Resul
         }
     }
 
+    // NOTE: compared above, parsed: io-oauth compares strings, and the
+    // issuer held went through a `Url`, which adds a bare origin's slash.
     Oauth20AuthParams::from(&url)
-        .validate(Some(&state))
+        .validate(Some(&state), None)
         .map(|code| code.into_owned())
         .map_err(|err| err.to_string())
 }
@@ -196,10 +198,9 @@ pub fn domain_scope(scopes_supported: &str, domains: &str) -> String {
 }
 
 /// Parses the session PKCE verifier, rejecting bytes outside the
-/// RFC 7636 unreserved set.
+/// RFC 7636 unreserved set and a length outside 43 to 128.
 pub fn parse_pkce_verifier(verifier: &str) -> Result<Oauth20PkceCodeVerifier, String> {
-    Oauth20PkceCodeVerifier::from_str(verifier)
-        .map_err(|byte| format!("Invalid PKCE verifier byte 0x{byte:x}"))
+    Oauth20PkceCodeVerifier::from_str(verifier).map_err(|err| err.to_string())
 }
 
 /// Letters and digits, valid as both PKCE verifier and VSCHAR state.
@@ -259,27 +260,25 @@ impl<H: Host> Client<H> {
     /// Fetches an authorization server's RFC 8414 metadata from its issuer.
     ///
     /// The `oauth-authorization-server` well-known first, then OpenID
-    /// Connect Discovery (the mailmaint draft requires one); refused unless
-    /// it is the issuer's own, over https ([`trusted_metadata`]).
+    /// Connect Discovery (the mailmaint draft requires one); io-pim-discovery
+    /// refuses one that is not the issuer's own, or not https throughout.
     pub fn oauth_server_metadata(
         &mut self,
         issuer: &Url,
     ) -> Result<DiscoveryOauthServerMetadata, BridgeError> {
-        require_https(issuer, "issuer")?;
-        let metadata = self.fetch_oauth_server_metadata(issuer)?;
-        trusted_metadata(issuer, metadata)
-    }
+        // NOTE: said once here, where the two tries would each say it.
+        if issuer.scheme() != "https" {
+            let server = issuer.origin().ascii_serialization();
+            let scheme = issuer.scheme();
+            return Err(format!("Refused issuer {server}: {scheme} is not https").into());
+        }
 
-    fn fetch_oauth_server_metadata(
-        &mut self,
-        issuer: &Url,
-    ) -> Result<DiscoveryOauthServerMetadata, BridgeError> {
         let primary = DiscoveryOauthServerMetadata::well_known_url(issuer);
-        match self.run_discovery(DiscoveryOauthServerResolve::new(primary)) {
+        match self.run_discovery(DiscoveryOauthServerResolve::new(primary, issuer.clone())) {
             Ok(metadata) => Ok(metadata),
             Err(primary_err) => {
                 let fallback = DiscoveryOauthServerMetadata::openid_well_known_url(issuer);
-                self.run_discovery(DiscoveryOauthServerResolve::new(fallback))
+                self.run_discovery(DiscoveryOauthServerResolve::new(fallback, issuer.clone()))
                     .map_err(|fallback_err| {
                         format!("{primary_err} (OpenID fallback also failed: {fallback_err})")
                             .into()
@@ -422,42 +421,6 @@ fn oauth_post_request(endpoint: &Url) -> HttpRequest {
         body: Vec::new(),
     }
     .header("Host", format!("{host}:{port}"))
-}
-
-/// The metadata fetched for `issuer`, when it is that issuer's.
-///
-/// RFC 8414 section 3.3: its `issuer` must match, or a host serving
-/// another's metadata steers the grant. Endpoints must be https: the
-/// browser opens one, and the code, verifier and refresh tokens go to them.
-fn trusted_metadata(
-    issuer: &Url,
-    metadata: DiscoveryOauthServerMetadata,
-) -> Result<DiscoveryOauthServerMetadata, BridgeError> {
-    if metadata.issuer != *issuer {
-        return Err(format!(
-            "Authorization server metadata for {issuer} names another issuer, {}",
-            metadata.issuer
-        )
-        .into());
-    }
-
-    let endpoints = [
-        (&metadata.authorization_endpoint, "authorization endpoint"),
-        (&metadata.token_endpoint, "token endpoint"),
-        (&metadata.registration_endpoint, "registration endpoint"),
-        (
-            &metadata.device_authorization_endpoint,
-            "device authorization endpoint",
-        ),
-    ];
-    for (endpoint, what) in endpoints {
-        let Some(endpoint) = endpoint else {
-            continue;
-        };
-        require_https(endpoint, what)?;
-    }
-
-    Ok(metadata)
 }
 
 /// A refused refresh, an ended grant (`invalid_grant`) as the sign-in 401.

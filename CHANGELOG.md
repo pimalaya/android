@@ -54,6 +54,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Changed the protocol libraries to their releases of 2026-11-13: io-http 0.7, io-oauth 0.6, io-imap 0.9, io-smtp 0.8, io-jmap 0.8, io-webdav 0.8, io-gcal 0.4, io-gtasks 0.1, io-gmail 0.7, io-gpeople 0.7, io-msgraph 0.8 and io-pim-discovery 0.12.
+- Changed a message addressed to something that is no email address to fail at once over SMTP, naming the address, without holding back the messages queued behind it.
+- Changed an OAuth server found by its issuer to be refused over plain `http` even on the phone itself: its issuer and every address its metadata names are https.
 - Changed the store to pimdir storage-draft-11, sync-draft-11 and search-draft-11 (io-pimdir 0.12). **Breaking:** a store an older build wrote is refused on open, and the app asks to be reinstalled; changes not yet sent from that store are lost.
 - Changed *Send again* on a message that may have been sent: it goes back to its place in the outbox, ahead of messages queued after it, where it was queued again at the end.
 - Changed deleting an entry that is in conflict: outside its conflict form the delete is refused and the conflict stays, where it was deleted and the other version dropped unseen.
@@ -105,6 +108,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed an IMAP answer holding a line the app cannot read (a mailbox, a search or a message line in a form no client decodes) being taken for a shorter listing, which dropped that mailbox or those messages from the phone: the mailbox's sync now fails saying so, and nothing is dropped.
+- Fixed a CardDAV or CalDAV listing cut short, or answered by a page that is no listing, being read as a shorter one, its missing contacts or events dropped from the phone: the listing now fails.
+- Fixed a message one recipient of which the server refuses not saying which: the failed message names the recipient.
+- Fixed a recipient whose address needs quotes, such as `john doe@example.org`, being sent to the server unquoted.
+- Fixed a Google Calendar event whose id holds `#`, `?` or `/` being read or written at another address than its own.
 - Fixed a message opening, or an attachment being read, from a damaged file stored under its name, such as the first part of a message a crash cut short: the file is now checked before anything of it is shown, moved aside into quarantine, and the message downloaded again.
 - Fixed a message moved on the server staying listed in Deleted items: once the mailbox it moved to holds it, its old row goes for good.
 - Fixed a new message reusing the `Message-ID` of a deleted one showing the deleted message's text under its own subject and never being downloaded: it is now a message of its own.
@@ -180,6 +188,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Security
 
+- Refused an address holding a line break before it reaches a mail server, where it added commands of its own to the sending session.
 - Encrypted the pending sign-in a browser step leaves on the phone, its PKCE verifier and a custom client's secret included, like the accounts, and removed it as soon as the sign-in completes, fails or is abandoned; one an older version left unencrypted is wiped on the next start.
 - Refused to send a password or token over an unencrypted connection, whatever asked for it: plain `imap://` and `http://` servers are refused when typed or discovered, a non-TLS CalDAV or CardDAV SRV record is ignored, and the bridge and the transport both refuse any credential on a plain socket (SMTP only after STARTTLS).
 - Bounded redirects: at most five, never from https to http, and never with the credential to another server; a JMAP download served from a CDN is followed without the token, and a principal or home set a DAV server names on another site is refused.

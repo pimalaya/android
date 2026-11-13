@@ -250,10 +250,10 @@ public class AccountClientTest {
 
         OauthSession blank =
                 OauthSession.resume(
-                        new OauthRequest("client", null, "http://127.0.0.1:8117", null), "s", "v");
+                        new OauthRequest("client", null, "http://127.0.0.1:8117", null), "s", "v".repeat(43));
         assertEquals("", blank.scope());
         assertEquals(
-                "https://auth.example.org/authorize?client_id=client&code_challenge=TJRIXgwhrmxBzh3-e2v6zupato5AokdvUCCOUm9QYIA&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A8117&response_type=code&state=s",
+                "https://auth.example.org/authorize?client_id=client&code_challenge=7w_YNF9DSfIdPf_pRjSq646_kPr-2-o9NAl16JGghdM&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A8117&response_type=code&state=s",
                 blank.authorizeUrl("https://auth.example.org/authorize", Map.of()));
     }
 

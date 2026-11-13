@@ -290,16 +290,16 @@ impl<H: Host> Gcal<'_, H> {
         params: &GcalEventsListParams,
     ) -> Result<Result<GcalEvents, GcalSendError>, BridgeError> {
         let auth = HttpAuthBearer::new(self.token);
-        let coroutine = GcalEventsList::new(&auth, &calendar_path(calendar), params)
-            .map_err(|err| err.to_string())?;
+        let coroutine =
+            GcalEventsList::new(&auth, calendar, params).map_err(|err| err.to_string())?;
         self.try_run(coroutine)
     }
 
     /// Reads one event.
     fn event(&mut self, calendar: &str, id: &str) -> Result<GcalEvent, BridgeError> {
         let auth = HttpAuthBearer::new(self.token);
-        let coroutine = GcalEventGet::new(&auth, &calendar_path(calendar), id, None, None)
-            .map_err(|err| err.to_string())?;
+        let coroutine =
+            GcalEventGet::new(&auth, calendar, id, None, None).map_err(|err| err.to_string())?;
         self.run(coroutine)
     }
 }
@@ -311,8 +311,8 @@ impl<H: Host> Gcal<'_, H> {
     fn import(&mut self, calendar: &str, event: &GcalEvent) -> Result<GcalEvent, BridgeError> {
         let params = GcalEventImportParams::default();
         let auth = HttpAuthBearer::new(self.token);
-        let coroutine = GcalEventImport::new(&auth, &calendar_path(calendar), event, &params)
-            .map_err(|err| err.to_string())?;
+        let coroutine =
+            GcalEventImport::new(&auth, calendar, event, &params).map_err(|err| err.to_string())?;
         self.run(coroutine)
     }
 
@@ -328,8 +328,8 @@ impl<H: Host> Gcal<'_, H> {
             ..Default::default()
         };
         let auth = HttpAuthBearer::new(self.token);
-        let coroutine = GcalEventInsert::new(&auth, &calendar_path(calendar), event, &params)
-            .map_err(|err| err.to_string())?;
+        let coroutine =
+            GcalEventInsert::new(&auth, calendar, event, &params).map_err(|err| err.to_string())?;
         self.run(coroutine)
     }
 
@@ -349,8 +349,8 @@ impl<H: Host> Gcal<'_, H> {
             ..Default::default()
         };
         let auth = HttpAuthBearer::new(self.token);
-        let coroutine = GcalEventInstances::new(&auth, &calendar_path(calendar), id, &params)
-            .map_err(|err| err.to_string())?;
+        let coroutine =
+            GcalEventInstances::new(&auth, calendar, id, &params).map_err(|err| err.to_string())?;
         Ok(self.run(coroutine)?.items)
     }
 
@@ -368,15 +368,8 @@ impl<H: Host> Gcal<'_, H> {
             ..Default::default()
         };
         let auth = HttpAuthBearer::new(self.token);
-        let coroutine = GcalEventUpdate::new(
-            &auth,
-            &calendar_path(calendar),
-            id,
-            event,
-            &params,
-            if_match,
-        )
-        .map_err(|err| err.to_string())?;
+        let coroutine = GcalEventUpdate::new(&auth, calendar, id, event, &params, if_match)
+            .map_err(|err| err.to_string())?;
         self.run(coroutine)
     }
 
@@ -389,14 +382,8 @@ impl<H: Host> Gcal<'_, H> {
         send_updates: GcalSendUpdates,
     ) -> Result<(), BridgeError> {
         let auth = HttpAuthBearer::new(self.token);
-        let coroutine = GcalEventDelete::new(
-            &auth,
-            &calendar_path(calendar),
-            id,
-            Some(send_updates),
-            if_match,
-        )
-        .map_err(|err| err.to_string())?;
+        let coroutine = GcalEventDelete::new(&auth, calendar, id, Some(send_updates), if_match)
+            .map_err(|err| err.to_string())?;
         self.run(coroutine)?;
         Ok(())
     }
@@ -864,24 +851,6 @@ fn check_revision(
         }
         _ => Ok(()),
     }
-}
-
-/// A calendar id as a path segment.
-///
-/// Google's ids carry `@` and, for the subscribed ones, `#`, which a URL
-/// would read as the start of a fragment, and io-gcal pastes the id into
-/// the path as it is given.
-fn calendar_path(id: &str) -> String {
-    let mut encoded = String::with_capacity(id.len());
-    for byte in id.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'@' => {
-                encoded.push(char::from(byte))
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
 }
 
 /// An io-gcal calendar list entry as a [`Calendar`], [`None`] without id.

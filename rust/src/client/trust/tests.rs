@@ -12,7 +12,7 @@ use secrecy::SecretString;
 use url::Url;
 
 use crate::client::trust::*;
-use crate::client::{Auth, Client, Host, USER_AGENT, jmap::Jmap};
+use crate::client::{Auth, Client, Host, USER_AGENT, jmap::Jmap, webdav::Webdav};
 
 /// A server answering each request with the next scripted answer.
 struct Scripted {
@@ -166,7 +166,7 @@ fn a_blob_download_follows_a_cdn_without_the_token() {
         auth: Auth::Bearer("token"),
     }
     .run_redirect(&start, CrossOrigin::Anonymous, |url| {
-        JmapBlobDownload::new(&auth, url)
+        Ok(JmapBlobDownload::new(&auth, url))
     })
     .unwrap();
 
@@ -190,7 +190,7 @@ fn a_blob_download_is_not_followed_to_plain_http() {
         auth: Auth::Bearer("token"),
     }
     .run_redirect(&start, CrossOrigin::Anonymous, |url| {
-        JmapBlobDownload::new(&auth, url)
+        Ok(JmapBlobDownload::new(&auth, url))
     })
     .unwrap_err();
 
@@ -213,7 +213,7 @@ fn a_jmap_session_redirect_to_another_server_is_refused() {
         auth: Auth::Bearer("token"),
     }
     .run_redirect(&start, CrossOrigin::Refuse, |url| {
-        JmapSessionGet::new(&auth, url)
+        Ok(JmapSessionGet::new(&auth, url))
     })
     .unwrap_err();
 
@@ -320,6 +320,105 @@ fn oauth_endpoints_require_https() {
         check("http://auth.example.org/token").unwrap_err(),
         "Refused token endpoint http://auth.example.org: http is not https"
     );
+}
+
+/// One answer carrying authorization server metadata.
+fn metadata(issuer: &str, token_endpoint: &str) -> String {
+    let body = serde_json::json!({
+        "issuer": issuer,
+        "authorization_endpoint": "https://as.example.org/auth",
+        "token_endpoint": token_endpoint,
+    })
+    .to_string();
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+/// Metadata is used only when it names the issuer asked, every URL of it
+/// https (RFC 8414 section 3.3): both well-known documents are refused.
+#[test]
+fn oauth_metadata_is_the_issuers_own() {
+    let issuer: Url = "https://as.example.org".parse().unwrap();
+    let fetch = |answer: String| {
+        let mut client = Client::new(Scripted::new(&[&answer, &answer]));
+        let fetched = client.oauth_server_metadata(&issuer);
+        (fetched, client.host.writes.len())
+    };
+
+    let own = metadata("https://as.example.org", "https://as.example.org/token");
+    let (fetched, requests) = fetch(own);
+    assert_eq!(fetched.unwrap().issuer, issuer);
+    assert_eq!(requests, 1);
+
+    let other = metadata("https://evil.example", "https://as.example.org/token");
+    let (fetched, requests) = fetch(other);
+    let err = fetched.unwrap_err();
+    assert!(err.message.contains("another issuer"), "{}", err.message);
+    assert_eq!(requests, 2);
+
+    let clear = metadata("https://as.example.org", "http://as.example.org/token");
+    let err = fetch(clear).0.unwrap_err();
+    assert!(err.message.contains("is not https"), "{}", err.message);
+}
+
+/// No metadata is asked of a cleartext issuer, a loopback one included.
+#[test]
+fn oauth_metadata_is_not_fetched_in_clear() {
+    let mut client = Client::new(Scripted::new(&[]));
+    let issuer: Url = "http://127.0.0.1:8080/as".parse().unwrap();
+
+    let err = client.oauth_server_metadata(&issuer).unwrap_err();
+
+    assert_eq!(
+        err.message,
+        "Refused issuer http://127.0.0.1:8080: http is not https"
+    );
+    assert!(client.host.writes.is_empty());
+}
+
+/// A listing cut short is refused, never read as a shorter one.
+#[test]
+fn a_dav_listing_that_is_not_whole_is_refused() {
+    let listing = |body: &str| {
+        let answer = format!(
+            "HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml\r\n\
+             Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let mut client = Client::new(Scripted::new(&[&answer]));
+        let url: Url = "https://dav.example.org/books/jane/".parse().unwrap();
+        let auth = Auth::Basic {
+            login: "jane",
+            password: "secret",
+        };
+        let mut dav = Webdav {
+            client: &mut client,
+            auth,
+        };
+        dav.list_cards(&url).map(|cards| cards.len())
+    };
+    let card = |name: &str| {
+        format!(
+            "<d:response><d:href>/books/jane/{name}.vcf</d:href><d:propstat><d:prop>\
+             <d:getetag>\"1\"</d:getetag><c:address-data>BEGIN:VCARD\r\nVERSION:4.0\r\n\
+             FN:{name}\r\nEND:VCARD\r\n</c:address-data></d:prop>\
+             <d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+        )
+    };
+    let whole = format!(
+        "<d:multistatus xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:carddav\">\
+         {}{}</d:multistatus>",
+        card("ana"),
+        card("bo")
+    );
+
+    assert_eq!(listing(&whole).unwrap(), 2);
+    let cut = &whole[..whole.len() - "</d:multistatus>".len() - 20];
+    assert!(listing(cut).is_err(), "a cut document lists nothing");
+    assert!(listing("<html><body>Sign in</body></html>").is_err());
+    assert!(listing("").is_err());
 }
 
 /// Stripping the credential leaves the rest of the request whole.

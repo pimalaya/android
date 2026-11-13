@@ -88,7 +88,7 @@ impl<H: Host> Jmap<'_, H> {
         let http_auth = self.auth.authorization();
         let session_url = self.session_url.clone();
         let out = self.run_redirect(&session_url, CrossOrigin::Refuse, |target| {
-            JmapSessionGet::new(&http_auth, target)
+            Ok(JmapSessionGet::new(&http_auth, target))
         })?;
         let key = session_key(&session_url, &http_auth);
         sessions().put(key, Instant::now(), out.session.clone());
@@ -96,11 +96,13 @@ impl<H: Host> Jmap<'_, H> {
     }
 
     /// Runs a coroutine that may answer 3xx, within [`Redirects`].
+    ///
+    /// `make` builds it for each target, failing as the coroutine does.
     pub fn run_redirect<C, T, E>(
         &mut self,
         start: &Url,
         cross_origin: CrossOrigin,
-        make: impl Fn(&Url) -> C,
+        make: impl Fn(&Url) -> Result<C, E>,
     ) -> Result<T, BridgeError>
     where
         C: JmapCoroutine<Yield = JmapRedirectYield, Return = Result<T, E>>,
@@ -110,7 +112,7 @@ impl<H: Host> Jmap<'_, H> {
         let mut target = start.clone();
 
         loop {
-            let mut coroutine = make(&target);
+            let mut coroutine = make(&target).map_err(|err| coroutine_error(&err))?;
             let mut arg: Option<Vec<u8>> = None;
 
             loop {

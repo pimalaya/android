@@ -14,7 +14,9 @@ use io_pim_discovery::{
         mx::{DiscoveryDnsMx, mx_base_domain},
     },
     compose::{
-        config::{DiscoveryConfigSource, DiscoveryService, DiscoveryServiceConfig},
+        config::{
+            DiscoveryConfigSource, DiscoveryConfigTrust, DiscoveryService, DiscoveryServiceConfig,
+        },
         providers::DiscoveryKnownProvider,
     },
     coroutine::{DiscoveryCoroutine, DiscoveryCoroutineState, DiscoveryYield},
@@ -61,7 +63,12 @@ impl<H: Host> Client<H> {
             let exchange = record.rdata.exchange.to_string();
 
             if let Some(provider) = DiscoveryKnownProvider::from_mx(&exchange) {
-                let mut configs = provider.configs(&email);
+                // NOTE: an MX answer vouches for nothing, the domain rule does.
+                let trust = match DiscoveryKnownProvider::from_domain(&domain) {
+                    Some(named) if named == provider => DiscoveryConfigTrust::Rule,
+                    _ => DiscoveryConfigTrust::Unauthenticated,
+                };
+                let mut configs = provider.configs(&email, trust);
 
                 // NOTE: a bare-domain search has no email, so the
                 // username hint is dropped rather than minted.
@@ -107,11 +114,12 @@ impl<H: Host> Client<H> {
             self.search_resolver(resolver)?,
         )
         .with_secure_only(true);
-        let url = self.run_mechanism(resolve)?;
+        let output = self.run_mechanism(resolve)?;
 
         Ok(vec![DiscoveryServiceConfig::from_dav(
             DiscoveryService::Carddav,
-            url,
+            output.root,
+            origin_trust(output.srv),
         )])
     }
 
@@ -129,11 +137,12 @@ impl<H: Host> Client<H> {
             self.search_resolver(resolver)?,
         )
         .with_secure_only(true);
-        let url = self.run_mechanism(resolve)?;
+        let output = self.run_mechanism(resolve)?;
 
         Ok(vec![DiscoveryServiceConfig::from_dav(
             DiscoveryService::Caldav,
-            url,
+            output.root,
+            origin_trust(output.srv),
         )])
     }
 
@@ -155,16 +164,20 @@ impl<H: Host> Client<H> {
 
         let mut located = Vec::new();
         if let Ok(url) = DiscoveryIsp::host_url(&address, &host, true) {
-            located.push((url, DiscoveryConfigSource::IspMain));
+            let trust = DiscoveryConfigTrust::Domain;
+            located.push((url, DiscoveryConfigSource::IspMain, trust));
         }
         if let Some(url) = self.alias_url(&host, &address, &resolver) {
-            located.push((url, DiscoveryConfigSource::IspMain));
+            let trust = DiscoveryConfigTrust::Unauthenticated;
+            located.push((url, DiscoveryConfigSource::IspMain, trust));
         }
         if let Ok(url) = DiscoveryIsp::fallback_url(&domain, true) {
-            located.push((url, DiscoveryConfigSource::IspFallback));
+            let trust = DiscoveryConfigTrust::Domain;
+            located.push((url, DiscoveryConfigSource::IspFallback, trust));
         }
         if let Ok(url) = DiscoveryIsp::db_url(&domain, true) {
-            located.push((url, DiscoveryConfigSource::Ispdb));
+            let trust = DiscoveryConfigTrust::ThirdParty;
+            located.push((url, DiscoveryConfigSource::Ispdb, trust));
         }
 
         // NOTE: the mailconf TXT record names the document's URL; https
@@ -173,7 +186,8 @@ impl<H: Host> Client<H> {
         if let Ok(url) = self.run_mechanism(mailconf)
             && url.scheme() == "https"
         {
-            located.push((url, DiscoveryConfigSource::Mailconf));
+            let trust = DiscoveryConfigTrust::Unauthenticated;
+            located.push((url, DiscoveryConfigSource::Mailconf, trust));
         }
 
         let configs = self.first_autoconfig(located, email);
@@ -195,16 +209,18 @@ impl<H: Host> Client<H> {
 
         for base in bases {
             let host = format!("autoconfig.{base}");
+            let source = DiscoveryConfigSource::Mx;
+            let trust = DiscoveryConfigTrust::Unauthenticated;
 
             let mut located = Vec::new();
             if let Ok(url) = DiscoveryIsp::host_url(&address, &host, true) {
-                located.push((url, DiscoveryConfigSource::Mx));
+                located.push((url, source, trust));
             }
             if let Some(url) = self.alias_url(&host, &address, &resolver) {
-                located.push((url, DiscoveryConfigSource::Mx));
+                located.push((url, source, trust));
             }
             if let Ok(url) = DiscoveryIsp::db_url(&base, true) {
-                located.push((url, DiscoveryConfigSource::Mx));
+                located.push((url, source, trust));
             }
 
             let configs = self.first_autoconfig(located, email);
@@ -229,14 +245,14 @@ impl<H: Host> Client<H> {
     /// The configs of the first located autoconfig document that has any.
     fn first_autoconfig(
         &mut self,
-        located: Vec<(Url, DiscoveryConfigSource)>,
+        located: Vec<(Url, DiscoveryConfigSource, DiscoveryConfigTrust)>,
         email: &str,
     ) -> Vec<DiscoveryServiceConfig> {
-        for (url, source) in located {
+        for (url, source, trust) in located {
             let Ok(config) = self.run_mechanism(DiscoveryIsp::new(url)) else {
                 continue;
             };
-            let configs = DiscoveryServiceConfig::from_autoconfig(&config, email, source);
+            let configs = DiscoveryServiceConfig::from_autoconfig(&config, email, source, trust);
             if !configs.is_empty() {
                 return configs;
             }
@@ -254,11 +270,12 @@ impl<H: Host> Client<H> {
         let (_, domain) = search_domain(email)?;
 
         let resolve = DiscoveryJmapResolve::new(&domain, self.search_resolver(resolver)?);
-        let session = self.run_mechanism(resolve)?;
+        let output = self.run_mechanism(resolve)?;
 
         Ok(vec![DiscoveryServiceConfig::from_jmap(
-            session.url,
-            &session.auth_schemes,
+            output.session.url,
+            &output.session.auth_schemes,
+            origin_trust(output.srv),
         )])
     }
 
@@ -374,6 +391,14 @@ impl<H: Host> Client<H> {
                 }
             }
         }
+    }
+}
+
+/// What vouches for a resolved origin: nothing once SRV named its host.
+fn origin_trust(srv: bool) -> DiscoveryConfigTrust {
+    match srv {
+        true => DiscoveryConfigTrust::Unauthenticated,
+        false => DiscoveryConfigTrust::Domain,
     }
 }
 

@@ -25,19 +25,19 @@ tempfile = { version = "3", default-features = false }
 [dependencies]
 chrono = { version = "0.4", default-features = false }
 ical-rs = { version = "0.7", default-features = false, features = ["jscalendar", "parser"] }
-io-gcal = { version = "0.3.1", default-features = false, features = ["ical"] }
-io-gmail = { version = "0.6", default-features = false }
-io-gpeople = { version = "0.6", default-features = false, features = ["vcard"] }
-io-gtasks = { git = "https://github.com/pimalaya/io-gtasks", rev = "f4c4aeda1e26f56c2a3783511199019c16be69ef", default-features = false, features = ["ical"] }
-io-http = { version = "0.6", default-features = false }
-io-imap = { version = "0.8", default-features = false }
-io-jmap = { version = "0.7", default-features = false, features = ["ical", "vcard"] }
-io-msgraph = { version = "0.7", default-features = false, features = ["ical", "vcard"] }
-io-oauth = { version = "0.5", default-features = false }
-io-pim-discovery = { version = "0.11", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
+io-gcal = { version = "0.4", default-features = false, features = ["ical"] }
+io-gmail = { version = "0.7", default-features = false }
+io-gpeople = { version = "0.7", default-features = false, features = ["vcard"] }
+io-gtasks = { version = "0.1", default-features = false, features = ["ical"] }
+io-http = { version = "0.7", default-features = false }
+io-imap = { version = "0.9", default-features = false }
+io-jmap = { version = "0.8", default-features = false, features = ["ical", "vcard"] }
+io-msgraph = { version = "0.8", default-features = false, features = ["ical", "vcard"] }
+io-oauth = { version = "0.6", default-features = false }
+io-pim-discovery = { version = "0.12", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
 io-pimdir = { version = "0.12", default-features = false, features = ["search"] }
-io-smtp = { version = "0.7", default-features = false }
-io-webdav = { version = "0.7", default-features = false }
+io-smtp = { version = "0.8", default-features = false }
+io-webdav = { version = "0.8", default-features = false }
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 jni = "0.22"
 libc = { version = "0.2", default-features = false }
@@ -54,6 +54,3 @@ siphasher = { version = "1", default-features = false }
 simd-cpu = { version = "0.1", default-features = false, features = ["std"] }
 url = { version = "2", default-features = false }
 vcard-rs = { version = "0.6", default-features = false, features = ["parser", "jscontact"] }
-
-[patch.crates-io]
-io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "92c28d5d8b44963a66eb1cb15017945f080f8ca1" }

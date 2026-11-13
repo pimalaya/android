@@ -97,7 +97,9 @@ fn http_status(err: &(dyn StdError + 'static)) -> Option<u16> {
         if let Some(WebdavFollowRedirectsError::HttpStatus { status, .. }) = err.downcast_ref() {
             return Some(*status);
         }
-        if let Some(JmapSendError::HttpStatus(status)) = err.downcast_ref() {
+        if let Some(JmapSendError::HttpStatus(status) | JmapSendError::Request { status, .. }) =
+            err.downcast_ref()
+        {
             return Some(*status);
         }
         if let Some(JmapSessionGetError::HttpStatus(status)) = err.downcast_ref() {
@@ -184,7 +186,8 @@ pub fn parts_failure(failures: Vec<BridgeError>) -> Option<BridgeError> {
 #[cfg(test)]
 mod tests {
     use io_jmap::rfc8620::{
-        blob_upload::JmapBlobUploadError, send::JmapSendError, session_get::JmapSessionGetError,
+        blob_upload::JmapBlobUploadError, error::JmapRequestError, send::JmapSendError,
+        session_get::JmapSessionGetError,
     };
 
     use crate::error::{BridgeError, coroutine_error, refused_for_good};
@@ -247,6 +250,16 @@ mod tests {
             coroutine_error(&JmapSendError::HttpStatus(412)).status,
             Some(412)
         );
+
+        // NOTE: a 401 answered as problem details must refresh as well.
+        for status in [400, 401] {
+            let error = JmapRequestError::Other {
+                type_name: "urn:ietf:params:jmap:error:notRequest".into(),
+                detail: None,
+            };
+            let refused = coroutine_error(&JmapSendError::Request { status, error });
+            assert_eq!(refused.status, Some(status));
+        }
 
         let parsed = coroutine_error(&JmapSessionGetError::NoPrimaryMailAccount);
         assert_eq!(parsed.status, None);

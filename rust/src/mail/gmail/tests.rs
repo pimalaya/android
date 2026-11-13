@@ -11,6 +11,7 @@ use std::{
 };
 
 use io_gmail::v1::rest::messages::{GmailMessageHeader, GmailMessagePayload};
+use percent_encoding::percent_decode_str;
 use url::Url;
 
 use crate::{
@@ -385,9 +386,9 @@ impl FakeBatcher {
         }
 
         assert_eq!(request.method, "GET");
-        let id = request.path.strip_prefix(MESSAGES).unwrap();
-        self.singles.push(id.into());
-        json_response(200, &self.message(id, read_of(request.param("format"))))
+        let id = read_id(&request.path);
+        self.singles.push(id.clone());
+        json_response(200, &self.message(&id, read_of(request.param("format"))))
     }
 
     /// Answers one batch, each call met by its next refusal, gone or served.
@@ -400,7 +401,7 @@ impl FakeBatcher {
         for call in &calls {
             assert_eq!(call.method, "GET");
             assert_eq!(read_of(call.param("format")), read, "one read per batch");
-            let id = call.path.strip_prefix(MESSAGES).unwrap().to_string();
+            let id = read_id(&call.path);
             let refusal = self
                 .refusals
                 .get_mut(&id)
@@ -436,6 +437,13 @@ impl FakeBatcher {
 
 /// The path a message is read under, before its id.
 const MESSAGES: &str = "/gmail/v1/users/me/messages/";
+
+/// The id a message is read under, one percent-encoded path segment.
+fn read_id(path: &str) -> String {
+    let segment = path.strip_prefix(MESSAGES).unwrap();
+    assert!(!segment.contains('/'), "an id is one segment: {path}");
+    percent_decode_str(segment).decode_utf8().unwrap().into()
+}
 
 /// What a read's `format` parameter asks.
 fn read_of(format: Option<&str>) -> Read {

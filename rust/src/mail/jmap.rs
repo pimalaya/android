@@ -716,7 +716,7 @@ impl<H: Host> JmapCalls<'_, '_, H> {
         let out = self
             .jmap
             .run_redirect(&url, CrossOrigin::Anonymous, |target| {
-                JmapBlobDownload::new(auth, target)
+                Ok(JmapBlobDownload::new(auth, target))
             })?;
         Ok(out.data)
     }
@@ -764,9 +764,13 @@ impl<H: Host> JmapCalls<'_, '_, H> {
         let imported = self.import_draft(&blob, &drafts)?;
         if let Some(err) = imported.not_created.into_values().next() {
             let message = format!("The server refused the message: {err}");
+            // NOTE: one already held may be an earlier try's, sent or not.
             return Err(match err {
-                JmapEmailImportItemError::Unknown => message.into(),
-                _ => refused(message),
+                JmapEmailImportItemError::AlreadyExists { .. }
+                | JmapEmailImportItemError::Other { .. } => message.into(),
+                JmapEmailImportItemError::InvalidEmail { .. }
+                | JmapEmailImportItemError::NotFound { .. }
+                | JmapEmailImportItemError::InvalidProperties { .. } => refused(message),
             });
         }
         let email = imported
@@ -808,6 +812,10 @@ impl<H: Host> JmapCalls<'_, '_, H> {
         // have sent and moved it already.
         let out = self.submit(args)?;
         if out.created.contains_key("s0") {
+            // NOTE: sent all the same, its draft staying where it was.
+            if let Some(reason) = unfiled(&out) {
+                log::warn!("sent message {email} not filed out of Drafts: {reason}");
+            }
             return Ok(());
         }
 
@@ -823,7 +831,7 @@ impl<H: Host> JmapCalls<'_, '_, H> {
         Err(match err {
             JmapEmailSubmissionSetItemError::RateLimit { .. }
             | JmapEmailSubmissionSetItemError::NotFound { .. }
-            | JmapEmailSubmissionSetItemError::Unknown => message.into(),
+            | JmapEmailSubmissionSetItemError::Other { .. } => message.into(),
             _ => refused(message),
         })
     }
@@ -887,6 +895,17 @@ impl<H: Host> JmapCalls<'_, '_, H> {
     fn destroy_draft(&mut self, id: &str) -> Result<(), BridgeError> {
         converged(self.run_email_set(destroy_args(id), id))?;
         Ok(())
+    }
+}
+
+/// Why the `Email/set` filing a submitted draft did not, when it said so.
+fn unfiled(out: &JmapEmailSubmissionSetOutput) -> Option<String> {
+    match out.email_set.as_ref()? {
+        Err(err) => Some(err.to_string()),
+        Ok(set) => {
+            let mut refused = set.not_updated.values().chain(set.not_destroyed.values());
+            refused.next().map(ToString::to_string)
+        }
     }
 }
 

@@ -15,15 +15,18 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use io_msgraph::v1::rest::{
-    batch::{MsgraphBatchRequest, MsgraphBatchResponse, MsgraphBatchResponses},
-    users::{
-        contacts::{MsgraphSingleValueExtendedProperty, delta::MsgraphRemoved},
-        messages::{
-            MsgraphEmailAddress, MsgraphFlagStatus, MsgraphFollowupFlag, MsgraphMessage,
-            MsgraphRecipient,
-            delta::{MsgraphMessageDelta, MsgraphMessagesDeltaResponse},
-            list::MsgraphMessagesListResponse,
+use io_msgraph::v1::{
+    field::MsgraphField,
+    rest::{
+        batch::{MsgraphBatchRequest, MsgraphBatchResponse, MsgraphBatchResponses},
+        users::{
+            contacts::{MsgraphSingleValueExtendedProperty, delta::MsgraphRemoved},
+            messages::{
+                MsgraphEmailAddress, MsgraphFlagStatus, MsgraphFollowupFlag, MsgraphMessage,
+                MsgraphRecipient,
+                delta::{MsgraphMessageDelta, MsgraphMessagesDeltaResponse},
+                list::MsgraphMessagesListResponse,
+            },
         },
     },
 };
@@ -381,6 +384,7 @@ impl FakeGraph {
                     value,
                     next_link: None,
                     delta_link: Some(format!("{DELTA}?$deltatoken={}", self.log.len())),
+                    count: None,
                 };
                 return FakeResponse::json(200, &page);
             }
@@ -413,6 +417,7 @@ impl FakeGraph {
             value,
             next_link,
             delta_link,
+            count: None,
         };
         FakeResponse::json(200, &page)
     }
@@ -1150,7 +1155,7 @@ fn the_summary_reads_the_select() {
         id: "m1".into(),
         subject: Some("Hello".into()),
         from: Some(recipient("Ana", "Ana@Example.org")),
-        to_recipients: vec![recipient("Bo", "bo@example.org")],
+        to_recipients: MsgraphField::Set(vec![recipient("Bo", "bo@example.org")]),
         internet_message_id: Some("<m1@example.org>".into()),
         has_attachments: Some(true),
         ..Default::default()

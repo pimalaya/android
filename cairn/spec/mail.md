@@ -268,13 +268,13 @@ The waiting messages SHALL be filed under each account's own *Outbox*, which the
 - THEN its row is cancelled and the body it pinned is released
 
 ### Requirement: A message is submitted and a copy is kept
-A sync draining the queue SHALL take an account's pending actions in append order and hand each message's bytes to the account's submit endpoint with the envelope its own address headers name, the `Bcc` among them, that header leaving the bytes on the way out so no copy a recipient receives names a blind one. A Graph or Gmail account SHALL hand the bytes, `Bcc` still in them, to `sendMail` or `messages.send` on the session it reads from: the API reads the recipients off the headers, keeps the blind ones from the recipients, and files the sent copy itself, in `Sent Items` or under `SENT`. A refusal for good is a 400, 403, 404, 413 or 422 there.
+A sync draining the queue SHALL take an account's pending actions in append order and hand each message's bytes to the account's submit endpoint with the envelope its own address headers name, the `Bcc` among them, that header leaving the bytes on the way out so no copy a recipient receives names a blind one. An SMTP envelope address SHALL go out as RFC 5321 spells it, checked by io-smtp, a local part given bare that needs quotes (`john doe`) quoted; one that is no address, a line break in it included, SHALL park the row with what is wrong before any command carries it, no later attempt spelling it better. A Graph or Gmail account SHALL hand the bytes, `Bcc` still in them, to `sendMail` or `messages.send` on the session it reads from: the API reads the recipients off the headers, keeps the blind ones from the recipients, and files the sent copy itself, in `Sent Items` or under `SENT`. A refusal for good is a 400, 403, 404, 413 or 422 there.
 
 The submission SHALL file no copy itself: the copy is the create staged in the sent mailbox beside it (A sent message is in Sent at once), carried out by a push of its own. On IMAP that push SHALL `APPEND` the message as composed, already `\Seen`, its `Bcc` kept as the sender's record of whom it went to, and SHALL wait while the submission is queued or parked: a copy filed for a message that was not sent is a lie the sender reads as a sent message. A copy that could not be filed SHALL stay pending for the next sync and SHALL NOT be a reason to submit again. An account marking no sent mailbox SHALL send anyway, with no copy staged.
 
 The row SHALL be removed by cancelling it once the message has been handed over, and never claimed before: a submission's effect is not a store mutation, so there is nothing to apply, and a claim that deleted the row before the server accepted the message would lose the message. A row SHALL be noted on the device as being handed over before the handover and until its verdict is recorded: a drain finding a row still noted, the app having stopped between the two, SHALL park it as uncertain rather than send it again, and a failure after the handover SHALL NOT send it again either (A send that may have gone waits for the user), and an SMTP `QUIT` failing after the message was accepted SHALL NOT fail the send.
 
-A submission the server refuses for good, which is a 5yz reply (RFC 5321 section 4.2.1), SHALL park the row with what the server said, counted as one attempt, shown as failed to send and never retried on its own; the drain SHALL carry on to the rows behind it. A refusal for a rate or a quota, a 429 or a 403 naming one that the retries outlasted or a daily quota, SHALL NOT be one for good: the row SHALL stay pending for the next drain. An uncertain one SHALL be parked as such and stop the drain. Any other failure SHALL count an attempt, leave the row pending and stop the drain, the usual cause being that there is no network and the next message would fail too. An action of a kind this app does not carry out SHALL be left pending and untouched, its attempts unbumped.
+A submission the server refuses for good, which is a 5yz reply (RFC 5321 section 4.2.1), SHALL park the row with what the server said, the recipient named when the refusal is one recipient's, counted as one attempt, shown as failed to send and never retried on its own; the drain SHALL carry on to the rows behind it. A refusal for a rate or a quota, a 429 or a 403 naming one that the retries outlasted or a daily quota, SHALL NOT be one for good: the row SHALL stay pending for the next drain. An uncertain one SHALL be parked as such and stop the drain. Any other failure SHALL count an attempt, leave the row pending and stop the drain, the usual cause being that there is no network and the next message would fail too. An action of a kind this app does not carry out SHALL be left pending and untouched, its attempts unbumped.
 
 #### Scenario: The next sync
 - GIVEN a queued message and an IMAP account with a submit endpoint and a `\Sent` mailbox
@@ -285,6 +285,16 @@ A submission the server refuses for good, which is a 5yz reply (RFC 5321 section
 - GIVEN a server answering the envelope with a 5yz reply
 - WHEN the sync drains the queue
 - THEN nothing is appended anywhere, the row is parked carrying the error, and the message shows as failed to send
+
+#### Scenario: One recipient the server refuses
+- GIVEN a message to two recipients, the server answering the `RCPT TO` of `bob@example.org` with a 550
+- WHEN the sync drains the queue
+- THEN the message reaches nobody, and the parked row's error names `<bob@example.org>`
+
+#### Scenario: An address that is none
+- GIVEN a queued message one of whose recipients is `bob@exa mple.org`
+- WHEN the sync drains the queue
+- THEN no command carries the address, the row is parked saying it is not an email address, and the rows behind it are handed over
 
 #### Scenario: One refusal among several
 - GIVEN two queued messages, the first of which is refused
@@ -339,7 +349,7 @@ The bridge SHALL read the RFC 5322 source of messages into files (`fetchMessageS
 - THEN it is streamed into a file, filed in the store and rendered from it
 
 ### Requirement: Mail signs in with a token
-An IMAP or SMTP connection whose credential is an OAuth token SHALL authenticate with SASL `XOAUTH2`, the user being the one its URL names. A mail connection signed in through a browser grant SHALL carry the address as that user, on the endpoint it reads from and on the one it submits to. A token IMAP refuses SHALL be renewed once, as an HTTP backend's 401 is.
+An IMAP or SMTP connection whose credential is an OAuth token SHALL authenticate with SASL `XOAUTH2`, the user being the one its URL names. A mail connection signed in through a browser grant SHALL carry the address as that user, on the endpoint it reads from and on the one it submits to. A token IMAP refuses SHALL be renewed once, as an HTTP backend's 401 is. A JMAP request the server refuses whole with a problem of the JMAP error namespace (RFC 8620 section 3.6.1) SHALL answer with its HTTP status as a refusal with no such body does, so its 401 renews the token too.
 
 #### Scenario: A Microsoft mailbox
 - GIVEN mail connected through a Microsoft grant
@@ -1139,3 +1149,26 @@ The mail list's search SHALL read its words as a query of pimdir SEARCH §8, ans
 - GIVEN a message whose subject is `Re: weekly`
 - WHEN the user searches `re: weekly`
 - THEN the search field says the field `re` is not one of the language's, and the message is listed by its subject
+
+### Requirement: An IMAP listing that skipped a response is not whole
+io-imap skips an untagged response it cannot decode and hands it back beside the result. The bridge SHALL NOT take such an answer for a whole listing where what it lacks would read as gone: a `LIST` (the roster drops a mailbox it lacks), a `UID SEARCH` or a `UID SORT` (a round's members, its enumeration, a floor, a copy already filed), an `EXAMINE` stating no `EXISTS` (read as an empty mailbox) and a `UID FETCH` lacking a UID it asked for (read as a message gone, by a round's page as by a body read) SHALL fail with an error naming the command and how many responses went unread, so the roster, the page, the floor or the read fails and nothing is dropped. A `UID FETCH` answering every UID asked SHALL stand, whatever else was skipped. A QRESYNC `SELECT` that skipped a response SHALL hand what it read with the checkpoint it was asked from, so the next delta asks again for what the response held. An `ALERT` response code SHALL be logged as a warning.
+
+#### Scenario: A mailbox line that does not decode
+- GIVEN a `LIST` answering two mailboxes and a line no client decodes
+- WHEN the roster is read
+- THEN it fails, and no mailbox is dropped for being absent from it
+
+#### Scenario: A message line that does not decode
+- GIVEN a round's page asking UIDs 1 to 3, the server answering UID 2 with flags no client decodes
+- WHEN the page is read
+- THEN it fails, and UID 2 is not read as gone
+
+#### Scenario: A line that is none of the page's
+- GIVEN a `UID FETCH` answering every UID asked, beside a line that does not decode
+- WHEN the page is read
+- THEN it lists every UID asked
+
+#### Scenario: A delta that skipped a line
+- GIVEN a QRESYNC `SELECT` from `7:9` answering a `VANISHED`, a changed message, `HIGHESTMODSEQ 12` and a line that does not decode
+- WHEN the delta is read
+- THEN the gone and the changed are handed, and its checkpoint stays `7:9`

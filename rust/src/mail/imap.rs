@@ -19,7 +19,7 @@
 
 use core::num::{NonZeroU32, NonZeroU64};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
@@ -53,6 +53,7 @@ use io_imap::{
         auth_plain::{ImapAuthPlain, ImapAuthPlainOptions},
         auth_xoauth2::{ImapAuthXoauth2, ImapAuthXoauth2Options},
     },
+    send::ImapOutput,
     types::{
         IntoStatic,
         command::SelectParameter,
@@ -413,7 +414,7 @@ impl<'a, H: Host> ImapSession<'a, H> {
         let reference: Mailbox = "".try_into().expect("empty LIST reference is valid");
         let pattern: ListMailbox = "*".try_into().expect("`*` LIST pattern is valid");
 
-        let listed = self.run(ImapMailboxList::new(reference, pattern))?;
+        let listed = whole(self.run(ImapMailboxList::new(reference, pattern))?, "LIST")?;
 
         Ok(listed
             .into_iter()
@@ -729,15 +730,15 @@ impl<'a, H: Host> ImapSession<'a, H> {
         }])
         .expect("one sort criterion");
 
-        let uids: Vec<u32> = self
-            .run(ImapMessageSort::new(
-                order,
-                criteria,
-                ImapMessageSortOptions {
-                    uid: true,
-                    fallback: false,
-                },
-            ))?
+        let sorted = self.run(ImapMessageSort::new(
+            order,
+            criteria,
+            ImapMessageSortOptions {
+                uid: true,
+                fallback: false,
+            },
+        ))?;
+        let uids: Vec<u32> = whole(sorted, "UID SORT")?
             .into_iter()
             .map(NonZeroU32::get)
             .collect();
@@ -785,11 +786,11 @@ impl<'a, H: Host> ImapSession<'a, H> {
         }
         let criteria = Vec1::try_from(criteria).expect("one criterion at least");
 
-        let mut uids: Vec<u32> = self
-            .run(ImapMessageSearch::new(
-                criteria,
-                ImapMessageSearchOptions { uid: true },
-            ))?
+        let searched = self.run(ImapMessageSearch::new(
+            criteria,
+            ImapMessageSearchOptions { uid: true },
+        ))?;
+        let mut uids: Vec<u32> = whole(searched, "UID SEARCH")?
             .into_iter()
             .map(NonZeroU32::get)
             .collect();
@@ -913,10 +914,17 @@ impl<'a, H: Host> ImapSession<'a, H> {
             Err(err) => return Err(err.to_string().into()),
         };
 
-        Ok(fetched
+        let (fetched, skipped) = taken(fetched);
+        let headers: Vec<(u32, Header)> = fetched
             .into_values()
             .filter_map(|items| header(items.into_inner()))
-            .collect())
+            .collect();
+        // NOTE: a UID gone is left out, never one whose line was not read.
+        let read: HashSet<u32> = headers.iter().map(|(uid, _)| *uid).collect();
+        if skipped > 0 && uids.iter().any(|uid| !read.contains(uid)) {
+            return Err(unread("UID FETCH", skipped));
+        }
+        Ok(headers)
     }
 
     /// A QRESYNC `SELECT (QRESYNC (uidvalidity modseq))`, or [`None`]
@@ -952,8 +960,8 @@ impl<'a, H: Host> ImapSession<'a, H> {
         // NOTE: a server advertising QRESYNC then refusing it owes a full
         // round, not a failed pass; logged, as the capability and the
         // ENABLE should make it unreachable.
-        let data = match selected {
-            Ok(data) => data,
+        let (data, skipped) = match selected {
+            Ok(selected) => taken(selected),
             Err(err) => {
                 log::warn!("QRESYNC select refused for {mailbox}, enumerating whole: {err}");
                 return Ok(None);
@@ -969,6 +977,15 @@ impl<'a, H: Host> ImapSession<'a, H> {
             return Ok(None);
         }
 
+        // NOTE: kept on a skipped line, for the next delta to ask it again.
+        let reached = match skipped {
+            0 => data.highest_mod_seq.unwrap_or(modseq),
+            _ => {
+                log::debug!("{mailbox}: {skipped} QRESYNC responses unread, checkpoint kept");
+                modseq
+            }
+        };
+
         Ok(Some(Delta {
             changed: data
                 .changed
@@ -981,7 +998,7 @@ impl<'a, H: Host> ImapSession<'a, H> {
                 .flat_map(|range| range.start().get()..=range.end().get())
                 .map(|uid| uid.to_string())
                 .collect(),
-            checkpoint: encode_cursor(validity_now, data.highest_mod_seq.unwrap_or(modseq)),
+            checkpoint: encode_cursor(validity_now, reached),
         }))
     }
 }
@@ -1016,7 +1033,8 @@ impl<H: Host> ImapSession<'_, H> {
             },
         ))?;
 
-        fetched
+        taken(fetched)
+            .0
             .into_values()
             .flat_map(|items| items.into_inner())
             .find_map(|item| match item {
@@ -1108,6 +1126,7 @@ impl<H: Host> ImapSession<'_, H> {
             },
         ))?;
 
+        let (fetched, skipped) = taken(fetched);
         let mut sizes = HashMap::new();
         for items in fetched.into_values() {
             let mut uid = None;
@@ -1122,6 +1141,10 @@ impl<H: Host> ImapSession<'_, H> {
             if let Some(uid) = uid {
                 sizes.insert(uid, size);
             }
+        }
+        // NOTE: a UID with no size reads as gone, so its line must be read.
+        if skipped > 0 && uids.iter().any(|uid| !sizes.contains_key(uid)) {
+            return Err(unread("UID FETCH", skipped));
         }
         Ok(sizes)
     }
@@ -1426,7 +1449,7 @@ impl<H: Host> ImapSession<'_, H> {
             criteria,
             ImapMessageSearchOptions { uid: true },
         ))?;
-        Ok(!found.is_empty())
+        Ok(!whole(found, "UID SEARCH")?.is_empty())
     }
 
     /// Copies one message into `target`, unless it holds its `Message-ID`.
@@ -1537,11 +1560,15 @@ impl<H: Host> ImapSession<'_, H> {
             name,
             ImapMailboxExamineOptions::default(),
         ))?;
-        let data = match examined {
-            Ok(data) => data,
+        let (data, skipped) = match examined {
+            Ok(examined) => taken(examined),
             Err(err @ ImapMailboxExamineError::No(_)) => return Err(refused(&err)),
             Err(err) => return Err(err.to_string().into()),
         };
+        // NOTE: no EXISTS reads as an empty mailbox, so its line must be read.
+        if skipped > 0 && data.exists.is_none() {
+            return Err(unread("EXAMINE", skipped));
+        }
         self.state.selected = Some((mailbox.into(), Access::Read));
         self.state.observe(mailbox, &data);
 
@@ -1579,6 +1606,27 @@ impl<H: Host> ImapSession<'_, H> {
 
         Ok(())
     }
+}
+
+/// The data of an answer and how many responses it skipped unread.
+fn taken<T>(output: ImapOutput<T>) -> (T, usize) {
+    for alert in &output.alerts {
+        log::warn!("server alert: {alert}");
+    }
+    (output.data, output.skipped.len())
+}
+
+/// The data of a listing, refused when it skipped a response unread.
+fn whole<T>(output: ImapOutput<T>, command: &str) -> Result<T, BridgeError> {
+    match taken(output) {
+        (data, 0) => Ok(data),
+        (_, skipped) => Err(unread(command, skipped)),
+    }
+}
+
+/// A listing lacking what the responses it could not read held.
+fn unread(command: &str, skipped: usize) -> BridgeError {
+    format!("IMAP {command} is not whole, responses unread: {skipped}").into()
 }
 
 /// A mailbox the server refused to open ([`MAILBOX_REFUSED`]).

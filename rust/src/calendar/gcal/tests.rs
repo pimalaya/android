@@ -107,11 +107,29 @@ fn a_listing_names_each_entry_with_its_body() {
     );
 }
 
+/// A subscribed calendar's `#` and an id's `@` go out encoded once.
 #[test]
-fn a_subscribed_calendar_id_stays_one_segment() {
+fn an_id_reaches_google_encoded_once() {
+    let mut paths = Vec::new();
+    {
+        let mut client = Client::new(FakeServer::boxed(|request| {
+            paths.push(request.path.clone());
+            FakeResponse::json(200, &event("e#1@google.com", "\"1\"", None))
+        }));
+        let mut gcal = Gcal {
+            client: &mut client,
+            token: "token",
+        };
+        let calendar = "fr.french#holiday@group.v.calendar.google.com";
+        gcal.event(calendar, "e#1@google.com").unwrap();
+    }
+
     assert_eq!(
-        calendar_path("fr.french#holiday@group.v.calendar.google.com"),
-        "fr.french%23holiday@group.v.calendar.google.com"
+        paths,
+        [
+            "/calendar/v3/calendars/fr.french%23holiday@group.v.calendar.google.com\
+          /events/e%231@google.com"
+        ]
     );
 }
 

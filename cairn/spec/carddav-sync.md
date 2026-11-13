@@ -18,6 +18,14 @@ A collection sync SHALL run the RFC 6578 `sync-collection` REPORT, and SHALL enu
 - WHEN an initial sync runs
 - THEN the collection is enumerated with `PROPFIND` and the round reports itself complete
 
+### Requirement: A DAV listing that is not whole is refused
+A CardDAV or CalDAV listing, delta or discovery answer that is not one whole `multistatus` document (a page of another kind, a document cut short, an empty body) SHALL fail its request, as io-webdav 0.8 fails it, and SHALL NOT be read as a shorter listing, whose missing members would read as deleted.
+
+#### Scenario: A listing cut short
+- GIVEN a CardDAV server whose listing of two cards ends before its closing tag
+- WHEN the book is listed
+- THEN the listing fails, and no card is read as gone
+
 ### Requirement: A Graph book reads its changed contacts 20 to a batch
 A Graph addressbook pass SHALL take a contact's body from the complete round's listing when it carries one, and SHALL read every other body it needs 20 requests to a `$batch`, each request the one a single contact read sends, a request the batch could not serve being sent again on its own. A contact Graph no longer holds when it is read SHALL be left out, and the rest of the book stored. Each read SHALL log how many contacts it was asked for, how many the listing gave, how many it read in how many batches and its network time.
 

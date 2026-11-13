@@ -27,7 +27,9 @@ use io_gpeople::{
                 get::GpeoplePersonGet,
                 get_batch_get::GpeoplePersonsBatchGet,
                 update_contact::GpeopleContactUpdate,
-                vcard::{GPEOPLE_PERSON_STASH_KEY, GPEOPLE_PERSON_VCARD_FIELDS},
+                vcard::{
+                    GPEOPLE_PERSON_STASH_KEY, GPEOPLE_PERSON_VCARD_FIELDS, GpeoplePersonVcard,
+                },
             },
         },
         send::{GPEOPLE_API_BASE, GpeopleSendError, GpeopleSendOutput},
@@ -227,7 +229,7 @@ impl<H: Host> Gpeople<'_, H> {
 
     /// Creates the vCard as a contact, under the id the server assigns.
     pub fn create_card(&mut self, vcard: &str) -> Result<Card, BridgeError> {
-        let person = GpeoplePerson::from_vcard(vcard)?;
+        let person = written_person(vcard)?;
         let auth = HttpAuthBearer::new(self.token);
 
         let coroutine = GpeopleContactCreate::new(&auth, &person, GPEOPLE_PERSON_VCARD_FIELDS, &[])
@@ -255,9 +257,9 @@ impl<H: Host> Gpeople<'_, H> {
     ) -> Result<Card, BridgeError> {
         let resource_name = format!("people/{id}");
 
-        let mut edit = GpeoplePerson::from_vcard(vcard)?;
+        let mut edit = written_person(vcard)?;
         edit.resource_name = resource_name.clone();
-        let base = base_vcard.map(GpeoplePerson::from_vcard).transpose()?;
+        let base = base_vcard.map(projected_person).transpose()?;
 
         let changed = match &base {
             Some(base) => edit.changed_fields(base),
@@ -349,7 +351,7 @@ impl<H: Host> Gpeople<'_, H> {
 
         let persons = vcards
             .iter()
-            .map(|vcard| GpeoplePerson::from_vcard(vcard))
+            .map(|vcard| written_person(vcard))
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut cards = Vec::with_capacity(persons.len());
@@ -570,7 +572,7 @@ fn merged_fields(
     changed: &[GpeoplePersonField],
 ) -> Result<Option<Vec<GpeoplePersonField>>, BridgeError> {
     // NOTE: through the projection, so the metadata People adds reads equal.
-    let held = GpeoplePerson::from_vcard(&held.to_vcard())?;
+    let held = projected_person(&held.to_vcard())?;
     let apart = held.changed_fields(edit);
     let moved = match base {
         Some(base) => held.changed_fields(base),
@@ -588,6 +590,21 @@ fn merged_fields(
         fields.push(*field);
     }
     Ok(Some(fields))
+}
+
+/// The person a vCard projects onto, for a comparison.
+fn projected_person(vcard: &str) -> Result<GpeoplePerson, BridgeError> {
+    Ok(GpeoplePerson::from_vcard(vcard)?.person)
+}
+
+/// The person a vCard writes, saying which properties People cannot hold.
+fn written_person(vcard: &str) -> Result<GpeoplePerson, BridgeError> {
+    let GpeoplePersonVcard { person, dropped } = GpeoplePerson::from_vcard(vcard)?;
+    if !dropped.is_empty() {
+        let names = dropped.join(", ");
+        log::warn!("contact written without its properties over 8 KiB: {names}");
+    }
+    Ok(person)
 }
 
 /// Whether People refused an update for its etag.

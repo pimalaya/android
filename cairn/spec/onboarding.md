@@ -103,7 +103,7 @@ The account settings screen SHALL show, for an account covering mail, where that
 - THEN the account stores no submit endpoint and is no longer offered as a sender
 
 ### Requirement: A provider's own rules are discovered first
-The protocol sweep SHALL run the fixed provider rules (by domain, then by MX) before every other mechanism, so an address hosted at Google or Microsoft is offered every domain those rules name, a custom domain included.
+The protocol sweep SHALL run the fixed provider rules (by domain, then by MX) before every other mechanism, so an address hosted at Google or Microsoft is offered every domain those rules name, a custom domain included. Every service the bridge discovers SHALL carry io-pim-discovery's `trust`, what vouches that it belongs to the address's domain, set as that library's own client sets it: `rule` for a provider rule matching the domain itself, `domain` for the domain answering over TLS under its own name (its autoconfig, its DAV or JMAP well-known), `thirdParty` for the ISPDB, `unauthenticated` where a DNS answer alone named the host (an MX, an SRV, an alias, a `mailconf` record). The setup does not read it yet.
 
 #### Scenario: A Microsoft address
 - GIVEN an address whose mail exchanges live at Microsoft
@@ -271,12 +271,22 @@ A sign-in card asking for a password or token SHALL name, before it is sent, eac
 - THEN it reads that the password is sent to `imaps://imap.fastmail.com:993`, not on `example.org`, flagged
 
 ### Requirement: OAuth servers are checked
-The issuer, every endpoint its metadata names and the authorization URL the browser opens SHALL be https (http only on a loopback host); the metadata's `issuer` SHALL be the issuer asked for (RFC 8414 section 3.3); an issuer-flow redirect whose `iss` names another issuer SHALL be refused before the code is exchanged (RFC 9207). No error SHALL carry the redirect URL, which holds the code.
+The issuer and every URL its metadata names SHALL be https, a loopback host included, and the metadata's `issuer` SHALL be the issuer asked for (RFC 8414 section 3.3): io-pim-discovery checks both where it fetches the metadata, and no metadata is asked of a cleartext issuer. The authorization URL the browser opens and the token or registration endpoint a grant is given SHALL be https (http only on a loopback host, a custom client's own server). An issuer-flow redirect whose `iss` names another issuer SHALL be refused before the code is exchanged (RFC 9207). No error SHALL carry the redirect URL, which holds the code.
 
 #### Scenario: A mix-up redirect
 - GIVEN a grant started at issuer A
 - WHEN the redirect comes back with `iss` naming issuer B
 - THEN it is refused and nothing is exchanged
+
+#### Scenario: Metadata naming another issuer
+- GIVEN an issuer whose two well-known documents name another issuer, or a cleartext token endpoint
+- WHEN its metadata is fetched
+- THEN both documents are refused and no grant starts
+
+#### Scenario: A cleartext issuer
+- GIVEN the issuer `http://127.0.0.1:8080/as`
+- WHEN its metadata is asked for
+- THEN it is refused before any request
 
 ### Requirement: Nothing leaves the phone by backup or transfer
 The app SHALL exclude every file from cloud backup and from a device transfer. Accounts the Keystore key cannot open for good (a failed tag, a lost key) SHALL be dropped once and the user asked to add them again; a Keystore failing for now SHALL leave the app starting with no account rather than failing.

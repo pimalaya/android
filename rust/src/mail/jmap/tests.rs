@@ -347,6 +347,30 @@ fn what_no_pass_changes_is_refused_before_anything_is_written() {
     }
 }
 
+/// A request refused whole keeps its status, named as a JMAP problem or
+/// not: its 401 is what renews the token.
+#[test]
+fn a_request_refused_as_a_jmap_problem_keeps_its_status() {
+    let problem = json!({"type": "urn:ietf:params:jmap:error:notRequest", "status": 401});
+    for body in [json!({}), problem] {
+        let refuse = |_: &FakeRequest| FakeResponse::json(401, &body);
+        let mut client = Client::new(FakeServer::new(refuse));
+        let mut jmap = Jmap {
+            client: &mut client,
+            session_url: Url::parse("https://api.example.com/jmap/session").unwrap(),
+            auth: Auth::Bearer("token"),
+        };
+        let mut calls = JmapCalls {
+            jmap: &mut jmap,
+            session: session(""),
+            auth: SecretString::from("Bearer token"),
+        };
+
+        let err = calls.identities().unwrap_err();
+        assert_eq!(err.status, Some(401), "{}", err.message);
+    }
+}
+
 /// One email of a mail delta, filed in `mailboxes`.
 fn filed(id: &str, mailboxes: &[&str]) -> JmapEmail {
     let mailbox_ids: BTreeMap<&str, bool> = mailboxes.iter().map(|id| (*id, true)).collect();

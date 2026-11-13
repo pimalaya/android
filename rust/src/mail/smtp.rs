@@ -18,9 +18,9 @@ use io_smtp::{
     message::{SmtpMessageSend, SmtpMessageSendError, SmtpMessageSendOptions},
     rfc3207::starttls::SmtpStartTls,
     rfc5321::{
-        SmtpDomain, SmtpEhloDomain, SmtpForwardPath, SmtpLocalPart, SmtpMailbox, SmtpReversePath,
-        data::SmtpDataError, ehlo::SmtpEhlo, greeting::SmtpGreetingGet, mail::SmtpMailError,
-        quit::SmtpQuit, rcpt::SmtpRcptError,
+        SmtpEhloDomain, SmtpForwardPath, SmtpLocalPart, SmtpMailbox, SmtpReversePath,
+        SmtpSyntaxError, data::SmtpDataError, ehlo::SmtpEhlo, greeting::SmtpGreetingGet,
+        mail::SmtpMailError, quit::SmtpQuit, rcpt::SmtpRcptError,
     },
     sasl::{
         auth_plain::{SmtpAuthPlain, SmtpAuthPlainOptions},
@@ -139,11 +139,13 @@ impl<'a, H: Host> SmtpSession<'a, H> {
     /// loop is spelled out, not [`Self::run`], so the failure stays typed: the
     /// queue parks or retries, and a string cannot say which.
     fn submit(&mut self, composed: &Composed) -> Result<(), SmtpSendError> {
-        let sender = mailbox(&composed.sender).map_err(SmtpSendError::transient)?;
+        // NOTE: no later try spells an address better, so the row is parked.
+        let unspelled = |err: BridgeError| SmtpSendError::Refused(err.message);
+        let sender = mailbox(&composed.sender).map_err(unspelled)?;
 
         let mut recipients = Vec::with_capacity(composed.recipients.len());
         for recipient in &composed.recipients {
-            let recipient = mailbox(recipient).map_err(SmtpSendError::transient)?;
+            let recipient = mailbox(recipient).map_err(unspelled)?;
             recipients.push(SmtpForwardPath::from(recipient));
         }
 
@@ -192,7 +194,8 @@ impl<'a, H: Host> SmtpSession<'a, H> {
 /// with what it said, anything else stays pending for the next drain.
 #[derive(Debug)]
 pub enum SmtpSendError {
-    /// The server refused this message, and would refuse it again.
+    /// The server refused this message, and would refuse it again, or its
+    /// envelope holds an address SMTP cannot spell.
     Refused(String),
     /// The server refused the credential, the message kept for later.
     SignIn(String),
@@ -217,10 +220,6 @@ impl SmtpSendError {
     /// Whether the server refused the credential.
     pub fn is_sign_in(&self) -> bool {
         matches!(self, Self::SignIn(_))
-    }
-
-    fn transient(err: impl Display) -> Self {
-        Self::Transient(err.to_string())
     }
 
     /// A session that did not open: the credential refused, or transient.
@@ -260,10 +259,23 @@ impl Display for SmtpSendError {
 fn refusal(err: SmtpMessageSendError, handed_over: bool) -> SmtpSendError {
     let code = match &err {
         SmtpMessageSendError::MailFrom(SmtpMailError::Rejected { code, .. })
-        | SmtpMessageSendError::RcptTo(SmtpRcptError::Rejected { code, .. })
+        | SmtpMessageSendError::RcptTo {
+            error: SmtpRcptError::Rejected { code, .. },
+            ..
+        }
         | SmtpMessageSendError::Data(SmtpDataError::CommandRejected { code, .. })
         | SmtpMessageSendError::Data(SmtpDataError::BodyRejected { code, .. }) => *code,
-        _ => 0,
+        // NOTE: one recipient asked to wait keeps the message waiting.
+        SmtpMessageSendError::NoRecipient(refusals) => {
+            let codes = refusals.iter().map(|refusal| refusal.code);
+            codes.min().unwrap_or(0)
+        }
+        SmtpMessageSendError::MailFrom(SmtpMailError::Send(_))
+        | SmtpMessageSendError::RcptTo {
+            error: SmtpRcptError::Send(_),
+            ..
+        }
+        | SmtpMessageSendError::Data(_) => 0,
     };
 
     if (500..600).contains(&code) {
@@ -284,18 +296,28 @@ fn handed(bytes: &[u8]) -> bool {
 /// The `EHLO` name, built per use as the type borrows and two coroutines
 /// want one.
 fn domain() -> SmtpEhloDomain<'static> {
-    SmtpEhloDomain::from(SmtpDomain(EHLO_DOMAIN.into()))
+    SmtpEhloDomain::try_from(EHLO_DOMAIN).expect("a valid EHLO name")
 }
 
-/// One address as the envelope spells it.
-fn mailbox(address: &str) -> Result<SmtpMailbox<'static>, BridgeError> {
+/// One address as the envelope spells it, a bare local part needing
+/// quotes quoted, refused when it is none SMTP takes.
+fn mailbox(address: &str) -> Result<SmtpMailbox<'_>, BridgeError> {
+    let refused = |err: SmtpSyntaxError| {
+        BridgeError::from(format!("`{address}` is not an email address: {err}"))
+    };
+
+    if let Ok(mailbox) = SmtpMailbox::try_from(address) {
+        return Ok(mailbox);
+    }
+
     let (local, domain) = address
         .rsplit_once('@')
-        .ok_or_else(|| BridgeError::from(format!("`{address}` is not an email address")))?;
+        .filter(|(local, _)| !local.is_empty())
+        .ok_or_else(|| refused(SmtpSyntaxError::Mailbox))?;
 
     Ok(SmtpMailbox {
-        local_part: SmtpLocalPart(local.to_string().into()),
-        domain: SmtpEhloDomain::from(SmtpDomain(domain.to_string().into())),
+        local_part: SmtpLocalPart::quote(local).map_err(refused)?,
+        domain: SmtpEhloDomain::try_from(domain).map_err(refused)?,
     })
 }
 
@@ -327,15 +349,35 @@ pub fn send<H: Host>(
 #[cfg(test)]
 mod tests {
     use io_smtp::{
-        message::SmtpMessageSendError,
-        rfc5321::{data::SmtpDataError, mail::SmtpMailError, rcpt::SmtpRcptError},
+        message::{SmtpMessageSendError, SmtpMessageSendRefusal},
+        rfc5321::{SmtpForwardPath, data::SmtpDataError, mail::SmtpMailError, rcpt::SmtpRcptError},
         send::SmtpCommandSendError,
     };
 
+    use url::Url;
+
     use crate::{
+        client::{
+            Client,
+            fake::{FakeRequest, FakeResponse, FakeServer},
+        },
         error::BridgeError,
-        mail::smtp::{SmtpSendError, handed, refusal},
+        mail::{
+            compose::Composed,
+            smtp::{EHLO_DOMAIN, SmtpSendError, SmtpSession, domain, handed, mailbox, refusal},
+        },
     };
+
+    /// The server refusing one recipient with `code`.
+    fn rcpt_refused(address: &'static str, code: u16) -> SmtpMessageSendError {
+        SmtpMessageSendError::RcptTo {
+            forward_path: SmtpForwardPath::from(mailbox(address).unwrap()),
+            error: SmtpRcptError::Rejected {
+                code,
+                message: "No such recipient".into(),
+            },
+        }
+    }
 
     #[test]
     fn a_refused_credential_keeps_the_message_and_signs_in_again() {
@@ -352,12 +394,100 @@ mod tests {
 
     #[test]
     fn a_5yz_reply_is_the_servers_last_word() {
-        let err = SmtpMessageSendError::RcptTo(SmtpRcptError::Rejected {
-            code: 550,
-            message: "No such recipient".into(),
-        });
+        let refused = refusal(rcpt_refused("bob@example.org", 550), false);
 
-        assert!(refusal(err, false).is_permanent(), "expected a refusal");
+        assert!(refused.is_permanent(), "expected a refusal");
+    }
+
+    /// The parked row says which recipient the server would not take.
+    #[test]
+    fn a_refused_recipient_is_named() {
+        let refused = refusal(rcpt_refused("bob@example.org", 550), false);
+
+        assert_eq!(
+            refused.to_string(),
+            "Recipient <bob@example.org>: SMTP RCPT TO failed: rejected 550 No such recipient"
+        );
+    }
+
+    /// Every recipient refused: for good only when none asked to wait.
+    #[test]
+    fn recipients_all_refused_wait_when_one_may_come_back() {
+        let refusals = |codes: &[u16]| {
+            let refusals = codes.iter().map(|code| SmtpMessageSendRefusal {
+                forward_path: SmtpForwardPath::from(mailbox("bob@example.org").unwrap()),
+                code: *code,
+                message: "No".into(),
+            });
+            SmtpMessageSendError::NoRecipient(refusals.collect())
+        };
+
+        assert!(refusal(refusals(&[550, 551]), false).is_permanent());
+        assert!(!refusal(refusals(&[550, 450]), false).is_permanent());
+        assert!(!refusal(refusals(&[550, 450]), false).is_uncertain());
+    }
+
+    /// An address goes out as SMTP spells it, a bare local part that needs
+    /// quotes quoted.
+    #[test]
+    fn an_address_is_spelled_for_the_envelope() {
+        let spelled = |address: &str| mailbox(address).unwrap().to_string();
+
+        assert_eq!(spelled("alice@example.org"), "alice@example.org");
+        assert_eq!(spelled("jörg@bücher.example"), "jörg@bücher.example");
+        assert_eq!(
+            spelled(r#""john doe"@example.org"#),
+            r#""john doe"@example.org"#
+        );
+        assert_eq!(spelled("john doe@example.org"), r#""john doe"@example.org"#);
+    }
+
+    /// A line break in an address would add a command to the session.
+    #[test]
+    fn an_address_adding_a_line_is_refused() {
+        for address in [
+            "alice@example.org>\r\nRCPT TO:<eve@example.org",
+            "alice\r\nRSET@example.org",
+            "alice@example.org\n",
+            "alice",
+            "alice@",
+            "@example.org",
+        ] {
+            let err = mailbox(address).unwrap_err();
+            assert!(
+                err.message.contains("is not an email address"),
+                "{address:?}: {}",
+                err.message
+            );
+        }
+    }
+
+    /// An address SMTP cannot spell parks its message, nothing sent.
+    #[test]
+    fn an_envelope_smtp_cannot_spell_is_refused_unsent() {
+        let unsent = |_: &FakeRequest| -> FakeResponse { panic!("nothing is sent") };
+        let mut client = Client::new(FakeServer::new(unsent));
+        let url = Url::parse("smtps://smtp.example.org").unwrap();
+        let composed = Composed {
+            message: b"Subject: x\r\n\r\n".to_vec(),
+            sender: "jane@example.org".into(),
+            recipients: vec!["bob@exa mple.org".into()],
+        };
+
+        let err = SmtpSession::new(&mut client, &url)
+            .submit(&composed)
+            .unwrap_err();
+
+        assert!(err.is_permanent());
+        assert_eq!(
+            err.to_string(),
+            "`bob@exa mple.org` is not an email address: Invalid SMTP domain"
+        );
+    }
+
+    #[test]
+    fn the_hello_name_is_one_smtp_takes() {
+        assert_eq!(domain().to_string(), EHLO_DOMAIN);
     }
 
     #[test]

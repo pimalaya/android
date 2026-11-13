@@ -353,7 +353,7 @@ fn item_failure(what: &str, err: &JmapCalendarEventSetItemError) -> BridgeError 
         JmapCalendarEventSetItemError::NotFound { .. }
         | JmapCalendarEventSetItemError::RateLimit { .. }
         | JmapCalendarEventSetItemError::WillDestroy { .. }
-        | JmapCalendarEventSetItemError::Unknown => moved(message),
+        | JmapCalendarEventSetItemError::Other { .. } => moved(message),
     }
 }
 
