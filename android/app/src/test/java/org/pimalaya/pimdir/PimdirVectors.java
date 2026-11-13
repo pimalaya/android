@@ -22,7 +22,23 @@ final class PimdirVectors {
 
     /** A file of spec/, e.g. {@code vectors/objects.json}. */
     static String read(String file) throws IOException {
-        return new String(Files.readAllBytes(path(file).toPath()), StandardCharsets.UTF_8);
+        return new String(bytes(file), StandardCharsets.UTF_8);
+    }
+
+    /** The bytes of a file of spec/, e.g. a fixture a vector names. */
+    static byte[] bytes(String file) throws IOException {
+        return Files.readAllBytes(path(file).toPath());
+    }
+
+    /** The files of spec/vectors/sync/, one case each, in name order. */
+    static File[] syncCases() throws IOException {
+        File dir = new File(path("vectors/manifest.json").getParentFile(), "sync");
+        File[] cases = dir.listFiles((parent, name) -> name.endsWith(".json"));
+        if (cases == null) {
+            throw new IOException("No sync vectors under " + dir);
+        }
+        java.util.Arrays.sort(cases);
+        return cases;
     }
 
     private static File path(String file) throws IOException {

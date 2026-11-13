@@ -1,0 +1,62 @@
+# The sync vectors (pimdir SYNC §11) SyncVectorsTest does not pass, at the
+# io-pimdir rust/Cargo.toml pins. One case a line: `fails` for a case the
+# app runs and departs from, `unbound` for one its entry points cannot run,
+# the case's file stem, a colon and a space, then why.
+#
+# A case listed `fails` that passes, an unlisted one that fails, one listed
+# `unbound` that binds, an unlisted one that cannot be bound and a listed
+# one the vectors do not hold each fail the suite. The `fails` lines only go.
+
+# The write keeps no body a collection's policy did not adopt (SYNC §9):
+# no retained item, no Overruled. The app sets no policy but manual.
+fails 85-prefer-incoming-keeps-the-body-it-replaced: no retained item for the body the policy replaced, no Overruled
+fails 86-prefer-existing-keeps-the-body-it-refused: no retained item for the body the policy refused, no Overruled
+fails 90-a-fetched-conflict-body-meets-prefer-incoming: no retained item for the body the policy replaced, no Overruled
+fails 91-a-fetched-conflict-body-meets-prefer-existing: no retained item for the body the policy refused, no Overruled
+fails 104-a-second-policy-loser-is-minted-again: no retained item for the body the policy did not adopt, no Overruled
+fails 114-a-fill-settles-a-prefer-incoming-divergence: no retained item for the body the policy replaced, no Overruled
+fails 115-a-fill-settles-a-prefer-existing-divergence: no retained item for the body the policy refused, no Overruled
+
+# The write lacks the rule of STORAGE §11.1 for a retained row a listing
+# revives at meta: it keeps the retained body as the item's.
+fails 108-a-file-revived-at-meta-sets-its-retained-body-aside: the revived row keeps the retained body at full, no item set aside, no Overruled
+
+# The load names a create's origin by a statement of the app's own, which
+# leaves out a member under a tombstone and reads the account off the id.
+fails 49-a-create-beside-a-held-copy-copies-from-its-origin: the create loads with no origin, so no add is pushed
+
+# The load carries no summary but a message's date, subject and sender, so
+# what a held body told (SYNC §6) is restated from the listing.
+fails 52-a-held-body-keeps-its-size: the held message's size and attachment mark are written null
+fails 58-a-local-file-edit-is-pushed: the listing's size replaces the held body's
+
+unbound 07-a-meta-upgrade-revisits-an-unheld-claim: the bridge upgrades to the full tier alone
+unbound 08-read-only-reverts-a-delete: the bridge always pushes
+unbound 10-rekey-carries-state-by-link-id: the bridge runs no rekey
+unbound 22-rekey-carries-a-minted-key: the bridge runs no rekey
+unbound 23-rekey-remote-edit-conflicts-a-local-edit: the bridge runs no rekey
+unbound 24-rekey-remote-edit-pulls: the bridge runs no rekey
+unbound 29-rekey-keeps-a-pending-create: the bridge runs no rekey
+unbound 89-a-rekey-missing-most-members-parks: the bridge runs no rekey
+unbound 95-a-rekey-reusing-a-gone-handle-drops-it-first: the bridge runs no rekey
+unbound 96-a-rekey-matches-copies-at-one-revision-in-handle-order: the bridge runs no rekey
+unbound 14-both-edited-prefer-remote-pulls: the bridge syncs under the manual policy alone
+unbound 15-both-edited-prefer-local-over-an-unread-body-conflicts: the bridge syncs under the manual policy alone
+unbound 33-an-item-conflict-reports-a-server-edit: the bridge syncs under the manual policy alone
+unbound 83-a-body-less-pull-over-an-edit-conflicts: the bridge syncs under the manual policy alone
+unbound 97-a-bodiless-arrival-landing-a-mutable-create-conflicts: the bridge syncs under the manual policy alone
+unbound 116-an-upgrade-settles-a-prefer-local-conflict-keeping-the-server-body: the bridge syncs under the manual policy alone
+unbound 117-prefer-local-keeps-the-body-it-pushes-over: the bridge syncs under the manual policy alone
+unbound 62-a-delta-head-lands-an-arrival-the-round-keeps: the bridge lists no head
+unbound 63-a-removal-a-head-states-applies-at-once: the bridge lists no head
+unbound 64-a-member-a-head-named-and-a-page-lists-is-one: the bridge lists no head
+unbound 65-a-band-head-lands-an-arrival-unstamped: the bridge lists no head
+unbound 66-the-last-page-decides-what-a-band-head-named: the bridge lists no head
+unbound 67-a-head-lands-a-create-and-holds-the-others: the bridge lists no head
+unbound 68-a-rejected-head-restarts-the-round: the bridge lists no head
+unbound 69-a-band-round-head-lists-from-the-source-checkpoint: the bridge lists no head
+unbound 150-a-delivered-create-is-given-up-on-request: the bridge states no abandon
+unbound 151-an-abandon-is-refused-on-a-pending-create: the bridge states no abandon
+unbound 157-an-abandon-beside-another-source-leaves-it-the-delete: the bridge states no abandon
+unbound 70-a-body-entering-stands-for-its-attachments: binds an owner recording attachments in the engine's write, the app records them when a body is stored
+unbound 158-a-body-entering-under-another-messages-key-records-no-stand-in: binds an owner recording attachments in the engine's write, the app records them when a body is stored

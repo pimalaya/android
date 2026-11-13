@@ -15,6 +15,8 @@ mod host;
 mod mail;
 mod offline;
 mod search;
+#[cfg(debug_assertions)]
+mod vector;
 
 use std::{
     any::Any,

@@ -90,22 +90,29 @@ pub struct Driver<H> {
     dated: Dated,
 }
 
+impl OfflineSync<'_> {
+    /// The sync coroutine the pass runs.
+    pub fn coroutine(&self) -> PimdirSync {
+        let scope = match self.since.is_empty() {
+            true => PimdirScope::unbounded(),
+            false => PimdirScope::since(self.since),
+        };
+        let opts = PimdirSyncOptions {
+            full: self.full,
+            scope,
+            accept_absences: self.accept_absences,
+            ..sync_options(self.content)
+        };
+
+        PimdirSync::new(self.collection, opts).scope_bound(self.scope_bound)
+    }
+}
+
 /// The engine's coroutines, run to completion through the Java driver.
 impl<H: Host> Driver<H> {
     /// Reconciles a collection with its remote, returning the sync report.
     pub fn sync(&mut self, sync: &OfflineSync) -> Result<SyncReportJson, BridgeError> {
-        let scope = match sync.since.is_empty() {
-            true => PimdirScope::unbounded(),
-            false => PimdirScope::since(sync.since),
-        };
-        let opts = PimdirSyncOptions {
-            full: sync.full,
-            scope,
-            accept_absences: sync.accept_absences,
-            ..sync_options(sync.content)
-        };
-        let coroutine = PimdirSync::new(sync.collection, opts).scope_bound(sync.scope_bound);
-        let report = self.run(coroutine)?;
+        let report = self.run(&mut sync.coroutine())?;
 
         Ok(SyncReportJson::from(&report))
     }
@@ -124,10 +131,7 @@ impl<H: Host> Driver<H> {
         handles: Vec<String>,
         content: bool,
     ) -> Result<UpgradeReportJson, BridgeError> {
-        let handles = handles.into_iter().map(PimdirHandle::from).collect();
-        let options = PimdirUpgradeOptions::from(&sync_options(content));
-        let coroutine = PimdirUpgrade::new(collection, handles, PimdirTier::Full).options(options);
-        let report = self.run(coroutine)?;
+        let report = self.run(&mut upgrading(collection, handles, content))?;
 
         Ok(UpgradeReportJson::from(&report))
     }
@@ -141,17 +145,32 @@ impl<H: Host> Driver<H> {
         collection: &str,
         mutation: &str,
     ) -> Result<MutateReportJson, MutateFailureJson> {
-        let mutation: MutationJson =
-            from_str(mutation).map_err(|err| format!("Invalid mutation: {err}"))?;
-        let syncs_target = mutation.syncs_target();
-        let mutation = PimdirMutation::try_from(mutation)?;
-        let mutate = PimdirMutate::new(collection, mutation).syncs_target(syncs_target);
+        let mut mutate = mutating(collection, mutation)?;
         let report = self
-            .drive(mutate)?
+            .drive(&mut mutate)?
             .map_err(|err| MutateFailureJson::from(&err))?;
 
         Ok(MutateReportJson::from(&report))
     }
+}
+
+/// The upgrade coroutine raising `handles` of `collection` to the full
+/// tier, under the options its sync runs under.
+pub fn upgrading(collection: &str, handles: Vec<String>, content: bool) -> PimdirUpgrade {
+    let handles = handles.into_iter().map(PimdirHandle::from).collect();
+    let options = PimdirUpgradeOptions::from(&sync_options(content));
+
+    PimdirUpgrade::new(collection, handles, PimdirTier::Full).options(options)
+}
+
+/// The mutation coroutine of a mutation's wire JSON on `collection`.
+pub fn mutating(collection: &str, mutation: &str) -> Result<PimdirMutate, String> {
+    let mutation: MutationJson =
+        from_str(mutation).map_err(|err| format!("Invalid mutation: {err}"))?;
+    let syncs_target = mutation.syncs_target();
+    let mutation = PimdirMutation::try_from(mutation)?;
+
+    Ok(PimdirMutate::new(collection, mutation).syncs_target(syncs_target))
 }
 
 /// The options every sync of the app runs under, `content` whether it
@@ -259,7 +278,7 @@ impl<H: Host> Driver<H> {
     }
 
     /// Runs an offline coroutine to completion through the Java driver.
-    fn run<C, T, E>(&mut self, coroutine: C) -> Result<T, BridgeError>
+    fn run<C, T, E>(&mut self, coroutine: &mut C) -> Result<T, BridgeError>
     where
         C: PimdirCoroutine<Yield = PimdirYield, Return = Result<T, E>>,
         E: Display,
@@ -269,7 +288,7 @@ impl<H: Host> Driver<H> {
 
     /// Runs an offline coroutine to completion, answering what it returned,
     /// its own failure included; the driver's or the wire's fails the run.
-    fn drive<C, R>(&mut self, mut coroutine: C) -> Result<R, BridgeError>
+    pub fn drive<C, R>(&mut self, coroutine: &mut C) -> Result<R, BridgeError>
     where
         C: PimdirCoroutine<Yield = PimdirYield, Return = R>,
     {

@@ -1007,7 +1007,8 @@ pub struct SnapshotJson {
     vanished: Vec<String>,
     #[serde(default)]
     complete: bool,
-    /// Whether the page closes its listing; one without a cursor always does.
+    /// Whether the page closes its listing. One saying it does not while
+    /// handing no cursor is the engine's to refuse (SYNC §4, §5).
     #[serde(default = "closing")]
     last: bool,
     /// Where the round's next page resumes, on every page but the last.
@@ -1048,7 +1049,7 @@ impl From<SnapshotJson> for PimdirEnumerated {
             items: wire.items.into_iter().map(PimdirRemoteItem::from).collect(),
             vanished: wire.vanished.into_iter().map(PimdirHandle).collect(),
             complete: wire.complete,
-            last: wire.last || cursor.is_none(),
+            last: wire.last,
             cursor,
             checkpoint: wire
                 .checkpoint

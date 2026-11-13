@@ -179,6 +179,7 @@ public final class PimdirStorage {
         }
 
         JSONArray conflicted = new JSONArray();
+        JSONArray offered = new JSONArray();
         try (Cursor cursor = PimdirDb.query(db, scoped(db, scope, stored, source))) {
             while (cursor.moveToNext()) {
                 // NOTE: one placement per item the source binds, and one
@@ -197,6 +198,11 @@ public final class PimdirStorage {
                 }
                 JSONObject placement = placementOf(collection, cursor);
                 placements.put(placement);
+                // NOTE: a copy the store offers the source is no create of
+                // the source's own (SYNC §3, §6).
+                if (cursor.isNull(5) && "created".equals(placement.getString("status"))) {
+                    offered.put(placement.getString("handle"));
+                }
                 // NOTE: the item's own conflict, which an edit meets beside
                 // its binding's (SYNC §7): a placement projecting a conflict
                 // the load does not state reads as one nobody has read, which
@@ -213,6 +219,9 @@ public final class PimdirStorage {
         }
         if (conflicted.length() > 0) {
             reply.put("conflicted", conflicted);
+        }
+        if (offered.length() > 0) {
+            reply.put("offered", offered);
         }
         held(db, stored, placements, reply);
         superseded(db, stored, source, placements, reply);
