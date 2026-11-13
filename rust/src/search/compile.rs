@@ -230,6 +230,7 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
             PimdirQuery::Not(operand) => {
                 format!("(NOT {})", self.node(operand, !negated, undated))
             }
+            PimdirQuery::Group(operand) => self.node(operand, negated, undated),
             PimdirQuery::Term(term) => self.term(term, negated, undated),
         }
     }
@@ -610,6 +611,9 @@ const DAY: i64 = 86_400;
 /// The first instant of year 0, the earliest an RFC 3339 instant spells.
 const YEAR_ZERO: i64 = -62_167_219_200;
 
+/// The last instant a four-digit year states: `9999-12-31T23:59:59Z`.
+const YEAR_LAST: i64 = 253_402_300_799;
+
 /// The collection media type of a kind.
 pub fn media_type(kind: PimdirQueryKind) -> &'static str {
     match kind {
@@ -626,7 +630,10 @@ pub fn media_type(kind: PimdirQueryKind) -> &'static str {
 /// in UTC, either side `None` open, as io-pimdir's canonical compile reads
 /// them: a calendar point its day, month or year in `zone`, `today` and
 /// `yesterday` theirs around `now` (Unix seconds), a relative amount the
-/// instant that long before `now`, its span alone running to `now`.
+/// instant that long before `now`, its span alone running to `now`. A bound
+/// no instant of a four-digit year states is open: a start before
+/// `0000-01-01T00:00:00Z` and an end past `9999-12-31T23:59:59Z`. An end
+/// before year 0 is its first instant, the range then holding nothing.
 pub fn bounds(
     range: &PimdirQueryDateRange,
     now: i64,
@@ -638,11 +645,17 @@ pub fn bounds(
         PimdirQueryDate::Relative { .. } if single => now,
         point => span(point, now, zone).1,
     });
-    (since.map(rfc3339), until.map(rfc3339))
+    let since = since.filter(|since| *since >= YEAR_ZERO);
+    let until = until.filter(|until| *until <= YEAR_LAST);
+    (
+        since.map(rfc3339),
+        until.map(|until| rfc3339(until.max(YEAR_ZERO))),
+    )
 }
 
 /// The span of one date point, `[start, end)` in Unix seconds, its days
-/// read in `zone`.
+/// read in `zone`; a relative amount spans its instant, which may lie
+/// before year 0.
 fn span(point: &PimdirQueryDate, now: i64, zone: &TimeZone) -> (i64, i64) {
     let day = |year: u16, month: u8, day: u8| {
         days_from_civil(i32::from(year), u32::from(month), u32::from(day))
@@ -689,11 +702,10 @@ fn span(point: &PimdirQueryDate, now: i64, zone: &TimeZone) -> (i64, i64) {
                             let date = date.min(days_in_month(year, month));
                             days_from_civil(year, month, date) * DAY + now.rem_euclid(DAY)
                         }
-                        _ => YEAR_ZERO,
+                        _ => YEAR_ZERO - 1,
                     }
                 }
             };
-            let instant = instant.max(YEAR_ZERO);
             (instant, instant)
         }
     }
@@ -802,9 +814,51 @@ pub fn fts(text: &PimdirQueryText) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use io_pimdir::search::query::PimdirQueryText;
+    use io_pimdir::search::query::{PimdirQueryTerm, PimdirQueryText};
 
     use crate::search::compile::*;
+
+    fn bounds_of(value: &str, now: i64) -> (Option<String>, Option<String>) {
+        match PimdirQuery::parse(&format!("date:{value}")).unwrap() {
+            PimdirQuery::Term(PimdirQueryTerm {
+                predicate: PimdirQueryPredicate::Date(range),
+                ..
+            }) => bounds(&range, now, &TimeZone::UTC),
+            _ => panic!("a date term"),
+        }
+    }
+
+    /// A bound no instant of a four-digit year states is open (SEARCH
+    /// §8.1), as io-pimdir's canonical compile reads it.
+    #[test]
+    fn a_bound_no_four_digit_year_states_is_open() {
+        // 2026-08-20T12:00:00Z.
+        let now = 1_787_227_200;
+        let at = |instant: &str| Some(String::from(instant));
+
+        assert_eq!(
+            bounds_of("99999y", now),
+            (None, at("2026-08-20T12:00:00Z")),
+            "a start before year 0 is open"
+        );
+        assert_eq!(bounds_of("999999d", now).0, None);
+        assert_eq!(bounds_of("2026y", now).0, at("0000-08-20T12:00:00Z"));
+        assert_eq!(
+            bounds_of("..999999d", now),
+            (None, at("0000-01-01T00:00:00Z")),
+            "an end before year 0 holds nothing"
+        );
+        assert_eq!(
+            bounds_of("2026..9999", now),
+            (at("2026-01-01T00:00:00Z"), None),
+            "the year 9999 ends past the last instant four digits state"
+        );
+        assert_eq!(bounds_of("9999-12-31", now).1, None);
+        assert_eq!(
+            bounds_of("9999-12-30", now),
+            (at("9999-12-30T00:00:00Z"), at("9999-12-31T00:00:00Z")),
+        );
+    }
 
     fn text(text: &str, prefix: bool) -> PimdirQueryText {
         PimdirQueryText {

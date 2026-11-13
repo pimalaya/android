@@ -53,10 +53,22 @@ public final class MailStager extends Stager {
     /** Stages one marker added or removed; the next sync pushes the change. */
     public void stageFlag(MailStore.StoredMessage message, Flags.Marker flag, boolean add)
             throws JSONException {
-        mutateFlags(
-                message.collection,
-                offline.handleFor(message.collection, message.id),
-                mail().flagsOf(message.collection, message.id).with(flag, add));
+        stageMarker(
+                message, offline.handleFor(message.collection, message.id), flag, add);
+    }
+
+    /**
+     * Stages one marker changed on the set the store holds, stated as the
+     * change's base, so the engine applies the change alone and a marker a
+     * sync landed since survives (SYNC §7). A set nobody read has no base:
+     * the staged set replaces it whole.
+     */
+    private void stageMarker(
+            MailStore.StoredMessage message, String handle, Flags.Marker flag, boolean add)
+            throws JSONException {
+        Flags read = mail().knownFlagsOf(message.collection, message.id);
+        Flags held = read == null ? Flags.none() : read;
+        mutateFlags(message.collection, handle, held.with(flag, add), read);
     }
 
     /** Stages one message's move into the {@code target} collection. */
@@ -108,10 +120,7 @@ public final class MailStager extends Stager {
             mutateRemove(message.collection, handle);
             return Deletion.ERASED;
         }
-        mutateFlags(
-                message.collection,
-                handle,
-                mail().flagsOf(message.collection, message.id).with(Flags.Marker.DELETED, true));
+        stageMarker(message, handle, Flags.Marker.DELETED, true);
         return Deletion.MARKED;
     }
 }

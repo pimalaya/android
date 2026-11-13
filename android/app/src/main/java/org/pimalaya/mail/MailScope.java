@@ -11,7 +11,7 @@ import java.time.ZoneId;
  *
  * <p>A scope on {@code Date} (pimdir SYNC section 5): rounds list from its
  * floor, undated mail included, a sync deletes nothing outside it, narrowing
- * frees space ({@link MailStore#collectBefore}). In prefs by account id.
+ * frees space ({@link MailStore#evictBefore}). In prefs by account id.
  */
 public final class MailScope {
     /** The choices the settings offer, in months; 0 is all mail. */

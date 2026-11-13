@@ -23,6 +23,34 @@ import org.robolectric.RobolectricTestRunner;
 public class PimdirHashTest {
     @Rule public final TemporaryFolder folder = new TemporaryFolder();
 
+    /**
+     * The temporaries a killed writer left are unlinked, in objects/ and in
+     * its shard directories, a body and a period-prefixed directory left
+     * (pimdir STORAGE §5).
+     */
+    @Test
+    public void aKilledWritersTemporariesAreUnlinked() throws Exception {
+        File objects = new File(folder.getRoot(), "objects");
+        PimdirBlobs blobs = new PimdirBlobs(objects);
+        byte[] body = "kept".getBytes("UTF-8");
+        String hash = PimdirHash.of(body);
+        blobs.put(hash, body);
+        File shard = blobs.pathOf(hash).getParentFile();
+        File left = new File(shard, "." + hash + ".left.tmp");
+        File above = new File(objects, ".stray.tmp");
+        File directory = new File(shard, ".kept");
+        Files.write(left.toPath(), body);
+        Files.write(above.toPath(), body);
+        assertTrue(directory.mkdir());
+
+        assertEquals(2, blobs.sweepTemporaries());
+
+        assertTrue(!left.exists() && !above.exists());
+        assertTrue("a body stays", blobs.has(hash));
+        assertTrue("no regular file, left in place", directory.isDirectory());
+        assertEquals(0, blobs.sweepTemporaries());
+    }
+
     @Test
     public void everyObjectVectorIsNamedAndPlacedAsPimdirSays() throws Exception {
         JSONArray objects = new JSONObject(PimdirVectors.read("vectors/objects.json"))

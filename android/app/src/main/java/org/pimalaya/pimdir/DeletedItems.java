@@ -353,7 +353,7 @@ public final class DeletedItems {
         db.beginTransaction();
         try {
             Map<String, Object> values = new HashMap<>();
-            values.put("cutoff", cutoff);
+            values.put("before", cutoff);
             purged = PimdirDb.changed(db, PimdirSql.bind("PURGE_RETAINED_BEFORE", values));
             db.setTransactionSuccessful();
         } finally {

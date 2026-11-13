@@ -397,7 +397,9 @@ public class MailStoreTest {
                 .execSQL(
                         "INSERT INTO queue(created_at, producer, collection, action, payload)"
                                 + " VALUES(?, ?, ?, ?, ?)",
-                        new Object[] {DATE, "someone.else", collection, "set-flags", "{}"});
+                        new Object[] {
+                                "2026-01-05T09:00:00.000Z", "someone.else", collection, "set-flags", "{}"
+                        });
     }
 
     @Test

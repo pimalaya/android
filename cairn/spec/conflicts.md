@@ -66,3 +66,16 @@ An edit settling a conflict by a rule (an overrule) SHALL keep each diverging bo
 - GIVEN a calendar entry in conflict whose server body was never opened
 - WHEN the conflict is settled by a rule keeping the phone's body
 - THEN the write is refused until the server's body is read, and once read it is kept as a retained item
+
+### Requirement: A removal names the conflicts it settles
+A removal SHALL be staged as the engine's `Remove` stating the body it was decided over where the page read one (`if_match`), refused, staging nothing, once another write replaced it, and, from the conflict form alone, the diverging bodies the form showed (`resolves`). A removal meeting a conflict, the item's or its binding's, whose diverging body it does not name SHALL be refused, staging nothing (SYNC §7): a delete from a list or an ordinary page settles no conflict. A tombstone SHALL clear an item's conflict only when its removal named it (the engine's `Settle`).
+
+#### Scenario: Deleting from the conflict form
+- GIVEN a calendar entry in conflict, open in its conflict form
+- WHEN it is deleted there
+- THEN the removal names the server version the form showed, the conflict is settled and the delete is pushed
+
+#### Scenario: Deleting a conflicted contact from the list
+- GIVEN a contact the phone and the server changed, its conflict not settled
+- WHEN it is deleted from the contacts list
+- THEN the delete is refused, nothing is staged, and the contact stays conflicted

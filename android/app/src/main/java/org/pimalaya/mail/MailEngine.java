@@ -115,7 +115,7 @@ public final class MailEngine extends PimdirEngine {
     protected JSONObject lookup(JSONArray links) throws JSONException {
         return upgrading == null
                 ? new JSONObject().put("objects", new JSONObject())
-                : offline.lookupMessages(links, upgrading, accountId);
+                : offline.lookupMessages(links, accountId);
     }
 
     /**

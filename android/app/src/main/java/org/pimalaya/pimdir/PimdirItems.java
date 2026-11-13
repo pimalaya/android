@@ -134,6 +134,11 @@ public final class PimdirItems {
         }
     }
 
+    /** {@link #seqFor(SQLiteDatabase, String, String, Map)} for a kind other than mail. */
+    public static long seqFor(SQLiteDatabase db, String collection, String linkId) {
+        return seqFor(db, collection, linkId, null);
+    }
+
     /**
      * The public id an item of {@code linkId} takes in {@code collection},
      * shared by every placement of that key within the collection's kind
@@ -142,13 +147,20 @@ public final class PimdirItems {
      * <p>Drawn from the store-wide counter ({@code bump_next_seq}) the first
      * time the key is seen in the kind, and always for a key the writer
      * derived ({@code alt:}, {@code hash:}, {@code dup:}), which names no
-     * identity to share one with.
+     * identity to share one with. A message shares only with a row agreeing
+     * with {@code witnesses}, the subject, date and sender its summary states
+     * ({@link PimdirSummary#witnesses}, STORAGE §9); null for another kind,
+     * which agrees with anything.
      */
-    public static long seqFor(SQLiteDatabase db, String collection, String linkId) {
+    public static long seqFor(
+            SQLiteDatabase db, String collection, String linkId, Map<String, Object> witnesses) {
         if (!derived(linkId)) {
             Map<String, Object> values = new java.util.HashMap<>();
             values.put("collection", collection);
             values.put("link_id", linkId);
+            for (String witness : new String[] {"subject", "date", "sender"}) {
+                values.put(witness, witnesses == null ? null : witnesses.get(witness));
+            }
             PimdirSql.Bound held = PimdirSql.bind("SEQ_FOR_LINK_ANY", values);
             try (Cursor cursor = PimdirDb.typed(db, held.sql, held.args)) {
                 if (cursor.moveToFirst()) {
@@ -372,6 +384,7 @@ public final class PimdirItems {
         if (store.collected.isEmpty() || db.inTransaction()) {
             return;
         }
+        List<String> unlinked = new ArrayList<>();
         db.beginTransaction();
         try {
             for (String hash : new ArrayList<>(store.collected)) {
@@ -389,9 +402,14 @@ public final class PimdirItems {
                     }
                     if (!held && !blobs.remove(hash)) {
                         Log.w("pimalaya", "could not unlink the orphan blob " + hash);
+                    } else if (!held) {
+                        unlinked.add(hash);
                     }
                 }
             }
+            // NOTE: the collector answers only once its unlinks are durable
+            // (STORAGE §5).
+            blobs.flushShards(unlinked);
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();

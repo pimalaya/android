@@ -246,6 +246,16 @@ public class DeletedItemsTest {
 
     /** Files one message bound and agreed, then has its server delete it. */
     private void retainedMail(String inbox, String handle, JSONArray flags) throws JSONException {
+        retainedMail(inbox, handle, flags, "Hello");
+    }
+
+    /**
+     * A listed mail whose summary states {@code subject}, as its body does
+     * ({@link #BODY_FIELDS}): a restore revives a row only when the two agree
+     * (pimdir STORAGE §9).
+     */
+    private void retainedMail(String inbox, String handle, JSONArray flags, String subject)
+            throws JSONException {
         String date = "2026-10-07T08:00:00Z";
         JSONObject placement =
                 new JSONObject()
@@ -257,13 +267,17 @@ public class DeletedItemsTest {
                         .put(
                                 "summary",
                                 PimdirSummary.mail(
-                                        "<m" + handle + "@example.org>", "Hello", "Ann",
+                                        "<m" + handle + "@example.org>", subject, "Ann",
                                         "ann@example.org", null, date, 0, false))
                         .put("sortKey", PimdirSummary.mailSortKey(date))
                         .put("flags", flags)
                         .put("base", new JSONObject().put("flags", flags));
         write(new JSONObject().put("op", "upsert").put("placement", placement));
     }
+
+    /** The sender and the date {@link #retainedMail}'s summary states. */
+    private static final String BODY_FIELDS =
+            "From: Ann <ann@example.org>\r\nDate: Wed, 07 Oct 2026 08:00:00 +0000\r\n";
 
     private void drop(String inbox, String handle) throws JSONException {
         write(
@@ -311,7 +325,7 @@ public class DeletedItemsTest {
         fixtures.putObject(
                 inbox,
                 "42",
-                "Message-ID: <m42@example.org>\r\nSubject: Hello\r\n\r\nbody\r\n"
+                ("Message-ID: <m42@example.org>\r\nSubject: Hello\r\n" + BODY_FIELDS + "\r\nbody\r\n")
                         .getBytes(StandardCharsets.UTF_8));
         drop(inbox, "42");
         long seq = scalar("SELECT seq FROM items WHERE link_id = '42'");
@@ -339,9 +353,10 @@ public class DeletedItemsTest {
     @Test
     public void aLatin1MailIsRestoredByteForByte() throws Exception {
         String inbox = inbox();
-        retainedMail(inbox, "43", new JSONArray());
+        retainedMail(inbox, "43", new JSONArray(), "Caf\u00e9");
         byte[] source =
-                ("Message-ID: <m43@example.org>\r\nSubject: Café\r\n"
+                ("Message-ID: <m43@example.org>\r\nSubject: =?iso-8859-1?Q?Caf=E9?=\r\n"
+                                + BODY_FIELDS
                                 + "Content-Type: text/plain; charset=iso-8859-1\r\n"
                                 + "Content-Transfer-Encoding: 8bit\r\n\r\ndéjà vu\r\n")
                         .getBytes(StandardCharsets.ISO_8859_1);

@@ -245,9 +245,15 @@ public final class PimdirSql {
      * <p>Android binds no named parameters; rewriting keeps column lists in the
      * crate. Values come from {@code values} by name: a missing one binds NULL,
      * a repeated one the same value. Comments are stripped first.
+     *
+     * @throws PimalayaException when the caller names a value the statement
+     *     does not take while leaving one of its parameters unnamed, which is
+     *     what a parameter renamed in the crate looks like: it would bind
+     *     NULL unseen
      */
     public static Bound bind(String name, Map<String, Object> values) {
         Rewritten[] rewritten = rewritten(name);
+        refuseRenamed(name, rewritten, values);
         Map<String, List<Object>> params = new LinkedHashMap<>();
         List<Bound> steps = new ArrayList<>(rewritten.length);
         for (Rewritten step : rewritten) {
@@ -264,6 +270,36 @@ public final class PimdirSql {
             return new Bound(steps.get(0).sql, steps.get(0).args, params);
         }
         return new Bound(params, steps);
+    }
+
+    /**
+     * Refuses a call that names a value no statement of {@code name} takes,
+     * as a parameter or a list slot, while a parameter of it goes unnamed.
+     *
+     * <p>Either alone is how the app binds: an optional parameter left out
+     * binds NULL, and one map of values serves several statements. Both at
+     * once is a parameter the standard renamed under its caller, which SQLite
+     * would run on NULL: a release with no bound, a purge of nothing.
+     */
+    private static void refuseRenamed(
+            String name, Rewritten[] rewritten, Map<String, Object> values) {
+        Set<String> taken = new LinkedHashSet<>();
+        for (Rewritten step : rewritten) {
+            taken.addAll(Arrays.asList(step.names));
+            taken.addAll(Arrays.asList(step.slots));
+        }
+        if (values.keySet().containsAll(taken)) {
+            return;
+        }
+        for (String given : values.keySet()) {
+            if (!taken.contains(given)) {
+                Set<String> unnamed = new LinkedHashSet<>(taken);
+                unnamed.removeAll(values.keySet());
+                throw new PimalayaException(
+                        "The pimdir statement '" + name + "' takes no '" + given
+                                + "', and its " + unnamed + " would bind NULL");
+            }
+        }
     }
 
     /**

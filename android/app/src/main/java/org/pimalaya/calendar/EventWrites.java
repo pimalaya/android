@@ -249,9 +249,11 @@ final class EventWrites {
         // conflicted is the decision on it: the engine
         // gates the delete on the revision it recorded.
         if (left == null && settling != null && settling.ifMatch != null) {
-            engine.mutateRemoveOver(settling.collection, settling.linkId, settling.ifMatch);
+            engine.mutateRemoveOver(
+                    settling.collection, settling.linkId, settling.ifMatch, settling.resolves);
         } else if (left == null && settling != null) {
-            engine.mutateRemove(settling.collection, settling.handle);
+            engine.mutateRemove(
+                    settling.collection, settling.handle, null, settling.resolves);
         } else if (left == null) {
             deleteWhole(target, collection);
         } else if (settling != null) {

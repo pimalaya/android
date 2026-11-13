@@ -29,9 +29,16 @@ pub const TOKENIZER: &str = "unicode61 \"remove_diacritics=0\"";
 /// The index schema version (SEARCH §2), its `PRAGMA user_version`.
 pub const VERSION: i64 = 1;
 
-/// The canonical statements the shape leaves out: the relevance order,
-/// which FTS4 cannot rank (SEARCH §8.2, `match_objects_ranked`).
-pub const DROPPED: &[&str] = &["MATCH_OBJECTS_RANKED"];
+/// The revision of what SEARCH §6 leaves to an indexer that is this
+/// shape's own (SEARCH §2): its FTS4 tables and what it writes in them.
+const EXTRACTOR: &str = "pimalaya-android 1";
+
+/// The indexer's revision recorded in `index_meta.extractor` (SEARCH §2):
+/// the shape's own, then io-pimdir's, whose extraction it runs. An index
+/// recording another is rebuilt.
+pub fn extractor() -> String {
+    format!("{EXTRACTOR}, {}", io_pimdir::search::extract::EXTRACTOR)
+}
 
 /// The directory of the app's own index statements under pimdir/queries/.
 #[cfg(test)]
@@ -43,9 +50,7 @@ pub const APP: &str = "index";
 pub fn statements() -> &'static BTreeMap<&'static str, &'static str> {
     static STATEMENTS: OnceLock<BTreeMap<&'static str, &'static str>> = OnceLock::new();
     STATEMENTS.get_or_init(|| {
-        let mut statements: BTreeMap<_, _> = search::all()
-            .filter(|(name, _)| !DROPPED.contains(name))
-            .collect();
+        let mut statements: BTreeMap<_, _> = search::all().collect();
         statements.insert("CREATE_TERM_MATCH", search::CREATE_TERM_MATCH);
         statements.insert("CLEAR_TERM_MATCH", search::CLEAR_TERM_MATCH);
         for (name, _, text) in INDEX {

@@ -39,9 +39,6 @@ public final class Outbox {
      */
     private static final String OUTBOX = "\u0001outbox";
 
-    /** A parked reason's prefix when the message may have gone, not refused. */
-    static final String UNCERTAIN = "uncertain: ";
-
     /** The rows being handed over, kept on disk so a crash mid-way shows. */
     private static final String HANDING = "handing";
 
@@ -163,7 +160,11 @@ public final class Outbox {
                                     action.kind(),
                                     action.payload(),
                                     queue.body(action.objectHash())));
-            if (!action.pending()) {
+            if (PimdirQueue.unconfirmed(action.error())) {
+                queue.unconfirm(
+                        moved,
+                        action.error().substring(PimdirQueue.unconfirmedPrefix().length()));
+            } else if (!action.pending()) {
                 queue.park(moved, action.error());
             }
             queue.acknowledge(action.id());
@@ -224,7 +225,7 @@ public final class Outbox {
                         action.id(),
                         action.objectHash(),
                         !action.pending(),
-                        action.error() != null && action.error().startsWith(UNCERTAIN)));
+                        PimdirQueue.unconfirmed(action.error())));
     }
 
     /**
@@ -394,34 +395,23 @@ public final class Outbox {
      * the user asks ({@link #resendOutgoing}).
      */
     public void parkUncertain(long queued, String reason) {
-        queue.park(queued, UNCERTAIN + reason);
+        queue.unconfirm(queued, reason);
         handed(queued);
     }
 
     /**
-     * Queues a parked submission again at the end, dropping the parked row.
+     * Puts a parked submission back among the pending ones, in its place
+     * (STORAGE §15.5, {@code retry_action}): its row, its id and its attempts
+     * kept, its body pinned throughout.
      *
-     * <p>The user checked it did not go. The new row is appended first, so its
-     * body stays pinned throughout.
+     * <p>The user checked it did not go, and accepts it may go twice.
      */
     void resendOutgoing(long queued) {
         for (PimdirQueue.Action action : queue.parked()) {
-            if (action.id() != queued || !PimdirQueue.SUBMIT.equals(action.kind())) {
-                continue;
+            if (action.id() == queued && PimdirQueue.SUBMIT.equals(action.kind())) {
+                queue.retry(queued);
+                return;
             }
-            byte[] source = queue.body(action.objectHash());
-            if (source == null) {
-                throw new IllegalStateException("The message to send again is gone");
-            }
-            queue.enqueue(
-                    new PimdirQueue.Enqueued(
-                            action.collection(),
-                            submission(action).from(),
-                            PimdirQueue.SUBMIT,
-                            action.payload(),
-                            source));
-            queue.acknowledge(action.id());
-            return;
         }
     }
 

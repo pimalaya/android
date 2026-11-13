@@ -1518,16 +1518,16 @@ public final class MailStore {
         }
         String floor = MailScope.since(months);
         MailWindow.raise(context, account, floor);
-        return collectBefore(accountEmail, floor);
+        return evictBefore(accountEmail, floor);
     }
 
     /**
-     * Collects an account's mail dated before {@code before} (STORAGE 11.3).
+     * Evicts an account's mail dated before {@code before} (STORAGE 11.3).
      *
      * <p>Messages owing nothing to a server go with bindings, summary and body,
      * kept on the server; a widening refetches. Answers how many went.
      */
-    int collectBefore(String accountEmail, String before) {
+    int evictBefore(String accountEmail, String before) {
         int collected = 0;
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
@@ -1541,7 +1541,7 @@ public final class MailStore {
                 Map<String, Object> values = new HashMap<>();
                 values.put("collection", stored.id);
                 values.put("before", before);
-                collected += PimdirDb.changed(db, PimdirSql.bind("COLLECT_BEFORE", values));
+                collected += PimdirDb.changed(db, PimdirSql.bind("EVICT_BEFORE", values));
             }
             // NOTE: the cascade drops pins no statement returns, so the
             // counts are recomputed before the collector reads them.
@@ -1574,7 +1574,7 @@ public final class MailStore {
         }
         Map<String, Object> values = new HashMap<>();
         values.put("collections", new JSONArray(ids).toString());
-        values.put("until", until);
+        values.put("before", until);
         int released = 0;
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
@@ -1598,20 +1598,28 @@ public final class MailStore {
      * app renders: a toggle leaves the others alone.
      */
     Flags flagsOf(String collection, String id) {
+        Flags known = knownFlagsOf(collection, id);
+        return known == null ? Flags.none() : known;
+    }
+
+    /**
+     * {@link #flagsOf}, or null when the store holds no set for the envelope:
+     * nobody read its markers, or the set is unreadable, so a staged change
+     * has no base to state and replaces it whole.
+     */
+    Flags knownFlagsOf(String collection, String id) {
         try (Cursor cursor =
                 PimdirDb.query(
                         items.readable(),
                         "ITEM_FLAGS",
                         PimdirSql.values("collection", collection, "link_id", id))) {
             if (!cursor.moveToFirst() || cursor.isNull(0)) {
-                return Flags.none();
+                return null;
             }
             try {
                 return Flags.parse(cursor.getString(0));
             } catch (JSONException error) {
-                // NOTE: an unreadable set has nothing to keep: the staged
-                // set replaces it whole.
-                return Flags.none();
+                return null;
             }
         }
     }

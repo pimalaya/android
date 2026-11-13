@@ -26,7 +26,7 @@ use io_pimdir::{
     coroutine::*,
     load::{PimdirLoadSelection, PimdirLoaded},
     mutate::{PimdirMutate, PimdirMutation},
-    object::{PimdirHash, PimdirObject},
+    object::{PimdirHash, PimdirHeldObject},
     placement::{PimdirHandle, PimdirLinkId, PimdirPlacement},
     remote::{
         PimdirEnumerate, PimdirFetchedBody, PimdirFetchedItem, PimdirListing, PimdirPushOutcome,
@@ -402,14 +402,18 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
                         (PimdirHandle(item.handle), object.map(PimdirHash))
                     })
                     .collect(),
+                offered: loaded.offered.into_iter().map(PimdirHandle).collect(),
             })
         }
         PimdirYield::WantsLookupObject(_) => {
             let lookup: LookupJson = parse(reply)?;
-            let objects: BTreeMap<PimdirLinkId, PimdirObject> = lookup
+            let objects: BTreeMap<PimdirLinkId, Vec<PimdirHeldObject>> = lookup
                 .objects
                 .into_iter()
-                .map(|(link, object)| (PimdirLinkId(link), object.into()))
+                .map(|(link, held)| {
+                    let held = held.into_iter().map(Into::into).collect();
+                    (PimdirLinkId(link), held)
+                })
                 .collect();
             PimdirArg::LookupObject(objects)
         }

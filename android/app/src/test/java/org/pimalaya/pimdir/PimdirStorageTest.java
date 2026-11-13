@@ -2,6 +2,7 @@ package org.pimalaya.pimdir;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -1036,8 +1037,13 @@ public class PimdirStorageTest {
         // NOTE: the size is the witness an immutable link needs (SYNC §6): the
         // engine records the object it dedups against without ever reading its
         // bytes.
-        assertEquals(h("ba13"), objects.getJSONObject("mid-1").getString("hash"));
-        assertEquals(7, objects.getJSONObject("mid-1").getInt("size"));
+        JSONArray holders = objects.getJSONArray("mid-1");
+        assertEquals(1, holders.length());
+        assertEquals(h("ba13"), holders.getJSONObject(0).getString("hash"));
+        assertEquals(7, holders.getJSONObject(0).getInt("size"));
+        // NOTE: a row holding no mail summary states none of the three
+        // fields, which a message never agrees with.
+        assertFalse(holders.getJSONObject(0).has("subject"));
     }
 
     /** A body failing its name links nothing (STORAGE §7): it is fetched again. */
@@ -1240,7 +1246,7 @@ public class PimdirStorageTest {
         assertEquals(0, scalar("SELECT count(*) FROM store_meta WHERE sync_version IS NOT NULL"));
         storage.applyWrites(batch(storeObject("aa01", "body"), upsert("a.vcf", "uid-a", h("aa01"), "a")));
         assertEquals(
-                1, scalar("SELECT count(*) FROM store_meta WHERE sync_version = 'sync-draft-09'"));
+                1, scalar("SELECT count(*) FROM store_meta WHERE sync_version = 'sync-draft-10'"));
 
         db.execSQL("UPDATE store_meta SET sync_version = 'sync-draft-06'");
         try {
@@ -1668,6 +1674,204 @@ public class PimdirStorageTest {
         assertEquals(PimdirHash.of(card("Joe", "+33100")),
                 stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
         assertTrue(storage.loadConflicts(server).isEmpty());
+        assertRefcountsHold();
+    }
+
+    /** Declares a mailbox of the test account. */
+    private void mailbox(String name) {
+        db.execSQL(
+                "INSERT INTO collections(id, account, kind, name) VALUES(?, 'acct', 'message/rfc822', ?)",
+                new Object[] {"acct/" + name, name});
+    }
+
+    /**
+     * A listed message of {@code mailbox}, bound under {@code handle} with a
+     * base, its summary stating {@code subject}, holding {@code hash} or no
+     * body.
+     */
+    private JSONObject message(String mailbox, String handle, String linkId, String subject,
+            String hash) throws Exception {
+        JSONObject placement = new JSONObject();
+        placement.put("collection", "acct/" + mailbox);
+        placement.put("handle", handle);
+        placement.put("linkId", linkId);
+        placement.put("level", hash == null ? "meta" : "full");
+        placement.put("status", "clean");
+        placement.put("flags", new JSONArray());
+        placement.put(
+                "summary",
+                PimdirSummary.mail(
+                        "<" + linkId + ">", subject, "Ann", "ann@example.org", null,
+                        "2026-10-07T08:00:00Z", 0, false));
+        placement.put("sortKey", "2026-10-07T08:00:00Z");
+        JSONObject base = new JSONObject().put("revision", "rev").put("flags", new JSONArray());
+        if (hash != null) {
+            placement.put("object", hash);
+            base.put("object", hash);
+        }
+        placement.put("base", base);
+        return new JSONObject().put("op", "upsert").put("placement", placement);
+    }
+
+    /** A `Deleted` drop of one handle of a mailbox. */
+    private JSONObject dropFrom(String mailbox, String handle) throws Exception {
+        return new JSONObject()
+                .put("op", "drop")
+                .put("collection", "acct/" + mailbox)
+                .put("handle", handle)
+                .put("reason", "deleted");
+    }
+
+    /**
+     * One message filed in two mailboxes shares its public id, and another
+     * message reusing its Message-ID draws its own (STORAGE §9.1,
+     * seq_for_link_any): the row it would share with states another subject.
+     */
+    @Test
+    public void aMessageSharesItsPublicIdOnlyWithARowThatAgrees() throws Exception {
+        mailbox("INBOX");
+        mailbox("Archive");
+        mailbox("Lists");
+        storage.applyWrites(batch(message("INBOX", "1", "mid@x", "Hello", null)));
+        storage.applyWrites(batch(message("Archive", "7", "mid@x", "Hello", null)));
+        storage.applyWrites(batch(message("Lists", "3", "mid@x", "Another", null)));
+
+        long inbox = scalar("SELECT seq FROM items WHERE collection = 'acct/INBOX'");
+        assertEquals(inbox, scalar("SELECT seq FROM items WHERE collection = 'acct/Archive'"));
+        assertNotEquals(inbox, scalar("SELECT seq FROM items WHERE collection = 'acct/Lists'"));
+    }
+
+    /**
+     * A member naming a retained row that holds another message is keyed
+     * apart, the row neither revived nor given its place (STORAGE §9, §14;
+     * SYNC §6); the same message listed again revives it.
+     */
+    @Test
+    public void aMemberNamingAnotherMessageIsKeyedApart() throws Exception {
+        mailbox("INBOX");
+        storage.applyWrites(
+                batch(
+                        storeObject("m1", "the first body"),
+                        message("INBOX", "1", "mid@x", "First", h("m1"))));
+        storage.applyWrites(batch(dropFrom("INBOX", "1")));
+        assertEquals(1, scalar("SELECT count(*) FROM items WHERE retained_at IS NOT NULL"));
+
+        storage.applyWrites(batch(message("INBOX", "9", "mid@x", "Second", null)));
+
+        assertEquals(
+                "the retained row keeps its body and stays retained",
+                h("m1"),
+                stringOf(
+                        "SELECT object_hash FROM items WHERE link_id = 'mid@x'"
+                                + " AND retained_at IS NOT NULL"));
+        assertEquals(
+                "the member is a row of its own, under a key minted over its handle",
+                1,
+                scalar(
+                        "SELECT count(*) FROM items WHERE link_id = 'dup:mid@x#9'"
+                                + " AND retained_at IS NULL AND object_hash IS NULL"));
+        assertEquals(
+                "Second",
+                stringOf(
+                        "SELECT m.subject FROM mail_summary m JOIN items i ON i.id = m.item"
+                                + " WHERE i.link_id = 'dup:mid@x#9'"));
+
+        storage.applyWrites(batch(message("INBOX", "12", "mid@x", "First", null)));
+
+        assertEquals(
+                "the same message revives its row",
+                0,
+                scalar("SELECT count(*) FROM items WHERE retained_at IS NOT NULL"));
+        assertRefcountsHold();
+    }
+
+    /**
+     * An item retired while its account holds it live elsewhere with the same
+     * body is purged, a move losing nothing; one held nowhere else is retained
+     * (STORAGE §11.1, held_elsewhere).
+     */
+    @Test
+    public void anItemRetiredWhileHeldElsewhereIsPurged() throws Exception {
+        mailbox("INBOX");
+        mailbox("Archive");
+        storage.applyWrites(
+                batch(
+                        storeObject("m1", "the moved body"),
+                        message("INBOX", "1", "moved@x", "Moved", h("m1")),
+                        storeObject("m2", "the deleted body"),
+                        message("INBOX", "2", "gone@x", "Gone", h("m2"))));
+        storage.applyWrites(batch(message("Archive", "7", "moved@x", "Moved", h("m1"))));
+
+        storage.applyWrites(batch(dropFrom("INBOX", "1"), dropFrom("INBOX", "2")));
+
+        assertEquals(
+                "the moved message left the inbox for good",
+                0,
+                scalar("SELECT count(*) FROM items WHERE collection = 'acct/INBOX'"
+                        + " AND link_id = 'moved@x'"));
+        assertEquals(
+                h("m1"),
+                stringOf("SELECT object_hash FROM items WHERE collection = 'acct/Archive'"));
+        assertEquals(
+                "the deleted one is retained",
+                1,
+                scalar("SELECT count(*) FROM items WHERE link_id = 'gone@x'"
+                        + " AND retained_at IS NOT NULL"));
+        assertRefcountsHold();
+    }
+
+    /**
+     * A bodiless message is held elsewhere only by a row agreeing with it: a
+     * holder of another subject is another message, and the row is retained
+     * (STORAGE §9, §11.1).
+     */
+    @Test
+    public void aBodilessItemIsPurgedOnlyForAHolderThatAgrees() throws Exception {
+        mailbox("INBOX");
+        mailbox("Archive");
+        storage.applyWrites(
+                batch(
+                        message("INBOX", "1", "same@x", "Same", null),
+                        message("INBOX", "2", "reused@x", "First", null)));
+        storage.applyWrites(
+                batch(
+                        message("Archive", "7", "same@x", "Same", null),
+                        message("Archive", "8", "reused@x", "Second", null)));
+
+        storage.applyWrites(batch(dropFrom("INBOX", "1"), dropFrom("INBOX", "2")));
+
+        assertEquals(
+                0,
+                scalar("SELECT count(*) FROM items WHERE collection = 'acct/INBOX'"
+                        + " AND link_id = 'same@x'"));
+        assertEquals(
+                1,
+                scalar("SELECT count(*) FROM items WHERE collection = 'acct/INBOX'"
+                        + " AND link_id = 'reused@x' AND retained_at IS NOT NULL"));
+    }
+
+    /**
+     * A delete then an upsert of one message in one batch keeps the row: the
+     * purge is settled once the batch applied (STORAGE §11.1).
+     */
+    @Test
+    public void aRowRevivedByItsBatchIsNotPurged() throws Exception {
+        mailbox("INBOX");
+        mailbox("Archive");
+        storage.applyWrites(
+                batch(
+                        storeObject("m1", "the body"),
+                        message("INBOX", "1", "mid@x", "Hello", h("m1"))));
+        storage.applyWrites(batch(message("Archive", "7", "mid@x", "Hello", h("m1"))));
+        long seq = scalar("SELECT seq FROM items WHERE collection = 'acct/INBOX'");
+
+        storage.applyWrites(
+                batch(dropFrom("INBOX", "1"), message("INBOX", "5", "mid@x", "Hello", h("m1"))));
+
+        assertEquals(
+                seq,
+                scalar("SELECT seq FROM items WHERE collection = 'acct/INBOX'"
+                        + " AND retained_at IS NULL AND object_hash IS NOT NULL"));
         assertRefcountsHold();
     }
 }

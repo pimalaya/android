@@ -124,6 +124,26 @@ public class MailEngineTest {
     }
 
     /**
+     * A marker staged from the set it was read as changes that marker alone
+     * (pimdir SYNC §7, a flag change's base): one that landed since the read
+     * survives, where a staged set replaced it whole.
+     */
+    @Test
+    public void aMarkerStagedFromItsBaseKeepsWhatLandedSince() throws Exception {
+        Flags read = store.flagsOf(collection, "42");
+        assertFalse(read.has(Flags.Marker.SEEN));
+        // NOTE: the set moves after the read, as a sync landing the marker.
+        engine.mutateFlags(collection, "42", read.with(Flags.Marker.SEEN, true));
+
+        engine.mutateFlags(collection, "42", read.with(Flags.Marker.FLAGGED, true), read);
+
+        Flags held = store.flagsOf(collection, "42");
+        assertTrue("the marker staged", held.has(Flags.Marker.FLAGGED));
+        assertTrue("the marker that landed since the read", held.has(Flags.Marker.SEEN));
+        assertTrue(held.markers().contains("$junk"));
+    }
+
+    /**
      * A staged marker comes back to the engine as a pending push.
      *
      * <p>Or the sync finds nothing to send: the merge acts on the placement's
@@ -248,7 +268,7 @@ public class MailEngineTest {
     }
 
     @Test
-    public void aLookupAnswersTheAccountsBodiesOfTheSameMessageAlone() throws Exception {
+    public void aLookupAnswersTheAccountsHoldersWithTheirSummary() throws Exception {
         store.replaceMailboxes(
                 EMAIL, List.of(new Mailbox("INBOX", ""), new Mailbox("Archive", "")));
         String archive = store.collectionOf(EMAIL, "Archive");
@@ -271,16 +291,23 @@ public class MailEngineTest {
                         .put("alt:Hi||a@example.org");
 
         JSONObject objects =
-                engine.offline.lookupMessages(links, archive, accountId).getJSONObject("objects");
+                engine.offline.lookupMessages(links, accountId).getJSONObject("objects");
 
         List<String> answered = new ArrayList<>();
         for (Iterator<String> keys = objects.keys(); keys.hasNext(); ) {
             answered.add(keys.next());
         }
         assertEquals(
-                "another account's, another message's and a derived key's are no fact",
-                List.of("ours@example.org"),
+                "another account's and a derived key's are no fact",
+                List.of("ours@example.org", "reused@example.org"),
                 answered);
+        // NOTE: every holder is answered with what its summary states, the
+        // engine linking a body only from one agreeing with the message
+        // (pimdir SYNC §6): the holder of the reused id states the first
+        // message's subject, which the second never agrees with.
+        JSONObject reused = objects.getJSONArray("reused@example.org").getJSONObject(0);
+        assertEquals("First", reused.getString("subject"));
+        assertEquals(1, objects.getJSONArray("ours@example.org").length());
     }
 
     /** One message of a mailbox, its body held unless null. */

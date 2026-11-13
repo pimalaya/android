@@ -21,10 +21,10 @@
 //! its `-- Wraps:` line names.
 //!
 //! The text is the `pimalaya-android` shape. The store records no shape:
-//! draft-09 has one on-disk format and no `store_meta.shape` (STORAGE
+//! draft-10 has one on-disk format and no `store_meta.shape` (STORAGE
 //! §4.1, §6), so a store the canonical text wrote is the same store, and
-//! the app states its conformance as `storage-draft-09 owner, sync-draft-09
-//! engine` (§17).
+//! the app states its conformance as `storage-draft-10 owner (own statement
+//! text), sync-draft-10 engine` (§17).
 
 use std::collections::BTreeMap;
 

@@ -26,7 +26,7 @@ fn seed() -> String {
         "INSERT INTO store_meta(id, format, format_version, version, read_version,
                                 produce_version, store_id, incarnation, hash_algo,
                                 created_at, derivation)
-         VALUES (1, 'pimdir', 'storage-draft-09', 1, 1, 1,
+         VALUES (1, 'pimdir', 'storage-draft-10', 1, 1, 1,
                  '0123456789abcdef0123456789abcdef', 1, 'blake3',
                  '2026-11-01T00:00:00.000Z', 3);
          INSERT INTO collections(id, account, kind, name) VALUES
@@ -43,7 +43,7 @@ fn seed() -> String {
            ('INBOX', 'm1', 1, 1, '{a}', '2026-01-01T00:00:00Z', 2, 0, NULL, NULL),
            ('INBOX', 'm2', 2, 0, '{b}', '2026-03-01T00:00:00Z', 2, 0, NULL, NULL),
            ('INBOX', 'r1', 3, 0, '{c}', '2025-01-01T00:00:00Z', 2, 1,
-            '2020-01-01T00:00:00Z', 'imap'),
+            '2020-01-01T00:00:00.000Z', 'imap'),
            ('INBOX', 'u1', 7, 0, '{d}', '', 2, 0, NULL, NULL),
            ('INBOX', '007', 8, 0, NULL, '', 1, 0, NULL, NULL),
            ('INBOX', '7', 9, 0, NULL, '', 1, 0, NULL, NULL),
@@ -88,7 +88,7 @@ fn seed() -> String {
          VALUES ((SELECT id FROM items WHERE collection = 'INBOX' AND link_id = 'm2'),
                  (SELECT id FROM items WHERE collection = 'Archive' AND link_id = 'm1'));
          INSERT INTO queue(created_at, producer, collection, action, payload, object_hash)
-         VALUES ('2026-11-01T00:00:00Z', 'p', 'INBOX', 'add', '{{}}', '{d}');
+         VALUES ('2026-11-01T00:00:00.000Z', 'p', 'INBOX', 'add', '{{}}', '{d}');
          INSERT INTO item_reference(from_kind, from_link_id, to_kind, to_link_id, role, origin,
                                     created_at)
          VALUES ('message/rfc822', 'm1', 'text/vcard', 'c1', 'sender', 'auto',
@@ -700,6 +700,19 @@ fn a_returning_write_answers_what_it_wrote() {
             call("BUMP_GENERATION", vec![("collection", text("nope"))]),
         ],
     );
+    same(
+        "a parked row put back, once",
+        &[
+            call("RETRY_ACTION", vec![("id", Value::Integer(1))]),
+            call(
+                "PARK_ACTION",
+                vec![("id", Value::Integer(1)), ("error", text("refused"))],
+            ),
+            call("RETRY_ACTION", vec![("id", Value::Integer(1))]),
+            call("RETRY_ACTION", vec![("id", Value::Integer(1))]),
+            call("RETRY_ACTION", vec![("id", Value::Integer(9))]),
+        ],
+    );
     for name in ["CANCEL_ACTION", "CLAIM_ACTION"] {
         same(
             name,
@@ -726,7 +739,7 @@ fn a_returning_write_answers_what_it_wrote() {
         "a purge below a cutoff",
         &[call(
             "PURGE_RETAINED_BEFORE",
-            vec![("cutoff", text("2021-01-01T00:00:00Z"))],
+            vec![("before", text("2021-01-01T00:00:00.000Z"))],
         )],
     );
     same(
@@ -744,9 +757,9 @@ fn a_returning_write_answers_what_it_wrote() {
     );
     for before in ["2026-02-01T00:00:00Z", "2027-01-01T00:00:00Z"] {
         same(
-            "a collection below a date",
+            "an eviction below a date",
             &[call(
-                "COLLECT_BEFORE",
+                "EVICT_BEFORE",
                 vec![("collection", text("INBOX")), ("before", text(before))],
             )],
         );
@@ -755,10 +768,10 @@ fn a_returning_write_answers_what_it_wrote() {
 
 #[test]
 fn a_release_below_a_date_lets_go_of_the_same_bodies() {
-    for until in [Value::Text("2026-02-01T00:00:00Z".to_owned()), Value::Null] {
+    for before in [Value::Text("2026-02-01T00:00:00Z".to_owned()), Value::Null] {
         let release = |name: &'static str| Call {
             name,
-            values: vec![("until", until.clone())],
+            values: vec![("before", before.clone())],
             lists: vec![("collections", vec![text("INBOX"), text("Archive")])],
         };
         same(

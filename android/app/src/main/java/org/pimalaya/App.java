@@ -18,6 +18,7 @@ import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.contact.ContactPhonePass;
 import org.pimalaya.mail.MailState;
 import org.pimalaya.phone.PhoneQueue;
+import org.pimalaya.pimdir.PimdirBlobs;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.sync.BackgroundCheck;
 
@@ -67,6 +68,10 @@ public final class App extends Application
             }
             pimdir = new PimdirDb(this);
             pimdir.startIndex().refreshSoon();
+            // NOTE: once a process, off the main thread: a temporary is left
+            // only by a writer killed mid-write (pimdir STORAGE §5).
+            PimdirBlobs blobs = new PimdirBlobs(pimdir.blobs());
+            new Thread(blobs::sweepTemporaries, "pimdir-temporaries").start();
         }
         return pimdir;
     }

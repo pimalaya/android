@@ -299,7 +299,7 @@ fn describe(
     let mut asked = Vec::new();
     for hit in &found {
         asked.push(batch.add(
-            "LOAD_HIT_PLACEMENTS",
+            "HIT",
             &[
                 (":seq", hit.seq.into()),
                 (":account", hit.account.clone().into()),

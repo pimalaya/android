@@ -27,7 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>Schema and statements over JNI ({@link PimdirSql}), never transcribed:
  * io-pimdir's schema and the app's shape of the statements, which SQLite
  * 3.18 (Android 8.0) runs. One store for every account and kind, at
- * storage-draft-08: a store of another draft is refused, never reconciled
+ * storage-draft-10: a store of another draft is refused, never reconciled
  * nor migrated ({@link #refusal}), and the app reinstalled.
  */
 public final class PimdirDb extends SQLiteOpenHelper {

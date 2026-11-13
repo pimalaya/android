@@ -19,6 +19,10 @@ use crate::{
 /// The draft of SEARCH.md this shape follows (SEARCH §2).
 const FORMAT_DRAFT: u32 = io_pimdir::sql::search::FORMAT_DRAFT;
 
+/// The revision of SEARCH §6 io-pimdir extracts under, which the index
+/// records in `index_meta.extraction` (SEARCH §2).
+const EXTRACTION: i64 = io_pimdir::search::extract::EXTRACTION;
+
 /// What index.db holds.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", tag = "held")]
@@ -87,6 +91,11 @@ pub fn held(sql: &mut impl IndexSql) -> Result<Held, BridgeError> {
         Some(number) if number == FORMAT_DRAFT => (),
         _ => return Ok(refused(version, named_shape)),
     }
+    if !has("extraction") || !has("extractor") {
+        return Ok(Held::Rebuild {
+            reason: "an index recording no extraction".into(),
+        });
+    }
 
     let mut batch = Batch::default();
     let user_version = batch.add("INDEX_USER_VERSION", &[])?;
@@ -105,6 +114,11 @@ pub fn held(sql: &mut impl IndexSql) -> Result<Held, BridgeError> {
     if text(meta, 1)? != TOKENIZER {
         return Ok(Held::Rebuild {
             reason: "an index under another tokenizer".into(),
+        });
+    }
+    if int(meta, 12)? != EXTRACTION || text(meta, 13)? != shape::extractor() {
+        return Ok(Held::Rebuild {
+            reason: "an index extracted under another revision".into(),
         });
     }
 
@@ -169,6 +183,8 @@ pub fn init(sql: &mut impl IndexSql) -> Result<(), BridgeError> {
         &[
             (":version", Value::from(VERSION)),
             (":tokenizer", Value::from(TOKENIZER)),
+            (":extraction", Value::from(EXTRACTION)),
+            (":extractor", Value::from(shape::extractor())),
         ],
     )?;
     batch.run(sql)?;

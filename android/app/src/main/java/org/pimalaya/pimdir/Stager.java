@@ -272,21 +272,45 @@ public abstract class Stager implements OfflineDriver {
     protected void applied(JSONArray effects) throws JSONException {}
 
     /**
-     * Stages a flag set on one placement.
+     * Stages a flag set replacing the markers of one placement.
      *
      * <p>The next sync pushes its difference from the set the source agreed.
      */
     public void mutateFlags(String collection, String handle, Flags flags) throws JSONException {
-        mutate(collection, Mutation.setFlags(handle, flags));
+        mutateFlags(collection, handle, flags, null);
+    }
+
+    /**
+     * Stages a flag set changed from {@code base}, the set the caller read:
+     * the change alone is applied to the set the placement holds when it is
+     * staged, so a marker a sync landed or removed since survives (SYNC §7).
+     * Null replaces the set whole.
+     */
+    public void mutateFlags(String collection, String handle, Flags flags, Flags base)
+            throws JSONException {
+        mutate(collection, Mutation.setFlags(handle, flags, base));
     }
 
     /**
      * Stages a removal: a tombstone the next sync pushes.
      *
-     * <p>A create never pushed is withdrawn instead.
+     * <p>A create never pushed is withdrawn instead. A conflict, the item's or
+     * the binding's, refuses it (SYNC §7).
      */
     public void mutateRemove(String collection, String handle) throws JSONException {
-        mutate(collection, Mutation.remove(handle));
+        mutateRemove(collection, handle, null, null);
+    }
+
+    /**
+     * Stages a removal made over the body {@code ifMatch} names, refused
+     * ({@link org.pimalaya.client.BodyReplaced}) once another write replaced
+     * it, and settling the conflicts it meets when {@code resolves} names the
+     * diverging body of each, a person's resolution by deleting (SYNC §7).
+     * Null for none of either.
+     */
+    public void mutateRemove(String collection, String handle, String ifMatch,
+            java.util.List<String> resolves) throws JSONException {
+        mutate(collection, Mutation.remove(handle, ifMatch, resolves));
     }
 
     /**

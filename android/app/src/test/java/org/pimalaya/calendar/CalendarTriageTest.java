@@ -184,6 +184,29 @@ public class CalendarTriageTest {
         assertFalse(stored().conflicted);
     }
 
+    /**
+     * A delete settles a conflict only as a resolution naming the version it
+     * was shown (pimdir SYNC §7): one naming none is refused, nothing staged.
+     */
+    @Test
+    public void aConflictedEntryDeletedNamingNoConflictIsRefused() throws Exception {
+        conflict(
+                calendar,
+                "e.ics",
+                entry("Planning", "Room 1", "20260201T100000Z"),
+                entry("Retro", "Room 1", "20260201T110000Z"));
+
+        try {
+            engine.mutateRemove(calendar, "e.ics");
+            org.junit.Assert.fail("a delete naming no conflict settled one");
+        } catch (org.pimalaya.client.PimalayaException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains("conflict"));
+        }
+
+        assertFalse(storage.loadRow(calendar, "e.ics").getBoolean("deleted"));
+        assertFalse(EventStore.conflictsOf(storage, calendar).isEmpty());
+    }
+
     @Test
     public void aConflictedEntryDeletedWholeIsDeletedAgainstWhatTheSourceWasSeenToHold()
             throws Exception {
@@ -193,7 +216,7 @@ public class CalendarTriageTest {
                 entry("Planning", "Room 1", "20260201T100000Z"),
                 entry("Retro", "Room 1", "20260201T110000Z"));
 
-        engine.mutateRemove(calendar, "e.ics");
+        engine.mutateRemove(calendar, "e.ics", null, events.conflictOf(stored()).resolves);
 
         // NOTE: the delete is staged against the revision recorded when the
         // edit there was seen, never the stale base, so a later edit there

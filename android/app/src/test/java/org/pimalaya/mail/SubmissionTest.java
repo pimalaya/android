@@ -187,6 +187,43 @@ public class SubmissionTest {
         assertEquals("m1@example.org", store.outbox().outgoing(ONE).get(0).messageId);
     }
 
+    /**
+     * A submission sent again is its own row put back (pimdir STORAGE §15.5,
+     * retry_action): its id and its attempts kept, in its place before a row
+     * queued after it, where a new row was appended behind it.
+     */
+    @Test
+    public void aResentSubmissionKeepsItsRowAndItsPlace() {
+        MailFixtures.queue(store, ONE, "m1@example.org", "Hello", DATE);
+        MailFixtures.queue(store, ONE, "m2@example.org", "Next", DATE);
+        store.outbox().retryOutgoing(1);
+        store.outbox().parkUncertain(1, "eof");
+
+        store.outbox().resendOutgoing(1);
+
+        assertEquals(List.of("1", "2"), column("SELECT id FROM queue ORDER BY id"));
+        assertEquals(List.of("2", "0"), column("SELECT attempts FROM queue ORDER BY id"));
+        assertEquals(java.util.Arrays.asList(null, null),
+                column("SELECT error FROM queue ORDER BY id"));
+        assertEquals("m1@example.org", store.outbox().outgoing(ONE).get(0).messageId);
+    }
+
+    /**
+     * A refusal whose text begins with the reserved prefix is recorded behind
+     * failed: (pimdir STORAGE §15.2), so no failure reads as an unknown
+     * outcome.
+     */
+    @Test
+    public void aRefusalNeverReadsAsAnUnknownOutcome() {
+        MailFixtures.queue(store, ONE, "m1@example.org", "Hello", DATE);
+
+        store.outbox().parkOutgoing(1, "unconfirmed: said the server");
+
+        assertEquals(
+                List.of("failed: unconfirmed: said the server"),
+                column("SELECT error FROM queue"));
+    }
+
     /** A hand-over the app died in is parked, never handed over again. */
     @Test
     public void aHandOverTheAppDiedInIsParkedUncertain() {
@@ -202,7 +239,9 @@ public class SubmissionTest {
         }
 
         assertEquals(List.of("m2@example.org"), waiting);
-        assertTrue(column("SELECT error FROM queue ORDER BY id").get(0).startsWith(Outbox.UNCERTAIN));
+        // NOTE: the reserved prefix of an intent whose outcome is unknown
+        // (pimdir STORAGE §15.2), spelled here as the standard spells it.
+        assertTrue(column("SELECT error FROM queue ORDER BY id").get(0).startsWith("unconfirmed: "));
     }
 
     /** A hand-over with a verdict leaves nothing to park. */

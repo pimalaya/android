@@ -13,7 +13,7 @@ use std::{
 
 use io_pimdir::{
     change::{PimdirDropReason, PimdirWriteOp},
-    client::PimdirStore,
+    client::{PimdirStore, reader::PimdirReader},
     collection::{PimdirCollectionId, PimdirScope},
     object::{PimdirHash, PimdirObject},
     placement::{
@@ -36,7 +36,7 @@ use crate::{
         floor::{FLOOR, Floor},
         held::{self, Held},
         lists, refresh,
-        shape::{self, APP, DROPPED, SHAPE},
+        shape::{self, APP, SHAPE},
         sql::{IndexSql, int, query, text},
     },
 };
@@ -249,9 +249,6 @@ fn every_index_fork_names_the_canonical_text_it_rewrites() {
             );
         }
     }
-    for name in DROPPED {
-        assert!(!shape::statements().contains_key(name), "{name} is served");
-    }
 }
 
 /// One placement, the owner's write of what a source listed.
@@ -327,9 +324,12 @@ fn mail_summary(row: &Json, addresses: &[Json]) -> PimdirSummary {
 }
 
 /// Builds the vectors' fixture store at `dir` through io-pimdir's owner,
-/// as io-pimdir's own suite does (tests/search.rs).
+/// as io-pimdir's own suite does (tests/search.rs), then takes out of the
+/// blob directory the body of each item stating `unreadable` (SEARCH §11).
 fn build(spec: &Path, dir: &Path) {
     let store = json(&spec.join("vectors/search/store.json"));
+    assert_eq!(store["v"], 2, "store.json at another version");
+    let mut unreadable = Vec::new();
     let mut kinds = BTreeMap::new();
     let mut stand_ins = BTreeSet::new();
     for collection in store["collections"].as_array().unwrap() {
@@ -386,6 +386,9 @@ fn build(spec: &Path, dir: &Path) {
             let body = fs::read(spec.join("vectors").join(fixture)).unwrap();
             let derived = summary::derive(kind, &body).unwrap();
             let hash = owner.hash(&body);
+            if item["unreadable"].as_bool() == Some(true) {
+                unreadable.push(hash.clone());
+            }
             owner
                 .write(vec![
                     PimdirWriteOp::StoreObject {
@@ -457,6 +460,12 @@ fn build(spec: &Path, dir: &Path) {
             .unwrap()
             .expect("the reference links");
     }
+    drop(owner);
+
+    let blobs = PimdirReader::open(dir).unwrap().blobs();
+    for hash in unreadable {
+        fs::remove_file(blobs.path(&hash).unwrap()).unwrap();
+    }
 }
 
 /// An RFC 3339 instant in UTC as Unix seconds.
@@ -489,6 +498,9 @@ fn unbound(case: &Json) -> Option<&'static str> {
     }
     if case.get("threads").is_some() {
         return Some("a threaded listing, which the app does not offer");
+    }
+    if case.get("index_zone").is_some() {
+        return Some("a query in another zone than its index, which the app never asks");
     }
     None
 }
@@ -547,7 +559,7 @@ fn the_search_vectors_answer_on_the_floor() {
     let _held = PimdirStore::open(dir.path()).unwrap();
     build(&spec, dir.path());
     let vectors = json(&spec.join("vectors/search/queries.json"));
-    assert_eq!(vectors["v"], 3, "queries.json at another version");
+    assert_eq!(vectors["v"], 4, "queries.json at another version");
     let now = unix(vectors["now"].as_str().unwrap());
 
     let mut floor = index(dir.path());
@@ -739,7 +751,7 @@ fn an_index_of_another_shape_is_refused_and_an_older_one_rebuilt() {
         Held::Refused { .. }
     ));
     floor.exec(&format!(
-        "UPDATE index_meta SET shape = '{SHAPE}', format_version = 'search-draft-10'"
+        "UPDATE index_meta SET shape = '{SHAPE}', format_version = 'search-draft-11'"
     ));
     assert!(matches!(
         held::held(&mut floor).unwrap(),
@@ -750,12 +762,34 @@ fn an_index_of_another_shape_is_refused_and_an_older_one_rebuilt() {
         held::held(&mut floor).unwrap(),
         Held::Rebuild { .. }
     ));
-    floor.exec("UPDATE index_meta SET format_version = 'search-draft-09', store_id = 'other'");
+    floor.exec("UPDATE index_meta SET format_version = 'search-draft-09'");
+    assert!(matches!(
+        held::held(&mut floor).unwrap(),
+        Held::Rebuild { .. }
+    ));
+    floor.exec("UPDATE index_meta SET format_version = 'search-draft-10', store_id = 'other'");
     assert!(matches!(
         held::held(&mut floor).unwrap(),
         Held::Rebuild { .. }
     ));
     floor.exec("UPDATE index_meta SET store_id = (SELECT store_id FROM store.store_meta)");
+    assert_eq!(held::held(&mut floor).unwrap(), Held::Current);
+    // An index extracted under another revision, the standard's or the
+    // indexer's own, is rebuilt (SEARCH §2).
+    floor.exec("UPDATE index_meta SET extraction = extraction + 1");
+    assert!(matches!(
+        held::held(&mut floor).unwrap(),
+        Held::Rebuild { .. }
+    ));
+    floor.exec("UPDATE index_meta SET extraction = extraction - 1, extractor = 'io-pimdir 1'");
+    assert!(matches!(
+        held::held(&mut floor).unwrap(),
+        Held::Rebuild { .. }
+    ));
+    floor.exec(&format!(
+        "UPDATE index_meta SET extractor = '{}'",
+        shape::extractor()
+    ));
     assert_eq!(held::held(&mut floor).unwrap(), Held::Current);
     floor.exec("DROP INDEX message_by_parent");
     assert!(matches!(

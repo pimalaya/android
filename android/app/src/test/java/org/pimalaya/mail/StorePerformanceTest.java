@@ -229,7 +229,7 @@ public class StorePerformanceTest {
         // NOTE: a delete read through a cursor runs again for every row past
         // its first window, each run reading the mailbox: a collection that
         // never ends.
-        assertEquals(PAST_A_WINDOW, store.collectBefore(EMAIL, "2002-01-01T00:00:00Z"));
+        assertEquals(PAST_A_WINDOW, store.evictBefore(EMAIL, "2002-01-01T00:00:00Z"));
         assertEquals(PAST_A_WINDOW, scalar("SELECT count(*) FROM items"));
         assertEquals(PAST_A_WINDOW, scalar("SELECT count(*) FROM bindings"));
     }
@@ -251,7 +251,7 @@ public class StorePerformanceTest {
                 "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < "
                         + PAST_A_WINDOW + ") INSERT INTO items(collection, link_id, seq,"
                         + " object_hash, level, deleted, retained_at)"
-                        + " SELECT ?, 'r' || i, i, '" + PINNED + "', 2, 1, '2001-01-01T00:00:00Z' FROM n",
+                        + " SELECT ?, 'r' || i, i, '" + PINNED + "', 2, 1, '2001-01-01T00:00:00.000Z' FROM n",
                 new Object[] {inbox});
 
         DeletedItems deleted = new DeletedItems(pimdir, context);
@@ -266,7 +266,7 @@ public class StorePerformanceTest {
         Map<String, Object> values = new HashMap<>();
         values.put("collection", inbox);
         values.put("before", "2002-01-01T00:00:00Z");
-        PimdirSql.Bound bound = PimdirSql.bind("COLLECT_BEFORE", values);
+        PimdirSql.Bound bound = PimdirSql.bind("EVICT_BEFORE", values);
         // NOTE: the shape's text reads the rows it deletes beside the delete
         // (no RETURNING on SQLite 3.18), and the count is the delete's alone.
         assertEquals("a read, then the delete", 2, bound.steps.size());

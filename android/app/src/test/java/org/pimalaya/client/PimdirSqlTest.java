@@ -77,6 +77,34 @@ public class PimdirSqlTest {
         }
     }
 
+    /**
+     * A parameter renamed in the crate fails where it is bound: the caller
+     * names a value the statement does not take while a parameter of it goes
+     * unnamed, which SQLite would run on NULL (a release with no bound).
+     */
+    @Test
+    public void aRenamedParameterIsRefusedWhereItIsBound() {
+        try {
+            PimdirSql.bind(
+                    "RELEASE_BEFORE",
+                    PimdirSql.values("collections", "[]", "until", "2026-01-01T00:00:00Z"));
+            fail("bound a release on NULL");
+        } catch (PimalayaException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains("'until'"));
+            assertTrue(refused.getMessage(), refused.getMessage().contains("before"));
+        }
+
+        // NOTE: either alone is how the app binds: an optional parameter
+        // left out binds NULL, and one map serves several statements.
+        PimdirSql.Bound open = PimdirSql.bind("RELEASE_BEFORE", PimdirSql.values("collections", "[]"));
+        assertEquals(2, open.steps.size());
+        assertNotNull(
+                PimdirSql.bind(
+                        "RELEASE_BEFORE",
+                        PimdirSql.values(
+                                "collections", "[]", "before", "2026-01-01T00:00:00Z", "limit", 5)));
+    }
+
     @Test
     public void anUnknownStatementFailsLoudly() {
         try {

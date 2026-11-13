@@ -1006,7 +1006,7 @@ On every start, the app SHALL remove the folders a body download writes into and
 - THEN the folder is gone
 
 ### Requirement: A send that may have gone waits for the user
-A submission that fails after the whole message was handed over and before any verdict came back SHALL be uncertain: over SMTP once the data's final `.` was written, over JMAP, Graph or Gmail once the request was written whole and no byte of its answer came, or when a 500, 502, 503 or 504 answered. An uncertain submission SHALL park its row, shown as *May have been sent*, and SHALL never be handed over again on its own. The reader SHALL offer *Send again* on it, which queues the same message anew at the end of the queue and drops the parked row.
+A submission that fails after the whole message was handed over and before any verdict came back SHALL be uncertain: over SMTP once the data's final `.` was written, over JMAP, Graph or Gmail once the request was written whole and no byte of its answer came, or when a 500, 502, 503 or 504 answered. An uncertain submission SHALL park its row under an error beginning with the reserved prefix `unconfirmed: ` (pimdir STORAGE §15.2), shown as *May have been sent*, and SHALL never be handed over again on its own. The reader SHALL offer *Send again* on it, which puts the same row back among the pending ones (`retry_action`, STORAGE §15.5), its id and its attempts kept, in its place in the queue's order.
 
 #### Scenario: The connection dies after the final dot
 - GIVEN an SMTP server that closes the connection after the message's final `.`
@@ -1021,7 +1021,7 @@ A submission that fails after the whole message was handed over and before any v
 #### Scenario: The user sends it again
 - GIVEN a message parked as *May have been sent* that the recipient never got
 - WHEN the user opens it and taps *Send again*
-- THEN it is queued again and the next sync hands it over
+- THEN its row is pending again, before a message queued after it, and the next sync hands it over
 
 ### Requirement: A copy or append is not made twice
 Where the server has no MOVE, a relocation SHALL search the target for the message's `Message-ID` (`UID SEARCH HEADER`) before its COPY and skip the COPY when it is there, so a relocation run again after a lost answer disposes of the original without filing a second copy. A copy SHALL be skipped the same way when its target holds the message: on IMAP by `UID SEARCH HEADER`, on Graph by the target folder's messages filtered on the source's `internetMessageId`. An `APPEND` of a message whose `Message-ID` the mailbox already holds SHALL be skipped and count as done. A message carrying no `Message-ID` SHALL be copied and appended as before.

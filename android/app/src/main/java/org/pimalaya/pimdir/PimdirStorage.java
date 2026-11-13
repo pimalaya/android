@@ -1002,16 +1002,7 @@ public final class PimdirStorage {
                             db,
                             "HELD_OBJECT",
                             PimdirSql.values("link_id", linkId, "account", account))) {
-                // NOTE: only a body read whole under its name links (STORAGE
-                // §7); one failing it goes to quarantine and is fetched.
-                if (cursor.moveToFirst() && blobs.verified(cursor.getString(0))) {
-                    // NOTE: the size is the witness an immutable link needs
-                    // (SYNC §6): the engine records the object unread.
-                    JSONObject object = new JSONObject();
-                    object.put("hash", cursor.getString(0));
-                    object.put("size", cursor.getLong(1));
-                    objects.put(linkId, object);
-                }
+                held(objects, linkId, cursor);
             }
         }
 
@@ -1020,27 +1011,52 @@ public final class PimdirStorage {
         return reply;
     }
 
-    /** {@link #lookupObjects} for one collection's messages, agreeing ones. */
-    public JSONObject lookupMessages(JSONArray links, String engineCollection, String account)
-            throws JSONException {
+    /**
+     * {@link #lookupObjects} for an account's messages: every holder of each
+     * key, never a derived one, the engine linking a body only from a row
+     * agreeing with the message (SYNC §6).
+     */
+    public JSONObject lookupMessages(JSONArray links, String account) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
         JSONObject objects = new JSONObject();
-        String collection = collectionOf(engineCollection);
         for (int index = 0; index < links.length(); index++) {
             String linkId = links.getString(index);
-            Map<String, Object> values =
-                    PimdirSql.values("collection", collection, "link_id", linkId);
-            values.put("account", account);
+            Map<String, Object> values = PimdirSql.values("link_id", linkId, "account", account);
             try (Cursor cursor = PimdirDb.query(db, "HELD_MESSAGE_OBJECT", values)) {
-                if (cursor.moveToFirst() && blobs.verified(cursor.getString(0))) {
-                    JSONObject object = new JSONObject();
-                    object.put("hash", cursor.getString(0));
-                    object.put("size", cursor.getLong(1));
-                    objects.put(linkId, object);
-                }
+                held(objects, linkId, cursor);
             }
         }
         return new JSONObject().put("objects", objects);
+    }
+
+    /**
+     * Writes every holder a lookup read into its reply, under {@code linkId}:
+     * each body with its size and the subject, date and sender its row's mail
+     * summary states, absent for a row holding none, which the engine checks
+     * a link against (SYNC §6). A link id no row holds a body under is left
+     * out.
+     */
+    private void held(JSONObject objects, String linkId, Cursor cursor) throws JSONException {
+        JSONArray holders = new JSONArray();
+        while (cursor.moveToNext()) {
+            // NOTE: only a body read whole under its name links (STORAGE
+            // §7); one failing it goes to quarantine and is fetched.
+            if (!blobs.verified(cursor.getString(0))) {
+                continue;
+            }
+            // NOTE: the size is the witness an immutable link needs (SYNC
+            // §6): the engine records the object unread.
+            JSONObject object = new JSONObject();
+            object.put("hash", cursor.getString(0));
+            object.put("size", cursor.getLong(1));
+            putText(object, "subject", cursor, 2);
+            putText(object, "date", cursor, 3);
+            putText(object, "sender", cursor, 4);
+            holders.put(object);
+        }
+        if (holders.length() > 0) {
+            objects.put(linkId, holders);
+        }
     }
 
     /** Applies a batch of engine writes atomically; returns what it did. */
@@ -1051,6 +1067,8 @@ public final class PimdirStorage {
         rebinding = new HashMap<>();
         overruling = new HashSet<>();
         settling = new HashSet<>();
+        claimed = claimedKeys(writes);
+        retired = new LinkedHashSet<>();
         try {
             Map<String, byte[]> bodies = new HashMap<>();
             List<JSONObject> stamps = new ArrayList<>();
@@ -1123,6 +1141,17 @@ public final class PimdirStorage {
                 }
             }
 
+            // NOTE: an item the batch retired and left so, which its account
+            // holds live elsewhere with the same body, or, bodiless, in a
+            // row agreeing with it, moved rather than went: purged, the
+            // holder pinning the body (STORAGE §11.1). Settled once the
+            // whole batch applied, as io-pimdir settles it, so a later
+            // upsert of the batch reviving the row keeps it.
+            for (String key : retired) {
+                String[] parts = key.split("\n", 2);
+                purgeHeldElsewhere(db, parts[0], parts[1]);
+            }
+
             // NOTE: after the upserts, so a binding the batch named is stamped
             // too (SYNC §5): the round's last page drops what no page stamped.
             for (JSONObject stamp : stamps) {
@@ -1141,6 +1170,8 @@ public final class PimdirStorage {
             rebinding = null;
             overruling = null;
             settling = null;
+            claimed = null;
+            retired = null;
             PimdirItems.unlinkCollected(store, db, blobs);
         }
     }
@@ -1164,6 +1195,58 @@ public final class PimdirStorage {
                     "sync-version: the store's sync state is " + stored + "'s, not "
                             + engine + "'s");
         }
+    }
+
+    /**
+     * The keys this batch's upserts state, by stored collection and link id.
+     *
+     * <p>Read ahead: a key minted for a member named apart takes none of them.
+     */
+    private static Set<String> claimedKeys(JSONArray writes) throws JSONException {
+        Set<String> claimed = new HashSet<>();
+        for (int index = 0; index < writes.length(); index++) {
+            JSONObject op = writes.getJSONObject(index);
+            JSONObject placement = op.optJSONObject("placement");
+            if ("upsert".equals(op.getString("op"))
+                    && placement != null
+                    && !placement.isNull("linkId")) {
+                claimed.add(
+                        collectionOf(placement.getString("collection")) + "\n"
+                                + placement.getString("linkId"));
+            }
+        }
+        return claimed;
+    }
+
+    /**
+     * Purges the row retained under a key when its account holds the item
+     * live in another collection ({@code held_elsewhere}): with the retiring
+     * body, or, the row holding none, at all, a message only in a row agreeing
+     * with its subject, date and sender. Its pins are released; a row revived
+     * since, or held nowhere else, is left.
+     */
+    private void purgeHeldElsewhere(SQLiteDatabase db, String collection, String linkId) {
+        Map<String, Object> key = PimdirItems.key(collection, linkId);
+        long seq;
+        String object;
+        String conflict;
+        try (Cursor cursor = PimdirDb.query(db, "RETAINED_ITEM", key)) {
+            if (!cursor.moveToFirst()) {
+                return;
+            }
+            seq = cursor.getLong(0);
+            object = cursor.isNull(1) ? null : cursor.getString(1);
+            conflict = cursor.isNull(2) ? null : cursor.getString(2);
+        }
+        Map<String, Object> held = PimdirItems.key(collection, linkId);
+        held.put("hash", object);
+        if (one(db, "HELD_ELSEWHERE", held) == null) {
+            return;
+        }
+        Map<String, Object> purged = PimdirSql.values("collection", collection, "seq", seq);
+        PimdirDb.changed(db, PimdirSql.bind("PURGE_ITEM", purged));
+        adjustRefcount(db, object, null);
+        adjustRefcount(db, conflict, null);
     }
 
     /**
@@ -1434,6 +1517,25 @@ public final class PimdirStorage {
                     "Unnamed placement " + collection + "/" + handle + " on " + source);
         }
 
+        // NOTE: a member naming a row of the collection that holds another
+        // message, a reused Message-ID, is keyed apart (STORAGE §9, §14; SYNC
+        // §6), never joining, landing nor reviving that row, whose body
+        // would stand for both. A handle the source binds is no member to
+        // name, and a summary not stated says nothing against.
+        Map<String, Object> witnesses = mail ? PimdirSummary.witnesses(summary) : null;
+        if (witnesses != null && known == null) {
+            String keyed = keyedApart(db, collection, source, linkId, handle, witnesses);
+            if (!keyed.equals(linkId)) {
+                Log.d("pimalaya", handle + " names another message than " + linkId);
+                if (handle.equals(provisionalOf(linkId))) {
+                    handle = provisionalOf(keyed);
+                    placement.put("handle", handle);
+                }
+                linkId = keyed;
+                placement.put("linkId", linkId);
+            }
+        }
+
         // NOTE: a handle that named another identity (replaced in place, or
         // resolved by fetch) has that binding retired first, as a delete would
         // (STORAGE §10): a handle names one item per source.
@@ -1507,7 +1609,14 @@ public final class PimdirStorage {
 
         if (!exists) {
             Map<String, Object> row = PimdirItems.key(collection, linkId);
-            row.put("seq", PimdirItems.seqFor(db, collection, linkId));
+            // NOTE: a message shares its public id only with a row agreeing
+            // with its summary (STORAGE §9.1), its own or, for a create made
+            // from another message, the one it is about to be given.
+            Map<String, Object> agreed =
+                    witnesses != null || !mail
+                            ? witnesses
+                            : carriedWitnesses(db, source, placement.optJSONObject("origin"));
+            row.put("seq", PimdirItems.seqFor(db, collection, linkId, agreed));
             row.put("flags_known", flags == null ? 0 : 1);
             row.put("object_hash", object);
             row.put("sort_key", sortKey);
@@ -1669,6 +1778,9 @@ public final class PimdirStorage {
 
         if (!isBound(db, collection, linkId)) {
             PimdirDb.exec(db, "RETAIN_ITEM", binding(collection, linkId, source));
+            if (retired != null) {
+                retired.add(collection + "\n" + linkId);
+            }
             return;
         }
 
@@ -2413,11 +2525,7 @@ public final class PimdirStorage {
             return false;
         }
         String fromCollection = collectionOf(origin.getString("collection"));
-        String handle = origin.getString("handle");
-        String fromLink = linkOf(db, fromCollection, source, handle);
-        if (fromLink == null) {
-            fromLink = nameOf(handle);
-        }
+        String fromLink = originLink(db, source, origin);
         // NOTE: the tables Annex A.1 files a message's summary in, copied
         // row for row whatever their columns.
         Map<String, Object> values =
@@ -2429,6 +2537,68 @@ public final class PimdirStorage {
         boolean copied = PimdirDb.exec(db, "COPY_MAIL_SUMMARY", values) > 0;
         PimdirDb.exec(db, "COPY_ADDRESSES", values);
         return copied;
+    }
+
+    /** The link id of the message a create was made from, in its collection. */
+    private String originLink(SQLiteDatabase db, String source, JSONObject origin)
+            throws JSONException {
+        String fromCollection = collectionOf(origin.getString("collection"));
+        String handle = origin.getString("handle");
+        String fromLink = linkOf(db, fromCollection, source, handle);
+        return fromLink == null ? nameOf(handle) : fromLink;
+    }
+
+    /**
+     * What the stored summary of a create's origin states ({@link
+     * PimdirSummary#witnesses}), the summary {@link #carrySummary} gives the
+     * create; null for a create with no origin or an origin holding none.
+     */
+    private Map<String, Object> carriedWitnesses(
+            SQLiteDatabase db, String source, JSONObject origin) throws JSONException {
+        if (origin == null) {
+            return null;
+        }
+        Map<String, Object> key =
+                PimdirItems.key(
+                        collectionOf(origin.getString("collection")),
+                        originLink(db, source, origin));
+        try (Cursor cursor = PimdirDb.query(db, "MAIL_WITNESSES", key)) {
+            if (!cursor.moveToFirst()) {
+                return null;
+            }
+            Map<String, Object> witnesses = new HashMap<>();
+            witnesses.put("subject", cursor.isNull(0) ? null : cursor.getString(0));
+            witnesses.put("date", cursor.isNull(1) ? null : cursor.getString(1));
+            witnesses.put("sender", cursor.isNull(2) ? null : cursor.getString(2));
+            witnesses.put("size", cursor.isNull(3) ? null : cursor.getLong(3));
+            return witnesses;
+        }
+    }
+
+    /**
+     * The key a member is filed under: {@code linkId}, or, when the row the
+     * collection holds under it is another message ({@code
+     * names_another_message}), the identity minted over its handle, minted
+     * again over a key a row or an upsert of the batch holds (STORAGE §9).
+     */
+    private String keyedApart(SQLiteDatabase db, String collection, String source,
+            String linkId, String handle, Map<String, Object> witnesses) {
+        Map<String, Object> values = new HashMap<>(witnesses);
+        values.put("collection", collection);
+        values.put("link_id", linkId);
+        values.put("source", source);
+        if (one(db, "NAMES_ANOTHER_MESSAGE", values) == null) {
+            return linkId;
+        }
+        String key = "dup:" + linkId + "#" + handle;
+        while (one(db, "ITEM_EXISTS", PimdirItems.key(collection, key)) != null
+                || (claimed != null && claimed.contains(collection + "\n" + key))) {
+            key = "dup:" + key + "#" + handle;
+        }
+        if (claimed != null) {
+            claimed.add(collection + "\n" + key);
+        }
+        return key;
     }
 
     /**
@@ -2633,6 +2803,20 @@ public final class PimdirStorage {
      * the item's conflict (SYNC §7). Null outside a batch.
      */
     private Set<String> settling;
+
+    /**
+     * The keys the upserts of the write batch state, by stored collection and
+     * link id, and those minted within it: a key minted for a member named
+     * apart takes none of them (STORAGE §9). Null outside a batch.
+     */
+    private Set<String> claimed;
+
+    /**
+     * The items a delete of the write batch retired, by stored collection and
+     * link id: one still retained when the batch ends and held elsewhere is
+     * purged, a move losing nothing (STORAGE §11.1). Null outside a batch.
+     */
+    private Set<String> retired;
 
     /**
      * The first column of a read's first row, null for none or NULL.

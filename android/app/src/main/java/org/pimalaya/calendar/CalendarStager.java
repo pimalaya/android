@@ -71,19 +71,31 @@ public final class CalendarStager extends Stager {
      */
     public void mutateRemoveOver(String collection, String linkId, String object)
             throws JSONException {
+        mutateRemoveOver(collection, linkId, object, null);
+    }
+
+    /**
+     * {@link #mutateRemoveOver(String, String, String)}, settling the
+     * conflicts it meets when {@code resolves} names the diverging body of
+     * each, a person's resolution by deleting (SYNC §7); null for none.
+     */
+    public void mutateRemoveOver(String collection, String linkId, String object,
+            java.util.List<String> resolves) throws JSONException {
         offline.atomically(
-                () -> {
-                    requireHeld(collection, linkId, object);
-                    mutateRemove(collection, offline.handleFor(collection, linkId));
-                });
+                () ->
+                        mutateRemove(
+                                collection,
+                                offline.handleFor(collection, linkId),
+                                object,
+                                resolves));
     }
 
     /**
      * Refuses ({@link BodyReplaced}) when the entry {@code linkId} no longer
      * holds {@code object}; null checks nothing.
      *
-     * <p>For a write the engine takes no {@code if_match} on (a removal, a
-     * move's add): called in the transaction that stages it.
+     * <p>For a write the engine takes no {@code if_match} on (a move's add):
+     * called in the transaction that stages it.
      */
     public void requireHeld(String collection, String linkId, String object) {
         if (object == null) {

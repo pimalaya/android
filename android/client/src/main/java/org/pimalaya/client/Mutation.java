@@ -24,14 +24,17 @@ import org.json.JSONObject;
  * @param summary the derived summary, opaque (the pimdir persistence
  *     format), read-only by contract
  * @param sortKey the derived sort key
- * @param ifMatch the body an edit was made over, its store hash: the edit is
- *     refused, staging nothing, once another write replaced it (SYNC §7,
- *     {@link BodyReplaced}); null applies it over whatever is held
+ * @param ifMatch the body an edit or a removal was made over, its store
+ *     hash: refused, staging nothing, once another write replaced it (SYNC
+ *     §7, {@link BodyReplaced}); null applies it over whatever is held
  * @param resolves the diverging bodies a resolution was decided over, for an
- *     edit settling a conflict (SYNC §7); null for an ordinary edit, which a
- *     conflict refuses, and for every other op
+ *     edit or a removal settling a conflict (SYNC §7); null for an ordinary
+ *     one, which a conflict refuses, and for every other op
  * @param syncsTarget whether the placement's source syncs {@code target}
  *     (SYNC §7), for a copy or a move; null otherwise
+ * @param base the marker set a flag set was changed from: the change alone
+ *     is applied to the set the placement holds, refused over an unknown one
+ *     (SYNC §7); null replaces the set whole, and for every other op
  */
 public record Mutation(
         Op op,
@@ -47,7 +50,8 @@ public record Mutation(
         String sortKey,
         String ifMatch,
         java.util.List<String> resolves,
-        Boolean syncsTarget) {
+        Boolean syncsTarget,
+        Flags base) {
     /** The operation of a mutation, as the wire tags it. */
     public enum Op {
         /** A flag set replacing the placement's markers. */
@@ -75,28 +79,50 @@ public record Mutation(
         }
     }
 
-    /** A flag set on one placement. */
+    /** A flag set replacing the markers of one placement. */
     public static Mutation setFlags(String handle, Flags flags) {
-        return new Mutation(Op.SET_FLAGS, handle, null, null, flags, null, null, null, null, null,
-                null, null, null, null);
+        return setFlags(handle, flags, null);
     }
 
-    /** A removal of one placement. */
+    /**
+     * A flag set on one placement, changed from {@code base}, the set the
+     * caller read: the change alone is applied to the set held, so a marker
+     * a sync landed or removed since survives (SYNC §7). Null replaces it.
+     */
+    public static Mutation setFlags(String handle, Flags flags, Flags base) {
+        return new Mutation(Op.SET_FLAGS, handle, null, null, flags, null, null, null, null, null,
+                null, null, null, null, base);
+    }
+
+    /** A removal of one placement, which a conflict refuses (SYNC §7). */
     public static Mutation remove(String handle) {
+        return remove(handle, null, null);
+    }
+
+    /**
+     * A removal of one placement made over the body {@code ifMatch} names,
+     * refused once another write replaced it, and a person's resolution when
+     * {@code resolves} names the diverging bodies it was decided over: it
+     * settles the conflicts it meets only when it names each one's (SYNC §7).
+     * Null for none of either.
+     */
+    public static Mutation remove(
+            String handle, String ifMatch, java.util.List<String> resolves) {
         return new Mutation(Op.REMOVE, handle, null, null, null, null, null, null, null, null,
-                null, null, null, null);
+                null, ifMatch, resolves == null ? null : java.util.List.copyOf(resolves), null,
+                null);
     }
 
     /** A move of one placement into {@code target}. */
     public static Mutation move(String handle, String target, boolean syncsTarget) {
         return new Mutation(Op.MOVE, handle, null, target, null, null, null, null, null, null,
-                null, null, null, syncsTarget);
+                null, null, null, syncsTarget, null);
     }
 
     /** A copy of one placement into {@code target}. */
     public static Mutation copy(String handle, String target, boolean syncsTarget) {
         return new Mutation(Op.COPY, handle, null, target, null, null, null, null, null, null,
-                null, null, null, syncsTarget);
+                null, null, null, syncsTarget, null);
     }
 
     /**
@@ -138,6 +164,7 @@ public record Mutation(
                 sortKey,
                 ifMatch,
                 resolves == null ? null : java.util.List.copyOf(resolves),
+                null,
                 null);
     }
 
@@ -156,6 +183,7 @@ public record Mutation(
                 null,
                 summary,
                 sortKey,
+                null,
                 null,
                 null,
                 null);
@@ -182,6 +210,7 @@ public record Mutation(
                 sortKey,
                 null,
                 null,
+                null,
                 null);
     }
 
@@ -202,12 +231,17 @@ public record Mutation(
             // or the item keeps the position its old key gave it.
             mutation.put("sortKey", sortKey);
             mutation.put("ifMatch", ifMatch);
-            // NOTE: an absent key for an ordinary edit, never null nor an
-            // empty array, which the bridge reads as a resolution of nothing.
+            // NOTE: an absent key for an ordinary edit or removal, never null
+            // nor an empty array, which the bridge reads as a resolution of
+            // nothing.
             if (resolves != null) {
                 mutation.put("resolves", new org.json.JSONArray(resolves));
             }
             mutation.put("syncsTarget", syncsTarget);
+            // NOTE: an absent key replaces the set whole.
+            if (base != null) {
+                mutation.put("base", base.toJson());
+            }
             return mutation;
         } catch (JSONException error) {
             throw new PimalayaException("Unwritable mutation: " + error.getMessage());

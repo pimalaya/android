@@ -231,14 +231,53 @@ public final class PimdirQueue {
     }
 
     /**
+     * The reserved prefix of a parked row's error (STORAGE §15.2): an intent
+     * parked under it is one whose outcome is unknown, neither performed nor
+     * failed. io-pimdir's, over the bridge.
+     */
+    public static String unconfirmedPrefix() {
+        return PimdirSql.identity().optString("unconfirmed");
+    }
+
+    /** Whether a parked row's error says its outcome is unknown (§15.4). */
+    public static boolean unconfirmed(String error) {
+        return error != null && error.startsWith(unconfirmedPrefix());
+    }
+
+    /**
      * Parks one action: attempt counted, reason recorded, out of the drain.
      *
      * <p>For the store's or server's final word: nothing retries a parked
-     * row, or a refused message would be offered again on every sync.
+     * row, or a refused message would be offered again on every sync. A
+     * reason beginning with the reserved prefix is recorded behind {@code
+     * failed: }, so no failure reads as an unknown outcome.
      */
     public void park(long id, String reason) {
         SQLiteDatabase db = store.getWritableDatabase();
-        run(db, "PARK_ACTION", values("id", id, "error", reason));
+        String error = unconfirmed(reason) ? "failed: " + reason : reason;
+        run(db, "PARK_ACTION", values("id", id, "error", error));
+    }
+
+    /**
+     * Parks one intent whose outcome is unknown, handed over with no verdict
+     * back (§15.2): its error the reserved prefix then {@code reason}. No
+     * drain performs it again; it leaves by {@link #acknowledge} or {@link
+     * #retry}.
+     */
+    public void unconfirm(long id, String reason) {
+        SQLiteDatabase db = store.getWritableDatabase();
+        run(db, "PARK_ACTION", values("id", id, "error", unconfirmedPrefix() + reason));
+    }
+
+    /**
+     * Puts one parked action back among the pending ones, on a person's
+     * request (§15.5, {@code retry_action}): its error cleared, its id and
+     * attempts kept, so the next drain lists it in its place. Answers whether
+     * a parked row was there.
+     */
+    public boolean retry(long id) {
+        SQLiteDatabase db = store.getWritableDatabase();
+        return PimdirDb.changed(db, PimdirSql.bind("RETRY_ACTION", values("id", id))) > 0;
     }
 
     /**

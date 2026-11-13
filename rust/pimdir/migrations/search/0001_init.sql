@@ -1,4 +1,4 @@
--- Fork of MIGRATION_0001 (sha256 e711bbd2de874581) for SQLite 3.18: the
+-- Fork of MIGRATION_0001 (sha256 d102db0944466149) for SQLite 3.18: the
 -- search index schema, version 1, in the app's own shape, `pimalaya-android`
 -- (SEARCH §2). Section references are to SEARCH.md.
 --
@@ -33,7 +33,12 @@ CREATE TABLE index_meta (
     horizon_start TEXT    NOT NULL DEFAULT '' CHECK (typeof(horizon_start) = 'text'),
     horizon_end   TEXT    NOT NULL DEFAULT '' CHECK (typeof(horizon_end) = 'text'),
     tzdb_version  TEXT    NOT NULL DEFAULT '' CHECK (typeof(tzdb_version) = 'text'),
-    floating_zone TEXT    NOT NULL DEFAULT 'UTC' CHECK (typeof(floating_zone) = 'text')
+    floating_zone TEXT    NOT NULL DEFAULT 'UTC' CHECK (typeof(floating_zone) = 'text'),
+    -- The revision of §6 the bodies were extracted and the occurrences
+    -- expanded under, and the indexer's own (§2): an index recording
+    -- another of either is rebuilt.
+    extraction    INTEGER NOT NULL CHECK (typeof(extraction) = 'integer'),
+    extractor     TEXT    NOT NULL CHECK (typeof(extractor) = 'text')
 );
 
 -- One row per indexed body, keyed on the store's object hash. `id` is the
@@ -48,6 +53,10 @@ CREATE TABLE object (
     bday   INTEGER NOT NULL CHECK (bday IN (0, 1)),
     photo  INTEGER NOT NULL CHECK (photo IN (0, 1))
 );
+
+-- The bodies the extraction did not read whole (§6), encrypted or
+-- unparseable, so a query's coverage counts them by a seek (§8.2).
+CREATE INDEX object_not_ok ON object(status, hash) WHERE status <> 'ok';
 
 CREATE TABLE object_category (
     object INTEGER NOT NULL REFERENCES object(id) ON DELETE CASCADE,

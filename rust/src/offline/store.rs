@@ -12,7 +12,9 @@
 use std::collections::BTreeMap;
 
 use io_pimdir::{
-    codec::{PimdirAction, PimdirActionError, action_from_payload},
+    codec::{
+        PimdirAction, PimdirPayloadOutcome, UNCONFIRMED, action_from_payload, payload_outcome,
+    },
     hash::{self, HASH_ALGO},
     intent::{PimdirSubmit, SUBMIT},
     sql,
@@ -42,6 +44,9 @@ pub struct Identity {
     pub version: i64,
     /// `store_meta.hash_algo` (§5).
     pub hash_algo: &'static str,
+    /// The reserved prefix of `queue.error` (§15.2): an intent parked under
+    /// it is one whose outcome is unknown.
+    pub unconfirmed: &'static str,
 }
 
 /// The versions this build creates and opens.
@@ -52,6 +57,7 @@ pub fn identity() -> Identity {
         derivation: DERIVATION,
         version: sql::VERSION,
         hash_algo: HASH_ALGO,
+        unconfirmed: UNCONFIRMED,
     }
 }
 
@@ -221,9 +227,9 @@ pub struct ActionFacts {
     /// The collection it names beside its own, `queue.target_collection`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_collection: Option<String>,
-    /// Why the row is skipped rather than read: it states a payload
-    /// version this app does not know, a later producer's, left pending
-    /// and untouched for a later owner (§15.2), never parked.
+    /// Why the row is skipped rather than read: its payload is unknown,
+    /// an action or a version of one io-pimdir holds no schema for, left
+    /// pending and untouched for a later owner (§15.2), never parked.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skipped: Option<String>,
 }
@@ -232,21 +238,19 @@ pub struct ActionFacts {
 /// as its schema types it, and the body an `add` or an `update` names
 /// being the one the row pins (`object_hash`), a `submit` pinning the
 /// message it sends, else the row is malformed and parked whole, never
-/// applied in part (§15.3). A row stating a later payload version is
-/// skipped (§15.2), as io-pimdir's drain and pending reads skip it. A
-/// producer runs it before appending, so it never queues what an owner
-/// would park.
+/// applied in part (§15.3). A payload is valid, malformed or unknown, by
+/// io-pimdir's judgement (`payload_outcome`): an unknown one, another
+/// action or another integer `v` of a known one, is skipped and read no
+/// further (§15.2), and one stating no usable `v` is malformed. A producer
+/// runs it before appending, so it never queues what an owner would park.
 pub fn action(kind: &str, payload: &str, object_hash: Option<&str>) -> Result<ActionFacts, String> {
-    let action = match action_from_payload(kind, payload) {
-        Ok(action) => action,
-        Err(err @ PimdirActionError::UnknownVersion(Some(_))) => {
-            return Ok(ActionFacts {
-                skipped: Some(err.to_string()),
-                ..ActionFacts::default()
-            });
-        }
-        Err(err) => return Err(err.to_string()),
-    };
+    if payload_outcome(kind, payload) == PimdirPayloadOutcome::Unknown {
+        return Ok(ActionFacts {
+            skipped: Some(format!("A {kind} payload unknown to this app")),
+            ..ActionFacts::default()
+        });
+    }
+    let action = action_from_payload(kind, payload).map_err(|err| err.to_string())?;
 
     let named = match &action {
         PimdirAction::Add { object, .. } => object.as_ref(),
@@ -304,12 +308,14 @@ mod tests {
     use crate::offline::store::{MetaFacts, StoreFacts, action, check, submit_payload};
 
     /// io-pimdir's payload vectors (spec/vectors/payloads.json): every valid
-    /// payload reads, every malformed one is refused.
+    /// payload reads, every malformed one is refused, every unknown one is
+    /// skipped.
     #[test]
     fn the_payload_vectors_read_as_io_pimdir_reads_them() {
         let path = crate::offline::tests::io_pimdir_spec("vectors/payloads.json");
         let vectors: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(vectors["v"], 2, "payloads.json at another version");
         let cases = vectors["cases"].as_array().unwrap();
         assert!(cases.len() >= 30, "{}", path.display());
 
@@ -325,9 +331,14 @@ mod tests {
                 _ => payload["object"].as_str(),
             };
             let read = action(kind, &payload.to_string(), object);
+            let outcome = match &read {
+                Ok(facts) if facts.skipped.is_some() => "unknown",
+                Ok(_) => "valid",
+                Err(_) => "malformed",
+            };
             assert_eq!(
-                read.is_ok(),
-                case["valid"].as_bool().unwrap(),
+                outcome,
+                case["outcome"].as_str().unwrap(),
                 "{kind} {payload}: {read:?}"
             );
         }
@@ -356,9 +367,10 @@ mod tests {
         assert_eq!(moved.target_collection.as_deref(), Some("acct/Trash"));
     }
 
-    /// A row a later producer queued is skipped, left pending for a later
-    /// owner, never parked (§15.2), as io-pimdir's drain skips it; a row
-    /// stating no version is malformed.
+    /// A row a later producer queued, or of an action nobody here knows,
+    /// is skipped, left pending for a later owner, never parked (§15.2),
+    /// as io-pimdir's drain skips it; a row of a known action stating no
+    /// version, or one that is no integer, is malformed.
     #[test]
     fn a_later_payload_version_is_skipped_not_parked() {
         let hash = "a".repeat(52);
@@ -368,8 +380,13 @@ mod tests {
         let later = r#"{"v": 2, "seq": 3}"#;
         assert!(action("remove", later, None).unwrap().skipped.is_some());
 
+        let own = action("x-archive", r#"{"anything": true}"#, None).unwrap();
+        assert!(own.skipped.is_some(), "{own:?}");
+
         let unversioned = r#"{"seq": 3}"#;
         assert!(action("remove", unversioned, None).is_err());
+        let worded = r#"{"v": "2", "seq": 3}"#;
+        assert!(action("remove", worded, None).is_err(), "no integer");
         let current = action("remove", r#"{"v": 1, "seq": 3}"#, None).unwrap();
         assert_eq!(current, Default::default(), "read, not skipped");
     }
@@ -445,7 +462,7 @@ mod tests {
             objects,
             meta: Some(MetaFacts {
                 format: Some("pimdir".into()),
-                format_version: Some("storage-draft-09".into()),
+                format_version: Some("storage-draft-10".into()),
                 version: Some(1),
                 hash_algo: Some("blake3".into()),
                 sync_version: None,
@@ -470,6 +487,10 @@ mod tests {
 
         let mut facts = current();
         facts.meta.as_mut().unwrap().format_version = Some("storage-draft-08".into());
+        assert_eq!(check(&facts).unwrap_err().code, "store-version");
+
+        let mut facts = current();
+        facts.meta.as_mut().unwrap().format_version = Some("storage-draft-09".into());
         assert_eq!(check(&facts).unwrap_err().code, "store-version");
     }
 

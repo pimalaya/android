@@ -67,6 +67,26 @@ public class MutationTest {
         assertEquals(4, client.sent.size());
     }
 
+    /**
+     * A removal states the body it was decided over and the conflicts it
+     * resolves, a flag change the set it was made from (pimdir SYNC §7); an
+     * ordinary one states none, by an absent key.
+     */
+    @Test
+    public void aRemovalAndAFlagChangeStateWhatTheyWereDecidedOver() throws Exception {
+        stager.mutateRemove("c", "h1", "read", List.of("theirs"));
+        assertSameJson(
+                "{\"op\":\"remove\",\"handle\":\"h1\",\"ifMatch\":\"read\","
+                        + "\"resolves\":[\"theirs\"]}",
+                last());
+        stager.mutateFlags(
+                "c", "h2", new Flags(List.of("\\Seen", "\\Flagged")), new Flags(List.of("\\Seen")));
+        assertSameJson(
+                "{\"op\":\"setFlags\",\"handle\":\"h2\",\"flags\":[\"\\\\Seen\",\"\\\\Flagged\"],"
+                        + "\"base\":[\"\\\\Seen\"]}",
+                last());
+    }
+
     /** The name the store files a text body under (BLAKE3, objects.json). */
     private static String name(String body) {
         return PimdirSql.hash(body.getBytes(StandardCharsets.UTF_8));

@@ -9,7 +9,7 @@ use io_pimdir::{
     change::{PimdirChange, PimdirChangeKind, PimdirDropReason, PimdirWriteOp},
     collection::{PimdirCheckpoint, PimdirCursor, PimdirScope},
     mutate::{PimdirMutateError, PimdirMutateReport, PimdirMutation},
-    object::{PimdirHash, PimdirObject},
+    object::{PimdirHash, PimdirHeldObject, PimdirObject},
     placement::{
         PimdirBase, PimdirFlags, PimdirHandle, PimdirLevel, PimdirLinkId, PimdirOrigin,
         PimdirPlacement, PimdirStatus, PimdirSuperseded,
@@ -688,9 +688,23 @@ pub enum MutationJson {
     SetFlags {
         handle: String,
         flags: Vec<String>,
+        /// The set the caller read and changed into `flags`: the change
+        /// alone is applied to the set held (SYNC §7). Absent replaces it.
+        #[serde(default)]
+        base: Option<Vec<String>>,
     },
     Remove {
         handle: String,
+        /// The body the remove was decided over: refused once another
+        /// write replaced it (SYNC §7). Absent applies over whatever is
+        /// held.
+        #[serde(default)]
+        if_match: Option<String>,
+        /// The diverging bodies a person's resolution by deleting was
+        /// decided over (SYNC §7). Absent for an ordinary remove, which
+        /// a conflict refuses.
+        #[serde(default)]
+        resolves: Option<Vec<String>>,
     },
     /// A move into `target`: a create there, a tombstone here (SYNC §3).
     Move {
@@ -767,11 +781,24 @@ impl TryFrom<MutationJson> for PimdirMutation {
 
     fn try_from(wire: MutationJson) -> Result<Self, String> {
         Ok(match wire {
-            MutationJson::SetFlags { handle, flags } => Self::SetFlags {
+            MutationJson::SetFlags {
+                handle,
+                flags,
+                base,
+            } => Self::SetFlags {
                 handle: PimdirHandle(handle),
                 flags: PimdirFlags::from_iter(flags),
+                base: base.map(PimdirFlags::from_iter),
             },
-            MutationJson::Remove { handle } => Self::Remove(PimdirHandle(handle)),
+            MutationJson::Remove {
+                handle,
+                if_match,
+                resolves,
+            } => Self::Remove {
+                handle: PimdirHandle(handle),
+                if_match: if_match.filter(|hash| !hash.is_empty()).map(PimdirHash),
+                resolves: resolves.map(|names| names.into_iter().map(PimdirHash).collect()),
+            },
             MutationJson::Move { handle, target, .. } => Self::Move {
                 handle: PimdirHandle(handle),
                 target: target.into(),
@@ -862,6 +889,10 @@ pub struct LoadedJson {
     /// has read it: what an `Edit` meets beside its binding's conflict.
     #[serde(default)]
     pub conflicted: Vec<ConflictedJson>,
+    /// The loaded `Created` placements the source binds not, the copies
+    /// the store offers it of items other sources hold (SYNC §3, §9).
+    #[serde(default)]
+    pub offered: Vec<String>,
 }
 
 /// A loaded placement whose item is conflicted, and the item's diverging
@@ -927,22 +958,37 @@ pub struct RoundJson {
 /// Reply to a `lookup` yield.
 #[derive(Deserialize)]
 pub struct LookupJson {
+    /// Every row of the account holding a body under each link id.
     #[serde(default)]
-    pub objects: BTreeMap<String, ObjectJson>,
+    pub objects: BTreeMap<String, Vec<HeldObjectJson>>,
 }
 
-/// A stored body: its hash and the size an immutable link needs (SYNC §6).
+/// A body a row holds under a link id: its hash, the size an immutable
+/// link needs, and what the row's mail summary states, each absent for a
+/// row holding no mail summary, which a message never agrees with (SYNC
+/// §6).
 #[derive(Deserialize)]
-pub struct ObjectJson {
+pub struct HeldObjectJson {
     hash: String,
     size: usize,
+    #[serde(default)]
+    subject: Option<String>,
+    #[serde(default)]
+    date: Option<String>,
+    #[serde(default)]
+    sender: Option<String>,
 }
 
-impl From<ObjectJson> for PimdirObject {
-    fn from(wire: ObjectJson) -> Self {
+impl From<HeldObjectJson> for PimdirHeldObject {
+    fn from(wire: HeldObjectJson) -> Self {
         Self {
-            hash: PimdirHash(wire.hash),
-            size: wire.size,
+            object: PimdirObject {
+                hash: PimdirHash(wire.hash),
+                size: wire.size,
+            },
+            subject: wire.subject,
+            date: wire.date,
+            sender: wire.sender,
         }
     }
 }
@@ -1279,7 +1325,7 @@ impl From<&PimdirSyncReport> for SyncReportJson {
             refreshed: report.refreshed,
             rejected: report.rejected,
             unreadable: report.unreadable,
-            waiting: report.waiting,
+            waiting: report.waiting.len(),
         }
     }
 }

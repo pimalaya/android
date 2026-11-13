@@ -183,7 +183,7 @@ public final class PimdirSummary {
         for (int index = 0; values != null && index < values.length(); index++) {
             Map<String, Object> row = new LinkedHashMap<>(scope);
             row.put("position", index);
-            row.put(mail ? "msg_id" : "value", values.optString(index));
+            row.put(mail ? "message_id" : "value", values.optString(index));
             exec(db, mail ? "INSERT_IN_REPLY_TO" : "INSERT_CATEGORY", row);
         }
     }
@@ -192,6 +192,24 @@ public final class PimdirSummary {
     private static void exec(SQLiteDatabase db, String name, Map<String, Object> values) {
         PimdirSql.Bound bound = PimdirSql.bind(name, values);
         PimdirDb.changed(db, bound);
+    }
+
+    /**
+     * What a mail summary states of the fields an identity is checked against
+     * (STORAGE §9): its {@code subject}, {@code date} and {@code sender}, and
+     * its {@code size}, each null when absent; null for a summary of another
+     * kind or none.
+     */
+    public static Map<String, Object> witnesses(JSONObject summary) {
+        JSONObject mail = summary == null ? null : summary.optJSONObject("mail");
+        if (mail == null) {
+            return null;
+        }
+        Map<String, Object> witnesses = new LinkedHashMap<>();
+        for (String witness : new String[] {"subject", "date", "sender", "size"}) {
+            witnesses.put(witness, value(mail.opt(witness)));
+        }
+        return witnesses;
     }
 
     /**

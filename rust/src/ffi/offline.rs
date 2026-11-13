@@ -666,7 +666,7 @@ mod tests {
         );
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            format!("{FLOOR}\nwal\nstorage-draft-09\ntwo\nok\n"),
+            format!("{FLOOR}\nwal\nstorage-draft-10\ntwo\nok\n"),
         );
     }
 }

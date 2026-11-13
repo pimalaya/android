@@ -15,8 +15,12 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The content-addressed blob directory: item bodies, one file per hash.
@@ -45,6 +49,13 @@ public final class PimdirBlobs {
 
     /** How many times one write moves a failing file aside and files again. */
     private static final int FILINGS_MAX = 3;
+
+    /**
+     * The temporaries this process's writers are still to move, by path: what
+     * {@link #sweepTemporaries} leaves, the store's other period-prefixed files
+     * being a killed writer's (§5).
+     */
+    private static final Set<String> WRITING = ConcurrentHashMap.newKeySet();
 
     private final File root;
 
@@ -271,19 +282,88 @@ public final class PimdirBlobs {
         return pathOf(hash).delete();
     }
 
-    /** A temporary beside {@code target}, its name unique to this writer. */
+    /**
+     * Flushes the shard directories of the bodies a collector unlinked, each
+     * once, so it answers only once its unlinks are durable (§5, §11.5).
+     */
+    void flushShards(Collection<String> hashes) {
+        Set<File> shards = new LinkedHashSet<>();
+        for (String hash : hashes) {
+            shards.add(pathOf(hash).getParentFile());
+        }
+        for (File shard : shards) {
+            sync(shard);
+        }
+    }
+
+    /**
+     * Unlinks the temporaries a killed writer left (§5): every period-prefixed
+     * regular file of objects/ and of its shard directories, no link followed,
+     * but those a writer of this process is still to move. Each directory it
+     * unlinked in is flushed. Answers how many went.
+     *
+     * <p>The app is the store's one process, so a temporary no writer of it
+     * noted is nobody's to move: it may hold a whole body under a second name
+     * no row names, which an erase would otherwise leave (§11.5).
+     */
+    public int sweepTemporaries() {
+        int swept = sweep(root);
+        File[] shards = root.listFiles();
+        for (File shard : shards == null ? new File[0] : shards) {
+            if (shard.getName().length() == 2
+                    && Files.isDirectory(shard.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+                swept += sweep(shard);
+            }
+        }
+        return swept;
+    }
+
+    /** {@link #sweepTemporaries} over one directory. */
+    private static int sweep(File dir) {
+        String[] names = dir.list((parent, name) -> name.startsWith("."));
+        int swept = 0;
+        for (String name : names == null ? new String[0] : names) {
+            File file = new File(dir, name);
+            if (WRITING.contains(file.getPath())
+                    || !Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+                continue;
+            }
+            if (file.delete()) {
+                swept++;
+            }
+        }
+        if (swept > 0) {
+            Log.i("pimalaya", "unlinked " + swept + " temporaries a writer left in " + dir);
+            sync(dir);
+        }
+        return swept;
+    }
+
+    /**
+     * A temporary beside {@code target}, its name unique to this writer,
+     * noted as being written until {@link #commit} moved it.
+     */
     private static File temporary(File target) throws IOException {
         File shard = shard(target);
         // NOTE: period-prefixed so a partial write is never mistaken for a
         // blob, unique so two writers of one body never share it (§5).
-        return new File(shard, "." + target.getName() + "." + UUID.randomUUID() + ".tmp");
+        File temp = new File(shard, "." + target.getName() + "." + UUID.randomUUID() + ".tmp");
+        WRITING.add(temp.getPath());
+        return temp;
     }
 
-    /** The shard of {@code target}, made if missing. */
+    /**
+     * The shard of {@code target}, made if missing: a shard this call
+     * created has objects/ flushed, so the new directory outlasts a power
+     * loss as the body in it does (§5).
+     */
     private static File shard(File target) throws IOException {
         File shard = target.getParentFile();
-        if (shard != null && !shard.isDirectory() && !shard.mkdirs()) {
-            throw new IOException("Could not create the blob shard " + shard);
+        if (shard != null && !shard.isDirectory()) {
+            if (!shard.mkdirs() && !shard.isDirectory()) {
+                throw new IOException("Could not create the blob shard " + shard);
+            }
+            sync(shard.getParentFile());
         }
         return shard;
     }
@@ -297,6 +377,7 @@ public final class PimdirBlobs {
             file(hash, temp, target);
         } finally {
             temp.delete();
+            WRITING.remove(temp.getPath());
         }
     }
 
@@ -318,6 +399,10 @@ public final class PimdirBlobs {
                         sync(target.getParentFile());
                         return;
                     case HELD:
+                        // NOTE: the entry may be another writer's, moved and
+                        // not flushed yet: flushed all the same, before
+                        // the row naming the body commits (§5).
+                        sync(target.getParentFile());
                         return;
                     case FAILING:
                         if (filing == FILINGS_MAX) {
