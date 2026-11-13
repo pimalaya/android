@@ -56,4 +56,4 @@ url = { version = "2", default-features = false }
 vcard-rs = { version = "0.6", default-features = false, features = ["parser", "jscontact"] }
 
 [patch.crates-io]
-io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "01105a5f9d1f1104a3ff6034be466150d773a5e0" }
+io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "92c28d5d8b44963a66eb1cb15017945f080f8ca1" }

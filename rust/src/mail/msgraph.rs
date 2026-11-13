@@ -57,8 +57,8 @@ use io_msgraph::v1::{
 };
 
 use io_pimdir::summary::{
-    PimdirAddress,
-    mail::{PimdirMailSummary, decode},
+    PimdirAddress, PimdirSummary,
+    mail::{PimdirMailSummary, decode, derive_meta, message_id},
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -93,10 +93,13 @@ const WELL_KNOWN: [(&str, &str); 4] = [
 /// The `$select` of a band's `/messages` page and of a message read by
 /// id: what Annex A's summary and addresses read, and the markers.
 ///
-/// The date is `sentDateTime`, Graph's name for the `Date` header, which
-/// pimdir STORAGE Annex A.1 sorts mail by; the reception is no part of it.
+/// `internetMessageHeaders` is the raw read a member is named from
+/// (pimdir STORAGE Annex A.1), answered whole or not at all: every header
+/// field of the message on each row, the trace fields included. The
+/// decoded members name a row Graph answers none for, its date
+/// `sentDateTime`, Graph's name for the `Date` header, never the reception.
 const MESSAGE_SELECT: &str = "id,subject,from,toRecipients,ccRecipients,sentDateTime,isRead,\
-flag,hasAttachments,internetMessageId";
+flag,hasAttachments,internetMessageId,internetMessageHeaders";
 
 /// The `$expand` riding along [`MESSAGE_SELECT`]: the MAPI
 /// `PidTagMessageSize` (`Integer 0x0E08`), the size Exchange states for
@@ -793,35 +796,64 @@ fn named(message: MsgraphMessage, scope: &Scope, items: &mut Vec<Named>) {
     items.push(Named::new(message.id, flags, summary));
 }
 
+/// The header fields a summary reads, among those a row lists.
+const SUMMARY_FIELDS: [&str; 9] = [
+    "Message-ID",
+    "In-Reply-To",
+    "Subject",
+    "From",
+    "To",
+    "Cc",
+    "Bcc",
+    "Date",
+    "Content-Type",
+];
+
 /// The Annex A summary of one Graph message, read off its `$select`.
 ///
-/// The date is the `Date` header (`sentDateTime`), never the reception;
-/// the attachment mark is Graph's own `hasAttachments`; the size is the
-/// MAPI one [`MESSAGE_EXPAND`] asks for, the only property it expands.
+/// A row listing its header fields is named off them, each from its first
+/// entry, by the derivation a body is read with (pimdir STORAGE Annex
+/// A.1). A row listing none is named from `internetMessageId`, read as a
+/// `Message-ID` field is, and from what Graph decodes: the date is
+/// `sentDateTime`, never the reception. Either way the attachment mark is
+/// Graph's own `hasAttachments` and the size the MAPI one
+/// [`MESSAGE_EXPAND`] asks for, the only property it expands.
 fn graph_summary(message: &MsgraphMessage) -> PimdirMailSummary {
+    let size = message
+        .single_value_extended_properties
+        .first()
+        .and_then(|size| size.value.trim().parse().ok());
+
+    let fields = &message.internet_message_headers;
+    if !fields.is_empty() {
+        let mut header = String::new();
+        for name in SUMMARY_FIELDS {
+            let stated = fields
+                .iter()
+                .find(|field| field.name.eq_ignore_ascii_case(name));
+            if let Some(field) = stated {
+                header.push_str(&format!("{name}: {}\r\n", field.value));
+            }
+        }
+        header.push_str("\r\n");
+
+        return match derive_meta(header.as_bytes(), size, message.has_attachments).summary {
+            Some(PimdirSummary::Mail(summary)) => summary,
+            _ => PimdirMailSummary::default(),
+        };
+    }
+
     let from: Vec<PimdirAddress> = message.from.iter().filter_map(address).collect();
     let first = from.first().cloned();
 
     PimdirMailSummary {
-        message_id: message
-            .internet_message_id
-            .as_deref()
-            .map(|id| {
-                id.trim()
-                    .trim_start_matches('<')
-                    .trim_end_matches('>')
-                    .to_string()
-            })
-            .filter(|id| !id.is_empty()),
+        message_id: message.internet_message_id.as_deref().and_then(message_id),
         in_reply_to: Vec::new(),
         subject: message.subject.as_deref().map(decode).unwrap_or_default(),
         sender: first.as_ref().map(|address| address.address.clone()),
         sender_name: first.and_then(|address| address.name),
         date: message.sent_date_time.as_deref().and_then(utc),
-        size: message
-            .single_value_extended_properties
-            .first()
-            .and_then(|size| size.value.trim().parse().ok()),
+        size,
         attachment: message.has_attachments,
         invitation: None,
         from,

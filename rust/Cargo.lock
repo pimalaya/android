@@ -668,8 +668,8 @@ dependencies = [
 
 [[package]]
 name = "io-msgraph"
-version = "0.7.0"
-source = "git+https://github.com/pimalaya/io-msgraph?rev=01105a5f9d1f1104a3ff6034be466150d773a5e0#01105a5f9d1f1104a3ff6034be466150d773a5e0"
+version = "0.7.1"
+source = "git+https://github.com/pimalaya/io-msgraph?rev=92c28d5d8b44963a66eb1cb15017945f080f8ca1#92c28d5d8b44963a66eb1cb15017945f080f8ca1"
 dependencies = [
  "base64-codec",
  "ical-rs",

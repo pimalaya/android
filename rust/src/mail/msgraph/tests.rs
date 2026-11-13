@@ -11,6 +11,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -323,6 +324,7 @@ impl FakeGraph {
         let page = MsgraphMessagesListResponse {
             value: ids.iter().map(|id| self.message(id)).collect(),
             next_link: (matching.len() > take).then(|| format!("{MESSAGES}?$skip={take}")),
+            ..Default::default()
         };
         FakeResponse::json(200, &page)
     }
@@ -1162,6 +1164,353 @@ fn the_summary_reads_the_select() {
     assert_eq!(summary.attachment, Some(true));
 }
 
+/// pimdir's mail fixtures whose raw reading a decoded one may miss
+/// (vectors/summaries.json).
+const FIXTURES: [&str; 10] = [
+    "fixtures/mail-id-comment.eml",
+    "fixtures/mail-bracketless-id.eml",
+    "fixtures/mail-repeated-fields.eml",
+    "fixtures/mail-folded-subject.eml",
+    "fixtures/mail-military-zone.eml",
+    "fixtures/mail-charset-windows-1252.eml",
+    "fixtures/mail-charset-iso-8859-2.eml",
+    "fixtures/mail-charset-iso-2022-jp.eml",
+    "fixtures/mail-charset-gbk.eml",
+    "fixtures/mail-charset-replacement.eml",
+];
+
+/// One fixture of [`FIXTURES`]: its header fields as Graph lists them,
+/// and the case vectors/summaries.json states for it.
+struct Vector {
+    fixture: &'static str,
+    fields: Vec<(String, String)>,
+    case: Value,
+}
+
+impl Vector {
+    /// Every fixture of [`FIXTURES`], from io-pimdir's vendored spec.
+    fn all() -> Vec<Self> {
+        let spec = crate::offline::tests::io_pimdir_spec_dir().join("vectors");
+        let text = fs::read_to_string(spec.join("summaries.json")).unwrap();
+        let vectors: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(vectors["v"], 3, "summaries.json at another version");
+
+        let cases = vectors["cases"].as_array().unwrap();
+        FIXTURES
+            .into_iter()
+            .map(|fixture| {
+                let case = cases
+                    .iter()
+                    .find(|case| case["fixture"] == fixture)
+                    .unwrap_or_else(|| panic!("no case for {fixture}"));
+                let raw = fs::read(spec.join(fixture)).unwrap();
+                Self {
+                    fixture,
+                    fields: header_fields(&raw),
+                    case: case.clone(),
+                }
+            })
+            .collect()
+    }
+
+    /// The first value the fixture states for the field `name`.
+    fn field(&self, name: &str) -> Option<&str> {
+        self.fields
+            .iter()
+            .find(|(field, _)| field.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// What `named` misses of the case, the size and the mark aside (Graph's
+    /// own on a row); none when it names the fixture as the case states.
+    fn misses(&self, named: &Named) -> Vec<String> {
+        let named = serde_json::to_value(named).unwrap();
+        let mail = &named["summary"]["mail"];
+        let stated = &self.case["summary"];
+        let mut misses = Vec::new();
+        let mut check = |key: &str, got: &Value, want: &Value| {
+            if got != want {
+                misses.push(format!("{}: {key} {got}, stated {want}", self.fixture));
+            }
+        };
+
+        check("link_id", &named["linkId"], &self.case["link_id"]);
+        check("sort_key", &named["sortKey"], &self.case["sort_key"]);
+        for key in [
+            "message_id",
+            "in_reply_to",
+            "subject",
+            "sender",
+            "sender_name",
+            "date",
+        ] {
+            check(key, &mail[key], &stated[key]);
+        }
+        let named_name = |address: &Value| {
+            let mut address = address.clone();
+            if address.get("name").is_none() {
+                address["name"] = Value::Null;
+            }
+            address
+        };
+        let addresses = |rows: &Value| -> Value {
+            rows.as_array()
+                .map(|rows| rows.iter().map(named_name).collect())
+                .unwrap_or_default()
+        };
+        check(
+            "addresses",
+            &addresses(&mail["addresses"]),
+            &addresses(&self.case["addresses"]),
+        );
+        misses
+    }
+}
+
+/// Each header field of a message's header block as name and value in
+/// document order, as a source listing header fields in JSON serves them:
+/// the value trimmed at both ends, the line breaks of a folded one kept.
+fn header_fields(raw: &[u8]) -> Vec<(String, String)> {
+    let end = raw
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("a header block");
+    let header = std::str::from_utf8(&raw[..end + 2]).expect("an ASCII header block");
+
+    let mut fields: Vec<(String, String)> = Vec::new();
+    for line in header.split_inclusive("\r\n") {
+        match fields.last_mut() {
+            Some((_, value)) if line.starts_with([' ', '\t']) => value.push_str(line),
+            _ => {
+                if let Some((name, value)) = line.split_once(':') {
+                    fields.push((name.into(), value.into()));
+                }
+            }
+        }
+    }
+    for (_, value) in &mut fields {
+        *value = value.trim().into();
+    }
+    fields
+}
+
+/// A row as a read selecting `internetMessageHeaders` answers it: `fields`
+/// in their order, repeated names kept, beside the members Graph decodes,
+/// which here state another message.
+fn headed_row(id: &str, fields: &[(String, String)]) -> Value {
+    let headers: Vec<Value> = fields
+        .iter()
+        .map(|(name, value)| json!({ "name": name, "value": value }))
+        .collect();
+    json!({
+        "id": id,
+        "subject": "As Graph decodes it",
+        "from": { "emailAddress": { "name": "Decoded", "address": "decoded@example.net" } },
+        "toRecipients": [],
+        "sentDateTime": "2001-01-01T00:00:00Z",
+        "internetMessageId": "<decoded@example.net>",
+        "internetMessageHeaders": headers,
+    })
+}
+
+/// A row as the listing names it.
+fn named_row(row: Value) -> Named {
+    let message: MsgraphMessage = serde_json::from_value(row).unwrap();
+    Named::new(message.id.clone(), Vec::new(), graph_summary(&message))
+}
+
+/// A row listing its header fields is named off them as its body would
+/// name it (pimdir STORAGE Annex A.1), each from its first entry, whatever
+/// Graph decodes beside them; Graph stating no mark, the top-level
+/// `Content-Type` makes it, as on the `Meta` tier of a body.
+#[test]
+fn a_row_listing_its_header_fields_is_named_as_the_vectors_state() {
+    let mut misses = Vec::new();
+    for vector in Vector::all() {
+        let named = named_row(headed_row("m1", &vector.fields));
+        misses.extend(vector.misses(&named));
+
+        let mail = &serde_json::to_value(&named).unwrap()["summary"]["mail"];
+        let mark = vector.case["meta_attachment"] == 1;
+        if mail["attachment"] != mark {
+            let got = &mail["attachment"];
+            misses.push(format!("{}: attachment {got}", vector.fixture));
+        }
+    }
+    assert!(misses.is_empty(), "{}", misses.join("\n"));
+}
+
+/// On a row listing its header fields the size and the attachment mark
+/// stay Graph's own, the top-level `Content-Type` making the mark only
+/// where Graph states none.
+#[test]
+fn a_row_listing_its_header_fields_keeps_the_size_and_the_mark_graph_states() {
+    let fields = [
+        ("In-Reply-To".into(), "<p-1@example.org>".into()),
+        ("Content-Type".into(), "multipart/mixed; boundary=b".into()),
+    ];
+    let row = |mark: Option<bool>| {
+        let mut row = headed_row("m1", &fields);
+        row["singleValueExtendedProperties"] = json!([{ "id": "Integer 0xe08", "value": "48213" }]);
+        if let Some(mark) = mark {
+            row["hasAttachments"] = json!(mark);
+        }
+        graph_summary(&serde_json::from_value(row).unwrap())
+    };
+
+    let stated = row(Some(false));
+    assert_eq!(stated.in_reply_to, ["p-1@example.org"]);
+    assert_eq!(stated.size, Some(48213));
+    assert_eq!(stated.attachment, Some(false), "Graph's own mark");
+    assert_eq!(row(None).attachment, Some(true), "the Content-Type's");
+}
+
+/// A row listing no header field, the member left out, answered empty or
+/// `null`, keeps the reading of what Graph decodes, its
+/// `internetMessageId` read as a `Message-ID` field is (Annex A.1).
+#[test]
+fn a_row_listing_no_header_field_is_keyed_by_its_internet_message_id() {
+    let mut misses = Vec::new();
+    let mut run = 0;
+    for vector in Vector::all() {
+        let Some(id) = vector.field("Message-ID") else {
+            continue;
+        };
+        for headers in [None, Some(json!([])), Some(Value::Null)] {
+            let mut row = headed_row("m1", &[]);
+            row["internetMessageId"] = json!(id);
+            match headers {
+                Some(headers) => row["internetMessageHeaders"] = headers,
+                None => {
+                    row.as_object_mut()
+                        .unwrap()
+                        .remove("internetMessageHeaders");
+                }
+            }
+            run += 1;
+
+            let named = serde_json::to_value(named_row(row)).unwrap();
+            let mail = &named["summary"]["mail"];
+            for (key, got) in [
+                ("link_id", &named["linkId"]),
+                ("message_id", &mail["message_id"]),
+            ] {
+                let want = &vector.case["summary"]["message_id"];
+                if got != want {
+                    misses.push(format!("{}: {key} {got}, stated {want}", vector.fixture));
+                }
+            }
+            assert_eq!(mail["subject"], "As Graph decodes it", "{}", vector.fixture);
+            assert_eq!(mail["sender"], "decoded@example.net", "{}", vector.fixture);
+            assert_eq!(mail["date"], "2001-01-01T00:00:00Z", "{}", vector.fixture);
+        }
+    }
+    assert_eq!(run, 21, "seven fixtures state a Message-ID");
+    assert!(misses.is_empty(), "{}", misses.join("\n"));
+}
+
+/// Every read naming a member selects its header fields (pimdir STORAGE
+/// Annex A.1): a band's `/messages` page, a `$batch` of reads by id and a
+/// read by id alone, each answered as Graph does, the header fields only
+/// to a `$select` naming them, and each member named off them.
+#[test]
+fn every_read_naming_a_member_selects_its_header_fields() {
+    let vectors = Vector::all();
+    let vector = &vectors[0];
+    let row = |id: &str, select: Option<&str>| {
+        let mut row = headed_row(id, &vector.fields);
+        let selected = select
+            .into_iter()
+            .flat_map(|select| select.split(','))
+            .any(|name| name == "internetMessageHeaders");
+        if !selected {
+            row.as_object_mut()
+                .unwrap()
+                .remove("internetMessageHeaders");
+        }
+        row
+    };
+    let mut selects = Vec::new();
+    let mut answer = |request: &FakeRequest| match (request.method.as_str(), request.path.as_str())
+    {
+        ("GET", "/v1.0/me/mailFolders/inbox/messages")
+            if request.param("$select") == Some("id") =>
+        {
+            FakeResponse::json(200, &json!({ "value": [{ "id": "m1" }] }))
+        }
+        ("GET", "/v1.0/me/mailFolders/inbox/messages") => {
+            selects.push(("band", request.param("$select").map(String::from)));
+            let rows = vec![row("m1", request.param("$select"))];
+            FakeResponse::json(200, &json!({ "value": rows }))
+        }
+        ("POST", "/v1.0/$batch") => {
+            let requests: Vec<MsgraphBatchRequest> =
+                serde_json::from_value(request.json::<Value>()["requests"].take()).unwrap();
+            let responses: Vec<MsgraphBatchResponse> = requests
+                .iter()
+                .map(|inner| {
+                    let url = format!("https://graph.microsoft.com/v1.0{}", inner.url);
+                    let url = Url::parse(&url).unwrap();
+                    let select = url
+                        .query_pairs()
+                        .find(|(key, _)| key == "$select")
+                        .map(|(_, value)| value.into_owned());
+                    selects.push(("batch", select.clone()));
+                    let id = url.path().strip_prefix("/v1.0/me/messages/").unwrap();
+                    // NOTE: the second fails in the batch, read alone.
+                    let (status, body) = match id {
+                        "m1" => (200, row(id, select.as_deref())),
+                        _ => (503, json!({ "error": { "code": "ServiceUnavailable" } })),
+                    };
+                    MsgraphBatchResponse {
+                        id: inner.id.clone(),
+                        status,
+                        body: Some(body),
+                        ..Default::default()
+                    }
+                })
+                .collect();
+            FakeResponse::json(200, &MsgraphBatchResponses { responses })
+        }
+        ("GET", "/v1.0/me/messages/m2") => {
+            selects.push(("alone", request.param("$select").map(String::from)));
+            FakeResponse::json(200, &row("m2", request.param("$select")))
+        }
+        other => panic!("unexpected request {other:?}"),
+    };
+
+    let request = MailRequest {
+        listing: Listing::Round {
+            cursor: None,
+            band: true,
+        },
+        scope: Scope::default(),
+        covered: false,
+        received: None,
+    };
+    let (page, read) = {
+        let mut client = Client::new(FakeServer::boxed(&mut answer));
+        let mut graph = Msgraph {
+            client: &mut client,
+            token: "token",
+        };
+        let page = graph.list_page(FOLDER, &request).unwrap();
+        let read = graph.name_messages(&["m1".into(), "m2".into()]).unwrap();
+        (page, read)
+    };
+    drop(answer);
+
+    let reads: Vec<&str> = selects.iter().map(|(read, _)| *read).collect();
+    assert_eq!(reads, ["band", "batch", "batch", "alone"]);
+    let named: Vec<&Named> = page.items.iter().chain(&read).collect();
+    assert_eq!(named.len(), 3);
+    let misses: Vec<String> = named
+        .iter()
+        .flat_map(|named| vector.misses(named))
+        .collect();
+    assert!(misses.is_empty(), "{}\n{selects:?}", misses.join("\n"));
+}
+
 /// The step and the bodies' batches over a fake Graph account.
 ///
 /// The fake answers the account's or a folder's `/messages` on
@@ -1348,6 +1697,7 @@ mod step {
             let page = MsgraphMessagesListResponse {
                 value,
                 next_link: None,
+                ..Default::default()
             };
             FakeResponse::json(200, &page)
         }
