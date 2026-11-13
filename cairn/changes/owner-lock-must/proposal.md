@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: owner-lock-must
-status: active
+status: abandoned
 created: 2026-11-13
 ---
 
@@ -41,3 +41,7 @@ This proposal is not landed. The mechanism below needs no decision, but what the
 ## Not in this change
 
 The orphan walk of STORAGE §5 step 3, which the staging lock makes sound and nothing builds yet; an owner epoch, which the standard defers past version 1.
+
+## Decided
+
+Abandoned on 2026-11-13 by the owner: the app takes no lock at all. Its store lies in the app's private directory, which no other user id opens, and the app is one process, its services and its background job included, so a lock on the open file would exclude nobody. What can overlap is inside that process, where `flock(2)` sees nothing and the app's own locks answer: one sync at a time, one pass per collection, one writer. The four decisions above ask nothing any more. The standard is not changed: the app stays short of the MUST of STORAGE §8 on this point, which its spec states (cairn/spec/offline-store.md, "The app takes no lock on its store"). A second process added to the app reopens this change.

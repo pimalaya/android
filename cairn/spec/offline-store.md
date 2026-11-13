@@ -665,6 +665,14 @@ A body moved into the blob store before the write naming it (a downloaded messag
 - WHEN it is applied
 - THEN it is refused, and the message stays at meta, its body owed
 
+### Requirement: The app takes no lock on its store
+The app SHALL NOT take the owner lock nor the staging lock of pimdir STORAGE §8, a stated departure from that section: the store lies in the app's private directory, which the platform opens to no other user id, and the app runs as one process, its services and its background job in it, so no other process can own, stage into or collect the store, and a lock on the open file excludes nothing inside its holder. Within the process the app's own locks hold what §8 asks of an owner's handles: one sync at a time (`Locks.takeSync`, taken by the foreground passes and by the background job, which skips while another runs), one pass per collection (`Locks.collection`), and one writer (`Locks.store`). A component declared in a process of its own would void this requirement: the locks are then owed before it ships.
+
+#### Scenario: The background job meets a sync of the open app
+- GIVEN a pass of the open app holding the sync lock
+- WHEN the background job starts
+- THEN it takes no pass and writes nothing, and runs at its next schedule
+
 ### Requirement: A store of another draft is not opened
 The app SHALL create its store at storage-draft-10 (`store_meta.format_version`, a `store_id` and an `incarnation` by the canonical text, `derivation` 3) and record `sync_version`, sync-draft-10, with the first engine write. It SHALL decide whether an existing store opens by io-pimdir's rules (STORAGE §6) over facts read off the file read-only, and SHALL NOT read, write nor reconcile a store another draft, another program or another sync version wrote: start-up stands aside on a screen saying the app has to be reinstalled, and the background job, the sync adapters and the time-zone receiver do nothing. The app states its conformance as `storage-draft-10 owner (own statement text), sync-draft-10 engine` (STORAGE §17).
 
