@@ -54,7 +54,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
-- Changed the store to pimdir storage-draft-11, sync-draft-11 and search-draft-11 (io-pimdir 0.11 at cd33f0e). **Breaking:** a store an older build wrote is refused on open, and the app asks to be reinstalled; changes not yet sent from that store are lost.
+- Changed the store to pimdir storage-draft-11, sync-draft-11 and search-draft-11 (io-pimdir 0.12). **Breaking:** a store an older build wrote is refused on open, and the app asks to be reinstalled; changes not yet sent from that store are lost.
 - Changed *Send again* on a message that may have been sent: it goes back to its place in the outbox, ahead of messages queued after it, where it was queued again at the end.
 - Changed deleting an entry that is in conflict: outside its conflict form the delete is refused and the conflict stays, where it was deleted and the other version dropped unseen.
 - Changed moving a message that is in conflict, to another mailbox or into the trash: the move is refused and the message stays where it is, where it was moved and its conflict left behind unseen.

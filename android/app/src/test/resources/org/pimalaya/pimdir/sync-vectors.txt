@@ -40,6 +40,7 @@ unbound 29-rekey-keeps-a-pending-create: the bridge runs no rekey
 unbound 89-a-rekey-missing-most-members-parks: the bridge runs no rekey
 unbound 95-a-rekey-reusing-a-gone-handle-drops-it-first: the bridge runs no rekey
 unbound 96-a-rekey-matches-copies-at-one-revision-in-handle-order: the bridge runs no rekey
+unbound 159-a-capped-rekey-leaving-a-member-out-parks: the bridge runs no rekey
 unbound 14-both-edited-prefer-remote-pulls: the bridge syncs under the manual policy alone
 unbound 15-both-edited-prefer-local-over-an-unread-body-conflicts: the bridge syncs under the manual policy alone
 unbound 33-an-item-conflict-reports-a-server-edit: the bridge syncs under the manual policy alone
