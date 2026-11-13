@@ -39,7 +39,7 @@ use crate::{
         },
         smtp,
     },
-    offline::wire::sorted,
+    offline::{blobs, wire::sorted},
 };
 
 /// `Native.openMailSession`: connects and authenticates a mail session.
@@ -328,25 +328,23 @@ pub extern "system" fn Java_org_pimalaya_client_Native_parseMessage<'local>(
     .resolve::<ErrorReply>()
 }
 
-/// `Native.parseMessageFile`: `parseMessage` of the message in file `source`.
+/// `Native.parseMessageFile`: `parseMessage` of the stored message in file
+/// `source`, checked against `hash`, the name its row gives it.
 ///
 /// Read here: no copy of the message on the Java heap, none across the
-/// boundary.
+/// boundary. Bytes failing the name answer `{"error", "failing": true}`,
+/// nothing parsed (STORAGE §7).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_parseMessageFile<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     source: JString<'local>,
+    hash: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let source = read_string(env, &source);
-        let json = match fs::read(&source)
-            .map_err(|err| BridgeError::from(err.to_string()))
-            .and_then(|raw| read::parse(&raw))
-        {
-            Ok(message) => to_string(&message).unwrap_or_else(|err| error_json(err.to_string())),
-            Err(err) => error_json(err),
-        };
+        let hash = read_string(env, &hash);
+        let json = parse_stored(&source, &hash);
 
         Ok(env.new_string(json)?.into())
     })
@@ -378,33 +376,29 @@ pub extern "system" fn Java_org_pimalaya_client_Native_describeMessage<'local>(
     .resolve::<ErrorReply>()
 }
 
-/// `Native.messagePart`: writes one decoded part of a message to a file.
+/// `Native.messagePart`: writes one decoded part of a stored message to a
+/// file.
 ///
-/// The part by IMAP section, from file `source` to `target`; returns
-/// `{"size"}`, or an error for no such part. Written from the parser's own
+/// The part by IMAP section, from file `source`, checked against `hash`,
+/// the name its row gives it, to `target`; returns `{"size"}`, an error for
+/// no such part, or `{"error", "failing": true}` for bytes failing the
+/// name, nothing written (STORAGE §7). Written from the parser's own
 /// buffer: tens of megabytes are one buffer, never a base64 Java string.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_messagePart<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     source: JString<'local>,
+    hash: JString<'local>,
     section: JString<'local>,
     target: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let source = read_string(env, &source);
+        let hash = read_string(env, &hash);
         let section = read_string(env, &section);
         let target = read_string(env, &target);
-        let written = fs::read(&source)
-            .and_then(|raw| Ok((raw, File::create(&target)?)))
-            .map_err(|err| BridgeError::from(err.to_string()))
-            .and_then(|(raw, mut file)| read::write_part(&raw, &section, &mut file));
-        let json = match written {
-            Ok(size) => {
-                to_string(&SizeReply { size }).unwrap_or_else(|err| error_json(err.to_string()))
-            }
-            Err(err) => error_json(err),
-        };
+        let json = write_stored_part(&source, &hash, &section, &target);
 
         Ok(env.new_string(json)?.into())
     })
@@ -868,9 +862,120 @@ struct RefusedReply {
     status: Option<u16>,
 }
 
+/// The reply of a read of a stored message whose bytes fail its name.
+#[derive(Serialize)]
+struct FailingReply {
+    error: String,
+    failing: bool,
+}
+
+/// The stored message in file `source`, its bytes hashing to `hash`, or
+/// the reply of the read that failed ([`blobs::verified`]).
+fn stored(source: &str, hash: &str) -> Result<Vec<u8>, String> {
+    match blobs::verified(Path::new(source), hash) {
+        Ok(Some(raw)) => Ok(raw),
+        Ok(None) => {
+            let failing = FailingReply {
+                error: format!("The body {hash} fails its name"),
+                failing: true,
+            };
+            Err(to_string(&failing).unwrap_or_else(|err| error_json(err.to_string())))
+        }
+        Err(err) => Err(error_json(err.to_string())),
+    }
+}
+
+/// The reply of `parseMessageFile`.
+fn parse_stored(source: &str, hash: &str) -> String {
+    let raw = match stored(source, hash) {
+        Ok(raw) => raw,
+        Err(reply) => return reply,
+    };
+    match read::parse(&raw) {
+        Ok(message) => to_string(&message).unwrap_or_else(|err| error_json(err.to_string())),
+        Err(err) => error_json(err),
+    }
+}
+
+/// The reply of `messagePart`.
+fn write_stored_part(source: &str, hash: &str, section: &str, target: &str) -> String {
+    let raw = match stored(source, hash) {
+        Ok(raw) => raw,
+        Err(reply) => return reply,
+    };
+    let written = File::create(target)
+        .map_err(|err| BridgeError::from(err.to_string()))
+        .and_then(|mut file| read::write_part(&raw, section, &mut file));
+    match written {
+        Ok(size) => {
+            to_string(&SizeReply { size }).unwrap_or_else(|err| error_json(err.to_string()))
+        }
+        Err(err) => error_json(err),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::ffi::mail::{borrow, drop_handle};
+    use std::{fs, os::unix::fs::symlink};
+
+    use io_pimdir::hash;
+    use serde_json::{Value, from_str};
+
+    use crate::{
+        ffi::mail::{borrow, drop_handle, parse_stored, write_stored_part},
+        offline::blobs,
+    };
+
+    /// A stored message is parsed, and a part of it written out, only once
+    /// its bytes hash to the name its row gives it (STORAGE §5, §7): the
+    /// part a killed exclusive copy left under the name, and a link to the
+    /// very bytes, answer `failing`, nothing parsed nor written. A file
+    /// that cannot be read is an error of its own.
+    #[test]
+    fn a_stored_message_failing_its_name_is_not_read() {
+        let message = b"From: Ada <ada@example.org>\r\nSubject: Opened\r\n\
+            Content-Type: multipart/mixed; boundary=b\r\n\r\n\
+            --b\r\nContent-Type: text/plain\r\n\r\nHello\r\n\
+            --b\r\nContent-Type: application/pdf; name=a.pdf\r\n\
+            Content-Disposition: attachment; filename=a.pdf\r\n\
+            Content-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b--\r\n";
+        let name = hash::hash(message).0;
+        let dir = tempfile::tempdir().unwrap();
+        let (temp, source) = (dir.path().join(".tmp"), dir.path().join(&name));
+        let target = dir.path().join("part");
+        let (at, to) = (source.to_str().unwrap(), target.to_str().unwrap());
+        let reply = |json: String| from_str::<Value>(&json).unwrap();
+
+        fs::write(&temp, message).unwrap();
+        blobs::claimed(&temp, &source).unwrap();
+        assert_eq!(reply(parse_stored(at, &name))["subject"], "Opened");
+        assert_eq!(reply(write_stored_part(at, &name, "2", to))["size"], 5);
+        assert_eq!(fs::read(&target).unwrap(), b"%PDF-");
+        fs::remove_file(&target).unwrap();
+
+        // NOTE: what the copy holds under the name when its writer is
+        // killed: the first bytes, which still parse as a message.
+        fs::write(&source, &message[..message.len() - 12]).unwrap();
+        for failing in [
+            reply(parse_stored(at, &name)),
+            reply(write_stored_part(at, &name, "2", to)),
+        ] {
+            assert_eq!(failing["failing"], true, "a part: {failing}");
+            assert!(failing["error"].as_str().unwrap().contains(&name));
+        }
+        assert!(!target.exists(), "a part of a failing body was written");
+
+        fs::remove_file(&source).unwrap();
+        fs::write(dir.path().join("elsewhere"), message).unwrap();
+        symlink(dir.path().join("elsewhere"), &source).unwrap();
+        let linked = reply(parse_stored(at, &name));
+        assert_eq!(linked["failing"], true, "a link holds no body: {linked}");
+
+        fs::remove_file(&source).unwrap();
+        let missing = reply(parse_stored(at, &name));
+        assert!(missing["error"].is_string(), "{missing}");
+        assert_eq!(missing.get("failing"), None, "a missing file fails no name");
+    }
 
     #[test]
     fn a_closed_session_is_refused_rather_than_dereferenced() {

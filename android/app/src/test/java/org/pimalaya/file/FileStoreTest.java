@@ -126,7 +126,7 @@ public class FileStoreTest {
         File out =
                 File.createTempFile(
                         "part", null, RuntimeEnvironment.getApplication().getCacheDir());
-        client.messagePart(file(source), section, out);
+        client.messagePart(file(source), PimdirHash.of(source), section, out);
         return bytes(out);
     }
 

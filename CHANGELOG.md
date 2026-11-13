@@ -103,6 +103,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a message opening, or an attachment being read, from a damaged file stored under its name, such as the first part of a message a crash cut short: the file is now checked before anything of it is shown, moved aside into quarantine, and the message downloaded again.
 - Fixed a message moved on the server staying listed in Deleted items: once the mailbox it moved to holds it, its old row goes for good.
 - Fixed a new message reusing the `Message-ID` of a deleted one showing the deleted message's text under its own subject and never being downloaded: it is now a message of its own.
 - Fixed a star or a read mark tapped while a sync was landing another mark on the same message undoing that other mark.

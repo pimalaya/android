@@ -318,6 +318,11 @@ public class MailClientTest {
         return file;
     }
 
+    /** The name the store files message {@code index} under. */
+    private static String name(int index) {
+        return PimdirSql.hash(MessageCorpus.MESSAGES.get(index));
+    }
+
     @Test
     public void everyMessageParsesAsBefore() throws Exception {
         for (int index = 0; index < MessageCorpus.MESSAGES.size(); index++) {
@@ -329,14 +334,18 @@ public class MailClientTest {
                         assertThrows(PimalayaException.class, () -> client.parseMessage(message))
                                 .getMessage());
                 File file = file(index);
+                String name = name(index);
                 assertEquals(
                         "Could not read the message",
-                        assertThrows(PimalayaException.class, () -> client.parseMessage(file))
+                        assertThrows(
+                                        PimalayaException.class,
+                                        () -> client.parseMessage(file, name))
                                 .getMessage());
                 continue;
             }
             assertEquals("message " + index, expected, client.parseMessage(message));
-            assertEquals("message " + index, expected, client.parseMessage(file(index)));
+            assertEquals(
+                    "message " + index, expected, client.parseMessage(file(index), name(index)));
         }
     }
 
@@ -379,34 +388,33 @@ public class MailClientTest {
 
     @Test
     public void everyAttachmentReadsBackByItsSection() throws Exception {
-        File invoice = file(2);
+        assertPart(2, "2", Base64.getDecoder().decode("JVBERi0xLjQKJcOkw7zDtsOfCg=="));
+        assertPart(2, "3", "notes".getBytes(StandardCharsets.UTF_8));
+        assertPart(2, "4", "raw".getBytes(StandardCharsets.UTF_8));
+        assertPart(5, "2", "BEGIN:VCALENDAR\r\nEND:VCALENDAR".getBytes(StandardCharsets.UTF_8));
         assertPart(
-                invoice, "2", Base64.getDecoder().decode("JVBERi0xLjQKJcOkw7zDtsOfCg=="));
-        assertPart(invoice, "3", "notes".getBytes(StandardCharsets.UTF_8));
-        assertPart(invoice, "4", "raw".getBytes(StandardCharsets.UTF_8));
-        assertPart(
-                file(5), "2", "BEGIN:VCALENDAR\r\nEND:VCALENDAR".getBytes(StandardCharsets.UTF_8));
-        assertPart(
-                file(6),
+                6,
                 "2",
                 "From: Alice <alice@example.org>\r\nSubject: Lunch\r\n\r\nSee you at noon."
                         .getBytes(StandardCharsets.UTF_8));
 
         for (int index = 0; index < MessageCorpus.MESSAGES.size(); index++) {
             File source = file(index);
+            String name = name(index);
             File target = folder.newFile("x" + index);
             assertEquals(
                     index == 9 ? "Could not read the message" : "No part 99 in the message",
                     assertThrows(
                                     PimalayaException.class,
-                                    () -> client.messagePart(source, "99", target))
+                                    () -> client.messagePart(source, name, "99", target))
                             .getMessage());
         }
     }
 
-    private void assertPart(File source, String part, byte[] expected) throws Exception {
+    private void assertPart(int index, String part, byte[] expected) throws Exception {
         File target = folder.newFile();
-        assertEquals(expected.length, client.messagePart(source, part, target));
+        assertEquals(
+                expected.length, client.messagePart(file(index), name(index), part, target));
         assertArrayEquals(expected, Files.readAllBytes(target.toPath()));
     }
 

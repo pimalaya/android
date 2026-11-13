@@ -8,14 +8,17 @@ import org.pimalaya.client.PimdirSql;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The action queue: what the app wants done beyond the store (STORAGE §15).
  *
  * <p>{@link #enqueue} is one transaction (collection, pinned body, row). A
  * submission is carried out first and acknowledged after (§15.5), so it is
- * at-least-once. Statements are io-pimdir's, bound by name.
+ * at-least-once, and leaves its receipt; one withdrawn leaves none.
+ * Statements are io-pimdir's, bound by name.
  */
 public final class PimdirQueue {
     /**
@@ -29,6 +32,9 @@ public final class PimdirQueue {
 
     /** What the queue records as the origin of a row. */
     private static final String PRODUCER = "pimalaya.android";
+
+    /** How long a receipt is kept, the least §15.4 allows, as io-pimdir's. */
+    private static final int RECEIPT_DAYS = 7;
 
     private final PimdirDb store;
     private final PimdirItems items;
@@ -203,21 +209,60 @@ public final class PimdirQueue {
     }
 
     /**
-     * Removes one row and releases its body's pin, in one transaction.
+     * Acknowledges one intent its performer carried out (§15.5): the row
+     * removed, its body's pin released and its receipt recorded in one
+     * transaction, so a producer following the row reads it applied rather
+     * than withdrawn (§15.4).
      *
-     * <p>§15.5's cancel: acknowledging an intent carried out, or withdrawing
-     * one nobody wants.
+     * <p>The receipt names the collection the row was queued on and no item:
+     * a sent message's copy is filed by a later sync. A row already gone
+     * records nothing.
      */
     public void acknowledge(long id) {
+        remove(id, true);
+    }
+
+    /**
+     * Withdraws one row by request (§15.5's cancel): removed, its body's pin
+     * released, no receipt recorded, which is how a producer tells it from
+     * an intent carried out (§15.4).
+     */
+    public void cancel(long id) {
+        remove(id, false);
+    }
+
+    /**
+     * Removes one row and releases its body's pin, in one transaction, its
+     * receipt recorded with it when it was {@code performed}
+     * ({@code record_receipt}), the receipts past {@link #RECEIPT_DAYS}
+     * dropped ({@code prune_receipts}).
+     */
+    private void remove(long id, boolean performed) {
         SQLiteDatabase db = store.getWritableDatabase();
         db.beginTransaction();
         try {
+            String collection = null;
+            try (Cursor cursor = PimdirDb.query(db, "LOAD_ACTION", values("id", id))) {
+                if (cursor.moveToFirst()) {
+                    collection = cursor.getString(cursor.getColumnIndexOrThrow("collection"));
+                }
+            }
+            if (collection == null) {
+                return;
+            }
+
             String hash = null;
             PimdirSql.Bound bound = PimdirSql.bind("CANCEL_ACTION", values("id", id));
             try (Cursor cursor = PimdirDb.query(db, bound)) {
                 if (cursor.moveToFirst() && !cursor.isNull(0)) {
                     hash = cursor.getString(0);
                 }
+            }
+
+            if (performed) {
+                long kept = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(RECEIPT_DAYS);
+                run(db, "RECORD_RECEIPT", values("id", id, "collection", collection));
+                run(db, "PRUNE_RECEIPTS", values("before", DeletedItems.stamp(new Date(kept))));
             }
 
             if (hash != null) {

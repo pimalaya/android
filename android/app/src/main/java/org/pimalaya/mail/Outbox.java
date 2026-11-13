@@ -167,7 +167,8 @@ public final class Outbox {
             } else if (!action.pending()) {
                 queue.park(moved, action.error());
             }
-            queue.acknowledge(action.id());
+            // NOTE: withdrawn, nothing having gone: no receipt (§15.5).
+            queue.cancel(action.id());
         }
     }
 
@@ -372,13 +373,23 @@ public final class Outbox {
     }
 
     /**
-     * Acknowledges one submission, which is what finishes it.
+     * Acknowledges one submission handed over, which is what finishes it.
      *
      * <p>Cancelled rather than applied: it happened at a server, not in the
-     * store (STORAGE section 15.5). It releases the body's pin with it.
+     * store (STORAGE section 15.5). It releases the body's pin with it and
+     * records the row's receipt.
      */
     public void acknowledge(long queued) {
         queue.acknowledge(queued);
+        handed(queued);
+    }
+
+    /**
+     * Withdraws one submission nobody wants sent: its row and its body's pin
+     * go, and no receipt says it went (STORAGE section 15.5).
+     */
+    public void withdraw(long queued) {
+        queue.cancel(queued);
         handed(queued);
     }
 

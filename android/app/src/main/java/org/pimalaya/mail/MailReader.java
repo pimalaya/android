@@ -3,6 +3,7 @@ package org.pimalaya.mail;
 import android.util.Log;
 
 import org.pimalaya.R;
+import org.pimalaya.client.BodyFailing;
 import org.pimalaya.client.Description;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.MailSession;
@@ -19,7 +20,9 @@ import java.util.function.Supplier;
  * Reads one message for the reader: from the store, else from the server.
  *
  * <p>The store first, always: a sent message is immutable, so the filed copy is
- * the message, and the reader works offline. What it fetches is filed.
+ * the message, and the reader works offline. What it fetches is filed. A
+ * stored body is read only once its bytes hash to its name (pimdir STORAGE
+ * §7): one failing it goes to quarantine/ and is fetched again.
  */
 public final class MailReader {
     /** What one read came to. */
@@ -87,7 +90,17 @@ public final class MailReader {
                 stored = fetch(message, open);
                 read.fetched = true;
             }
-            read.body = waiting != null ? client.parseMessage(waiting) : client.parseMessage(stored);
+            if (waiting != null) {
+                read.body = client.parseMessage(waiting);
+            } else {
+                try {
+                    read.body = client.parseMessage(stored, stored.getName());
+                } catch (BodyFailing failing) {
+                    stored = again(message, stored, open);
+                    read.fetched = true;
+                    read.body = client.parseMessage(stored, stored.getName());
+                }
+            }
         } finally {
             MailPoison.end(stager.context(), key);
         }
@@ -98,6 +111,41 @@ public final class MailReader {
             }
         }
         return read;
+    }
+
+    /**
+     * Writes one part of a message out of its stored body {@code stored} to
+     * {@code target}, by {@link MessageBody.Attachment#part}.
+     *
+     * <p>A body failing its name is set aside and fetched again first
+     * ({@link #again}), {@code open} as {@link #read} takes it.
+     */
+    public void part(
+            MailStore.StoredMessage message,
+            File stored,
+            String part,
+            File target,
+            Supplier<MailSession> open) {
+        try {
+            client.messagePart(stored, stored.getName(), part, target);
+        } catch (BodyFailing failing) {
+            File fetched = again(message, stored, open);
+            client.messagePart(fetched, fetched.getName(), part, target);
+        }
+    }
+
+    /**
+     * The file of a message whose stored body {@code failing} failed its
+     * name, the hash it is filed under: that file moved into quarantine/
+     * (STORAGE §7), then the body fetched as one the store lacks, unless a
+     * writer filed it meanwhile.
+     */
+    private File again(
+            MailStore.StoredMessage message, File failing, Supplier<MailSession> open) {
+        Log.w("pimalaya", "mail body " + failing.getName() + " fails its name, fetching it again");
+        mail.quarantine(failing);
+        File stored = mail.sourceFile(message);
+        return stored != null ? stored : fetch(message, open);
     }
 
     /** A message's stand-ins, else under a derived key its body's parts. */

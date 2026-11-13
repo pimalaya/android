@@ -364,8 +364,12 @@ final class Native {
      */
     static native String parseMessage(byte[] source);
 
-    /** {@link #parseMessage} of a file, read natively: never on the heap. */
-    static native String parseMessageFile(String source);
+    /**
+     * {@link #parseMessage} of a stored message's file, read natively, never
+     * on the heap, and checked against {@code hash}, the name its row gives
+     * it: {@code {error, failing: true}} for bytes failing it.
+     */
+    static native String parseMessageFile(String source, String hash);
 
     /**
      * What the store files of the message in the file {@code source}.
@@ -376,11 +380,14 @@ final class Native {
     static native String describeMessage(String source);
 
     /**
-     * Writes one part's decoded bytes, by IMAP section, to {@code target}.
+     * Writes one part's decoded bytes, by IMAP section, to {@code target},
+     * out of a stored message's file checked against {@code hash}, the name
+     * its row gives it.
      *
-     * <p>Returns {@code {size}}, an error when the message has no such part.
+     * <p>Returns {@code {size}}, an error when the message has no such part,
+     * {@code {error, failing: true}} for bytes failing the name.
      */
-    static native String messagePart(String source, String part, String target);
+    static native String messagePart(String source, String hash, String part, String target);
 
     /**
      * Adds or removes one marker, named the IMAP way, on one message.

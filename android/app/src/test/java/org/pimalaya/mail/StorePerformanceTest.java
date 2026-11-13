@@ -452,19 +452,23 @@ public class StorePerformanceTest {
     }
 
 
-    @Test
-    public void anOpenedMessageIsStreamedIntoTheStoreAndReadFromIt() throws Exception {
-        storage.applyWrites(new JSONArray().put(listed(inbox, "42", "2026-03-02T00:30:00Z")));
-        byte[] source =
-                ("From: Ada <ada@example.org>\r\nSubject: Opened\r\n"
-                                + "Date: Mon, 2 Mar 2026 00:30:00 +0000\r\n"
-                                + "Content-Type: multipart/mixed; boundary=b\r\n\r\n"
-                                + "--b\r\nContent-Type: text/plain\r\n\r\nHello\r\n"
-                                + "--b\r\nContent-Type: application/pdf; name=a.pdf\r\n"
-                                + "Content-Disposition: attachment; filename=a.pdf\r\n"
-                                + "Content-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b--\r\n")
-                        .getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        List<java.io.File> dirs = new ArrayList<>();
+    /** The message the server holds as 42, one attachment of 5 octets. */
+    private static final byte[] OPENED =
+            ("From: Ada <ada@example.org>\r\nSubject: Opened\r\n"
+                            + "Date: Mon, 2 Mar 2026 00:30:00 +0000\r\n"
+                            + "Content-Type: multipart/mixed; boundary=b\r\n\r\n"
+                            + "--b\r\nContent-Type: text/plain\r\n\r\nHello\r\n"
+                            + "--b\r\nContent-Type: application/pdf; name=a.pdf\r\n"
+                            + "Content-Disposition: attachment; filename=a.pdf\r\n"
+                            + "Content-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b--\r\n")
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+    /**
+     * A reader over a server holding {@link #OPENED}, noting in {@code dirs}
+     * the scratch folder of each fetch it serves.
+     */
+    private MailReader reader(List<java.io.File> dirs) {
+        byte[] source = OPENED;
         MailClient bridge =
                 new MailClient() {
                     @Override
@@ -491,7 +495,15 @@ public class StorePerformanceTest {
                         new Clients(
                                 new AccountClient(), new ContactClient(), new CalendarClient(),
                                 bridge, new OfflineClient()));
-        MailReader reader = new MailReader(store, new FileStore(context, pimdir), bridge, stager);
+        return new MailReader(store, new FileStore(context, pimdir), bridge, stager);
+    }
+
+    @Test
+    public void anOpenedMessageIsStreamedIntoTheStoreAndReadFromIt() throws Exception {
+        storage.applyWrites(new JSONArray().put(listed(inbox, "42", "2026-03-02T00:30:00Z")));
+        byte[] source = OPENED;
+        List<java.io.File> dirs = new ArrayList<>();
+        MailReader reader = reader(dirs);
 
         MailStore.StoredMessage message = store.message(inbox, "42");
         MailReader.Read read = reader.read(message, () -> null);
@@ -514,5 +526,47 @@ public class StorePerformanceTest {
         MailReader.Read again = reader.read(store.message(inbox, "42"), () -> null);
         assertFalse(again.fetched);
         assertEquals(1, dirs.size());
+    }
+
+    /**
+     * A stored body is read only once its bytes hash to its name (pimdir
+     * STORAGE §5, §7): the part a killed copy left under the name is moved
+     * into quarantine/ and the message fetched again, for the reader and for
+     * an attachment alike, where it was parsed as the message.
+     */
+    @Test
+    public void aStoredBodyFailingItsNameIsSetAsideAndFetchedAgain() throws Exception {
+        storage.applyWrites(new JSONArray().put(listed(inbox, "42", "2026-03-02T00:30:00Z")));
+        List<java.io.File> dirs = new ArrayList<>();
+        MailReader reader = reader(dirs);
+        reader.read(store.message(inbox, "42"), () -> null);
+        java.io.File stored = store.sourceFile(store.message(inbox, "42"));
+        // NOTE: what an exclusive create and copy holds under the name when
+        // its writer is killed: the first bytes, which parse as a message.
+        byte[] part = Arrays.copyOf(OPENED, OPENED.length - 12);
+
+        java.nio.file.Files.write(stored.toPath(), part);
+        MailReader.Read read = reader.read(store.message(inbox, "42"), () -> null);
+
+        assertEquals("the whole attachment", 5, read.body.attachments().get(0).size());
+        assertTrue("its row redrawn", read.fetched);
+        assertEquals("fetched again", 2, dirs.size());
+        String[] aside = pimdir.quarantine().list();
+        assertEquals("the part set aside, never unlinked", 1, aside.length);
+        assertTrue(aside[0], aside[0].startsWith(stored.getName() + "."));
+        assertTrue(Arrays.equals(OPENED, java.nio.file.Files.readAllBytes(stored.toPath())));
+
+        java.nio.file.Files.write(stored.toPath(), part);
+        java.io.File target = new java.io.File(context.getCacheDir(), "a.pdf");
+        reader.part(store.message(inbox, "42"), stored, "2", target, () -> null);
+
+        assertEquals(
+                "%PDF-",
+                new String(
+                        java.nio.file.Files.readAllBytes(target.toPath()),
+                        java.nio.charset.StandardCharsets.UTF_8));
+        assertEquals("fetched again", 3, dirs.size());
+        assertEquals(2, pimdir.quarantine().list().length);
+        assertTrue(Arrays.equals(OPENED, java.nio.file.Files.readAllBytes(stored.toPath())));
     }
 }

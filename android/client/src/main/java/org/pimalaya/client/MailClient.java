@@ -136,13 +136,27 @@ public class MailClient {
      * Writes one attachment's decoded bytes to {@code target}, answering size.
      *
      * <p>By {@link MessageBody.Attachment#part}, file to file so a large part
-     * never sits on the heap. No network.
+     * never sits on the heap, out of the stored message in {@code source},
+     * checked against {@code hash}, the name its row gives it. No network.
+     *
+     * @throws BodyFailing when the bytes fail the name, nothing written
      */
-    public long messagePart(File source, String part, File target) {
-        return Replies.object(
+    public long messagePart(File source, String hash, String part, File target) {
+        return stored(
                         Native.messagePart(
-                                source.getAbsolutePath(), part, target.getAbsolutePath()))
+                                source.getAbsolutePath(), hash, part, target.getAbsolutePath()))
                 .optLong("size");
+    }
+
+    /** A reply read off a stored body, its {@code failing} thrown apart. */
+    private static JSONObject stored(String reply) {
+        if (Replies.failed(reply)) {
+            JSONObject failure = Replies.read(reply);
+            if (failure.optBoolean("failing")) {
+                throw new BodyFailing(failure.optString("error"));
+            }
+        }
+        return Replies.object(reply);
     }
 
     /**
@@ -154,9 +168,16 @@ public class MailClient {
         return MessageBody.from(Replies.object(Native.parseMessage(source)));
     }
 
-    /** {@link #parseMessage(byte[])} of a file, never on the Java heap. */
-    public MessageBody parseMessage(File source) {
-        return MessageBody.from(Replies.object(Native.parseMessageFile(source.getAbsolutePath())));
+    /**
+     * {@link #parseMessage(byte[])} of the stored message in {@code source},
+     * never on the Java heap, checked against {@code hash}, the name its row
+     * gives it.
+     *
+     * @throws BodyFailing when the bytes fail the name, nothing parsed
+     */
+    public MessageBody parseMessage(File source, String hash) {
+        return MessageBody.from(
+                stored(Native.parseMessageFile(source.getAbsolutePath(), hash)));
     }
 
     /** What the store files of the message in {@code source}, body-free. */

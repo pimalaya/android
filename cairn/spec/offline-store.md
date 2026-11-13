@@ -692,7 +692,12 @@ Opening the store SHALL configure its writing connection before write-ahead logg
 - THEN no other journal mode is asked of it, nothing logs "database is locked", and the file stays in write-ahead logging
 
 ### Requirement: A body is named by its content and checked before use
-The blob store SHALL file a body under its BLAKE3 name, one shard level deep (`objects/<hash[0:2]>/<hash>`), checking the name before any path is built, and SHALL write it by renaming a temporary with `RENAME_NOREPLACE`, or, below Android 11 (whose system call filter lacks `renameat2`) and where the kernel refuses the flag, by creating the name exclusively and copying the temporary into it, never by a hard link, which Android's SELinux policy denies an app on its own files, nor by a rename that replaces: a name already held keeps what holds it. It SHALL follow no link under objects/, and SHALL check a body against its name before serving, parsing, pushing or copying it, moving one that fails into quarantine/. A write finding its name held, by the rename or the exclusive create refusing it or before writing at all, SHALL keep the file there only once it checks against the name (STORAGE §5): a file failing it, a link or a part a crashed copy left among them, is moved into quarantine/, the app's renames and moves serialised so no move takes a file another of its writers is still filing, and the body is filed again.
+The blob store SHALL file a body under its BLAKE3 name, one shard level deep (`objects/<hash[0:2]>/<hash>`), checking the name before any path is built, and SHALL write it by renaming a temporary with `RENAME_NOREPLACE`, or, below Android 11 (whose system call filter lacks `renameat2`) and where the kernel refuses the flag, by creating the name exclusively and copying the temporary into it, never by a hard link, which Android's SELinux policy denies an app on its own files, nor by a rename that replaces: a name already held keeps what holds it. It SHALL follow no link under objects/, and SHALL check a body against its name before serving, parsing, pushing or copying it, moving one that fails into quarantine/. A write finding its name held, by the rename or the exclusive create refusing it or before writing at all, SHALL keep the file there only once it checks against the name (STORAGE §5): a file failing it, a link or a part a crashed copy left among them, is moved into quarantine/, the app's renames and moves serialised so no move takes a file another of its writers is still filing, and the body is filed again. A message opened in the reader, and an attachment extracted from one, SHALL be read from the stored file by the bridge, which follows no link and hashes the bytes it read, before it parses them or writes any part out, against the name the row gives the body: bytes failing it are a distinct outcome (`failing`), on which the file is moved into quarantine/ and the message fetched again as one the phone does not hold.
+
+#### Scenario: A message opened over a part a killed copy left
+- GIVEN a stored message whose file holds only its first bytes, which still parse as a message
+- WHEN the message is opened, or one of its attachments is
+- THEN nothing of that file is shown, it is moved into quarantine/, and the message is fetched and filed again
 
 #### Scenario: A message body downloaded on a device
 - GIVEN Android 15 refusing `link` to the app
@@ -954,3 +959,16 @@ Once per process, off the main thread, the app SHALL unlink every period-prefixe
 - GIVEN a temporary a killed process left in a shard directory
 - WHEN the app starts
 - THEN the file is unlinked, and a temporary a download is writing meanwhile is left
+
+### Requirement: A submission handed over leaves its receipt
+Acknowledging a submission the account's sending server accepted SHALL, in the one transaction removing its queue row and releasing its body's pin, record the row's receipt (STORAGE §15.5, `record_receipt`): its id, the collection it was queued on and no item, its sent copy being filed by a later sync. A row already gone SHALL record nothing. A submission withdrawn SHALL record none, which is how a producer following the row tells the two apart (§15.4): one deleted from the outbox, one of an account being removed, and one anchored again on the outbox, which goes on under a row of its own. A receipt SHALL be kept seven days after it was recorded, the older ones dropped (`prune_receipts`) in the transaction recording the next.
+
+#### Scenario: A message sent
+- GIVEN a message waiting in the outbox, anchored on the account's sent mailbox
+- WHEN a mail pass hands it over and the server accepts it
+- THEN its row is gone and `load_receipt` answers its id with that mailbox and no item
+
+#### Scenario: A message deleted from the outbox
+- GIVEN a message waiting in the outbox
+- WHEN the user deletes it
+- THEN its row is gone and no receipt names it

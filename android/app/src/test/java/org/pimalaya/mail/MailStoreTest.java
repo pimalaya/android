@@ -16,6 +16,8 @@ import org.junit.runner.RunWith;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.PimdirSql;
+import org.pimalaya.pimdir.DeletedItems;
 import org.pimalaya.pimdir.ItemFixtures;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -26,7 +28,9 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Date;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The mail side of the store, on the shared pimdir store.
@@ -730,6 +734,78 @@ public class MailStoreTest {
         assertEquals(0, scalar("SELECT count(*) FROM collections WHERE account = ?",
                 store.accountIdOf(ONE)));
         assertEquals("the body's pin released", 0, scalar("SELECT count(*) FROM objects"));
+    }
+
+    /**
+     * A submission handed over leaves its receipt in the transaction removing
+     * its row (pimdir STORAGE §15.5): the collection it was queued on and no
+     * item, its sent copy arriving with a later sync. One withdrawn leaves
+     * none, which is how a producer tells the two apart (§15.4). A receipt is
+     * kept seven days, then goes with the next one recorded.
+     */
+    @Test
+    public void aSubmissionHandedOverLeavesItsReceiptAndOneWithdrawnNone() throws Exception {
+        store.replaceMailboxes(
+                ONE, List.of(new Mailbox("INBOX", ""), new Mailbox("Sent", "sent")));
+        for (String subject : List.of("Sent", "Withdrawn", "Later", "Last")) {
+            MailFixtures.queue(store, ONE, subject + "@example.org", subject, DATE);
+        }
+        // NOTE: listed newest first.
+        List<MailStore.StoredMessage> waiting = store.outbox().outgoing();
+        long last = waiting.get(0).queued.id();
+        long later = waiting.get(1).queued.id();
+        MailStore.StoredMessage withdrawn = waiting.get(2);
+        long sent = waiting.get(3).queued.id();
+
+        store.outbox().acknowledge(sent);
+        assertEquals(
+                MailStager.Deletion.WITHDRAWN,
+                new MailStager(pimdir, Clients.real()).stageDelete(withdrawn));
+
+        assertEquals("two still wait", 2, scalar("SELECT count(*) FROM queue"));
+        String[] receipt = receipt(sent);
+        assertEquals("queued on its sent mailbox", store.collectionOf(ONE, "Sent"), receipt[0]);
+        assertNull("its copy arrives with a later sync", receipt[1]);
+        assertNull("withdrawn, never sent", receipt(withdrawn.queued.id()));
+
+        age(sent, 6);
+        store.outbox().acknowledge(later);
+        assertEquals("kept seven days", 2, scalar("SELECT count(*) FROM receipts"));
+
+        age(sent, 8);
+        store.outbox().acknowledge(last);
+        assertNull("dropped past seven days", receipt(sent));
+        assertEquals(2, scalar("SELECT count(*) FROM receipts"));
+    }
+
+    /**
+     * What a queue row became, as a producer following it reads it (pimdir
+     * STORAGE §15.4, {@code load_receipt}): its collection and its item, null
+     * for a row that left none.
+     */
+    private String[] receipt(long id) {
+        try (Cursor cursor =
+                PimdirDb.query(
+                        pimdir.getReadableDatabase(),
+                        "LOAD_RECEIPT",
+                        PimdirSql.values("id", id))) {
+            if (!cursor.moveToFirst()) {
+                return null;
+            }
+            return new String[] {
+                cursor.getString(cursor.getColumnIndexOrThrow("collection")),
+                cursor.getString(cursor.getColumnIndexOrThrow("seq"))
+            };
+        }
+    }
+
+    /** Dates the receipt of row {@code id} {@code days} back. */
+    private void age(long id, int days) {
+        long then = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(days);
+        pimdir.getWritableDatabase()
+                .execSQL(
+                        "UPDATE receipts SET applied_at = ? WHERE id = ?",
+                        new Object[] {DeletedItems.stamp(new Date(then)), id});
     }
 
     private String stringOf(String sql, String... args) {

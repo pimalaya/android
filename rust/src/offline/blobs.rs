@@ -24,7 +24,10 @@ use std::{
     path::Path,
 };
 
-use io_pimdir::{hash::PimdirHasher, object::PimdirHash};
+use io_pimdir::{
+    hash::{self, PimdirHasher},
+    object::PimdirHash,
+};
 
 /// What a no-replace rename did.
 #[derive(Debug, Eq, PartialEq)]
@@ -88,19 +91,12 @@ fn checked(filed: Filed, to: &Path) -> io::Result<Filed> {
             format!("{} is no body's name", to.display()),
         ));
     }
-    let mut held = match OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(to)
-    {
-        Ok(held) => held,
+    let mut held = match regular(to) {
+        Ok(Some(held)) => held,
+        Ok(None) => return Ok(Filed::Failing),
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Filed::Failing),
-        Err(err) if err.raw_os_error() == Some(libc::ELOOP) => return Ok(Filed::Failing),
         Err(err) => return Err(err),
     };
-    if !held.metadata()?.is_file() {
-        return Ok(Filed::Failing);
-    }
     let mut hasher = PimdirHasher::new();
     let mut buffer = vec![0; 64 * 1024];
     loop {
@@ -115,6 +111,41 @@ fn checked(filed: Filed, to: &Path) -> io::Result<Filed> {
         true => Ok(Filed::Held),
         false => Ok(Filed::Failing),
     }
+}
+
+/// The regular file under `path`, opened following no link: `None` for a
+/// link or anything but a regular file, which holds no body (STORAGE §5).
+fn regular(path: &Path) -> io::Result<Option<File>> {
+    let file = match OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(err) if err.raw_os_error() == Some(libc::ELOOP) => return Ok(None),
+        Err(err) => return Err(err),
+    };
+    Ok(file.metadata()?.is_file().then_some(file))
+}
+
+/// The body `name` read whole from `path` and checked in memory against
+/// its name before anything parses it (STORAGE §7): `None` when the file
+/// fails it, as other bytes, a part a crashed copy left, a link or
+/// anything but a regular file, for the owner to move into quarantine/.
+pub fn verified(path: &Path, name: &str) -> io::Result<Option<Vec<u8>>> {
+    let name = PimdirHash::from(name);
+    if !name.is_name() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} is no body's name", name.0),
+        ));
+    }
+    let Some(mut held) = regular(path)? else {
+        return Ok(None);
+    };
+    let mut body = Vec::new();
+    held.read_to_end(&mut body)?;
+    Ok((hash::hash(&body) == name).then_some(body))
 }
 
 /// [`rename_noreplace`] through `rename`, a rename refusing a name held.

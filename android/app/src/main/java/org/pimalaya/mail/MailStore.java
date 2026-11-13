@@ -175,7 +175,7 @@ public final class MailStore {
         // NOTE: before its collections go, which a row anchored on one of
         // them would refuse (collections_keep_queued).
         for (PimdirQueue.Action action : outbox.submissions(accountEmail)) {
-            queue.acknowledge(action.id());
+            queue.cancel(action.id());
         }
 
         forgetMailboxes(accountEmail);
@@ -1641,6 +1641,14 @@ public final class MailStore {
      */
     java.io.File sourceFile(StoredMessage message) {
         return message.pending() ? null : items.objectFile(message.collection, message.id);
+    }
+
+    /**
+     * Moves a {@link #sourceFile} whose bytes failed its name, the hash it
+     * is filed under, into quarantine/ (STORAGE §7).
+     */
+    void quarantine(java.io.File source) {
+        items.quarantine(source.getName());
     }
 
     /**

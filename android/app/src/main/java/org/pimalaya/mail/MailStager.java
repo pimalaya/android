@@ -102,7 +102,7 @@ public final class MailStager extends Stager {
      */
     public Deletion stageDelete(MailStore.StoredMessage message) throws JSONException {
         if (message.pending()) {
-            mail().outbox().acknowledge(message.queued.id());
+            mail().outbox().withdraw(message.queued.id());
             String sent = mail().sentOf(message.accountEmail);
             if (sent != null && offline.isPendingCreate(sent, message.id)) {
                 mutateRemove(sent, PimdirStorage.provisionalOf(message.id));

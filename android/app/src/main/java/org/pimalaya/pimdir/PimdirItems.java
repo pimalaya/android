@@ -320,6 +320,19 @@ public final class PimdirItems {
         return blobFile(objectOf(readable(), collection, linkId));
     }
 
+    /**
+     * Moves a file a read found failing its name into quarantine/, once it
+     * fails again under the filing lock (STORAGE §7): {@link #blobFile} then
+     * answers none, and the reader fetches the body.
+     */
+    public void quarantine(String hash) {
+        try {
+            blobs.quarantine(hash);
+        } catch (IOException error) {
+            Log.w("pimalaya", "could not quarantine the body " + hash, error);
+        }
+    }
+
     /** Moves the refcount by the difference one reference made. */
     public void adjustRefcount(SQLiteDatabase db, String before, String after) {
         if (before == null ? after == null : before.equals(after)) {

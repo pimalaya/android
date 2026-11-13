@@ -384,8 +384,9 @@ public final class MessageView implements FilesList.Origins {
      * The file one attachment is read from.
      *
      * <p>A saved copy's blob, else the part the bridge writes out of the
-     * message's blob, fetched first when not held. Every backend reads the
-     * whole message, though a part fetch would spare the rest.
+     * message's blob, fetched first when not held, and again when the blob
+     * fails its name ({@link MailReader#part}). Every backend reads the whole
+     * message, though a part fetch would spare the rest.
      */
     public java.io.File fileOf(MailStore.StoredMessage message, FileStore.StoredFile attachment) {
         java.io.File saved = parts.files().saved(attachment);
@@ -394,14 +395,7 @@ public final class MessageView implements FilesList.Origins {
         }
         java.io.File source = parts.mail().sourceFile(message);
         if (source == null) {
-            AccountEntry account = accountOf(message.accountEmail);
-            if (account == null) {
-                throw new IllegalStateException(host.getString(R.string.message_no_account));
-            }
-            if (!sync.online()) {
-                throw new IllegalStateException(
-                        host.getString(R.string.message_not_on_phone_later));
-            }
+            AccountEntry account = fetchable(message);
             reader().fetch(message, () -> sync.openMail(account));
             host.postAlive(mailList::reload);
             source = parts.mail().sourceFile(message);
@@ -410,8 +404,24 @@ public final class MessageView implements FilesList.Origins {
             }
         }
         java.io.File part = OpenedCopies.partFile(host, attachment.seq);
-        parts.clients().mail().messagePart(source, attachment.part, part);
+        reader().part(
+                message, source, attachment.part, part, () -> sync.openMail(fetchable(message)));
         return part;
+    }
+
+    /**
+     * The account a message's body is fetched from, refused when it is gone
+     * or there is no network.
+     */
+    private AccountEntry fetchable(MailStore.StoredMessage message) {
+        AccountEntry account = accountOf(message.accountEmail);
+        if (account == null) {
+            throw new IllegalStateException(host.getString(R.string.message_no_account));
+        }
+        if (!sync.online()) {
+            throw new IllegalStateException(host.getString(R.string.message_not_on_phone_later));
+        }
+        return account;
     }
 
     /**
