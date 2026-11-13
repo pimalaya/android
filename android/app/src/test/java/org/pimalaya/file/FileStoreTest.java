@@ -104,7 +104,8 @@ public class FileStoreTest {
             db.endTransaction();
         }
         fixtures.putObject(inbox, linkId, source);
-        files.recordAttachments(accountId, linkId, client.parseMessage(source).attachments());
+        files.recordAttachments(
+                accountId, inbox, linkId, client.parseMessage(source).attachments());
         return source;
     }
 
@@ -171,12 +172,86 @@ public class FileStoreTest {
 
         files.recordAttachments(
                 accountId,
+                inbox,
                 "m1",
                 client.parseMessage(SOURCE.getBytes(StandardCharsets.UTF_8)).attachments());
 
         assertEquals(2, scalar("SELECT count(*) FROM items WHERE link_id LIKE 'part:%'"));
         assertEquals(2, scalar("SELECT count(*) FROM item_reference"));
         assertEquals(seq, files.attachments(accountId, "m1").get(0).seq);
+    }
+
+    /** Files one message of a mailbox with its body, then records its parts. */
+    private void filed(String collection, String subject, String sender, String source) {
+        SQLiteDatabase db = items.writable();
+        db.beginTransaction();
+        try {
+            fixtures.put(
+                    db,
+                    collection,
+                    new ItemFixtures.Row(
+                            "m1",
+                            null,
+                            PimdirSummary.mail(
+                                    null, subject, "Sender", sender, null, DATE, 0, true),
+                            PimdirSummary.mailSortKey(DATE)));
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        byte[] body = source.getBytes(StandardCharsets.UTF_8);
+        fixtures.putObject(collection, "m1", body);
+        files.recordAttachments(
+                accountId, collection, "m1", client.parseMessage(body).attachments());
+    }
+
+    /**
+     * A part: key stands for one message (pimdir STORAGE section 14.3, sync
+     * vector 158): a body under a Message-ID another row of the account holds
+     * another body under, a message its summary does not agree with, records
+     * no stand-in and no reference, the first message's left as they were.
+     * The same message held under another form still records its parts.
+     */
+    @Test
+    public void aBodyUnderAnotherMessagesKeyStandsForNothing() throws Exception {
+        mail.replaceMailboxes(
+                ONE,
+                List.of(
+                        new Mailbox("INBOX", ""),
+                        new Mailbox("Copy", ""),
+                        new Mailbox("Archive", "")));
+        stored("m1");
+        String more =
+                "--sep\r\n"
+                        + "Content-Disposition: attachment; filename=\"more.txt\"\r\n"
+                        + "\r\n"
+                        + "more\r\n"
+                        + "--sep--\r\n";
+
+        // NOTE: the same message, of the same subject, date and sender, its
+        // bytes another form's: its fourth part is a stand-in of the key.
+        String resent = SOURCE.replace("--sep--\r\n", more);
+        filed(mail.collectionOf(ONE, "Copy"), "Invoice", "a@example.org", resent);
+        assertEquals(3, scalar("SELECT count(*) FROM items WHERE link_id LIKE 'part:m1#%'"));
+        assertEquals(3, scalar("SELECT count(*) FROM item_reference"));
+
+        // NOTE: another message reusing the id, with a fifth part.
+        String second = resent.replace("--sep--\r\n", more).replace("the body", "second edition");
+        filed(
+                mail.collectionOf(ONE, "Archive"),
+                "Invoice, second edition",
+                "dan@example.net",
+                second);
+
+        assertEquals(
+                "no stand-in of its own",
+                3,
+                scalar("SELECT count(*) FROM items WHERE link_id LIKE 'part:m1#%'"));
+        assertEquals("no reference", 3, scalar("SELECT count(*) FROM item_reference"));
+        assertEquals(
+                "the first message's stand-in, as it was",
+                "Invoice.pdf",
+                files.attachments(accountId, "m1").get(0).name);
     }
 
     @Test

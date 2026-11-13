@@ -457,7 +457,7 @@ public class PimdirDbTest {
                                 + " read_version, produce_version FROM store_meta",
                         null)) {
             assertTrue(cursor.moveToFirst());
-            assertEquals("storage-draft-10", cursor.getString(0));
+            assertEquals("storage-draft-11", cursor.getString(0));
             assertTrue(cursor.getString(1), cursor.getString(1).matches("[0-9a-f]{32}"));
             assertEquals(1, cursor.getInt(2));
             assertEquals(PimdirSql.identity().optLong("derivation"), cursor.getLong(3));

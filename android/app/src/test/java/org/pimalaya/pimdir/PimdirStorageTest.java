@@ -1246,7 +1246,7 @@ public class PimdirStorageTest {
         assertEquals(0, scalar("SELECT count(*) FROM store_meta WHERE sync_version IS NOT NULL"));
         storage.applyWrites(batch(storeObject("aa01", "body"), upsert("a.vcf", "uid-a", h("aa01"), "a")));
         assertEquals(
-                1, scalar("SELECT count(*) FROM store_meta WHERE sync_version = 'sync-draft-10'"));
+                1, scalar("SELECT count(*) FROM store_meta WHERE sync_version = 'sync-draft-11'"));
 
         db.execSQL("UPDATE store_meta SET sync_version = 'sync-draft-06'");
         try {

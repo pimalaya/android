@@ -79,3 +79,11 @@ A removal SHALL be staged as the engine's `Remove` stating the body it was decid
 - GIVEN a contact the phone and the server changed, its conflict not settled
 - WHEN it is deleted from the contacts list
 - THEN the delete is refused, nothing is staged, and the contact stays conflicted
+
+### Requirement: A move settles no conflict
+A relocation staged as the engine's `Move`, a message moved to another mailbox or deleted into the trash, SHALL be refused, staging nothing in either collection, when it meets a conflict, the item's or its binding's (SYNC §7): a move states no resolution, and its tombstone would leave the conflict standing under a placement no listing shows. The conflict SHALL be settled first, by an edit or a removal naming it. A `Copy` meets none. A contact, an event or a task filed in another collection is staged as an add and a removal, and its removal is refused as any removal over a conflict is (A removal names the conflicts it settles).
+
+#### Scenario: Deleting a message whose binding is in conflict
+- GIVEN a message whose binding is conflicted
+- WHEN it is deleted outside the trash, or moved to another mailbox
+- THEN the move is refused, the message stays in its mailbox, nothing shows in the target, and the conflict stands

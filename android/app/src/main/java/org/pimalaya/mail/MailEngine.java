@@ -941,7 +941,8 @@ public final class MailEngine extends PimdirEngine {
             for (Map.Entry<String, List<MessageBody.Attachment>> parts : attachments.entrySet()) {
                 // NOTE: one message failing leaves the others to record.
                 try {
-                    files.recordAttachments(accountId, parts.getKey(), parts.getValue());
+                    files.recordAttachments(
+                            accountId, collection, parts.getKey(), parts.getValue());
                 } catch (RuntimeException failure) {
                     Log.w("pimalaya", "attachments not recorded: " + parts.getKey(), failure);
                 }

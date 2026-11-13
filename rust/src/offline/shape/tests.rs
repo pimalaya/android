@@ -26,7 +26,7 @@ fn seed() -> String {
         "INSERT INTO store_meta(id, format, format_version, version, read_version,
                                 produce_version, store_id, incarnation, hash_algo,
                                 created_at, derivation)
-         VALUES (1, 'pimdir', 'storage-draft-10', 1, 1, 1,
+         VALUES (1, 'pimdir', 'storage-draft-11', 1, 1, 1,
                  '0123456789abcdef0123456789abcdef', 1, 'blake3',
                  '2026-11-01T00:00:00.000Z', 3);
          INSERT INTO collections(id, account, kind, name) VALUES
@@ -88,7 +88,8 @@ fn seed() -> String {
          VALUES ((SELECT id FROM items WHERE collection = 'INBOX' AND link_id = 'm2'),
                  (SELECT id FROM items WHERE collection = 'Archive' AND link_id = 'm1'));
          INSERT INTO queue(created_at, producer, collection, action, payload, object_hash)
-         VALUES ('2026-11-01T00:00:00.000Z', 'p', 'INBOX', 'add', '{{}}', '{d}');
+         VALUES ('2026-11-01T00:00:00.000Z', 'p', 'INBOX', 'add', '{{}}', '{d}'),
+                ('2026-11-01T00:00:01.000Z', 'p', 'INBOX', 'submit', '{{}}', NULL);
          INSERT INTO item_reference(from_kind, from_link_id, to_kind, to_link_id, role, origin,
                                     created_at)
          VALUES ('message/rfc822', 'm1', 'text/vcard', 'c1', 'sender', 'auto',
@@ -711,6 +712,34 @@ fn a_returning_write_answers_what_it_wrote() {
             call("RETRY_ACTION", vec![("id", Value::Integer(1))]),
             call("RETRY_ACTION", vec![("id", Value::Integer(1))]),
             call("RETRY_ACTION", vec![("id", Value::Integer(9))]),
+        ],
+    );
+    let unconfirm = |id: i64, detail: Value| {
+        call(
+            "UNCONFIRM_ACTION",
+            vec![("id", Value::Integer(id)), ("detail", detail)],
+        )
+    };
+    // NOTE: an update of the row whatever its action would park the `add`
+    // the owner applies itself, which the canonical text leaves pending.
+    tells_apart(
+        "an intent parked as unconfirmed, an owner's action and no row left alone",
+        "UNCONFIRM_ACTION",
+        "SELECT id FROM queue WHERE id = :id;\n\
+         UPDATE queue SET attempts = attempts + 1, \
+         error = 'unconfirmed: ' || coalesce(:detail, '') WHERE id = :id;\n",
+        &[
+            unconfirm(2, text("no reply")),
+            unconfirm(1, text("no reply")),
+            unconfirm(9, text("no reply")),
+            unconfirm(2, Value::Null),
+            call(
+                "PARK_ACTION",
+                vec![
+                    ("id", Value::Integer(2)),
+                    ("error", text("unconfirmed: relayed")),
+                ],
+            ),
         ],
     );
     for name in ["CANCEL_ACTION", "CLAIM_ACTION"] {

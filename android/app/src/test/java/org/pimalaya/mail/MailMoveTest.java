@@ -280,6 +280,73 @@ public class MailMoveTest {
                         archive));
     }
 
+    /**
+     * A move meeting a conflict is refused (pimdir SYNC §7, vectors 155 and
+     * 156): it states no resolution, and its tombstone would leave the
+     * conflict standing under a placement no listing shows. The refusal
+     * crosses the bridge as any other, nothing staged in either mailbox,
+     * which is what a delete into the trash stages too.
+     */
+    @Test
+    public void aMoveOverAConflictIsRefusedAndStagesNothing() throws Exception {
+        pimdir.getWritableDatabase()
+                .execSQL(
+                        "UPDATE bindings SET conflicted = 1, conflict_revision = 'r2'"
+                                + " WHERE collection = ? AND handle = '42'",
+                        new Object[] {inbox});
+
+        try {
+            stager().mutateMove(inbox, "42", trash);
+            throw new AssertionError("a move over a conflict staged");
+        } catch (PimalayaException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains("conflict"));
+        }
+        MailStore.StoredMessage row = MailFixtures.merged(store, 10).get(0);
+        try {
+            stager().stageDelete(row);
+            throw new AssertionError("a delete into the trash over a conflict staged");
+        } catch (PimalayaException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains("conflict"));
+        }
+
+        assertEquals("the source stays live", "0",
+                scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '42'", inbox));
+        assertNull("nothing lands in the target",
+                scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '42'", trash));
+        assertEquals("the conflict stands", "1",
+                scalar("SELECT conflicted FROM bindings WHERE collection = ? AND handle = '42'",
+                        inbox));
+    }
+
+    /**
+     * The schema takes a message's date as an instant in UTC at seconds
+     * precision alone (pimdir STORAGE §13): a summary stating another shape,
+     * an offset here, is written with no date, as io-pimdir stores it, the
+     * write never refused.
+     */
+    @Test
+    public void aSummaryDatedInAnotherShapeIsWrittenUndated() throws Exception {
+        JSONObject summary =
+                PimdirSummary.mail(
+                        "m9@example.org", "Offset", "", "a@example.org", null,
+                        "2026-10-07T08:00:00Z", 12, false);
+        summary.getJSONObject("mail").put("date", "2026-10-07T10:00:00+02:00");
+
+        stager().mutateAdd(
+                sent,
+                "m9@example.org",
+                "Subject: Offset\r\n\r\nbody\r\n",
+                Flags.none(),
+                summary,
+                "2026-10-07T08:00:00Z");
+
+        String row =
+                "FROM mail_summary WHERE item = (SELECT id FROM items"
+                        + " WHERE collection = ? AND link_id = 'm9@example.org')";
+        assertEquals("Offset", scalar("SELECT subject " + row, sent));
+        assertNull("no date of another shape", scalar("SELECT date " + row, sent));
+    }
+
     @Test
     public void theTombstoneOfAMoveNamesItsDestination() throws Exception {
         stager().mutateMove(inbox, "42", trash);

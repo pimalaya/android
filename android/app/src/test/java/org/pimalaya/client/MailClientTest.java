@@ -156,7 +156,9 @@ public class MailClientTest {
                             "",
                             "",
                             "plain",
-                            "cut off\r\n",
+                            // NOTE: the end of the message closes the multipart, its
+                            // last line break the missing delimiter's (Annex A.1).
+                            "cut off",
                             List.of(),
                             false),
                     null,

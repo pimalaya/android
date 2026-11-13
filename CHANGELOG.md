@@ -54,9 +54,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
-- Changed the store to pimdir storage-draft-10, sync-draft-10 and search-draft-10 (io-pimdir 0.11). **Breaking:** a store an older build wrote is refused on open, and the app asks to be reinstalled; changes not yet sent from that store are lost.
+- Changed the store to pimdir storage-draft-11, sync-draft-11 and search-draft-11 (io-pimdir 0.11 at cd33f0e). **Breaking:** a store an older build wrote is refused on open, and the app asks to be reinstalled; changes not yet sent from that store are lost.
 - Changed *Send again* on a message that may have been sent: it goes back to its place in the outbox, ahead of messages queued after it, where it was queued again at the end.
 - Changed deleting an entry that is in conflict: outside its conflict form the delete is refused and the conflict stays, where it was deleted and the other version dropped unseen.
+- Changed moving a message that is in conflict, to another mailbox or into the trash: the move is refused and the message stays where it is, where it was moved and its conflict left behind unseen.
+- Changed the attachments a message lists: a file sent with no disposition, such as a PDF or a picture attached bare, is now listed, opened and saved like any attachment, as its paperclip already said.
 - Changed the store to the pimdir sync draft 09: a store an older build wrote is refused on open, and the app asks to be reinstalled; changes not yet sent from that store are lost.
 - Changed the dates a search reads: `date:today`, `date:yesterday` and a day, month or year now start at midnight in the phone's time zone, not in UTC, so an event at 00:30 is found on its own day.
 - Changed what Google sign-in asks for calendars: to see and edit the events of your calendars and to see their list, no longer to manage every calendar (share or delete one), which the app never did. An account signed in before keeps syncing, and its next sign-in asks for the narrower access.
@@ -106,6 +108,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Fixed a message opening, or an attachment being read, from a damaged file stored under its name, such as the first part of a message a crash cut short: the file is now checked before anything of it is shown, moved aside into quarantine, and the message downloaded again.
 - Fixed a message moved on the server staying listed in Deleted items: once the mailbox it moved to holds it, its old row goes for good.
 - Fixed a new message reusing the `Message-ID` of a deleted one showing the deleted message's text under its own subject and never being downloaded: it is now a message of its own.
+- Fixed a message reusing the `Message-ID` of another one adding its attachments to that message's files.
+- Fixed the last attachment of a message cut short, and an attachment whose part states its type or its disposition twice, not being listed, or opening to other bytes than its file says.
 - Fixed a star or a read mark tapped while a sync was landing another mark on the same message undoing that other mark.
 - Fixed a Google Calendar event created with a start and no end failing to sync with "Google needs an end on every event": it now ends at its start, or lasts the day for an all-day event.
 - Fixed a delete for good or a restore of a Gmail or JMAP message in the trash, made before the next sync listed the trash, staying on the phone and the message coming back: it now waits on the phone and reaches the server once the trash is listed, a "Waiting for the server" notice naming what waits. An opened message moved to the trash keeps its read marker, and a move on a JMAP account lands in the same sync.

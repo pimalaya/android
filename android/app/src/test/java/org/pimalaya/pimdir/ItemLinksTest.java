@@ -133,7 +133,10 @@ public class ItemLinksTest {
         byte[] source = SOURCE.getBytes(StandardCharsets.UTF_8);
         fixtures.putObject(inbox, "m1", source);
         files.recordAttachments(
-                mail.accountIdOf(ONE), "m1", new MailClient().parseMessage(source).attachments());
+                mail.accountIdOf(ONE),
+                inbox,
+                "m1",
+                new MailClient().parseMessage(source).attachments());
 
         ItemLinks.Link link = links.links(message).get(0);
         assertTrue(link.automatic());
@@ -147,7 +150,10 @@ public class ItemLinksTest {
         byte[] source = SOURCE.getBytes(StandardCharsets.UTF_8);
         fixtures.putObject(inbox, "m1", source);
         files.recordAttachments(
-                mail.accountIdOf(ONE), "m1", new MailClient().parseMessage(source).attachments());
+                mail.accountIdOf(ONE),
+                inbox,
+                "m1",
+                new MailClient().parseMessage(source).attachments());
 
         List<ItemLinks.Placement> found = search("quarterly");
         assertEquals(2, found.size());

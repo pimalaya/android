@@ -107,7 +107,10 @@ public final class MailReader {
         if (!message.pending()) {
             synchronized (stager.locks.store) {
                 files.recordAttachments(
-                        mail.accountIdOf(message.accountEmail), message.id, read.body.attachments());
+                        mail.accountIdOf(message.accountEmail),
+                        message.collection,
+                        message.id,
+                        read.body.attachments());
             }
         }
         return read;

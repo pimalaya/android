@@ -15,7 +15,7 @@ use io_pimdir::summary::{
     calendar::{PimdirEventSummary, PimdirJournalSummary, PimdirTaskSummary, PimdirTime},
     contact::PimdirContactSummary,
     file::PimdirFileSummary,
-    mail::PimdirMailSummary,
+    mail::{PimdirMailSummary, usable_date},
 };
 use serde::{Deserialize, Serialize};
 
@@ -48,7 +48,9 @@ impl From<&PimdirSummary> for SummaryJson {
                 subject: mail.subject.clone(),
                 sender: mail.sender.clone(),
                 sender_name: mail.sender_name.clone(),
-                date: mail.date.clone(),
+                // NOTE: the one shape `mail_summary.date` takes (STORAGE
+                // §13); any other is no date, as io-pimdir stores it.
+                date: usable_date(mail.date.as_deref()).map(str::to_owned),
                 size: mail.size,
                 attachment: mail.attachment,
                 invitation: mail.invitation.clone(),
@@ -472,6 +474,35 @@ mod tests {
 
         let back: PimdirSummary = from_value::<SummaryJson>(wire).unwrap().into();
         assert_eq!(back, summary);
+    }
+
+    /// The store's write is Java's, bound from this row, and the schema
+    /// takes a message's date as an instant in UTC at seconds precision
+    /// alone (STORAGE §13): a date stated otherwise crosses as none, as
+    /// io-pimdir stores it, never as a text the write would be refused on.
+    #[test]
+    fn a_mail_date_of_another_shape_crosses_as_none() {
+        let dated = |date: &str| {
+            let summary = PimdirSummary::Mail(PimdirMailSummary {
+                subject: "Dated".into(),
+                date: Some(date.into()),
+                ..Default::default()
+            });
+            to_value(SummaryJson::from(&summary)).unwrap()["mail"]["date"].clone()
+        };
+
+        assert_eq!(dated("2026-08-01T10:00:00Z"), "2026-08-01T10:00:00Z");
+        for stated in [
+            "2026-08-01T10:00:00.5Z",
+            "2026-08-01T12:00:00+02:00",
+            "2026-08-01t10:00:00z",
+            "12026-08-01T10:00:00Z",
+            "2026-08-01",
+            "Sat, 1 Aug 2026 10:00:00 +0000",
+            "",
+        ] {
+            assert!(dated(stated).is_null(), "{stated:?}");
+        }
     }
 
     /// A start is three columns, and an absent one is none of them.

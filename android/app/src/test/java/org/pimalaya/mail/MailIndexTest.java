@@ -175,20 +175,20 @@ public class MailIndexTest {
         message("a", "Weekly", "the roadmap for the quarter");
         PimdirIndexDb built = pimdir.startIndex();
         built.refresh();
-        assertEquals("pimalaya-android search-draft-10", shape());
+        assertEquals("pimalaya-android search-draft-11", shape());
         built.close();
 
         meta("shape = 'canonical'");
         PimdirIndexDb other = new PimdirIndexDb(pimdir);
         assertNull("no hit from an index of another shape", other.hits("roadmap", "date"));
         assertNotNull(other.refused());
-        assertEquals("left as it was", "canonical search-draft-10", shape());
+        assertEquals("left as it was", "canonical search-draft-11", shape());
 
         meta("shape = 'pimalaya-android', format_version = 'search-draft-07'");
         PimdirIndexDb older = new PimdirIndexDb(pimdir);
         older.refresh();
         assertNull(older.refused());
-        assertEquals("pimalaya-android search-draft-10", shape());
+        assertEquals("pimalaya-android search-draft-11", shape());
         assertEquals(1, older.hits("roadmap", "date").optJSONArray("hits").length());
         older.close();
     }

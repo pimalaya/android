@@ -171,14 +171,22 @@ public final class FileStore {
     }
 
     /**
-     * Records the attachments of a message whose body was just stored.
+     * Records the attachments of a message whose body was just stored in
+     * {@code mailbox}.
      *
      * <p>Per new part, a stand-in at {@code Meta} and the message's
      * {@code attachment} reference, in one transaction: no stand-in is left
      * unreferenced. A removed reference of a known part comes back.
+     *
+     * <p>A {@code part:} key stands for one message (section 14.3): nothing
+     * is recorded for a body under a key another row of the account holds
+     * another body under, a message its summary does not agree with ({@code
+     * key_of_another_message}), whose stand-ins and references are left as
+     * they are.
      */
     public void recordAttachments(
-            String accountId, String messageLinkId, List<MessageBody.Attachment> attachments) {
+            String accountId, String mailbox, String messageLinkId,
+            List<MessageBody.Attachment> attachments) {
         // NOTE: a message under a derived key gets no stand-in (section 14.3).
         if (attachments.isEmpty() || ItemLinks.derived(messageLinkId)) {
             return;
@@ -187,6 +195,13 @@ public final class FileStore {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
+            Map<String, Object> message = new HashMap<>();
+            message.put("account", accountId);
+            message.put("collection", mailbox);
+            message.put("link_id", messageLinkId);
+            if (text(db, "KEY_OF_ANOTHER_MESSAGE", message) != null) {
+                return;
+            }
             if (kindOf(db, collection) == null) {
                 declare(db, collection, accountId, PimdirCollections.ATTACHMENTS.substring(1));
                 PimdirDb.setRole(db, collection);

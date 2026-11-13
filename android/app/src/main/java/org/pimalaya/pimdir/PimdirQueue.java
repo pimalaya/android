@@ -278,7 +278,8 @@ public final class PimdirQueue {
     /**
      * The reserved prefix of a parked row's error (STORAGE §15.2): an intent
      * parked under it is one whose outcome is unknown, neither performed nor
-     * failed. io-pimdir's, over the bridge.
+     * failed. io-pimdir's, over the bridge, and read here alone: {@code
+     * unconfirm_action} writes it.
      */
     public static String unconfirmedPrefix() {
         return PimdirSql.identity().optString("unconfirmed");
@@ -293,25 +294,29 @@ public final class PimdirQueue {
      * Parks one action: attempt counted, reason recorded, out of the drain.
      *
      * <p>For the store's or server's final word: nothing retries a parked
-     * row, or a refused message would be offered again on every sync. A
-     * reason beginning with the reserved prefix is recorded behind {@code
-     * failed: }, so no failure reads as an unknown outcome.
+     * row, or a refused message would be offered again on every sync. The
+     * reason is handed over whole: {@code park_action} itself records one
+     * beginning with the reserved prefix behind {@code failed: } (§15.2), so
+     * no failure reads as an unknown outcome.
      */
     public void park(long id, String reason) {
         SQLiteDatabase db = store.getWritableDatabase();
-        String error = unconfirmed(reason) ? "failed: " + reason : reason;
-        run(db, "PARK_ACTION", values("id", id, "error", error));
+        run(db, "PARK_ACTION", values("id", id, "error", reason));
     }
 
     /**
      * Parks one intent whose outcome is unknown, handed over with no verdict
-     * back (§15.2): its error the reserved prefix then {@code reason}. No
-     * drain performs it again; it leaves by {@link #acknowledge} or {@link
-     * #retry}.
+     * back (§15.2, {@code unconfirm_action}): the statement alone writes the
+     * reserved prefix, then {@code detail}, and counts the attempt. No drain
+     * performs it again; it leaves by {@link #acknowledge} or {@link #retry}.
+     * Answers whether a row was parked: none for a row that is gone, nor for
+     * an action the owner applies itself, which is never unconfirmed.
      */
-    public void unconfirm(long id, String reason) {
+    public boolean unconfirm(long id, String detail) {
         SQLiteDatabase db = store.getWritableDatabase();
-        run(db, "PARK_ACTION", values("id", id, "error", unconfirmedPrefix() + reason));
+        PimdirSql.Bound bound =
+                PimdirSql.bind("UNCONFIRM_ACTION", values("id", id, "detail", detail));
+        return PimdirDb.changed(db, bound) > 0;
     }
 
     /**

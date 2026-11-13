@@ -135,7 +135,10 @@ public class AutomaticReferencesTest {
         mail.restateFromBody(
                 inbox, linkId, PimdirSql.derive(PimdirSummary.MAIL, body).summary());
         files.recordAttachments(
-                mail.accountIdOf(ONE), linkId, new MailClient().parseMessage(body).attachments());
+                mail.accountIdOf(ONE),
+                inbox,
+                linkId,
+                new MailClient().parseMessage(body).attachments());
     }
 
     private long count(String sql, String... args) {

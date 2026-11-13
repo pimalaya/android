@@ -9,10 +9,17 @@
 
 use std::{borrow::Cow, io::Write};
 
-use io_pimdir::{hash, summary::derive};
+use io_pimdir::{
+    hash,
+    summary::{
+        derive,
+        file::PimdirFileSummary,
+        mail::{attachments, first_occurrences},
+    },
+};
 use mime::{
-    header::marker::{CC, CONTENT_TYPE, DATE, FROM, SUBJECT, TO},
-    tree::{cst::MimeCst, entity::MimeEntity},
+    header::marker::{CC, DATE, FROM, SUBJECT, TO},
+    tree::{cst::MimeCst, entity::MimeEntity, parse::MimeParseOptions},
     value::address::MimeAddressList,
 };
 use serde::Serialize;
@@ -34,9 +41,11 @@ pub fn parse(raw: &[u8]) -> Result<MessageBody, BridgeError> {
     if raw.is_empty() {
         return Err("Could not read the message".into());
     }
-    let cst = MimeCst::parse(raw);
+    let once = first_occurrences(raw);
+    let cst = tree(&once, None);
     let root = &cst.root;
     let lists = root.body_lists();
+    let parts = attachments::parts(raw);
 
     let from = root.header::<FROM>();
     let sender = from.as_ref().and_then(MimeAddressList::first);
@@ -77,45 +86,55 @@ pub fn parse(raw: &[u8]) -> Result<MessageBody, BridgeError> {
             .unwrap_or_default(),
         kind: kind.to_string(),
         body,
-        attachments: attachments(root),
-        attachment_mark: match io_pimdir::summary::mail::derive(derivable(raw)).summary {
-            Some(io_pimdir::summary::PimdirSummary::Mail(summary)) => {
-                summary.attachment.unwrap_or(false)
-            }
-            _ => false,
-        },
+        attachments: listed(parts.attachments),
+        attachment_mark: parts.attachment,
     })
 }
 
-/// The parts a message carries as attachments, in document order.
+/// The tree of a message as STORAGE Annex A.1 reads its entities, from
+/// `once`, the message stating once each field an entity is read by
+/// ([`first_occurrences`]): mime-rs reads those from their last occurrence.
 ///
-/// Each carries its IMAP section, the key pimdir names its stand-in by.
-/// Exactly the parts making the attachment mark: those carrying
-/// `Content-Disposition: attachment` (STORAGE Annex A.1, section 14.3).
-fn attachments(root: &MimeEntity<'_>) -> Vec<MessageAttachment> {
-    sections(root)
+/// A multipart nothing closes is closed by the end of its entity: where the
+/// message's own is, the line break the message ends with is the missing
+/// delimiter's, and the tree is read without it. `entities` bounds the
+/// parse, [`None`] for mime-rs's own bound.
+fn tree(once: &[u8], entities: Option<usize>) -> MimeCst<'_> {
+    let opts = || MimeParseOptions {
+        max_entities: entities,
+        ..Default::default()
+    };
+    let cst = MimeCst::parse_with(once, opts());
+    let unclosed = cst
+        .root
+        .body
+        .multipart()
+        .is_some_and(|multipart| multipart.close.is_empty());
+    let cut = once
+        .strip_suffix(b"\n")
+        .map(|rest| rest.strip_suffix(b"\r").unwrap_or(rest));
+    match cut {
+        Some(cut) if unclosed => MimeCst::parse_with(cut, opts()),
+        _ => cst,
+    }
+}
+
+/// The parts a message carries as attachments, in document order, each with
+/// its IMAP section, the key pimdir names its stand-in by.
+///
+/// From io-pimdir's walk of the parts, so the reader lists exactly the
+/// stand-ins the store records: the parts making the attachment mark
+/// (STORAGE Annex A.1, §14.3).
+fn listed(files: Vec<PimdirFileSummary>) -> Vec<MessageAttachment> {
+    files
         .into_iter()
-        .filter(|(part, _)| {
-            part.disposition()
-                .is_some_and(|disposition| disposition.is("attachment"))
-        })
-        .map(|(part, section)| {
-            // NOTE: the field as stated, none when absent, rather than the
-            // `text/plain` RFC 2045 section 5.2 defaults it to.
-            let mime = part
-                .header::<CONTENT_TYPE>()
-                .map(|media| match media.sub.is_empty() {
-                    true => media.top,
-                    false => format!("{}/{}", media.top, media.sub),
-                })
-                .unwrap_or_default()
-                .to_lowercase();
-            MessageAttachment {
-                name: part.attachment_name().unwrap_or_default(),
-                mime,
-                size: decoded(part).len() as u64,
-                part: section,
-            }
+        .filter_map(|file| {
+            Some(MessageAttachment {
+                name: file.name,
+                mime: file.media_type.unwrap_or_default(),
+                size: file.size.unwrap_or_default(),
+                part: file.part?,
+            })
         })
         .collect()
 }
@@ -130,7 +149,10 @@ pub fn write_part(raw: &[u8], section: &str, out: &mut impl Write) -> Result<usi
     if raw.is_empty() {
         return Err("Could not read the message".into());
     }
-    let cst = MimeCst::parse(raw);
+    // NOTE: no entity bound, as io-pimdir's walk bounds the entities it
+    // reads and mime-rs leaves whole a multipart holding one too many.
+    let once = first_occurrences(raw);
+    let cst = tree(&once, Some(usize::MAX));
     let part = sections(&cst.root)
         .into_iter()
         .find_map(|(part, held)| (held == section).then_some(part))
@@ -396,7 +418,9 @@ mod tests {
 
         assert_eq!(message.subject, "Broken");
         assert_eq!(message.date, "");
-        assert_eq!(message.body, "cut off\r\n");
+        // NOTE: the end of the message closes the multipart, the line break
+        // it ends with being the missing delimiter's (STORAGE Annex A.1).
+        assert_eq!(message.body, "cut off");
         assert!(message.attachments.is_empty());
         assert_eq!(describe(raw).attachments.map(|found| found.len()), Some(0));
     }
@@ -497,6 +521,57 @@ mod tests {
         assert_eq!(described["size"], raw.len());
         assert!(described["summary"].to_string().contains("deep"));
         assert_eq!(described["attachments"][0]["part"], "1.1.1");
+    }
+
+    /// The attachments the reader lists and opens are the stand-ins
+    /// io-pimdir's summary vectors state (spec/vectors/summaries.json): the
+    /// same sections, names, types and sizes, a part opened by its section
+    /// measuring what its stand-in states (STORAGE §14.3, Annex A.1).
+    #[test]
+    fn the_reader_lists_and_opens_the_attachments_the_summary_vectors_state() {
+        let spec = crate::offline::tests::io_pimdir_spec_dir();
+        let text = std::fs::read_to_string(spec.join("vectors/summaries.json")).unwrap();
+        let vectors: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(vectors["v"], 3, "summaries.json at another version");
+
+        let mut failures = Vec::new();
+        let mut run = 0;
+        for case in vectors["cases"].as_array().unwrap() {
+            let Some(stated) = case.get("attachments").and_then(|found| found.as_array()) else {
+                continue;
+            };
+            let fixture = case["fixture"].as_str().unwrap();
+            let raw = std::fs::read(spec.join("vectors").join(fixture)).unwrap();
+            run += 1;
+
+            let listed: Vec<serde_json::Value> = on_java_stack({
+                let raw = raw.clone();
+                move || parse(&raw).unwrap().attachments
+            })
+            .into_iter()
+            .map(|found| {
+                serde_json::json!({
+                    "part": found.part,
+                    "name": found.name,
+                    "media_type": Some(found.mime).filter(|mime| !mime.is_empty()),
+                    "size": found.size,
+                })
+            })
+            .collect();
+            if &listed != stated {
+                failures.push(format!("{fixture}: listed {listed:?}, stated {stated:?}"));
+                continue;
+            }
+            for found in stated {
+                let section = found["part"].as_str().unwrap();
+                let opened = part(&raw, section).map(|bytes| bytes.len() as u64).ok();
+                if opened != found["size"].as_u64() {
+                    failures.push(format!("{fixture}: part {section} opens {opened:?} octets"));
+                }
+            }
+        }
+        assert!(run >= 40, "{run} cases state their attachments");
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     #[test]

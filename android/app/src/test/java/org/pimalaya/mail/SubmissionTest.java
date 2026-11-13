@@ -224,6 +224,39 @@ public class SubmissionTest {
                 column("SELECT error FROM queue"));
     }
 
+    /**
+     * An unknown outcome is the statement's to record (pimdir STORAGE §15.2,
+     * unconfirm_action): it writes the reserved prefix and counts the attempt
+     * for an intent, and writes nothing over an action the owner applies
+     * itself, nor for a row that is gone.
+     */
+    @Test
+    public void anUnknownOutcomeIsRecordedForAnIntentAlone() {
+        PimdirQueue queue =
+                new PimdirQueue(pimdir, new PimdirAccount(RuntimeEnvironment.getApplication()));
+        MailFixtures.queue(store, ONE, "m1@example.org", "Hello", DATE);
+        long applied =
+                queue.enqueue(
+                        new PimdirQueue.Enqueued(
+                                store.outbox().outboxOf(ONE),
+                                ONE,
+                                "remove",
+                                "{\"v\":1,\"seq\":3}",
+                                null));
+
+        boolean intent = queue.unconfirm(1, "eof");
+        boolean owned = queue.unconfirm(applied, "eof");
+        boolean gone = queue.unconfirm(99, "eof");
+
+        assertEquals(
+                java.util.Arrays.asList("unconfirmed: eof", null),
+                column("SELECT error FROM queue ORDER BY id"));
+        assertEquals(List.of("1", "0"), column("SELECT attempts FROM queue ORDER BY id"));
+        assertTrue(intent);
+        assertEquals("an owner's action", false, owned);
+        assertEquals("no such row", false, gone);
+    }
+
     /** A hand-over the app died in is parked, never handed over again. */
     @Test
     public void aHandOverTheAppDiedInIsParkedUncertain() {

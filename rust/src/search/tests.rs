@@ -751,7 +751,7 @@ fn an_index_of_another_shape_is_refused_and_an_older_one_rebuilt() {
         Held::Refused { .. }
     ));
     floor.exec(&format!(
-        "UPDATE index_meta SET shape = '{SHAPE}', format_version = 'search-draft-11'"
+        "UPDATE index_meta SET shape = '{SHAPE}', format_version = 'search-draft-12'"
     ));
     assert!(matches!(
         held::held(&mut floor).unwrap(),
@@ -767,7 +767,12 @@ fn an_index_of_another_shape_is_refused_and_an_older_one_rebuilt() {
         held::held(&mut floor).unwrap(),
         Held::Rebuild { .. }
     ));
-    floor.exec("UPDATE index_meta SET format_version = 'search-draft-10', store_id = 'other'");
+    floor.exec("UPDATE index_meta SET format_version = 'search-draft-10'");
+    assert!(matches!(
+        held::held(&mut floor).unwrap(),
+        Held::Rebuild { .. }
+    ));
+    floor.exec("UPDATE index_meta SET format_version = 'search-draft-11', store_id = 'other'");
     assert!(matches!(
         held::held(&mut floor).unwrap(),
         Held::Rebuild { .. }

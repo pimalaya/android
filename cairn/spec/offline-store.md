@@ -8,7 +8,7 @@ status: current
 
 The app keeps one pimdir store for every account and every domain: `collections.kind` carries the media type (`message/rfc822`, `text/vcard`, `text/calendar`) and `collections.account` groups by account, so the merged view's two filter axes are columns rather than three databases. Bodies live in a content-addressed blob directory beside the database, referenced by hash and refcounted.
 
-The schema is io-pimdir's canonical storage-draft-10 schema, handed to Java over JNI rather than transcribed; the statements run on it are the app's own text, the `pimalaya-android` shape, which SQLite 3.18 runs, so the store lives on the platform's own SQLite from Android 8.0 up and the app bundles none. The search index, index.db beside the store, is a second database on that same SQLite, written by io-pimdir's I/O-free refresh. The crate is taken without its `client` feature: compiling a second engine into every ABI would work against the app's first design goal.
+The schema is io-pimdir's canonical storage-draft-11 schema, handed to Java over JNI rather than transcribed; the statements run on it are the app's own text, the `pimalaya-android` shape, which SQLite 3.18 runs, so the store lives on the platform's own SQLite from Android 8.0 up and the app bundles none. The search index, index.db beside the store, is a second database on that same SQLite, written by io-pimdir's I/O-free refresh. The crate is taken without its `client` feature: compiling a second engine into every ABI would work against the app's first design goal.
 
 Every collection is reconciled by io-pimdir's sync engine, so every collection carries bindings, staged writes and conflicts. A contacts collection is reconciled against two sources, the server and the phone, which the store holds as one item with one `bindings` row per source; mail and calendar have the one source each and are otherwise the same. Nothing replaces a collection's contents: a refresh reconciles it, which is what lets a write staged before it survive it.
 
@@ -21,7 +21,7 @@ The bridge SHALL run io-pimdir's sync, upgrade and mutate coroutines, and the ap
 - THEN `PimdirSync` derives the push and the driver services its yields
 
 ### Requirement: The store's shape follows the canonical schema
-The store SHALL be created by the canonical draft-10 schema alone (0001_init.sql and `init_store_meta`), served over JNI, and SHALL NOT reconcile, widen, narrow nor rebuild a store of another shape: drafts are exact (STORAGE §4.2), and a store whose schema differs from the canonical text is refused as damaged. The statements it runs SHALL be the app's own shape, `pimalaya-android` (STORAGE §4.4: each canonical statement's name, parameters, columns and effect kept, its text free), and the store SHALL record no shape: a store the canonical statement text wrote is the same store and opens.
+The store SHALL be created by the canonical draft-11 schema alone (0001_init.sql and `init_store_meta`), served over JNI, and SHALL NOT reconcile, widen, narrow nor rebuild a store of another shape: drafts are exact (STORAGE §4.2), and a store whose schema differs from the canonical text is refused as damaged. The statements it runs SHALL be the app's own shape, `pimalaya-android` (STORAGE §4.4: each canonical statement's name, parameters, columns and effect kept, its text free), and the store SHALL record no shape: a store the canonical statement text wrote is the same store and opens.
 
 #### Scenario: A store whose index moved
 - GIVEN a store holding an index the canonical text does not declare
@@ -674,15 +674,15 @@ The app SHALL NOT take the owner lock nor the staging lock of pimdir STORAGE §8
 - THEN it takes no pass and writes nothing, and runs at its next schedule
 
 ### Requirement: A store of another draft is not opened
-The app SHALL create its store at storage-draft-10 (`store_meta.format_version`, a `store_id` and an `incarnation` by the canonical text, `derivation` 3) and record `sync_version`, sync-draft-10, with the first engine write. It SHALL decide whether an existing store opens by io-pimdir's rules (STORAGE §6) over facts read off the file read-only, and SHALL NOT read, write nor reconcile a store another draft, another program or another sync version wrote: start-up stands aside on a screen saying the app has to be reinstalled, and the background job, the sync adapters and the time-zone receiver do nothing. The app states its conformance as `storage-draft-10 owner (own statement text), sync-draft-10 engine` (STORAGE §17).
+The app SHALL create its store at storage-draft-11 (`store_meta.format_version`, a `store_id` and an `incarnation` by the canonical text, `derivation` 3) and record `sync_version`, sync-draft-11, with the first engine write. It SHALL decide whether an existing store opens by io-pimdir's rules (STORAGE §6) over facts read off the file read-only, and SHALL NOT read, write nor reconcile a store another draft, another program or another sync version wrote: start-up stands aside on a screen saying the app has to be reinstalled, and the background job, the sync adapters and the time-zone receiver do nothing. The app states its conformance as `storage-draft-11 owner (own statement text), sync-draft-11 engine` (STORAGE §17).
 
 #### Scenario: A store an earlier version wrote
-- GIVEN a store created before draft-10, a draft-09 store among them
+- GIVEN a store created before draft-11, a draft-10 store among them
 - WHEN the app starts
 - THEN it opens on the reinstall screen, and nothing in the store is written
 
 #### Scenario: Sync state an earlier sync draft wrote
-- GIVEN a store at storage-draft-10 whose `sync_version` is sync-draft-09
+- GIVEN a store at storage-draft-11 whose `sync_version` is sync-draft-10
 - WHEN the app starts
 - THEN it opens on the reinstall screen, and nothing in the store is written
 
@@ -723,7 +723,7 @@ The blob store SHALL file a body under its BLAKE3 name, one shard level deep (`o
 - THEN the file is moved into quarantine/, never unlinked, and the body is stored under its name
 
 ### Requirement: A queued action is read strictly
-Every row the app appends to the queue SHALL match its payload schema (STORAGE §15.3, payloads/), checked before anything is written. A message to send SHALL be queued as Annex B.2's `submit`: `source`, `from`, `rcpts` and `subject` alone, the message the row's body; it SHALL be anchored on the collection its sent copy belongs to, the account's sent mailbox, or on the account's outbox when the account marks none; what the outbox lists (the `Message-ID`, the subject and the date) SHALL be derived from the message, never added to the payload. The drain SHALL judge each row's payload as io-pimdir judges it, valid, malformed or unknown (`payload_outcome`), before handing anything over: a malformed row, one of a known action stating no integer `v` among them, is parked whole, naming what is malformed, and an unknown one, another action or another integer `v` of a known one, is skipped, read no further, left pending and untouched. A submission SHALL go out with the envelope its payload states. A park whose reason begins with the reserved prefix `unconfirmed: ` SHALL be recorded behind `failed: ` (STORAGE §15.2).
+Every row the app appends to the queue SHALL match its payload schema (STORAGE §15.3, payloads/), checked before anything is written. A message to send SHALL be queued as Annex B.2's `submit`: `source`, `from`, `rcpts` and `subject` alone, the message the row's body; it SHALL be anchored on the collection its sent copy belongs to, the account's sent mailbox, or on the account's outbox when the account marks none; what the outbox lists (the `Message-ID`, the subject and the date) SHALL be derived from the message, never added to the payload. The drain SHALL judge each row's payload as io-pimdir judges it, valid, malformed or unknown (`payload_outcome`), before handing anything over: a malformed row, one of a known action stating no integer `v` among them, is parked whole, naming what is malformed, and an unknown one, another action or another integer `v` of a known one, is skipped, read no further, left pending and untouched. A submission SHALL go out with the envelope its payload states. The reserved prefix `unconfirmed: ` SHALL be the statements' alone (STORAGE §13, §15.2): a submission whose outcome is unknown SHALL be parked by `unconfirm_action`, which writes the prefix, counts the attempt and writes nothing over an action the owner applies itself, and a failure SHALL be parked by `park_action` with its reason handed over whole, the statement recording one that begins with the prefix behind `failed: `. The app SHALL write neither prefix itself, and SHALL read the first only to tell an unknown outcome from a refusal.
 
 #### Scenario: A message queued from an account with a sent mailbox
 - GIVEN an account whose roster marks a sent mailbox
@@ -744,6 +744,11 @@ Every row the app appends to the queue SHALL match its payload schema (STORAGE �
 - GIVEN a queued row stating `v: 2`
 - WHEN the drain runs
 - THEN it stays pending, its attempts and error untouched
+
+#### Scenario: A server's refusal beginning with the reserved prefix
+- GIVEN a submission the server refuses with a text beginning `unconfirmed: `
+- WHEN the drain parks it
+- THEN the row's error reads `failed: unconfirmed: ` then the text, and the outbox shows it as refused, never as one that may have gone
 
 ### Requirement: A binding keeps what it agreed with the item
 Every binding SHALL record in `bindings.shared_object` the body it last agreed with the shared item (STORAGE §5, SYNC §9): moved by an upsert carrying a body the item settled on, never by one carrying none nor one leaving the item conflicted, and pinned as the base is (refcount, recount, collector), so it outlives the item's own body.
@@ -786,7 +791,7 @@ Every statement the app runs on the store SHALL prepare and run on SQLite 3.18 a
 - THEN the row is inserted, then updated, keeping the invitation the first write stated
 
 #### Scenario: A store the previous build wrote
-- GIVEN a store created by io-pimdir's canonical statement text at storage-draft-10
+- GIVEN a store created by io-pimdir's canonical statement text at storage-draft-11
 - WHEN this build starts
 - THEN the store opens, and its rows are read and written by the app's statements
 
@@ -807,7 +812,7 @@ The app SHALL write and query index.db on the same SQLite as the store, and SHAL
 - THEN one SQLite in the process holds both files, and the search answers once the refresh's current chunk commits
 
 ### Requirement: The index is the app's own shape over FTS4
-The app SHALL keep a search index, index.db beside the store, in a shape of its own named `pimalaya-android` in `index_meta.shape` (pimdir SEARCH §2), at search-draft-10: the canonical index on SQLite 3.18, ordinary FTS4 tables in place of FTS5 over text io-pimdir folded, `unicode61` with `remove_diacritics=0` and prefixes of 2 and 3. It SHALL record in `index_meta.extraction` the revision of SEARCH §6 io-pimdir extracts under and in `index_meta.extractor` its own revision then io-pimdir's. It SHALL refuse and leave as it is an index of another shape or a later version, and rebuild one of its shape at an earlier version, under another tokenizer or schema, recording another extraction or extractor, or built from another store. The index SHALL be refreshed by io-pimdir's refresh at start, after each engine write batch and at the end of each sync, a run of at most 200 rows of the store's feed per transaction, each run a deferred transaction that takes no lock of the store.
+The app SHALL keep a search index, index.db beside the store, in a shape of its own named `pimalaya-android` in `index_meta.shape` (pimdir SEARCH §2), at search-draft-11: the canonical index on SQLite 3.18, ordinary FTS4 tables in place of FTS5 over text io-pimdir folded, `unicode61` with `remove_diacritics=0` and prefixes of 2 and 3. It SHALL record in `index_meta.extraction` the revision of SEARCH §6 io-pimdir extracts under and in `index_meta.extractor` its own revision then io-pimdir's. It SHALL refuse and leave as it is an index of another shape or a later version, and rebuild one of its shape at an earlier version, under another tokenizer or schema, recording another extraction or extractor, or built from another store. The index SHALL be refreshed by io-pimdir's refresh at start, after each engine write batch and at the end of each sync, a run of at most 200 rows of the store's feed per transaction, each run a deferred transaction that takes no lock of the store.
 
 #### Scenario: A sync writing while the index refreshes
 - GIVEN a refresh run reading the store
@@ -980,3 +985,32 @@ Acknowledging a submission the account's sending server accepted SHALL, in the o
 - GIVEN a message waiting in the outbox
 - WHEN the user deletes it
 - THEN its row is gone and no receipt names it
+
+### Requirement: A message's date is stored in one shape
+The store SHALL hold a message's `date` as an instant in UTC at seconds precision under the `Z` designator (`2026-08-01T10:00:00Z`), or none, the only texts the schema takes (STORAGE §13, Annex A.0). Every mail summary the Java write binds crosses the bridge first, and the bridge SHALL hand it a date of that shape alone, by io-pimdir's own test (`usable_date`): a date stated otherwise, a fraction of a second, an offset, an empty text, SHALL cross as none, as io-pimdir stores it, and the write SHALL NOT be refused for it. The app's connectors state every date in that shape already.
+
+#### Scenario: A summary dated with an offset
+- GIVEN a message staged with a summary dated `2026-10-07T10:00:00+02:00`
+- WHEN the engine's write lands
+- THEN the row is written, its summary holding no date, and the message is in every scope
+
+### Requirement: A part key stands for one message
+The app SHALL record no stand-in and no `attachment` reference for a body stored under a `Message-ID` another row of the account holds another body under, a message whose summary does not agree with its own on subject, date and sender (STORAGE §11.1, §14.3, `key_of_another_message`): a `part:` key is built over the `Message-ID` alone, so the keys are the other message's, whose stand-ins and references SHALL be left as they are. One disagreeing holder is enough. The same message held under another form, its summary agreeing, SHALL record its parts as before.
+
+#### Scenario: A second edition under the first one's Message-ID
+- GIVEN a message stored with its three attachments, and another message of the same `Message-ID`, another subject and another sender, listed in a second mailbox
+- WHEN the second message's body is downloaded or opened
+- THEN no stand-in and no reference is added, and the first message's three stand as they were
+
+### Requirement: The reader lists the stand-ins the store records
+The attachments the reader lists, and the store records stand-ins from, SHALL be read by io-pimdir's walk of the message's parts (STORAGE Annex A.1, §14.3): the parts making the attachment mark, each with its section, name, type and decoded size, the mark shown being that walk's. A part SHALL be opened by its section from the message read as Annex A.1 reads it: each entity's `Content-Type`, `Content-Disposition` and `Content-Transfer-Encoding` from their first occurrence, a multipart nothing closes closed by the end of its entity, the line break the message ends with being the missing delimiter's, and no entity left unsplit, so a part opens to the octets its stand-in states.
+
+#### Scenario: A message cut short
+- GIVEN a `multipart/mixed` message ending after its second part's last line, with no closing delimiter
+- WHEN it is opened
+- THEN its second part is listed as an attachment and opens to its content without the line break the message ends with
+
+#### Scenario: A part stating its fields twice
+- GIVEN a part stating `Content-Disposition: attachment; filename="first.csv"` then `Content-Disposition: inline; filename="second.pdf"`, base64 then 7bit
+- WHEN the message is opened
+- THEN the part is listed as first.csv and opens to what its base64 decodes to
