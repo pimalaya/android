@@ -6,6 +6,7 @@ import static org.junit.Assert.assertTrue;
 import static org.robolectric.Shadows.shadowOf;
 
 import android.app.AlertDialog;
+import android.app.DatePickerDialog;
 import android.content.Context;
 import android.os.Looper;
 import android.view.View;
@@ -640,9 +641,11 @@ public class WritesAfterAPassTest {
         sync(list, "google://" + EMAIL);
 
         batch("due", selected);
-        ShadowAlertDialog.getLatestAlertDialog()
-                .getButton(AlertDialog.BUTTON_POSITIVE)
-                .performClick();
+        // NOTE: the picker opens on today, which may be the due the task holds;
+        // 24 December 2026, its month zero-based.
+        DatePickerDialog picker = (DatePickerDialog) ShadowAlertDialog.getLatestAlertDialog();
+        picker.updateDate(2026, 11, 24);
+        picker.getButton(DatePickerDialog.BUTTON_POSITIVE).performClick();
         settle();
 
         assertEquals("the due date the pass set stays", "20261201",
