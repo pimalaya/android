@@ -22,8 +22,8 @@ use io_msgraph::v1::{
         users::{
             contacts::{MsgraphSingleValueExtendedProperty, delta::MsgraphRemoved},
             messages::{
-                MsgraphEmailAddress, MsgraphFlagStatus, MsgraphFollowupFlag, MsgraphMessage,
-                MsgraphRecipient,
+                MsgraphEmailAddress, MsgraphFlagStatus, MsgraphFollowupFlag,
+                MsgraphInternetMessageHeader, MsgraphMessage, MsgraphRecipient,
                 delta::{MsgraphMessageDelta, MsgraphMessagesDeltaResponse},
                 list::MsgraphMessagesListResponse,
             },
@@ -55,7 +55,7 @@ use crate::{
     error::BridgeError,
     mail::{
         Mailbox,
-        listing::{Floor, Listing, MailRequest, Named, Scope},
+        listing::{Floor, Listing, MailPage, MailRequest, Named, Scope},
         msgraph::{
             Band, DELTA_SELECT, MESSAGE_EXPAND, MESSAGE_SELECT, graph_summary, message_url,
             permanent_delete_url,
@@ -85,6 +85,8 @@ struct Message {
     /// The MAPI size the summary's `$expand` reads, [`None`] when Graph
     /// answers none.
     size: Option<u64>,
+    /// The header fields a read answers, none for most.
+    fields: Vec<(String, String)>,
 }
 
 /// A Graph mail folder, and what was asked of it.
@@ -140,6 +142,7 @@ impl FakeGraph {
                     date: Some(hours_back(index as i64)),
                     read: false,
                     size: Some(1000 + index as u64),
+                    fields: Vec::new(),
                 },
             );
         }
@@ -152,6 +155,7 @@ impl FakeGraph {
             date,
             read: false,
             size: None,
+            fields: Vec::new(),
         };
         self.folder.insert(id.into(), message);
         self.log.push(id.into());
@@ -202,6 +206,14 @@ impl FakeGraph {
                     value: size.to_string(),
                 })
                 .into_iter()
+                .collect(),
+            internet_message_headers: message
+                .fields
+                .iter()
+                .map(|(name, value)| MsgraphInternetMessageHeader {
+                    name: name.clone(),
+                    value: value.clone(),
+                })
                 .collect(),
             ..Default::default()
         }
@@ -965,6 +977,92 @@ fn an_undated_message_survives_a_widening() {
         handles(dir.path()).contains("undated"),
         "a band listed by date says nothing of an undated message"
     );
+}
+
+/// The delta's first pass keeps a row by `sentDateTime`, stamped at
+/// submission, not by the `Date` a member is in scope by: a member with no
+/// `Date` it leaves out is kept through the folder's ids, one gone still
+/// retired (SYNC §5).
+#[test]
+fn a_delta_round_keeps_a_member_its_sent_date_leaves_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(dir.path());
+    let mut graph = FakeGraph::new(100);
+    let since = hours_back(50);
+
+    // NOTE: submitted before the scope, with no `Date` field.
+    graph.add("undated", Some(hours_back(90)));
+    graph.folder.get_mut("undated").unwrap().fields =
+        vec![("Message-ID".into(), "<undated@example.org>".into())];
+
+    // NOTE: the whole folder, then a bound inside it before any link.
+    sync(&mut store, &mut graph, dir.path(), None).unwrap();
+    assert_eq!(handles(dir.path()).len(), 101);
+    graph.remove("m0010");
+    sync(&mut store, &mut graph, dir.path(), Some(&since)).unwrap();
+    assert_eq!(graph.delta_starts, 1, "the round walked the delta");
+
+    let held = handles(dir.path());
+    assert!(held.contains("undated"), "no `Date`, in every scope");
+    assert!(!held.contains("m0010"), "gone, so retired");
+}
+
+/// One round over the delta's first pass under `since`, page by page.
+fn delta_round(graph: &mut FakeGraph, since: Option<&str>) -> Vec<MailPage> {
+    let mut cursor: Option<String> = None;
+    let mut pages = Vec::new();
+    loop {
+        let request = MailRequest {
+            listing: Listing::Round {
+                cursor: cursor.clone(),
+                band: false,
+            },
+            scope: Scope {
+                since: since.map(String::from),
+                until: None,
+            },
+            covered: true,
+            received: None,
+        };
+        let page = graph
+            .serve(|graph| graph.list_page(FOLDER, &request))
+            .unwrap();
+        cursor = page.cursor.clone();
+        pages.push(page);
+        if cursor.is_none() {
+            return pages;
+        }
+    }
+}
+
+/// A row the delta's first pass leaves out by `sentDateTime` may hold a
+/// `Date` in scope, so under a bound every page of its round is narrowed and
+/// the last hands the folder's every id (SYNC §4); an open scope leaves none
+/// out, its round neither narrowed nor enumerating.
+#[test]
+fn a_delta_round_under_a_bound_hands_the_folders_every_id() {
+    let mut graph = FakeGraph::new(10);
+    graph.page = 4;
+
+    let bounded = delta_round(&mut graph, Some(&hours_back(5)));
+    assert_eq!(bounded.len(), 3, "ten rows, four a page");
+    assert!(bounded.iter().all(|page| page.narrowed));
+    let listed: usize = bounded.iter().map(|page| page.items.len()).sum();
+    assert_eq!(listed, 6, "by sentDateTime");
+    let (last, before) = bounded.split_last().unwrap();
+    assert!(before.iter().all(|page| page.enumerated.is_none()));
+    let mut enumerated = last.enumerated.clone().expect("the folder's every id");
+    enumerated.sort();
+    let every: Vec<String> = graph.folder.keys().cloned().collect();
+    assert_eq!(enumerated, every, "those left out among them");
+
+    let id_lists = graph.id_lists;
+    let open = delta_round(&mut graph, None);
+    assert!(open.iter().all(|page| !page.narrowed));
+    assert!(open.iter().all(|page| page.enumerated.is_none()));
+    let listed: usize = open.iter().map(|page| page.items.len()).sum();
+    assert_eq!(listed, 10);
+    assert_eq!(graph.id_lists, id_lists, "no enumeration asked");
 }
 
 /// A session opened to widen a mailbox, or by a fill step, reads the folder

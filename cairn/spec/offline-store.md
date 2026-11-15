@@ -775,12 +775,17 @@ A round whose listing names no member while the store binds some, or finds more 
 - THEN the 40 entries are still there and a dialog says the server no longer lists them, offering Remove and Keep
 
 ### Requirement: A narrowed round enumerates its collection
-A mail round whose listing a date filter narrowed SHALL say so on every page, and its last page SHALL hand every handle the mailbox holds, read with no date filter: IMAP `UID SEARCH ALL`, JMAP `Email/query` filtered by the mailbox alone, Graph the folder's message ids, Gmail the label's ids with no query. A member the narrowed listing did not name SHALL be retired only when this enumeration does not name it either.
+A mail round whose listing a date filter narrowed, the server's or the app's own check of a date other than the `Date` header (Graph's `sentDateTime`), SHALL say so on every page, and its last page SHALL hand every handle the mailbox holds, read with no date filter: IMAP `UID SEARCH ALL`, JMAP `Email/query` filtered by the mailbox alone and paged until the `total` the server states or, stating none, an empty page, Graph the folder's message ids, Gmail the label's ids with no query. An enumeration ending short of the total its server states SHALL be handed as none. A member the narrowed listing did not name SHALL be retired only when this enumeration does not name it either, and never by a round handing none. The engine of io-pimdir 0.12 (sync-draft-11) still finds absent a narrowed round's member dated before the round opened, whatever the enumeration holds: until the app takes the io-pimdir that reads the enumeration alone, the app stands short of this requirement by it, a Graph message whose `Date` lies in the scope and whose `sentDateTime` does not among what it retires.
 
 #### Scenario: An undated message under the download window
 - GIVEN a Gmail label holding a message received before the round's `after:`
 - WHEN the round's last page lands
 - THEN the message stays, the label's ids naming it
+
+#### Scenario: A JMAP server stating no total
+- GIVEN a JMAP mailbox of 1,200 messages under the download window, on a server whose `Email/query` states no `total`
+- WHEN a round's last page lands
+- THEN its enumeration names all 1,200, and none the round left unlisted is retired
 
 ### Requirement: The store's statements run on Android 8's SQLite
 Every statement the app runs on the store SHALL prepare and run on SQLite 3.18 as Android 8.0 builds it (no `RETURNING`, upsert, `UPDATE ... FROM`, `STRICT` nor JSON), the store tests running on that build. A statement 3.18 lacks a construct for SHALL be the canonical one's effect in several statements run in order under its one name, in one transaction, never one at a time by its caller. No SQL SHALL be written in Java.

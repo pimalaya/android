@@ -108,6 +108,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed messages vanishing from the phone after a sync under a download window: on a JMAP server that does not say how many messages a mailbox holds, those past the first page of the check the sync makes of the mailbox, and on Microsoft 365 a message carrying no `Date` header that was sent before the window.
 - Fixed an IMAP answer holding a line the app cannot read (a mailbox, a search or a message line in a form no client decodes) being taken for a shorter listing, which dropped that mailbox or those messages from the phone: the mailbox's sync now fails saying so, and nothing is dropped.
 - Fixed a CardDAV or CalDAV listing cut short, or answered by a page that is no listing, being read as a shorter one, its missing contacts or events dropped from the phone: the listing now fails.
 - Fixed a message one recipient of which the server refuses not saying which: the failed message names the recipient.

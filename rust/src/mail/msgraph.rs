@@ -98,7 +98,7 @@ const WELL_KNOWN: [(&str, &str); 4] = [
 /// (pimdir STORAGE Annex A.1), answered whole or not at all: every header
 /// field of the message on each row, the trace fields included. The
 /// decoded members name a row Graph answers none for, its date
-/// `sentDateTime`, Graph's name for the `Date` header, never the reception.
+/// `sentDateTime`, never the reception.
 const MESSAGE_SELECT: &str = "id,subject,from,toRecipients,ccRecipients,sentDateTime,isRead,\
 flag,hasAttachments,internetMessageId,internetMessageHeaders";
 
@@ -202,8 +202,8 @@ impl<H: Host> Msgraph<'_, H> {
     }
 
     /// Takes a folder's newest messages below the floor's ceiling until its
-    /// chunk is full, listed by `sentDateTime` (the `Date` header, which
-    /// Graph filters on exactly), that alone selected.
+    /// chunk is full, listed by `sentDateTime` (which Graph filters on
+    /// exactly, not always the `Date` header), that alone selected.
     pub fn floor(&mut self, folder_id: &str, floor: &mut Floor) -> Result<(), BridgeError> {
         let auth = HttpAuthBearer::new(self.token);
         let filter = floor
@@ -354,8 +354,8 @@ const BAND_CURSOR: &str = "band:";
 /// delta's first pass, the rest Graph's next link.
 const DELTA_CURSOR: &str = "delta:";
 
-/// The `$select` of the unfiltered delta: the markers, and the `Date`
-/// telling a member in scope, all a change needs where the store names
+/// The `$select` of the unfiltered delta: the markers, and `sentDateTime`
+/// narrowing it to the scope, all a change needs where the store names
 /// the message already. The delta link keeps it for every later delta.
 const DELTA_SELECT: &str = "id,sentDateTime,isRead,flag";
 
@@ -367,13 +367,13 @@ pub struct MessagesPage {
     pub more: bool,
 }
 
-/// A band of `sentDateTime`, Graph's name for the `Date` header, which it
-/// filters on exactly.
+/// A band of `sentDateTime`, which Graph filters on exactly: stamped at
+/// submission, it need not be the `Date` header.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Band {
-    /// The oldest `Date` in the band.
+    /// The oldest `sentDateTime` in the band.
     pub since: Option<String>,
-    /// The `Date` the band stays below.
+    /// The `sentDateTime` the band stays below.
     pub until: Option<String>,
     /// Whether `until` is in, for a page resuming within one second.
     pub inclusive: bool,
@@ -482,13 +482,14 @@ impl<H: Host> Msgraph<'_, H> {
         }
     }
 
-    /// One page of a band listed by `/messages`, newest `Date` first, below
-    /// the ceiling, the next resuming below the oldest `Date` it reached.
+    /// One page of a band listed by `/messages`, newest `sentDateTime` first,
+    /// below the ceiling, the next resuming below the oldest it reached.
     ///
     /// No checkpoint: a band round keeps the source's, and a first chunk
     /// lands before any delta link exists. Every page is narrowed (SYNC
-    /// §4): the `sentDateTime` filter misses an undated message, so the last
-    /// page hands the folder's every id ([`Self::folder_ids`]).
+    /// §4): the `sentDateTime` filter misses an undated message and one it
+    /// does not date as `Date` does, so the last page hands the folder's
+    /// every id ([`Self::folder_ids`]).
     fn band_page(
         &mut self,
         folder: &str,
@@ -590,8 +591,10 @@ impl<H: Host> Msgraph<'_, H> {
     /// One page of the unfiltered delta's first pass, as a round page: the
     /// next link the cursor, the last page's delta link the checkpoint.
     ///
-    /// It is what the folder holds as it ends, so a member it does not list
-    /// is absent from the scope. A next link Graph expired restarts the round.
+    /// A row is kept by its `sentDateTime` ([`changes`]), so under a bounded
+    /// scope every page is narrowed (SYNC §4) and the last hands the folder's
+    /// every id ([`Self::folder_ids`]). A next link Graph expired restarts
+    /// the round.
     fn delta_page(
         &mut self,
         folder: &str,
@@ -608,10 +611,17 @@ impl<H: Host> Msgraph<'_, H> {
         let mut items = Vec::new();
         let mut vanished = Vec::new();
         changes(page.value, scope, &mut items, &mut vanished);
+        let narrowed = scope.since.is_some() || scope.until.is_some();
         let mut reply = match (page.next_link, page.delta_link) {
-            (Some(next), _) => MailPage::round(items, Some(format!("{DELTA_CURSOR}{next}")), None),
+            (Some(next), _) => MailPage::round(items, Some(format!("{DELTA_CURSOR}{next}")), None)
+                .narrowed(narrowed, None),
             (None, Some(link)) => {
+                let ids = match narrowed {
+                    true => Some(self.folder_ids(folder)?),
+                    false => None,
+                };
                 MailPage::round(items, None, Some(format!("{DELTA_CHECKPOINT}{link}")))
+                    .narrowed(narrowed, ids)
             }
             (None, None) => return Err("Graph delta page with no link".into()),
         };
@@ -744,8 +754,8 @@ impl<H: Host> Msgraph<'_, H> {
 }
 
 /// What one delta page says of the folder: a removal goes whatever the
-/// date, a message dated out of the scope is dropped, and one in scope
-/// is listed by id and markers alone.
+/// date, a message whose `sentDateTime` lies out of the scope is dropped,
+/// and one in scope is listed by id and markers alone.
 fn changes(
     rows: Vec<MsgraphMessageDelta>,
     scope: &Scope,

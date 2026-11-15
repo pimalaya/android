@@ -48,7 +48,7 @@ use url::Url;
 use crate::{
     client::{
         Host,
-        jmap::{Jmap, JmapCalls, max_objects_in_get, page_size, refused, sessions},
+        jmap::{Jmap, JmapCalls, max_objects_in_get, page_size, paged, refused, sessions},
         trust::CrossOrigin,
     },
     error::{BridgeError, converged, coroutine_error},
@@ -180,7 +180,7 @@ impl<H: Host> Jmap<'_, H> {
         // filtered by the mailbox alone: a query per page of ids.
         let narrowed = scope.since.is_some() || scope.until.is_some();
         let enumerated = match narrowed && !more {
-            true => Some(self.mailbox_ids(&session, &auth, &api_url, mailbox_id, limit)?),
+            true => self.mailbox_ids(&session, &auth, &api_url, mailbox_id, limit)?,
             false => None,
         };
         Ok(
@@ -191,6 +191,9 @@ impl<H: Host> Jmap<'_, H> {
 
     /// Every email id a mailbox holds, `Email/query` filtered by the mailbox
     /// alone and paged by position, ids only (RFC 8620 §5.5).
+    ///
+    /// Read to the `total` the server states, else to an empty page
+    /// ([`paged`]); [`None`] when it ends short of a stated total.
     fn mailbox_ids(
         &mut self,
         session: &JmapSession,
@@ -198,17 +201,16 @@ impl<H: Host> Jmap<'_, H> {
         api_url: &Url,
         mailbox_id: &str,
         limit: u64,
-    ) -> Result<Vec<String>, BridgeError> {
+    ) -> Result<Option<Vec<String>>, BridgeError> {
         let account = session.primary_account_id_for(JMAP_MAIL_CAPABILITY);
-        let mut ids = Vec::new();
-        loop {
+        let (ids, whole) = paged(|position| {
             let filter = JmapEmailFilter {
                 in_mailbox: Some(mailbox_id.to_string()),
                 ..Default::default()
             };
             let opts = JmapQueryOptions::<_, JmapEmailComparator> {
                 filter: Some(JmapFilter::Condition(filter)),
-                position: Some(ids.len() as u64),
+                position: Some(position),
                 limit: Some(limit),
                 calculate_total: true,
                 ..Default::default()
@@ -223,13 +225,14 @@ impl<H: Host> Jmap<'_, H> {
             )
             .map_err(|err| err.to_string())?;
             let page = self.run(api_url, coroutine)?;
-            let listed = page.ids.len();
-            ids.extend(page.ids);
-            let total = page.total.unwrap_or(0) as usize;
-            if listed == 0 || ids.len() >= total {
-                return Ok(ids);
-            }
+            Ok((page.ids, page.total, page.position))
+        })?;
+
+        if !whole {
+            log::warn!("mailbox {mailbox_id} enumerated short of its total");
+            return Ok(None);
         }
+        Ok(Some(ids))
     }
 
     /// Takes a mailbox's newest emails below the floor's ceiling until its
