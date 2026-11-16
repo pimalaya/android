@@ -520,12 +520,14 @@ impl<H: Host> GcalEntry<'_, H> {
                 Some(REFUSED) => BridgeError {
                     message: format!("Google refuses an occurrence of event {id} for good: {err}"),
                     status: Some(REFUSED),
+                    ..Default::default()
                 },
                 _ => BridgeError {
                     message: format!(
                         "Event {id} was written to Google without all its occurrences: {err}"
                     ),
                     status: Some(412),
+                    ..Default::default()
                 },
             })
     }
@@ -847,6 +849,7 @@ fn check_revision(
             Err(BridgeError {
                 message: format!("Event {id} changed on Google since it was read"),
                 status: Some(412),
+                ..Default::default()
             })
         }
         _ => Ok(()),

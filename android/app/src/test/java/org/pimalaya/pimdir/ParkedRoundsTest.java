@@ -12,10 +12,10 @@ import java.util.List;
 /** The rounds a sync parked, asked about once and accepted for one run. */
 public class ParkedRoundsTest {
     private static SyncReport parked(int absent, int bound) {
-        return new SyncReport(absent, bound, 0, 0, true, 0, 0, 0, 0, 0, 0);
+        return new SyncReport(absent, bound, 0, 0, true, 0, 0, 0, List.of(), 0, 0, 0, 0);
     }
 
-    private static final SyncReport CLOSED = new SyncReport(0, 0, 0, 0, false, 0, 0, 0, 0, 0, 0);
+    private static final SyncReport CLOSED = new SyncReport(0, 0, 0, 0, false, 0, 0, 0, List.of(), 0, 0, 0, 0);
 
     @Test
     public void aParkedRoundIsOfferedOnceUntilWhatItFindsChanges() {

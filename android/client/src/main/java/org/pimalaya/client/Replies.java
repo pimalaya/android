@@ -19,7 +19,10 @@ final class Replies {
         JSONObject reply = read(json);
         String error = reply.optString("error");
         if (!error.isEmpty()) {
-            throw new PimalayaException(error, reply.has("status") ? reply.optInt("status") : null);
+            throw new PimalayaException(
+                    error,
+                    reply.has("status") ? reply.optInt("status") : null,
+                    reply.optBoolean("refused"));
         }
         return reply;
     }

@@ -375,6 +375,7 @@ fn moved(message: impl Into<String>) -> BridgeError {
     BridgeError {
         message: message.into(),
         status: Some(412),
+        ..Default::default()
     }
 }
 

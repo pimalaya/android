@@ -24,7 +24,7 @@ use serde::Serialize;
 ///
 /// Java branches on the status (412 retries unguarded, 404 converges a
 /// removal, 401 refreshes the token), so it is a field, not message prose.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub struct BridgeError {
     /// Human-readable failure message.
     #[serde(rename = "error")]
@@ -32,6 +32,12 @@ pub struct BridgeError {
     /// Status of the failed HTTP round, absent on non-HTTP failures.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<u16>,
+    /// Whether the server refused the change as it stands (pimdir SYNC
+    /// §4), which no later attempt makes it take: a sync answers its push
+    /// `Refused`, which the engine holds, where any other failure is pushed
+    /// again. Set by the mail connectors alone ([`refuses`]).
+    #[serde(skip_serializing_if = "core::ops::Not::not")]
+    pub refused: bool,
 }
 
 impl fmt::Display for BridgeError {
@@ -44,7 +50,7 @@ impl From<String> for BridgeError {
     fn from(message: String) -> Self {
         Self {
             message,
-            status: None,
+            ..Default::default()
         }
     }
 }
@@ -72,7 +78,58 @@ pub fn coroutine_error(err: &(impl StdError + 'static)) -> BridgeError {
     BridgeError {
         message: err.to_string(),
         status: http_status(err),
+        refused: refuses(err),
     }
+}
+
+/// Whether a mail server refused a request as it stands (pimdir SYNC §4),
+/// read from the failure's source chain: Graph, Gmail or JMAP answering a
+/// status naming the request ([`names_the_request`]) that names no quota
+/// nor rate limit, the account's state rather than the change's, which the
+/// same change outlives. Any other failure cannot tell.
+pub fn refuses(err: &(dyn StdError + 'static)) -> bool {
+    let mut cause = Some(err);
+
+    while let Some(err) = cause {
+        if let Some(send) = err.downcast_ref::<MsgraphSendError>() {
+            return send.api().is_some_and(|api| {
+                names_the_request(api.status)
+                    && api.code != "ErrorQuotaExceeded"
+                    && !throttled(&api.message)
+            });
+        }
+        if let Some(GmailSendError::Api(api)) = err.downcast_ref::<GmailSendError>() {
+            let limited = api.reasons.iter().chain(&api.detail_reasons).any(|reason| {
+                let reason = reason.to_ascii_lowercase();
+                reason.contains("limitexceeded") || reason.contains("quota")
+            }) || api.google_status.as_deref() == Some("RESOURCE_EXHAUSTED");
+            return names_the_request(api.status) && !limited && !throttled(&api.message);
+        }
+        if let Some(JmapSendError::HttpStatus(status) | JmapSendError::Request { status, .. }) =
+            err.downcast_ref()
+        {
+            return names_the_request(*status) && !throttled(&err.to_string());
+        }
+        cause = err.source();
+    }
+
+    false
+}
+
+/// Whether an HTTP status names the request itself (pimdir SYNC §4): any
+/// from 400 to 499 but those naming the credentials (401, 407), a state
+/// that passes (408, 423, 425, 429) or a stale base (409, 412), as
+/// neverest reads it.
+pub fn names_the_request(status: u16) -> bool {
+    (400..500).contains(&status) && !matches!(status, 401 | 407 | 408 | 409 | 412 | 423 | 425 | 429)
+}
+
+/// Whether a server's text names a quota or a rate limit, without case.
+fn throttled(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    ["rate limit", "ratelimit", "quota", "usage limit"]
+        .iter()
+        .any(|limit| text.contains(limit))
 }
 
 /// The HTTP status of the failed round, from the failure's source chain.
@@ -153,13 +210,8 @@ pub const REFUSED: u16 = 422;
 /// throttle (429, a rate or quota 403), the token (401) or a gone event
 /// (404, 410), which a later pass may well see through.
 pub fn refused_for_good(err: &BridgeError) -> bool {
-    let message = err.message.to_ascii_lowercase();
-    let throttled = ["rate limit", "ratelimit", "quota", "usage limit"]
-        .iter()
-        .any(|limit| message.contains(limit));
-
     match err.status {
-        Some(403) => !throttled,
+        Some(403) => !throttled(&err.message),
         Some(401 | 404 | 409 | 410 | 412 | 429) => false,
         Some(status) => (400..500).contains(&status),
         None => false,
@@ -180,6 +232,7 @@ pub fn parts_failure(failures: Vec<BridgeError>) -> Option<BridgeError> {
     Some(BridgeError {
         message: first.message.clone(),
         status: Some(if refused { REFUSED } else { 412 }),
+        ..Default::default()
     })
 }
 
@@ -203,6 +256,7 @@ mod tests {
         let http = BridgeError {
             message: "WebDAV server returned HTTP 412".into(),
             status: Some(412),
+            ..Default::default()
         };
         assert_eq!(
             serde_json::to_string(&http).unwrap(),
@@ -215,6 +269,7 @@ mod tests {
         let failed = |status, message: &str| BridgeError {
             message: message.into(),
             status: Some(status),
+            ..Default::default()
         };
 
         assert!(refused_for_good(&failed(
@@ -263,5 +318,45 @@ mod tests {
 
         let parsed = coroutine_error(&JmapSessionGetError::NoPrimaryMailAccount);
         assert_eq!(parsed.status, None);
+    }
+
+    /// A status naming the request refuses a mail change as it stands, but
+    /// those naming the credentials, a passing state or a stale base, and a
+    /// quota or a rate limit whatever its status (pimdir SYNC §4).
+    #[test]
+    fn a_mail_refusal_is_told_by_its_status_and_never_by_a_quota() {
+        use io_gmail::v1::send::{GmailApiError, GmailSendError};
+        use io_msgraph::v1::send::{MsgraphApiError, MsgraphSendError};
+
+        let graph = |status, code: &str| {
+            let body = format!(r#"{{"error": {{"code": "{code}", "message": "m"}}}}"#);
+            let api = MsgraphApiError::parse(status, [], body.as_bytes());
+            coroutine_error(&MsgraphSendError::Api(Box::new(api))).refused
+        };
+        assert!(graph(400, "ErrorInvalidRequest"));
+        assert!(graph(403, "ErrorAccessDenied"));
+        assert!(!graph(403, "ErrorQuotaExceeded"));
+        for status in [401, 407, 408, 409, 412, 423, 425, 429, 500, 503, 507] {
+            assert!(!graph(status, "Other"), "{status}");
+        }
+
+        let gmail = |status, reason: &str| {
+            let body = format!(
+                r#"{{"error": {{"code": {status}, "message": "m",
+                    "errors": [{{"reason": "{reason}", "message": "m"}}]}}}}"#
+            );
+            let api = GmailApiError::parse(status, body.as_bytes());
+            coroutine_error(&GmailSendError::Api(api)).refused
+        };
+        assert!(gmail(400, "invalidArgument"));
+        assert!(gmail(403, "insufficientPermissions"));
+        assert!(!gmail(403, "userRateLimitExceeded"));
+        assert!(!gmail(403, "quotaExceeded"));
+        assert!(!gmail(429, "rateLimitExceeded"));
+        assert!(!gmail(500, "backendError"));
+
+        assert!(coroutine_error(&JmapSendError::HttpStatus(400)).refused);
+        assert!(!coroutine_error(&JmapSendError::HttpStatus(412)).refused);
+        assert!(!coroutine_error(&JmapSessionGetError::HttpStatus(403)).refused);
     }
 }

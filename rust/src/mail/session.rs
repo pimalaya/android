@@ -1291,6 +1291,7 @@ mod tests {
         let forbidden = || BridgeError {
             message: "Forbidden".into(),
             status: Some(403),
+            ..Default::default()
         };
         let limited = Refused::http(forbidden(), false, true, refused_by_api);
         assert!(!limited.permanent && !limited.uncertain);

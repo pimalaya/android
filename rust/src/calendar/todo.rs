@@ -334,6 +334,7 @@ fn check_revision(
         Some(expected) if current != Some(expected) => Err(BridgeError {
             message: format!("Task {id} changed on To Do since it was read"),
             status: Some(412),
+            ..Default::default()
         }),
         _ => Ok(()),
     }

@@ -462,7 +462,7 @@ mod tests {
             objects,
             meta: Some(MetaFacts {
                 format: Some("pimdir".into()),
-                format_version: Some("storage-draft-11".into()),
+                format_version: Some("storage-draft-13".into()),
                 version: Some(1),
                 hash_algo: Some("blake3".into()),
                 sync_version: None,
@@ -498,7 +498,15 @@ mod tests {
         assert_eq!(check(&facts).unwrap_err().code, "store-version");
 
         let mut facts = current();
-        facts.meta.as_mut().unwrap().sync_version = Some("sync-draft-10".into());
+        facts.meta.as_mut().unwrap().format_version = Some("storage-draft-11".into());
+        assert_eq!(check(&facts).unwrap_err().code, "store-version");
+
+        let mut facts = current();
+        facts.meta.as_mut().unwrap().format_version = Some("storage-draft-12".into());
+        assert_eq!(check(&facts).unwrap_err().code, "store-version");
+
+        let mut facts = current();
+        facts.meta.as_mut().unwrap().sync_version = Some("sync-draft-11".into());
         assert_eq!(check(&facts).unwrap_err().code, "sync-version");
     }
 

@@ -16,6 +16,7 @@ use io_jmap::{
         changes::*,
         error::JmapMethodError,
         filter::JmapFilter,
+        get::JmapUnparsed,
         query::{JmapQuery, JmapQueryOptions},
         session::JmapSession,
     },
@@ -164,6 +165,7 @@ impl<H: Host> Jmap<'_, H> {
         let coroutine =
             JmapEmailQuery::new(&session, &auth, opts).map_err(|err| err.to_string())?;
         let out = self.run(&api_url, coroutine)?;
+        parsed(&out.unparsed, "Email/query")?;
 
         let listed = out.emails.len() as u64;
         let reached = out.position + listed;
@@ -269,6 +271,7 @@ impl<H: Host> Jmap<'_, H> {
             let coroutine =
                 JmapEmailQuery::new(&session, &auth, opts).map_err(|err| err.to_string())?;
             let out = self.run(&api_url, coroutine)?;
+            parsed(&out.unparsed, "Email/query")?;
 
             let listed = out.emails.len() as u64;
             for email in &out.emails {
@@ -348,6 +351,7 @@ impl<H: Host> Jmap<'_, H> {
             let coroutine = JmapEmailGet::new(session, auth, ids.to_vec(), opts)
                 .map_err(|err| err.to_string())?;
             let out = self.run(api_url, coroutine)?;
+            parsed(&out.unparsed, "Email/get")?;
             gone.extend(out.not_found);
             emails.extend(out.emails);
         }
@@ -403,6 +407,7 @@ impl<H: Host> Jmap<'_, H> {
         let opts = JmapMailboxGetOptions::default();
         let coroutine = JmapMailboxGet::new(session, auth, opts).map_err(|err| err.to_string())?;
         let out = self.run(api_url, coroutine)?;
+        parsed(&out.unparsed, "Mailbox/get")?;
 
         let named: BTreeMap<String, JmapMailbox> = out
             .mailboxes
@@ -560,6 +565,21 @@ impl<H: Host> JmapCalls<'_, '_, H> {
     }
 }
 
+/// Refuses an answer holding an object its server sent and io-jmap could
+/// not read (io-jmap 0.10): left out, it would read as a message or a
+/// mailbox gone, so the answer is not whole.
+fn parsed(unparsed: &[JmapUnparsed], method: &str) -> Result<(), BridgeError> {
+    let Some(first) = unparsed.first() else {
+        return Ok(());
+    };
+    Err(format!(
+        "JMAP {method} is not whole, objects unread: {} ({})",
+        unparsed.len(),
+        first.error
+    )
+    .into())
+}
+
 /// One message's `Email/set` refusal as an error, if any: a message the
 /// server no longer finds as the 404 Gmail and Graph answer ([`converged`]).
 fn email_set_refusal(id: &str, refusal: Option<&JmapEmailSetItemError>) -> Result<(), BridgeError> {
@@ -568,8 +588,35 @@ fn email_set_refusal(id: &str, refusal: Option<&JmapEmailSetItemError>) -> Resul
         Some(JmapEmailSetItemError::NotFound { .. }) => Err(BridgeError {
             message: format!("No message {id} on the server"),
             status: Some(404),
+            ..Default::default()
         }),
-        Some(refused) => Err(format!("The server refused the change: {refused}").into()),
+        Some(refusal) => Err(BridgeError {
+            message: format!("The server refused the change: {refusal}"),
+            refused: refuses_as_it_stands(refusal),
+            ..Default::default()
+        }),
+    }
+}
+
+/// Whether an `Email/set` refusal names the change as it stands (pimdir
+/// SYNC §4, RFC 8620 §5.3, RFC 8621 §4.6): a rule it breaks, which no
+/// later attempt mends. A quota, a rate limit, a message about to go or
+/// a type io-jmap does not name cannot tell.
+fn refuses_as_it_stands(refusal: &JmapEmailSetItemError) -> bool {
+    match refusal {
+        JmapEmailSetItemError::TooManyKeywords { .. }
+        | JmapEmailSetItemError::TooManyMailboxes { .. }
+        | JmapEmailSetItemError::BlobNotFound { .. }
+        | JmapEmailSetItemError::InvalidPatch { .. }
+        | JmapEmailSetItemError::InvalidProperties { .. }
+        | JmapEmailSetItemError::Singleton { .. }
+        | JmapEmailSetItemError::Forbidden { .. }
+        | JmapEmailSetItemError::TooLarge { .. } => true,
+        JmapEmailSetItemError::NotFound { .. }
+        | JmapEmailSetItemError::WillDestroy { .. }
+        | JmapEmailSetItemError::OverQuota { .. }
+        | JmapEmailSetItemError::RateLimit { .. }
+        | JmapEmailSetItemError::Other { .. } => false,
     }
 }
 
@@ -690,7 +737,10 @@ impl<H: Host> JmapCalls<'_, '_, H> {
             JmapEmailQuery::new(&self.session, &self.auth, opts).map_err(|err| err.to_string())?;
         let api_url = self.session.api_url.clone();
         match self.jmap.try_run(&api_url, coroutine)? {
-            Ok(out) => Ok(Some(out.emails)),
+            Ok(out) => {
+                parsed(&out.unparsed, "Email/query")?;
+                Ok(Some(out.emails))
+            }
             Err(JmapEmailQueryError::QueryMethod(JmapMethodError::AnchorNotFound { .. })) => {
                 Ok(None)
             }
@@ -709,7 +759,9 @@ impl<H: Host> JmapCalls<'_, '_, H> {
         };
         let coroutine = JmapEmailGet::new(&self.session, &self.auth, ids, opts)
             .map_err(|err| err.to_string())?;
-        Ok(self.jmap.run(&self.session.api_url, coroutine)?.emails)
+        let out = self.jmap.run(&self.session.api_url, coroutine)?;
+        parsed(&out.unparsed, "Email/get")?;
+        Ok(out.emails)
     }
 
     /// One message's blob, downloaded from the session's download URL.
@@ -770,10 +822,14 @@ impl<H: Host> JmapCalls<'_, '_, H> {
             // NOTE: one already held may be an earlier try's, sent or not.
             return Err(match err {
                 JmapEmailImportItemError::AlreadyExists { .. }
+                | JmapEmailImportItemError::OverQuota { .. }
+                | JmapEmailImportItemError::RateLimit { .. }
                 | JmapEmailImportItemError::Other { .. } => message.into(),
                 JmapEmailImportItemError::InvalidEmail { .. }
                 | JmapEmailImportItemError::NotFound { .. }
-                | JmapEmailImportItemError::InvalidProperties { .. } => refused(message),
+                | JmapEmailImportItemError::InvalidProperties { .. }
+                | JmapEmailImportItemError::Forbidden { .. }
+                | JmapEmailImportItemError::TooLarge { .. } => refused(message),
             });
         }
         let email = imported

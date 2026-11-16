@@ -573,6 +573,7 @@ impl<H: Host> Calendars<'_, H> {
             Backend::Jmap | Backend::Graph | Backend::Google => Err(BridgeError {
                 message: format!("Cannot move {} on this backend", event.id),
                 status: Some(501),
+                ..Default::default()
             }),
             _ => Webdav {
                 client: self.client,

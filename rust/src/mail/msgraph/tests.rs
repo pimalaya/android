@@ -980,9 +980,9 @@ fn an_undated_message_survives_a_widening() {
 }
 
 /// The delta's first pass keeps a row by `sentDateTime`, stamped at
-/// submission, not by the `Date` a member is in scope by: a member with no
-/// `Date` it leaves out is kept through the folder's ids, one gone still
-/// retired (SYNC §5).
+/// submission, not by the `Date` a member is in scope by: a member it leaves
+/// out, with no `Date` or with one in scope, is kept through the folder's
+/// ids, one gone still retired (SYNC §5).
 #[test]
 fn a_delta_round_keeps_a_member_its_sent_date_leaves_out() {
     let dir = tempfile::tempdir().unwrap();
@@ -990,20 +990,30 @@ fn a_delta_round_keeps_a_member_its_sent_date_leaves_out() {
     let mut graph = FakeGraph::new(100);
     let since = hours_back(50);
 
-    // NOTE: submitted before the scope, with no `Date` field.
+    // NOTE: both submitted before the scope, one with no `Date` field, one
+    // whose `Date` lies in it.
     graph.add("undated", Some(hours_back(90)));
     graph.folder.get_mut("undated").unwrap().fields =
         vec![("Message-ID".into(), "<undated@example.org>".into())];
+    graph.add("dated", Some(hours_back(90)));
+    graph.folder.get_mut("dated").unwrap().fields = vec![
+        ("Message-ID".into(), "<dated@example.org>".into()),
+        ("Date".into(), "Thu, 01 Oct 2026 02:00:00 +0000".into()),
+    ];
 
     // NOTE: the whole folder, then a bound inside it before any link.
     sync(&mut store, &mut graph, dir.path(), None).unwrap();
-    assert_eq!(handles(dir.path()).len(), 101);
+    assert_eq!(handles(dir.path()).len(), 102);
     graph.remove("m0010");
     sync(&mut store, &mut graph, dir.path(), Some(&since)).unwrap();
     assert_eq!(graph.delta_starts, 1, "the round walked the delta");
 
     let held = handles(dir.path());
     assert!(held.contains("undated"), "no `Date`, in every scope");
+    assert!(
+        held.contains("dated"),
+        "a `Date` in scope, named by the ids"
+    );
     assert!(!held.contains("m0010"), "gone, so retired");
 }
 

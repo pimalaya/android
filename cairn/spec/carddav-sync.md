@@ -19,7 +19,7 @@ A collection sync SHALL run the RFC 6578 `sync-collection` REPORT, and SHALL enu
 - THEN the collection is enumerated with `PROPFIND` and the round reports itself complete
 
 ### Requirement: A DAV listing that is not whole is refused
-A CardDAV or CalDAV listing, delta or discovery answer that is not one whole `multistatus` document (a page of another kind, a document cut short, an empty body) SHALL fail its request, as io-webdav 0.8 fails it, and SHALL NOT be read as a shorter listing, whose missing members would read as deleted.
+A CardDAV or CalDAV listing, delta or discovery answer that is not one whole `multistatus` document (a page of another kind, a document cut short, an empty body) SHALL fail its request, as io-webdav 0.8 fails it, and SHALL NOT be read as a shorter listing, whose missing members would read as deleted. A card listing naming a card without its data (a 403 or 404 row, io-webdav's `unreadable`) SHALL fail too; a multiget's member answered without its data SHALL be left out and logged, as one the server did not answer.
 
 #### Scenario: A listing cut short
 - GIVEN a CardDAV server whose listing of two cards ends before its closing tag

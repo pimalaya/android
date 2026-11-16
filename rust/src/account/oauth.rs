@@ -429,6 +429,7 @@ fn refresh_error(err: Oauth20AccessTokenErrorParams) -> BridgeError {
     BridgeError {
         message: oauth_error(err),
         status,
+        ..Default::default()
     }
 }
 

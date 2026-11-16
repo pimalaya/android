@@ -8,7 +8,7 @@ status: current
 
 The app keeps one pimdir store for every account and every domain: `collections.kind` carries the media type (`message/rfc822`, `text/vcard`, `text/calendar`) and `collections.account` groups by account, so the merged view's two filter axes are columns rather than three databases. Bodies live in a content-addressed blob directory beside the database, referenced by hash and refcounted.
 
-The schema is io-pimdir's canonical storage-draft-11 schema, handed to Java over JNI rather than transcribed; the statements run on it are the app's own text, the `pimalaya-android` shape, which SQLite 3.18 runs, so the store lives on the platform's own SQLite from Android 8.0 up and the app bundles none. The search index, index.db beside the store, is a second database on that same SQLite, written by io-pimdir's I/O-free refresh. The crate is taken without its `client` feature: compiling a second engine into every ABI would work against the app's first design goal.
+The schema is io-pimdir's canonical storage-draft-13 schema, handed to Java over JNI rather than transcribed; the statements run on it are the app's own text, the `pimalaya-android` shape, which SQLite 3.18 runs, so the store lives on the platform's own SQLite from Android 8.0 up and the app bundles none. The search index, index.db beside the store, is a second database on that same SQLite, written by io-pimdir's I/O-free refresh. The crate is taken without its `client` feature: compiling a second engine into every ABI would work against the app's first design goal.
 
 Every collection is reconciled by io-pimdir's sync engine, so every collection carries bindings, staged writes and conflicts. A contacts collection is reconciled against two sources, the server and the phone, which the store holds as one item with one `bindings` row per source; mail and calendar have the one source each and are otherwise the same. Nothing replaces a collection's contents: a refresh reconciles it, which is what lets a write staged before it survive it.
 
@@ -21,7 +21,7 @@ The bridge SHALL run io-pimdir's sync, upgrade and mutate coroutines, and the ap
 - THEN `PimdirSync` derives the push and the driver services its yields
 
 ### Requirement: The store's shape follows the canonical schema
-The store SHALL be created by the canonical draft-11 schema alone (0001_init.sql and `init_store_meta`), served over JNI, and SHALL NOT reconcile, widen, narrow nor rebuild a store of another shape: drafts are exact (STORAGE §4.2), and a store whose schema differs from the canonical text is refused as damaged. The statements it runs SHALL be the app's own shape, `pimalaya-android` (STORAGE §4.4: each canonical statement's name, parameters, columns and effect kept, its text free), and the store SHALL record no shape: a store the canonical statement text wrote is the same store and opens.
+The store SHALL be created by the canonical draft-13 schema alone (0001_init.sql and `init_store_meta`), served over JNI, and SHALL NOT reconcile, widen, narrow nor rebuild a store of another shape: drafts are exact (STORAGE §4.2), and a store whose schema differs from the canonical text is refused as damaged. The statements it runs SHALL be the app's own shape, `pimalaya-android` (STORAGE §4.4: each canonical statement's name, parameters, columns and effect kept, its text free), and the store SHALL record no shape: a store the canonical statement text wrote is the same store and opens.
 
 #### Scenario: A store whose index moved
 - GIVEN a store holding an index the canonical text does not declare
@@ -674,15 +674,15 @@ The app SHALL NOT take the owner lock nor the staging lock of pimdir STORAGE §8
 - THEN it takes no pass and writes nothing, and runs at its next schedule
 
 ### Requirement: A store of another draft is not opened
-The app SHALL create its store at storage-draft-11 (`store_meta.format_version`, a `store_id` and an `incarnation` by the canonical text, `derivation` 3) and record `sync_version`, sync-draft-11, with the first engine write. It SHALL decide whether an existing store opens by io-pimdir's rules (STORAGE §6) over facts read off the file read-only, and SHALL NOT read, write nor reconcile a store another draft, another program or another sync version wrote: start-up stands aside on a screen saying the app has to be reinstalled, and the background job, the sync adapters and the time-zone receiver do nothing. The app states its conformance as `storage-draft-11 owner (own statement text), sync-draft-11 engine` (STORAGE §17).
+The app SHALL create its store at storage-draft-13 (`store_meta.format_version`, a `store_id` and an `incarnation` by the canonical text, `derivation` 3) and record `sync_version`, sync-draft-13, with the first engine write. It SHALL decide whether an existing store opens by io-pimdir's rules (STORAGE §6) over facts read off the file read-only, and SHALL NOT read, write nor reconcile a store another draft, another program or another sync version wrote: start-up stands aside on a screen saying the app has to be reinstalled, and the background job, the sync adapters and the time-zone receiver do nothing. The app states its conformance as `storage-draft-13 owner (own statement text), sync-draft-13 engine` (STORAGE §17).
 
 #### Scenario: A store an earlier version wrote
-- GIVEN a store created before draft-11, a draft-10 store among them
+- GIVEN a store created before draft-13, a draft-11 store among them
 - WHEN the app starts
 - THEN it opens on the reinstall screen, and nothing in the store is written
 
 #### Scenario: Sync state an earlier sync draft wrote
-- GIVEN a store at storage-draft-11 whose `sync_version` is sync-draft-10
+- GIVEN a store at storage-draft-13 whose `sync_version` is sync-draft-11
 - WHEN the app starts
 - THEN it opens on the reinstall screen, and nothing in the store is written
 
@@ -775,7 +775,7 @@ A round whose listing names no member while the store binds some, or finds more 
 - THEN the 40 entries are still there and a dialog says the server no longer lists them, offering Remove and Keep
 
 ### Requirement: A narrowed round enumerates its collection
-A mail round whose listing a date filter narrowed, the server's or the app's own check of a date other than the `Date` header (Graph's `sentDateTime`), SHALL say so on every page, and its last page SHALL hand every handle the mailbox holds, read with no date filter: IMAP `UID SEARCH ALL`, JMAP `Email/query` filtered by the mailbox alone and paged until the `total` the server states or, stating none, an empty page, Graph the folder's message ids, Gmail the label's ids with no query. An enumeration ending short of the total its server states SHALL be handed as none. A member the narrowed listing did not name SHALL be retired only when this enumeration does not name it either, and never by a round handing none. The engine of io-pimdir 0.12 (sync-draft-11) still finds absent a narrowed round's member dated before the round opened, whatever the enumeration holds: until the app takes the io-pimdir that reads the enumeration alone, the app stands short of this requirement by it, a Graph message whose `Date` lies in the scope and whose `sentDateTime` does not among what it retires.
+A mail round whose listing a date filter narrowed, the server's or the app's own check of a date other than the `Date` header (Graph's `sentDateTime`), SHALL say so on every page, and its last page SHALL hand every handle the mailbox holds, read with no date filter: IMAP `UID SEARCH ALL`, JMAP `Email/query` filtered by the mailbox alone and paged until the `total` the server states or, stating none, an empty page, Graph the folder's message ids, Gmail the label's ids with no query. An enumeration ending short of the total its server states SHALL be handed as none. A member the narrowed listing did not name SHALL be retired only when this enumeration does not name it either, and never by a round handing none. The engine (io-pimdir 0.14, sync-draft-13) reads the enumeration alone: a member it lacks is absent whatever its date, and a round handing none finds nothing absent.
 
 #### Scenario: An undated message under the download window
 - GIVEN a Gmail label holding a message received before the round's `after:`
@@ -787,6 +787,11 @@ A mail round whose listing a date filter narrowed, the server's or the app's own
 - WHEN a round's last page lands
 - THEN its enumeration names all 1,200, and none the round left unlisted is retired
 
+#### Scenario: A Graph message sent before the window and dated in it
+- GIVEN a Microsoft 365 message whose `Date` lies in the download window and whose `sentDateTime` lies before it
+- WHEN the round walking the delta's first pass under that window lands its last page
+- THEN the message stays, the folder's ids naming it
+
 ### Requirement: The store's statements run on Android 8's SQLite
 Every statement the app runs on the store SHALL prepare and run on SQLite 3.18 as Android 8.0 builds it (no `RETURNING`, upsert, `UPDATE ... FROM`, `STRICT` nor JSON), the store tests running on that build. A statement 3.18 lacks a construct for SHALL be the canonical one's effect in several statements run in order under its one name, in one transaction, never one at a time by its caller. No SQL SHALL be written in Java.
 
@@ -796,7 +801,7 @@ Every statement the app runs on the store SHALL prepare and run on SQLite 3.18 a
 - THEN the row is inserted, then updated, keeping the invitation the first write stated
 
 #### Scenario: A store the previous build wrote
-- GIVEN a store created by io-pimdir's canonical statement text at storage-draft-11
+- GIVEN a store created by io-pimdir's canonical statement text at storage-draft-13
 - WHEN this build starts
 - THEN the store opens, and its rows are read and written by the app's statements
 
@@ -817,7 +822,7 @@ The app SHALL write and query index.db on the same SQLite as the store, and SHAL
 - THEN one SQLite in the process holds both files, and the search answers once the refresh's current chunk commits
 
 ### Requirement: The index is the app's own shape over FTS4
-The app SHALL keep a search index, index.db beside the store, in a shape of its own named `pimalaya-android` in `index_meta.shape` (pimdir SEARCH §2), at search-draft-11: the canonical index on SQLite 3.18, ordinary FTS4 tables in place of FTS5 over text io-pimdir folded, `unicode61` with `remove_diacritics=0` and prefixes of 2 and 3. It SHALL record in `index_meta.extraction` the revision of SEARCH §6 io-pimdir extracts under and in `index_meta.extractor` its own revision then io-pimdir's. It SHALL refuse and leave as it is an index of another shape or a later version, and rebuild one of its shape at an earlier version, under another tokenizer or schema, recording another extraction or extractor, or built from another store. The index SHALL be refreshed by io-pimdir's refresh at start, after each engine write batch and at the end of each sync, a run of at most 200 rows of the store's feed per transaction, each run a deferred transaction that takes no lock of the store.
+The app SHALL keep a search index, index.db beside the store, in a shape of its own named `pimalaya-android` in `index_meta.shape` (pimdir SEARCH §2), at search-draft-13: the canonical index on SQLite 3.18, ordinary FTS4 tables in place of FTS5 over text io-pimdir folded, `unicode61` with `remove_diacritics=0` and prefixes of 2 and 3. It SHALL record in `index_meta.extraction` the revision of SEARCH §6 io-pimdir extracts under and in `index_meta.extractor` its own revision then io-pimdir's. It SHALL refuse and leave as it is an index of another shape or a later version, and rebuild one of its shape at an earlier version, under another tokenizer or schema, recording another extraction or extractor, or built from another store. The index SHALL be refreshed by io-pimdir's refresh at start, after each engine write batch and at the end of each sync, a run of at most 200 rows of the store's feed per transaction, each run a deferred transaction that takes no lock of the store.
 
 #### Scenario: A sync writing while the index refreshes
 - GIVEN a refresh run reading the store
@@ -1021,7 +1026,7 @@ The attachments the reader lists, and the store records stand-ins from, SHALL be
 - THEN the part is listed as first.csv and opens to what its base64 decodes to
 
 ### Requirement: The sync vectors run through the app's load and write
-The app SHALL run every case of the sync vectors of the io-pimdir it pins (pimdir SYNC §11) in a host test, on a store of its own over Android 8.0's SQLite: the case's rows seeded by the standard's own statements and plain SQL, never through the write under test; its run driven by io-pimdir's engine through the coroutines the bridge's sync, upgrade and mutate exports build, every load, lookup, verification and write served by the app's storage half and the remote scripted from the case on the wire a connector answers; its pushes, events, failure, park and rows compared as §11 says. A case the app does not pass SHALL be listed beside the test with its reason, as `fails` when the app runs it and departs from it, as `unbound` when the bridge states no such verb, option or mutation or the case binds another kind of owner, and the test SHALL fail when a listed case passes, an unlisted one fails, a case listed unbound binds, an unlisted one cannot be bound, or a listed one is not among the vectors. At io-pimdir 0.12, 159 cases: 117 pass, 11 fail, 31 are unbound. While a case is listed `fails`, the app's `sync-draft-11 engine` statement stands short of SYNC §12 by it.
+The app SHALL run every case of the sync vectors of the io-pimdir it pins (pimdir SYNC §11) in a host test, on a store of its own over Android 8.0's SQLite: the case's rows seeded by the standard's own statements and plain SQL, never through the write under test; its run driven by io-pimdir's engine through the coroutines the bridge's sync, upgrade and mutate exports build, every load, lookup, verification and write served by the app's storage half and the remote scripted from the case on the wire a connector answers; its pushes, events, failure, park and rows compared as §11 says. Under format 7 a binding's `refusal` and `refused_key` are seeded and compared, and a `Refused` outcome is fed back with its reason. A case the app does not pass SHALL be listed beside the test with its reason, as `fails` when the app runs it and departs from it, as `unbound` when the bridge states no such verb, option or mutation or the case binds another kind of owner, and the test SHALL fail when a listed case passes, an unlisted one fails, a case listed unbound binds, an unlisted one cannot be bound, or a listed one is not among the vectors. At io-pimdir 0.14, 167 cases: 125 pass, 11 fail, 31 are unbound. While a case is listed `fails`, the app's `sync-draft-13 engine` statement stands short of SYNC §12 by it.
 
 #### Scenario: A rule the Java write lacks
 - GIVEN a vector whose expected rows the Java write does not leave
@@ -1053,3 +1058,16 @@ The bridge SHALL hand the engine a listed page as its connector states it: a pag
 - GIVEN a round whose first page landed with a cursor, and a second page stating `last` false and no cursor
 - WHEN the second page is listed
 - THEN the sync fails, the round stays open on the first page's cursor, and no member is dropped
+
+### Requirement: A change refused as it stands is held
+A change a source's server refuses as it stands (pimdir SYNC §4) SHALL be answered to the engine `Refused` with the server's text, which the engine records on the binding the change was pushed for and holds while it derives the same change, under the same key, reporting it every run (SYNC §5); any other failure SHALL stay a rejection, pushed again by the next run. The store SHALL record a refusal by the canonical `refuse_binding` and clear one by `clear_refusal`, after the batch's upserts and stamps, the reason scrubbed of credentials (STORAGE §18) before it crosses to Java, and SHALL hand the source's refusals on every load (`list_refusals`). A sync report SHALL carry each refusal once with its reason, and the app SHALL log it; no screen shows it yet.
+
+#### Scenario: A change the server will never take
+- GIVEN a staged change whose push the server refuses as it stands
+- WHEN a sync pushes it
+- THEN the refusal is recorded on its binding and logged, and the next sync pushes it not again while it is the same change, logging it again
+
+#### Scenario: The change moves on
+- GIVEN a refusal standing on a message's binding
+- WHEN the user stages another change of it and its push is accepted
+- THEN the refusal is cleared

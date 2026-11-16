@@ -54,6 +54,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Changed the store to pimdir storage-draft-13, sync-draft-13 and search-draft-13 (io-pimdir 0.14). **Breaking:** a store an older build wrote is refused on open, and the app asks to be reinstalled; changes not yet sent from that store are lost.
+- Changed a mail change the server refuses for good (a marker, a delete, a move, a copy or a sent copy it will never take as it stands) to be set aside and logged, rather than failing that mailbox's sync on every pass or being sent again forever; a change made to the message afterwards is sent as usual. A full mailbox or a rate limit still waits for the next sync.
+- Changed the protocol libraries to their releases of 2026-11-15 and 2026-11-16: io-http 0.8, io-oauth 0.7, io-imap 0.11, io-smtp 0.9, io-jmap 0.10, io-webdav 0.11, io-gcal 0.5, io-gtasks 0.2, io-gmail 0.9, io-gpeople 0.8, io-msgraph 0.9, io-pim-discovery 0.14 and mime-rs 0.2.
 - Changed the protocol libraries to their releases of 2026-11-13: io-http 0.7, io-oauth 0.6, io-imap 0.9, io-smtp 0.8, io-jmap 0.8, io-webdav 0.8, io-gcal 0.4, io-gtasks 0.1, io-gmail 0.7, io-gpeople 0.7, io-msgraph 0.8 and io-pim-discovery 0.12.
 - Changed a message addressed to something that is no email address to fail at once over SMTP, naming the address, without holding back the messages queued behind it.
 - Changed an OAuth server found by its issuer to be refused over plain `http` even on the phone itself: its issuer and every address its metadata names are https.
@@ -108,6 +111,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a Microsoft 365 message dated inside the download window but sent before it vanishing from the phone after a sync.
+- Fixed a CardDAV server listing a contact it would not hand (a 403 or 404 row) having that contact dropped from the phone: the listing now fails, and nothing is dropped.
+- Fixed a Google Calendar event in a zone other than its calendar's showing at the wrong hour after a daylight-saving change, and a Google contact's birthday without a year being lost.
 - Fixed messages vanishing from the phone after a sync under a download window: on a JMAP server that does not say how many messages a mailbox holds, those past the first page of the check the sync makes of the mailbox, and on Microsoft 365 a message carrying no `Date` header that was sent before the window.
 - Fixed an IMAP answer holding a line the app cannot read (a mailbox, a search or a message line in a form no client decodes) being taken for a shorter listing, which dropped that mailbox or those messages from the phone: the mailbox's sync now fails saying so, and nothing is dropped.
 - Fixed a CardDAV or CalDAV listing cut short, or answered by a page that is no listing, being read as a shorter one, its missing contacts or events dropped from the phone: the listing now fails.

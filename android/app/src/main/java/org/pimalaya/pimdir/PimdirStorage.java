@@ -164,6 +164,7 @@ public final class PimdirStorage {
         reply.put("placements", placements);
 
         boolean roundOpen = syncState(db, stored, source, reply);
+        refused(db, stored, source, reply);
         String kind = scope == null ? "all" : scope.optString("kind", "all");
         if (roundOpen && "lastPage".equals(kind)) {
             reply.put("unstamped", unstamped(db, stored, source, scope));
@@ -226,6 +227,35 @@ public final class PimdirStorage {
         held(db, stored, placements, reply);
         superseded(db, stored, source, placements, reply);
         return reply;
+    }
+
+    /**
+     * Writes the refusals standing on the source's bindings into a load reply
+     * (pimdir SYNC §5), on every selection: the engine holds a change derived
+     * under a refused key wherever it derives it. Read by the canonical
+     * {@code list_refusals}, the collection's every source's, this source's
+     * kept.
+     */
+    private static void refused(
+            SQLiteDatabase db, String collection, String source, JSONObject reply)
+            throws JSONException {
+        JSONArray refused = new JSONArray();
+        PimdirSql.Bound bound = PimdirSql.bind("LIST_REFUSALS", Map.of("collection", collection));
+        try (Cursor cursor = PimdirDb.query(db, bound)) {
+            while (cursor.moveToNext()) {
+                if (!source.equals(cursor.getString(1))) {
+                    continue;
+                }
+                refused.put(
+                        new JSONObject()
+                                .put("handle", cursor.getString(2))
+                                .put("reason", cursor.getString(3))
+                                .put("key", cursor.getString(4)));
+            }
+        }
+        if (refused.length() > 0) {
+            reply.put("refused", refused);
+        }
     }
 
     /**
@@ -1081,6 +1111,7 @@ public final class PimdirStorage {
         try {
             Map<String, byte[]> bodies = new HashMap<>();
             List<JSONObject> stamps = new ArrayList<>();
+            List<JSONObject> refusals = new ArrayList<>();
             Set<String> fresh = new HashSet<>();
             Map<String, String> released = new HashMap<>();
             JSONArray effects = new JSONArray();
@@ -1135,6 +1166,10 @@ public final class PimdirStorage {
                     case "settle":
                         settling.add(op.getString("collection") + "\n" + op.getString("handle"));
                         break;
+                    case "refusePlacement":
+                    case "clearRefusal":
+                        refusals.add(op);
+                        break;
                     default:
                         throw new JSONException("Unknown write op " + op.getString("op"));
                 }
@@ -1165,6 +1200,12 @@ public final class PimdirStorage {
             // too (SYNC §5): the round's last page drops what no page stamped.
             for (JSONObject stamp : stamps) {
                 stamp(db, stamp);
+            }
+
+            // NOTE: after the stamps, as io-pimdir records them: a refusal
+            // names the binding the batch's upserts left (SYNC §5).
+            for (JSONObject refusal : refusals) {
+                refusal(db, refusal);
             }
 
             collectGarbage(db);
@@ -1869,6 +1910,28 @@ public final class PimdirStorage {
                         "collection", collectionOf(collection),
                         "source", sourceOf(collection),
                         "handle", op.getString("handle")));
+    }
+
+    /**
+     * Records or clears the refusal on one binding (pimdir SYNC §4, §5), by
+     * the canonical {@code refuse_binding} and {@code clear_refusal}; a
+     * handle nothing binds records nothing. The reason arrives scrubbed of
+     * credentials (STORAGE §18).
+     */
+    private static void refusal(SQLiteDatabase db, JSONObject op) throws JSONException {
+        String collection = op.getString("collection");
+        Map<String, Object> values =
+                PimdirSql.values(
+                        "collection", collectionOf(collection),
+                        "source", sourceOf(collection),
+                        "handle", op.getString("handle"));
+        if ("clearRefusal".equals(op.getString("op"))) {
+            PimdirDb.exec(db, "CLEAR_REFUSAL", values);
+            return;
+        }
+        values.put("key", op.getString("key"));
+        values.put("reason", op.getString("reason"));
+        PimdirDb.exec(db, "REFUSE_BINDING", values);
     }
 
     private void setCheckpoint(SQLiteDatabase db, JSONObject op) throws JSONException {

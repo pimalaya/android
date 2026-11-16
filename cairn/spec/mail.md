@@ -114,9 +114,14 @@ The app SHALL write the `\Seen`, `\Answered` and `\Flagged` markers of one messa
 - THEN only `\Flagged` is added and `$junk` is left alone
 
 #### Scenario: The server refuses
-- GIVEN a server rejecting the write
+- GIVEN a server failing the write, for no rule the change breaks
 - WHEN the sync pushes the marker
 - THEN the failure is reported and the marker stays staged for the sync that follows
+
+#### Scenario: The server refuses the change as it stands
+- GIVEN a server refusing the write for a rule the change breaks (A mail push refused as it stands is held)
+- WHEN the sync pushes the marker
+- THEN the change is held and logged, and the mailbox's sync goes on
 
 ### Requirement: Opening a message marks it read
 Opening a message SHALL mark it read in the store, once its body has arrived, and the next sync SHALL push it. The fetch itself SHALL NOT: it asks for `BODY.PEEK[]`, so a read that failed leaves the message unread.
@@ -1156,7 +1161,7 @@ The mail list's search SHALL read its words as a query of pimdir SEARCH §8, ans
 - THEN the search field says the field `re` is not one of the language's, and the message is listed by its subject
 
 ### Requirement: An IMAP listing that skipped a response is not whole
-io-imap skips an untagged response it cannot decode and hands it back beside the result. The bridge SHALL NOT take such an answer for a whole listing where what it lacks would read as gone: a `LIST` (the roster drops a mailbox it lacks), a `UID SEARCH` or a `UID SORT` (a round's members, its enumeration, a floor, a copy already filed), an `EXAMINE` stating no `EXISTS` (read as an empty mailbox) and a `UID FETCH` lacking a UID it asked for (read as a message gone, by a round's page as by a body read) SHALL fail with an error naming the command and how many responses went unread, so the roster, the page, the floor or the read fails and nothing is dropped. A `UID FETCH` answering every UID asked SHALL stand, whatever else was skipped. A QRESYNC `SELECT` that skipped a response SHALL hand what it read with the checkpoint it was asked from, so the next delta asks again for what the response held. An `ALERT` response code SHALL be logged as a warning.
+io-imap skips an untagged response it cannot decode and hands it back beside the result. The bridge SHALL NOT take such an answer for a whole listing where what it lacks would read as gone: a `LIST` (the roster drops a mailbox it lacks), a `UID SEARCH` or a `UID SORT` (a round's members, its enumeration, a floor, a copy already filed), an `EXAMINE` stating no `EXISTS` (read as an empty mailbox) and a `UID FETCH` lacking a UID it asked for (read as a message gone, by a round's page as by a body read) SHALL fail with an error naming the command and how many responses went unread, so the roster, the page, the floor or the read fails and nothing is dropped. A FETCH response io-imap decodes in part (io-imap 0.11) SHALL count as a response unread, the message it read in part left out of the answer, as io-imap 0.9 skipped the whole line: a message lacking an item asked (its flags, its header, its size) would read as one stating none. A `UID FETCH` answering every UID asked SHALL stand, whatever else was skipped. A QRESYNC `SELECT` that skipped a response SHALL hand what it read with the checkpoint it was asked from, so the next delta asks again for what the response held. An `ALERT` response code SHALL be logged as a warning.
 
 #### Scenario: A mailbox line that does not decode
 - GIVEN a `LIST` answering two mailboxes and a line no client decodes
@@ -1177,3 +1182,24 @@ io-imap skips an untagged response it cannot decode and hands it back beside the
 - GIVEN a QRESYNC `SELECT` from `7:9` answering a `VANISHED`, a changed message, `HIGHESTMODSEQ 12` and a line that does not decode
 - WHEN the delta is read
 - THEN the gone and the changed are handed, and its checkpoint stays `7:9`
+
+### Requirement: A mail push refused as it stands is held
+The mail connectors SHALL tell a write the server refuses as it stands from one that may land later (pimdir SYNC §4), as neverest tells them: Graph, Gmail and a JMAP request by a status naming the request (400 to 499 but 401, 407, 408, 409, 412, 423, 425 and 429) that names no quota nor rate limit (Graph's `ErrorQuotaExceeded`, Gmail's `quotaExceeded` and `...LimitExceeded` reasons or `RESOURCE_EXHAUSTED`, a text naming a quota or a rate limit); a JMAP `Email/set` by its `notUpdated` or `notDestroyed` type, refused for `tooManyKeywords`, `tooManyMailboxes`, `blobNotFound`, `invalidPatch`, `invalidProperties`, `singleton`, `forbidden` and `tooLarge`, never for `notFound`, `willDestroy`, `overQuota`, `rateLimit` or a type io-jmap does not name; IMAP by a `NO` naming `CANNOT`, `PARSE`, `TOOBIG` or `NOPERM`, never a `BAD`, a `NO` naming no code or a state that passes (`OVERQUOTA`, `INUSE`, `UNAVAILABLE`). A marker, a delete, a move, a copy and an append so refused SHALL be answered refused (A change refused as it stands is held) after a 404 is taken as a message gone (A push converges on a message gone); every other failure SHALL fail the push as before.
+
+#### Scenario: A marker the server cannot store
+- GIVEN an IMAP server answering `NO [CANNOT]` to the `UID STORE` of a staged marker
+- WHEN the sync pushes it
+- THEN the mailbox's sync goes on, the change is held and logged, and later syncs leave it unpushed
+
+#### Scenario: A full mailbox
+- GIVEN an IMAP server answering `NO [OVERQUOTA]` to an append
+- WHEN the sync pushes it
+- THEN the push fails as before, and a later sync pushes it again
+
+### Requirement: A JMAP answer holding an object it could not read is not whole
+An `Email/query`, an `Email/get` and a `Mailbox/get` whose answer holds an object io-jmap could not deserialize (io-jmap 0.10's `unparsed`) SHALL fail with an error naming the method and how many objects went unread, where leaving it out would read as a message or a mailbox gone, as the whole call failed before io-jmap 0.10.
+
+#### Scenario: A mailbox of a shape the app cannot read
+- GIVEN a JMAP account whose `Mailbox/get` lists a mailbox whose name is no string
+- WHEN the roster is read
+- THEN it fails, and no mailbox is dropped for being absent from it

@@ -29,8 +29,8 @@ use io_imap::{
     codec::fragmentizer::Fragmentizer,
     coroutine::{ImapCoroutine, ImapCoroutineState, ImapYield},
     rfc3501::{
-        append::{ImapMessageAppend, ImapMessageAppendOptions},
-        copy::{ImapMessageCopy, ImapMessageCopyOptions},
+        append::{ImapMessageAppend, ImapMessageAppendError, ImapMessageAppendOptions},
+        copy::{ImapMessageCopy, ImapMessageCopyError, ImapMessageCopyOptions},
         examine::{
             ExamineData, ImapMailboxExamine, ImapMailboxExamineError, ImapMailboxExamineOptions,
         },
@@ -43,17 +43,17 @@ use io_imap::{
         list::ImapMailboxList,
         search::{ImapMessageSearch, ImapMessageSearchOptions},
         select::{ImapMailboxSelect, ImapMailboxSelectError, ImapMailboxSelectOptions},
-        store::{ImapMessageStoreOptions, ImapMessageStoreSilent},
+        store::{ImapMessageStoreError, ImapMessageStoreOptions, ImapMessageStoreSilent},
     },
-    rfc4315::expunge_uid::ImapMessageExpungeUid,
+    rfc4315::expunge_uid::{ImapMessageExpungeUid, ImapMessageExpungeUidError},
     rfc5161::enable::ImapExtensionEnable,
     rfc5256::sort::{ImapMessageSort, ImapMessageSortOptions},
-    rfc6851::r#move::{ImapMessageMove, ImapMessageMoveOptions},
+    rfc6851::r#move::{ImapMessageMove, ImapMessageMoveError, ImapMessageMoveOptions},
     sasl::{
         auth_plain::{ImapAuthPlain, ImapAuthPlainOptions},
         auth_xoauth2::{ImapAuthXoauth2, ImapAuthXoauth2Options},
     },
-    send::ImapOutput,
+    send::{ImapOutput, ImapStatusError},
     types::{
         IntoStatic,
         command::SelectParameter,
@@ -66,7 +66,7 @@ use io_imap::{
         fetch::{MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName, Section},
         flag::{Flag, FlagFetch, FlagNameAttribute, StoreType},
         mailbox::{ListMailbox, Mailbox},
-        response::Capability,
+        response::{Capability, Code},
         search::SearchKey,
         sequence::SequenceSet,
     },
@@ -320,6 +320,20 @@ impl<'a, H: Host> ImapSession<'a, H> {
         }
     }
 
+    /// [`Self::run`] for a write: a `NO` refusing the change as it stands
+    /// ([`refuses_as_it_stands`]) fails it [`BridgeError::refused`].
+    fn write<C, T, E>(&mut self, coroutine: C) -> Result<T, BridgeError>
+    where
+        C: ImapCoroutine<Yield = ImapYield, Return = Result<T, E>>,
+        E: core::fmt::Display + WriteFailure,
+    {
+        self.attempt(coroutine)?.map_err(|err| BridgeError {
+            message: err.to_string(),
+            refused: err.no().is_some_and(refuses_as_it_stands),
+            ..Default::default()
+        })
+    }
+
     /// Consumes the greeting, then authenticates.
     ///
     /// AUTHENTICATE PLAIN for a password: LOGIN would be a second code path for
@@ -352,6 +366,7 @@ impl<'a, H: Host> ImapSession<'a, H> {
                 .map_err(|err| BridgeError {
                     message: err.message,
                     status: Some(401),
+                    ..Default::default()
                 })?
             }
             Auth::Basic { login, password } => {
@@ -371,6 +386,7 @@ impl<'a, H: Host> ImapSession<'a, H> {
                 .map_err(|err| BridgeError {
                     message: err.message,
                     status: Some(401),
+                    ..Default::default()
                 })?
             }
         };
@@ -914,7 +930,7 @@ impl<'a, H: Host> ImapSession<'a, H> {
             Err(err) => return Err(err.to_string().into()),
         };
 
-        let (fetched, skipped) = taken(fetched);
+        let (fetched, skipped) = taken_fetch(fetched);
         let headers: Vec<(u32, Header)> = fetched
             .into_values()
             .filter_map(|items| header(items.into_inner()))
@@ -961,7 +977,17 @@ impl<'a, H: Host> ImapSession<'a, H> {
         // round, not a failed pass; logged, as the capability and the
         // ENABLE should make it unreachable.
         let (data, skipped) = match selected {
-            Ok(selected) => taken(selected),
+            Ok(mut selected) => {
+                // NOTE: a change read in part is read again by the next
+                // delta, the checkpoint kept.
+                let partial: Vec<NonZeroU32> =
+                    selected.partial.iter().map(|line| line.seq).collect();
+                selected
+                    .data
+                    .changed
+                    .retain(|fetch| !partial.contains(&fetch.seq));
+                taken(selected)
+            }
             Err(err) => {
                 log::warn!("QRESYNC select refused for {mailbox}, enumerating whole: {err}");
                 return Ok(None);
@@ -1033,7 +1059,7 @@ impl<H: Host> ImapSession<'_, H> {
             },
         ))?;
 
-        taken(fetched)
+        taken_fetch(fetched)
             .0
             .into_values()
             .flat_map(|items| items.into_inner())
@@ -1126,7 +1152,7 @@ impl<H: Host> ImapSession<'_, H> {
             },
         ))?;
 
-        let (fetched, skipped) = taken(fetched);
+        let (fetched, skipped) = taken_fetch(fetched);
         let mut sizes = HashMap::new();
         for items in fetched.into_values() {
             let mut uid = None;
@@ -1370,7 +1396,7 @@ impl<H: Host> ImapSession<'_, H> {
             .map(|flag| flag.into_static())
             .map_err(|_| format!("Invalid message marker `{flag}`"))?;
 
-        self.run(ImapMessageStoreSilent::new(
+        self.write(ImapMessageStoreSilent::new(
             uids(uid)?,
             if add {
                 StoreType::Add
@@ -1392,7 +1418,7 @@ impl<H: Host> ImapSession<'_, H> {
 
         match relocation(&self.state.capabilities) {
             Relocation::Move => {
-                self.run(ImapMessageMove::new(
+                self.write(ImapMessageMove::new(
                     uids(uid)?,
                     mailbox_name(target)?,
                     ImapMessageMoveOptions { uid: true },
@@ -1401,7 +1427,7 @@ impl<H: Host> ImapSession<'_, H> {
             Relocation::CopyThenDispose => {
                 if !self.copied(mailbox, uid, target)? {
                     self.select(mailbox)?;
-                    self.run(ImapMessageCopy::new(
+                    self.write(ImapMessageCopy::new(
                         uids(uid)?,
                         mailbox_name(target)?,
                         ImapMessageCopyOptions { uid: true },
@@ -1458,7 +1484,7 @@ impl<H: Host> ImapSession<'_, H> {
             return Ok(());
         }
         self.select(mailbox)?;
-        self.run(ImapMessageCopy::new(
+        self.write(ImapMessageCopy::new(
             uids(uid)?,
             mailbox_name(target)?,
             ImapMessageCopyOptions { uid: true },
@@ -1480,7 +1506,7 @@ impl<H: Host> ImapSession<'_, H> {
     /// Marks one message of the selected mailbox `\Deleted`, then expunges
     /// it where [`disposal`] says the server can do so for that one alone.
     fn dispose(&mut self, uid: &str) -> Result<(), BridgeError> {
-        self.run(ImapMessageStoreSilent::new(
+        self.write(ImapMessageStoreSilent::new(
             uids(uid)?,
             StoreType::Add,
             vec![Flag::Deleted],
@@ -1488,7 +1514,7 @@ impl<H: Host> ImapSession<'_, H> {
         ))?;
 
         if disposal(&self.state.capabilities) == Disposal::Expunge {
-            self.run(ImapMessageExpungeUid::new(uids(uid)?))?;
+            self.write(ImapMessageExpungeUid::new(uids(uid)?))?;
         }
 
         Ok(())
@@ -1525,7 +1551,7 @@ impl<H: Host> ImapSession<'_, H> {
             owned.push(parsed);
         }
 
-        self.run(ImapMessageAppend::new(
+        self.write(ImapMessageAppend::new(
             mailbox_name(mailbox)?,
             message,
             ImapMessageAppendOptions {
@@ -1608,13 +1634,31 @@ impl<H: Host> ImapSession<'_, H> {
     }
 }
 
-/// The data of an answer and how many responses it skipped unread.
+/// The data of an answer and how many responses it did not read whole:
+/// those it skipped, and the FETCH responses it decoded in part (io-imap
+/// 0.11), which 0.9 skipped whole.
 fn taken<T>(output: ImapOutput<T>) -> (T, usize) {
     for alert in &output.alerts {
         log::warn!("server alert: {alert}");
     }
-    (output.data, output.skipped.len())
+    (output.data, output.skipped.len() + output.partial.len())
 }
+
+/// A FETCH answer as [`taken`] reads it, without the messages it decoded
+/// in part: a line lacking an item asked (a `FLAGS` the codec does not
+/// read, a header) would read as a message stating none, so it reads as
+/// unread instead.
+fn taken_fetch(output: ImapOutput<Fetched>) -> (Fetched, usize) {
+    let partial: Vec<NonZeroU32> = output.partial.iter().map(|line| line.seq).collect();
+    let (mut data, unread) = taken(output);
+    for seq in partial {
+        data.remove(&seq);
+    }
+    (data, unread)
+}
+
+/// The messages a FETCH answered, by sequence number.
+type Fetched = BTreeMap<NonZeroU32, Vec1<MessageDataItem<'static>>>;
 
 /// The data of a listing, refused when it skipped a response unread.
 fn whole<T>(output: ImapOutput<T>, command: &str) -> Result<T, BridgeError> {
@@ -1634,8 +1678,52 @@ fn refused(err: &impl core::fmt::Display) -> BridgeError {
     BridgeError {
         message: err.to_string(),
         status: Some(MAILBOX_REFUSED),
+        ..Default::default()
     }
 }
+
+/// Whether a `NO` refuses the change as it stands (pimdir SYNC §4), as
+/// neverest reads it: the message the server cannot parse (`PARSE`), one
+/// too large for it (`TOOBIG`, RFC 7889), a write it can never do
+/// (`CANNOT`) or one the account may not make (`NOPERM`, RFC 5530 §3). A
+/// `NO` naming none, or a state that passes (`OVERQUOTA`, `INUSE`,
+/// `UNAVAILABLE`), cannot tell.
+fn refuses_as_it_stands(status: &ImapStatusError) -> bool {
+    match &status.code {
+        Some(Code::Parse | Code::TooBig) => true,
+        Some(Code::Other(code)) => [&b"CANNOT"[..], b"NOPERM", b"TOOBIG"]
+            .iter()
+            .any(|name| code.inner().eq_ignore_ascii_case(name)),
+        _ => false,
+    }
+}
+
+/// The failure of a write's command, read for the `NO` it answered.
+trait WriteFailure {
+    /// The `NO` completion the server answered, none for another failure.
+    fn no(&self) -> Option<&ImapStatusError>;
+}
+
+macro_rules! write_failure {
+    ($($error:ty),*) => {
+        $(impl WriteFailure for $error {
+            fn no(&self) -> Option<&ImapStatusError> {
+                match self {
+                    Self::No(status) => Some(status),
+                    _ => None,
+                }
+            }
+        })*
+    };
+}
+
+write_failure!(
+    ImapMessageAppendError,
+    ImapMessageCopyError,
+    ImapMessageExpungeUidError,
+    ImapMessageMoveError,
+    ImapMessageStoreError
+);
 
 /// One message's UID as the sequence set a UID command takes.
 fn uids(uid: &str) -> Result<SequenceSet, BridgeError> {

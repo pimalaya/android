@@ -340,6 +340,7 @@ pub fn inner(result: Result<GmailMessage, GmailBatchResponseError>) -> Inner {
     Inner::Failed(BridgeError {
         message: err.to_string(),
         status: err.status(),
+        ..Default::default()
     })
 }
 
@@ -727,6 +728,7 @@ impl<H: Host> Gmail<'_, H> {
                         return Err(BridgeError {
                             message: "Gmail's daily quota is spent".into(),
                             status: Some(403),
+                            ..Default::default()
                         });
                     }
                     Inner::Failed(err) => return Err(err),

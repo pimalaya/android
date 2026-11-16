@@ -419,6 +419,9 @@ fn an_email_set_on_a_message_gone_answers_404_for_the_caller_to_converge() {
         email_set_refusal("m1", Some(&refused)).unwrap_err().status,
         None
     );
+    assert!(email_set_refusal("m1", Some(&refused)).unwrap_err().refused);
+    let full = JmapEmailSetItemError::OverQuota { description: None };
+    assert!(!email_set_refusal("m1", Some(&full)).unwrap_err().refused);
     assert!(email_set_refusal("m1", None).is_ok());
 }
 
@@ -559,4 +562,50 @@ fn an_enumeration_short_of_its_total_is_none() {
 
     assert_eq!(ids.unwrap(), None);
     assert_eq!(queries, [0, 2, 3], "an empty page at the third");
+}
+
+/// A mailbox io-jmap could not read is no mailbox gone: a roster leaving it
+/// out would retire its collection, so the roster is refused.
+#[test]
+fn a_roster_holding_a_mailbox_unread_is_refused() {
+    let list = |garbled: bool| {
+        let mut list = vec![json!({ "id": "mb-inbox", "name": "Inbox", "role": "inbox" })];
+        if garbled {
+            list.push(json!({ "id": "mb-odd", "name": 42 }));
+        }
+        list
+    };
+    let roster = |garbled: bool| {
+        let mut client = Client::new(FakeServer::new(|request: &FakeRequest| {
+            let calls: Vec<(String, Map<String, Value>, String)> =
+                from_value(request.json::<Value>()["methodCalls"].take()).unwrap();
+            let (name, _, id) = calls.into_iter().next().unwrap();
+            assert_eq!(name, "Mailbox/get");
+            let result = json!({
+                "accountId": "u42",
+                "state": "m1",
+                "list": list(garbled),
+                "notFound": [],
+            });
+            let body =
+                json!({ "methodResponses": [["Mailbox/get", result, id]], "sessionState": "s1" });
+            FakeResponse::json(200, &body)
+        }));
+        let mut jmap = Jmap {
+            client: &mut client,
+            session_url: Url::parse("https://api.example.com/jmap/session").unwrap(),
+            auth: Auth::Bearer("token"),
+        };
+        let api_url = Url::parse("https://api.example.com/jmap/").unwrap();
+        jmap.list_mailboxes(&session(""), &SecretString::from("Bearer token"), &api_url)
+    };
+
+    assert_eq!(roster(false).unwrap().len(), 1);
+    let err = roster(true).unwrap_err();
+    assert!(
+        err.message
+            .starts_with("JMAP Mailbox/get is not whole, objects unread: 1"),
+        "{}",
+        err.message
+    );
 }

@@ -56,7 +56,7 @@ public class SyncVectorsTest {
     @Rule public final TemporaryFolder folder = new TemporaryFolder();
 
     /** The format version this runner reads a case under (SYNC §11). */
-    private static final int FORMAT = 6;
+    private static final int FORMAT = 7;
 
     /** The system flags, each its bit of {@code marks} (STORAGE §13). */
     private static final List<String> MARKS =
@@ -536,6 +536,22 @@ public class SyncVectorsTest {
                             run.stored(binding.getString("source"))
                         });
             }
+            // NOTE: a refusal states its reason, its key and its instant, or
+            // none (STORAGE §13); the instant is the case's to leave unstated.
+            if (binding.has("refusal") && !binding.isNull("refusal")) {
+                db.execSQL(
+                        "UPDATE bindings SET refusal = ?, refused_key = ?,"
+                                + " refused_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+                                + " WHERE item = (SELECT id FROM items"
+                                + " WHERE collection = ? AND link_id = ?) AND source = ?",
+                        new Object[] {
+                            binding.getString("refusal"),
+                            binding.getString("refused_key"),
+                            binding.getString("collection"),
+                            binding.getString("link_id"),
+                            run.stored(binding.getString("source"))
+                        });
+            }
         }
 
         JSONArray summaries = stated.optJSONArray("summaries");
@@ -879,7 +895,10 @@ public class SyncVectorsTest {
                 }
                 JSONObject result = new JSONObject();
                 result.put("handle", handle);
-                result.put("accepted", !"Rejected".equals(outcome.optString("outcome")));
+                result.put("accepted", "Accepted".equals(outcome.optString("outcome")));
+                if ("Refused".equals(outcome.optString("outcome"))) {
+                    result.put("refused", outcome.getString("reason"));
+                }
                 result.putOpt("assigned", text(outcome, "assigned"));
                 result.putOpt("revision", text(outcome, "revision"));
                 result.put("relocated", outcome.optBoolean("relocated"));
@@ -1320,7 +1339,7 @@ public class SyncVectorsTest {
                                                 + " WHERE g.item = b.item AND g.source = b.source")
                                 + ", b.base_object, b.base_revision, b.base_present, b.conflicted,"
                                 + " b.conflict_revision, b.conflict_object, b.shared_object,"
-                                + " b.round FROM bindings b JOIN items i ON i.id = b.item";
+                                + " b.round, b.refusal, b.refused_key FROM bindings b JOIN items i ON i.id = b.item";
                 break;
             case "sources":
                 query =
@@ -1387,6 +1406,8 @@ public class SyncVectorsTest {
                         row.put("conflict_object", run.label(textOrNull(cursor, 10)));
                         row.put("shared_object", run.label(textOrNull(cursor, 11)));
                         row.put("round", cursor.isNull(12) ? JSONObject.NULL : cursor.getLong(12));
+                        row.put("refusal", orNull(textOrNull(cursor, 13)));
+                        row.put("refused_key", orNull(textOrNull(cursor, 14)));
                         break;
                     case "sources":
                         row.put("collection", cursor.getString(0));

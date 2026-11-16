@@ -1275,7 +1275,10 @@ public final class MailEngine extends PimdirEngine {
                     clients.mail().destroy(session, message);
                 }
             } catch (RuntimeException failure) {
-                gone(mailbox, handle, failure);
+                String reason = settled(mailbox, handle, failure);
+                if (reason != null) {
+                    return refusedResult(handle, reason);
+                }
             }
             return result(handle, true, null, null);
         }
@@ -1307,7 +1310,12 @@ public final class MailEngine extends PimdirEngine {
         try {
             clients.mail().relocate(session, new MessageRef(mailbox, handle), mailboxOf(to));
         } catch (RuntimeException failure) {
-            gone(mailbox, handle, failure);
+            // NOTE: refused, the move is held and its target's create with
+            // it, pending behind the removal it is the target of.
+            String reason = settled(mailbox, handle, failure);
+            if (reason != null) {
+                return refusedResult(handle, reason);
+            }
             moved = false;
         }
         // NOTE: account-wide, the target's listing in this pass may predate
@@ -1381,8 +1389,10 @@ public final class MailEngine extends PimdirEngine {
                                 new MessageRef(mailboxOf(from), origin.getString("handle")),
                                 mailbox);
             } catch (RuntimeException failure) {
-                gone(mailboxOf(from), origin.getString("handle"), failure);
-                return result(handle, false, null, null);
+                String reason = settled(mailboxOf(from), origin.getString("handle"), failure);
+                return reason == null
+                        ? result(handle, false, null, null)
+                        : refusedResult(handle, reason);
             }
             return result(handle, true, null, null);
         }
@@ -1395,7 +1405,17 @@ public final class MailEngine extends PimdirEngine {
         if (source == null) {
             return result(handle, false, null, null);
         }
-        clients.mail().append(session, mailbox, source, Flags.read(change.optJSONArray("flags")));
+        try {
+            clients.mail()
+                    .append(session, mailbox, source, Flags.read(change.optJSONArray("flags")));
+        } catch (RuntimeException failure) {
+            String reason = refusal(failure);
+            if (reason == null) {
+                throw failure;
+            }
+            Log.w("pimalaya", "append refused: " + mailbox + ": " + reason);
+            return refusedResult(handle, reason);
+        }
         return result(handle, true, null, null);
     }
 
@@ -1427,7 +1447,10 @@ public final class MailEngine extends PimdirEngine {
             try {
                 clients.mail().setFlag(session, new MessageRef(mailbox, handle), flag, wanted);
             } catch (RuntimeException failure) {
-                gone(mailbox, handle, failure);
+                String reason = settled(mailbox, handle, failure);
+                if (reason != null) {
+                    return refusedResult(handle, reason);
+                }
                 break;
             }
         }
@@ -1438,14 +1461,22 @@ public final class MailEngine extends PimdirEngine {
      * Takes a write's 404 as the message gone since listed: converged.
      *
      * <p>Nothing left to remove, move or mark; a copy is refused. Answered so a
-     * push never fails a pass on a 404 {@link #refused} would misread. Other
+     * push never fails a pass on a 404 {@link #refused} would misread. A
+     * failure refusing the change as it stands answers its reason, for the
+     * push to answer refused (pimdir SYNC §4); null for a message gone. Other
      * failures throw on.
      */
-    private static void gone(String mailbox, String handle, RuntimeException failure) {
-        if (!isGone(failure)) {
+    private static String settled(String mailbox, String handle, RuntimeException failure) {
+        if (isGone(failure)) {
+            Log.w("pimalaya", "message gone from the server: " + mailbox + " " + handle);
+            return null;
+        }
+        String reason = refusal(failure);
+        if (reason == null) {
             throw failure;
         }
-        Log.w("pimalaya", "message gone from the server: " + mailbox + " " + handle);
+        Log.w("pimalaya", "change refused: " + mailbox + " " + handle + ": " + reason);
+        return reason;
     }
 
     /** The mailboxes of one walk, in the store's collection shape. */

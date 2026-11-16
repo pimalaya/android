@@ -18,6 +18,7 @@ use io_pimdir::{
         PimdirEnumerated, PimdirFetchedBody, PimdirRemoteItem, PimdirRemoteMeta,
         PimdirRemoteSnapshot,
     },
+    security::scrub,
     summary::{PimdirSummary, mail::PimdirMailSummary},
     sync::{PimdirSyncEvent, PimdirSyncReport},
     upgrade::PimdirUpgradeReport,
@@ -381,6 +382,22 @@ pub enum WriteOpJson {
         collection: String,
         handle: String,
     },
+    /// Records the refusal of the change keyed `key` pushed for the binding
+    /// under `handle` (pimdir SYNC §4, §5), `reason` scrubbed of
+    /// credentials (STORAGE §18), after the batch's upserts and stamps.
+    RefusePlacement {
+        collection: String,
+        handle: String,
+        key: String,
+        reason: String,
+    },
+    /// Clears the refusal standing on the binding under `handle`, whose
+    /// push the remote accepted (pimdir SYNC §5), after the batch's upserts
+    /// and stamps.
+    ClearRefusal {
+        collection: String,
+        handle: String,
+    },
     /// A body, as text when UTF-8 and base64 otherwise.
     ///
     /// Base64 stores a message's 8-bit bytes as fetched; `persisted`, with no
@@ -467,6 +484,22 @@ impl From<&PimdirWriteOp> for WriteOpJson {
                 reason: (*reason).into(),
             },
             PimdirWriteOp::DeliverPlacement { collection, handle } => Self::DeliverPlacement {
+                collection: collection.as_str().into(),
+                handle: handle.as_str().into(),
+            },
+            PimdirWriteOp::RefusePlacement {
+                collection,
+                handle,
+                key,
+                reason,
+            } => Self::RefusePlacement {
+                collection: collection.as_str().into(),
+                handle: handle.as_str().into(),
+                key: key.as_str().into(),
+                // NOTE: a server's text may carry a credential (STORAGE §18).
+                reason: scrub(reason),
+            },
+            PimdirWriteOp::ClearRefusal { collection, handle } => Self::ClearRefusal {
                 collection: collection.as_str().into(),
                 handle: handle.as_str().into(),
             },
@@ -893,6 +926,19 @@ pub struct LoadedJson {
     /// the store offers it of items other sources hold (SYNC §3, §9).
     #[serde(default)]
     pub offered: Vec<String>,
+    /// The refusals standing on the source's bindings (`list_refusals`,
+    /// SYNC §5), each held while the engine derives the change it names.
+    #[serde(default)]
+    pub refused: Vec<RefusalJson>,
+}
+
+/// A refusal standing on a binding, on a load reply: the handle the change
+/// was pushed for, the key of the change refused and the remote's reason.
+#[derive(Deserialize)]
+pub struct RefusalJson {
+    pub handle: String,
+    pub key: String,
+    pub reason: String,
 }
 
 /// A loaded placement whose item is conflicted, and the item's diverging
@@ -1159,6 +1205,10 @@ pub struct PushedJson {
 pub struct PushResultJson {
     pub handle: String,
     pub accepted: bool,
+    /// The remote's reason when it refused the change for good, as it
+    /// stands (pimdir SYNC §4): never set beside `accepted`.
+    #[serde(default)]
+    pub refused: Option<String>,
     #[serde(default)]
     pub assigned: Option<String>,
     #[serde(default)]
@@ -1306,11 +1356,26 @@ pub struct SyncReportJson {
     pub pulled: usize,
     pub pushed: usize,
     pub refreshed: usize,
+    /// The changes the remote refused for good this run, each once with its
+    /// reason, those held for a refusal standing on their binding included
+    /// (SYNC §5).
+    pub refusals: Vec<RefusedJson>,
     pub rejected: usize,
+    /// The based bindings in scope a capped round, or a narrowed one handing
+    /// no enumeration, did not list and kept (SYNC §5).
+    pub unlisted: usize,
     /// The changes withheld because their body failed its name or was
     /// missing (STORAGE §7).
     pub unreadable: usize,
     pub waiting: usize,
+}
+
+/// A change the remote refused for good, on a sync report: the handle it
+/// was pushed for and the remote's reason (SYNC §5).
+#[derive(Debug, Eq, PartialEq, Serialize)]
+pub struct RefusedJson {
+    pub handle: String,
+    pub reason: String,
 }
 
 impl From<&PimdirSyncReport> for SyncReportJson {
@@ -1324,11 +1389,30 @@ impl From<&PimdirSyncReport> for SyncReportJson {
             pulled: report.pulled,
             pushed: report.pushed,
             refreshed: report.refreshed,
+            refusals: refusals(&report.events),
             rejected: report.rejected,
+            unlisted: report.unlisted,
             unreadable: report.unreadable,
             waiting: report.waiting.len(),
         }
     }
+}
+
+/// The refusals the events report, once per handle, their reason scrubbed
+/// of credentials (STORAGE §18) before a log shows it.
+fn refusals(events: &[PimdirSyncEvent]) -> Vec<RefusedJson> {
+    let mut refusals: Vec<RefusedJson> = Vec::new();
+    for event in events {
+        if let PimdirSyncEvent::Refused { handle, reason } = event
+            && refusals.iter().all(|seen| seen.handle != handle.as_str())
+        {
+            refusals.push(RefusedJson {
+                handle: handle.as_str().into(),
+                reason: scrub(reason),
+            });
+        }
+    }
+    refusals
 }
 
 /// How many bodies the events say a policy kept as retained items.

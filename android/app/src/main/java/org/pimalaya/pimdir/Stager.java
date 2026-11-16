@@ -50,6 +50,14 @@ public abstract class Stager implements OfflineDriver {
     @Override
     public void synced(String collection, SyncReport report) {
         parked.synced(collection, report);
+        // NOTE: a refused change is held, reported every pass while its
+        // refusal stands (pimdir SYNC §5); no screen shows it yet.
+        for (SyncReport.Refusal refusal : report.refusals()) {
+            Log.w(
+                    "pimalaya",
+                    "refused for good in " + collection + ": " + refusal.handle() + ": "
+                            + refusal.reason());
+        }
     }
 
     /**

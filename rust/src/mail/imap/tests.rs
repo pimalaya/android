@@ -83,6 +83,8 @@ struct Scripted {
     garbled: Vec<u32>,
     /// The commands, by prefix, answered with an undecodable line more.
     noisy: Vec<&'static str>,
+    /// What `UID STORE` answers, `TAG` standing for the command's tag.
+    store: &'static str,
     pending: VecDeque<u8>,
     commands: Vec<String>,
     /// Every UID whose header fields were fetched, in order.
@@ -107,6 +109,7 @@ impl Scripted {
             gone: Vec::new(),
             garbled: Vec::new(),
             noisy: Vec::new(),
+            store: "TAG OK stored\r\n",
             pending: VecDeque::new(),
             commands: Vec::new(),
             headers_read: Vec::new(),
@@ -207,6 +210,15 @@ impl Scripted {
                 .map(|m| m.uid.to_string())
                 .collect();
             return format!("* SEARCH {}\r\n{tag} OK searched\r\n", uids.join(" "));
+        }
+        if command.starts_with("SELECT INBOX") {
+            return format!(
+                "* {} EXISTS\r\n* OK [UIDVALIDITY 7] v\r\n{tag} OK [READ-WRITE] done\r\n",
+                self.messages.len()
+            );
+        }
+        if command.starts_with("UID STORE ") {
+            return self.store.replace("TAG", tag);
         }
         let Some(fetch) = command.strip_prefix("UID FETCH ") else {
             return format!("{tag} BAD unscripted\r\n");
@@ -1413,4 +1425,37 @@ fn an_append_of_a_message_the_mailbox_holds_is_skipped() {
             .count(),
         1
     );
+}
+
+/// A write the server answers `NO` naming a rule the change breaks is
+/// refused as it stands, for the push to answer `Refused` (pimdir SYNC §4);
+/// one naming a state that passes, or no code, may land later.
+#[test]
+fn a_write_refused_as_it_stands_is_told_from_one_that_may_land() {
+    let cases = [
+        ("TAG NO [CANNOT] not here\r\n", true),
+        ("TAG NO [NOPERM] read-only\r\n", true),
+        ("TAG NO [TOOBIG] too large\r\n", true),
+        ("TAG NO [PARSE] unreadable\r\n", true),
+        ("TAG NO [OVERQUOTA] full\r\n", false),
+        ("TAG NO [INUSE] busy\r\n", false),
+        ("TAG NO try later\r\n", false),
+        ("TAG BAD what\r\n", false),
+    ];
+
+    for (answer, refused) in cases {
+        let mut client = Client::new(Scripted::new(daily(3)));
+        client.host.store = answer;
+        let mut state = state(Vec::new());
+        let err = ImapSession::bind(&mut client, &mut state)
+            .store_flag("INBOX", "2", "\\Seen", true)
+            .expect_err(answer);
+        assert_eq!(err.refused, refused, "{answer}: {}", err.message);
+    }
+
+    let mut client = Client::new(Scripted::new(daily(3)));
+    let mut state = state(Vec::new());
+    ImapSession::bind(&mut client, &mut state)
+        .store_flag("INBOX", "2", "\\Seen", true)
+        .unwrap();
 }

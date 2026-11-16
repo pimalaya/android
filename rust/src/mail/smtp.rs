@@ -130,6 +130,7 @@ impl<'a, H: Host> SmtpSession<'a, H> {
         signed.map_err(|err| BridgeError {
             message: err.message,
             status: Some(401),
+            ..Default::default()
         })
     }
 
@@ -384,6 +385,7 @@ mod tests {
         let refused = SmtpSendError::connecting(BridgeError {
             message: "535 5.7.8 Authentication failed".into(),
             status: Some(401),
+            ..Default::default()
         });
         assert!(refused.is_sign_in());
         assert!(!refused.is_permanent() && !refused.is_uncertain());

@@ -79,6 +79,9 @@ public class MailMoveTest {
         /** The handles the server no longer holds: a write on one is a 404. */
         final Set<String> gone = new HashSet<>();
 
+        /** The handles a write on which the server refuses as it stands. */
+        final Set<String> refusing = new HashSet<>();
+
         /** The page a mailbox lists, by name, else {@link #listed} as a round. */
         final Map<String, JSONObject> pages = new HashMap<>();
 
@@ -156,6 +159,9 @@ public class MailMoveTest {
         private void refuseGone(String handle) {
             if (gone.contains(handle)) {
                 throw new PimalayaException("Requested entity was not found.", 404);
+            }
+            if (refusing.contains(handle)) {
+                throw new PimalayaException("NO [CANNOT] not in this mailbox", null, true);
             }
         }
     }
@@ -524,6 +530,38 @@ public class MailMoveTest {
         assertNull("the removal converged",
                 scalar("SELECT handle FROM bindings WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = '7')",
                         trash));
+    }
+
+    /**
+     * A delete the server refuses as it stands is answered refused: the
+     * refusal is recorded on the binding and reported, and the next sync
+     * holds the same change rather than pushing it again (pimdir SYNC §4,
+     * §5).
+     */
+    @Test
+    public void aDeleteRefusedAsItStandsIsHeldAndReported() throws Exception {
+        file(trash, named("7", "Old"));
+        stager().mutateRemove(trash, "7");
+
+        Server server = new Server();
+        server.refusing.add("7");
+        server.listed = new JSONArray().put(named("7", "Old")).put(named("8", "New"));
+        SyncReport report = sync(server, trash);
+
+        assertEquals("nothing accepted: " + report, 0, report.pushed());
+        assertEquals(1, report.refusals().size());
+        assertEquals("7", report.refusals().get(0).handle());
+        assertTrue(report.refusals().get(0).reason().contains("CANNOT"));
+        assertEquals("the page landed", "0",
+                scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '8'", trash));
+        assertNotNull("recorded on the binding",
+                scalar("SELECT refusal FROM bindings WHERE handle = '7' AND collection = ?",
+                        trash));
+
+        server.calls.clear();
+        report = sync(server, trash);
+        assertTrue("held: " + server.calls, server.calls.isEmpty());
+        assertEquals("reported again", 1, report.refusals().size());
     }
 
     @Test

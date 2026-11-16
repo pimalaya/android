@@ -617,6 +617,7 @@ fn changed_since_base(id: &str) -> BridgeError {
     BridgeError {
         message: format!("People contact {id} changed since the base of its edit"),
         status: Some(412),
+        ..Default::default()
     }
 }
 

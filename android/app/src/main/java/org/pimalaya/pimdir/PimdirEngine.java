@@ -334,6 +334,29 @@ public abstract class PimdirEngine extends Stager {
         return result;
     }
 
+    /**
+     * One push result refusing the change as it stands (pimdir SYNC §4), with
+     * the server's reason: the engine records it on the binding and holds the
+     * change while it derives the same one, where a rejected one is pushed
+     * again.
+     */
+    public static JSONObject refusedResult(String handle, String reason) throws JSONException {
+        JSONObject result = result(handle, false, null, null);
+        result.put("refused", reason == null ? "" : reason);
+        return result;
+    }
+
+    /**
+     * The reason a failure refuses its change as it stands, as the bridge
+     * read it off the server's answer, or null when it cannot tell.
+     */
+    protected static String refusal(Exception failure) {
+        if (failure instanceof PimalayaException && ((PimalayaException) failure).refused) {
+            return failure.getMessage();
+        }
+        return null;
+    }
+
     /** The strings of a JSON array, in order. */
     protected static List<String> stringsOf(JSONArray values) throws JSONException {
         List<String> strings = new ArrayList<>(values.length());

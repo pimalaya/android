@@ -83,9 +83,18 @@ impl<H: Host> Webdav<'_, H> {
         let coroutine = CarddavCardList::new(url, &auth, USER_AGENT, url.path(), &opts);
         let list = self.client.run(url, coroutine)?;
 
-        // NOTE: a truncated listing would read as deletions downstream.
+        // NOTE: a truncated listing would read as deletions downstream, and
+        // so would a card listed without its data.
         if list.truncated {
             return Err(format!("CardDAV server truncated the card listing of {url}").into());
+        }
+        if let Some(card) = list.unreadable.first() {
+            return Err(format!(
+                "CardDAV listing of {url} is not whole, cards unreadable: {} ({} first)",
+                list.unreadable.len(),
+                card.id
+            )
+            .into());
         }
 
         Ok(list.cards.into_iter().map(into_card).collect())
@@ -178,9 +187,14 @@ impl<H: Host> Webdav<'_, H> {
     pub fn multiget_cards(&mut self, url: &Url, uris: &[&str]) -> Result<Vec<Card>, BridgeError> {
         let auth = self.auth.webdav();
         let coroutine = CarddavCardMultiget::new(url, &auth, USER_AGENT, url.path(), uris);
-        let cards: Vec<CarddavCardEntry> = self.client.run(url, coroutine)?;
+        let fetched = self.client.run(url, coroutine)?;
+        // NOTE: a card answered without its data is left out, as one the
+        // server did not answer at all; only the log says which.
+        for entry in &fetched.unreadable {
+            log::warn!("{url}: card {} unreadable: {:?}", entry.id, entry.status);
+        }
 
-        Ok(cards.into_iter().map(into_card).collect())
+        Ok(fetched.cards.into_iter().map(into_card).collect())
     }
 }
 

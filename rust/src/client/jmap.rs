@@ -312,6 +312,7 @@ pub fn refused(message: impl Into<String>) -> BridgeError {
     BridgeError {
         message: message.into(),
         status: Some(REFUSED),
+        ..Default::default()
     }
 }
 

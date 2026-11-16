@@ -383,12 +383,14 @@ impl<H: Host> GraphEntry<'_, H> {
                 Some(REFUSED) => BridgeError {
                     message: format!("Graph refuses an occurrence of event {id} for good: {err}"),
                     status: Some(REFUSED),
+                    ..Default::default()
                 },
                 _ => BridgeError {
                     message: format!(
                         "Event {id} was written to Graph without all its occurrences: {err}"
                     ),
                     status: Some(412),
+                    ..Default::default()
                 },
             })
     }
@@ -735,6 +737,7 @@ fn check_revision(
         Some(expected) if current.change_key.as_deref() != Some(expected) => Err(BridgeError {
             message: format!("Event {id} changed on Graph since it was read"),
             status: Some(412),
+            ..Default::default()
         }),
         _ => Ok(()),
     }

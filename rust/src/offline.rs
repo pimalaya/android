@@ -21,10 +21,10 @@ use core::fmt::Display;
 use std::collections::BTreeMap;
 
 use io_pimdir::{
-    change::PimdirWriteOp,
+    change::{PimdirChangeKey, PimdirWriteOp},
     collection::{PimdirCheckpoint, PimdirCoverage, PimdirCursor, PimdirRound, PimdirScope},
     coroutine::*,
-    load::{PimdirLoadSelection, PimdirLoaded},
+    load::{PimdirLoadSelection, PimdirLoaded, PimdirRefusal},
     mutate::{PimdirMutate, PimdirMutation},
     object::{PimdirHash, PimdirHeldObject},
     placement::{PimdirHandle, PimdirLinkId, PimdirPlacement},
@@ -369,6 +369,7 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
         return Err(BridgeError {
             message: error,
             status: probe.status,
+            ..Default::default()
         });
     }
 
@@ -422,6 +423,17 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
                     })
                     .collect(),
                 offered: loaded.offered.into_iter().map(PimdirHandle).collect(),
+                refused: loaded
+                    .refused
+                    .into_iter()
+                    .map(|refusal| {
+                        let held = PimdirRefusal {
+                            key: PimdirChangeKey(refusal.key),
+                            reason: refusal.reason,
+                        };
+                        (PimdirHandle(refusal.handle), held)
+                    })
+                    .collect(),
             })
         }
         PimdirYield::WantsLookupObject(_) => {
@@ -494,10 +506,10 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
                 .into_iter()
                 .map(|result| PimdirPushResult {
                     handle: PimdirHandle(result.handle),
-                    outcome: if result.accepted {
-                        PimdirPushOutcome::Accepted
-                    } else {
-                        PimdirPushOutcome::Rejected
+                    outcome: match (result.accepted, result.refused) {
+                        (true, _) => PimdirPushOutcome::Accepted,
+                        (false, Some(reason)) => PimdirPushOutcome::Refused { reason },
+                        (false, None) => PimdirPushOutcome::Rejected,
                     },
                     assigned: result.assigned.map(PimdirHandle),
                     revision: result.revision,
@@ -917,6 +929,77 @@ pub(crate) mod tests {
             pushed[0]["supersedes"],
             serde_json::json!({"collection": "acct/work", "handle": "gate.ics", "ifMatch": "e0"}),
         );
+    }
+
+    /// A push Java answers refused crosses as `Refused`: the engine records
+    /// the refusal on the binding, its reason scrubbed, and reports it; a
+    /// load carrying that refusal back holds the same change, unpushed and
+    /// reported again (pimdir SYNC §4, §5).
+    #[test]
+    fn a_refused_push_is_recorded_then_held() {
+        let opts = PimdirSyncOptions {
+            push: true,
+            ..Default::default()
+        };
+        let placement = r#"{"collection": "acct/Drafts", "handle": "\u0001m1",
+            "linkId": "m1", "object": "h1", "level": "full", "status": "created"}"#;
+        let reason = "NO [CANNOT] Bearer abc.def.ghi refused";
+
+        // NOTE: one run, answering the load with `refused` and every push
+        // as Java answers a refusal; what it wrote and pushed, and its
+        // report's refusals.
+        let run = |refused: &str| {
+            let mut sync = PimdirSync::new("acct/Drafts", opts.clone());
+            let loaded = format!(r#"{{"placements": [{placement}], "refused": [{refused}]}}"#);
+            let (mut pushed, mut written) = (0, Vec::new());
+            let mut arg = None;
+            let report = loop {
+                let yielded = match sync.resume(arg.take()) {
+                    PimdirCoroutineState::Yielded(yielded) => yielded,
+                    PimdirCoroutineState::Complete(done) => break done.unwrap(),
+                };
+                let envelope: Value = serde_json::from_str(&yield_json(&yielded)).unwrap();
+                let reply = match envelope["op"].as_str().unwrap() {
+                    "load" => loaded.clone(),
+                    "enumerate" => r#"{"items": [], "complete": true}"#.to_string(),
+                    "verify" => serde_json::json!({"verified": envelope["hashes"]}).to_string(),
+                    "write" => {
+                        written.extend(envelope["writes"].as_array().unwrap().clone());
+                        "{}".to_string()
+                    }
+                    "push" => {
+                        pushed += envelope["changes"].as_array().unwrap().len();
+                        serde_json::json!({"results": [{"handle": "\u{1}m1",
+                            "accepted": false, "refused": reason}]})
+                        .to_string()
+                    }
+                    _ => "{}".to_string(),
+                };
+                arg = Some(parse_arg(&yielded, &reply).unwrap());
+            };
+            let report = crate::offline::wire::SyncReportJson::from(&report);
+            (pushed, written, report.refusals)
+        };
+
+        let (pushed, written, refusals) = run("");
+        assert_eq!(pushed, 1);
+        let refusal = written
+            .iter()
+            .find(|op| op["op"] == "refusePlacement")
+            .unwrap_or_else(|| panic!("no refusal recorded: {written:?}"));
+        assert_eq!(refusal["collection"], "acct/Drafts");
+        assert_eq!(refusal["handle"], "\u{1}m1");
+        let recorded = refusal["reason"].as_str().unwrap();
+        assert!(!recorded.contains("abc.def.ghi"), "scrubbed: {recorded}");
+        assert_eq!(refusals.len(), 1);
+        assert_eq!(refusals[0].handle, "\u{1}m1");
+
+        let held = serde_json::json!({"handle": "\u{1}m1", "key": refusal["key"],
+            "reason": recorded});
+        let (pushed, written, refusals) = run(&held.to_string());
+        assert_eq!(pushed, 0, "the same change is held");
+        assert!(written.iter().all(|op| op["op"] != "refusePlacement"));
+        assert_eq!(refusals.len(), 1, "reported while it stands");
     }
 
     /// The edit `mutation` (its wire JSON) of a placement whose load reply

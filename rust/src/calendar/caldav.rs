@@ -102,9 +102,14 @@ impl<H: Host> Webdav<'_, H> {
     pub fn multiget_events(&mut self, url: &Url, ids: &[&str]) -> Result<Vec<Event>, BridgeError> {
         let auth = self.auth.webdav();
         let coroutine = CaldavItemMultiget::new(url, &auth, USER_AGENT, url.path(), ids);
-        let items: Vec<CaldavItemEntry> = self.client.run(url, coroutine)?;
+        let fetched = self.client.run(url, coroutine)?;
+        // NOTE: an event answered without its data is left out, as one the
+        // server did not answer at all; only the log says which.
+        for entry in &fetched.unreadable {
+            log::warn!("{url}: event {} unreadable: {:?}", entry.id, entry.status);
+        }
 
-        Ok(items.into_iter().map(into_event).collect())
+        Ok(fetched.items.into_iter().map(into_event).collect())
     }
 
     /// Replaces the object `id` at `url`, answering the new ETag if sent.
@@ -178,6 +183,7 @@ impl<H: Host> Webdav<'_, H> {
             return Err(BridgeError {
                 message: format!("Cannot move {id} to another server"),
                 status: Some(501),
+                ..Default::default()
             });
         }
 

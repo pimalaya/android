@@ -269,6 +269,9 @@ struct EventJson {
     kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     link_id: Option<String>,
+    /// A Refused event's reason, as the remote gave it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
 }
 
 impl From<&PimdirSyncEvent> for EventJson {
@@ -283,6 +286,14 @@ impl From<&PimdirSyncEvent> for EventJson {
             PimdirSyncEvent::Abandoned(handle) => ("Abandoned", handle, None),
             PimdirSyncEvent::Overruled { handle, link_id } => ("Overruled", handle, Some(link_id)),
             PimdirSyncEvent::Disagreed { handle, link_id } => ("Disagreed", handle, Some(link_id)),
+            PimdirSyncEvent::Refused { handle, reason } => {
+                return Self {
+                    handle: handle.as_str().into(),
+                    kind: "Refused",
+                    link_id: None,
+                    reason: Some(reason.clone()),
+                };
+            }
             _ => return Self::unknown(),
         };
 
@@ -290,6 +301,7 @@ impl From<&PimdirSyncEvent> for EventJson {
             handle: handle.as_str().into(),
             kind,
             link_id: link_id.map(|link| link.as_str().into()),
+            reason: None,
         }
     }
 }
@@ -301,6 +313,7 @@ impl EventJson {
             handle: String::new(),
             kind: "Unknown",
             link_id: None,
+            reason: None,
         }
     }
 }

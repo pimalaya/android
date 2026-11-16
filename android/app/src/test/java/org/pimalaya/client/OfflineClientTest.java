@@ -46,7 +46,7 @@ public class OfflineClientTest {
         String raw = Native.offlineSync(EMPTY, "c", false, true, "", true, false);
         assertMirrors(SyncReport.class, raw);
         assertEquals(
-                new SyncReport(0, 0, 0, 0, false, 0, 0, 0, 0, 0, 0),
+                new SyncReport(0, 0, 0, 0, false, 0, 0, 0, List.of(), 0, 0, 0, 0),
                 new OfflineClient().sync(EMPTY, "c", false));
     }
 
@@ -57,9 +57,25 @@ public class OfflineClientTest {
                         new JSONObject(
                                 "{\"absent\":30,\"bound\":40,\"conflicts\":1,\"overruled\":7,"
                                         + "\"parked\":true,\"pulled\":2,\"pushed\":3,"
-                                        + "\"refreshed\":4,\"rejected\":5,\"unreadable\":8,"
-                                        + "\"waiting\":6}"));
-        assertEquals(new SyncReport(30, 40, 1, 7, true, 2, 3, 4, 5, 8, 6), report);
+                                        + "\"refreshed\":4,\"refusals\":[{\"handle\":\"h1\","
+                                        + "\"reason\":\"NO [CANNOT] no\"}],\"rejected\":5,"
+                                        + "\"unlisted\":9,\"unreadable\":8,\"waiting\":6}"));
+        assertEquals(
+                new SyncReport(
+                        30,
+                        40,
+                        1,
+                        7,
+                        true,
+                        2,
+                        3,
+                        4,
+                        List.of(new SyncReport.Refusal("h1", "NO [CANNOT] no")),
+                        5,
+                        9,
+                        8,
+                        6),
+                report);
     }
 
     @Test
