@@ -662,7 +662,7 @@ fn span(point: &PimdirQueryDate, now: i64, zone: &TimeZone) -> (i64, i64) {
     };
     let start = |days: i64| start_of_day(days, zone);
     let today = Timestamp::from_second(now).map_or(now.div_euclid(DAY), |instant| {
-        let date = instant.to_zoned(zone.clone()).date();
+        let date = instant.to_zoned_datetime(zone.clone()).date();
         days_from_civil(
             i32::from(date.year()),
             date.month() as u32,
@@ -719,7 +719,7 @@ fn start_of_day(days: i64, zone: &TimeZone) -> i64 {
     i16::try_from(year)
         .ok()
         .and_then(|year| Date::new(year, month as i8, day as i8).ok())
-        .and_then(|date| date.to_zoned(zone.clone()).ok())
+        .and_then(|date| date.to_zoned_datetime(zone.clone()).ok())
         .and_then(|zoned| zoned.start_of_day().ok())
         .map_or(days * DAY, |zoned| zoned.timestamp().as_second())
 }

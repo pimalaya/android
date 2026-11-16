@@ -367,7 +367,7 @@ fn day_of(instant: &str) -> Date {
     instant
         .parse::<Timestamp>()
         .unwrap()
-        .to_zoned(TimeZone::UTC)
+        .to_zoned_datetime(TimeZone::UTC)
         .date()
 }
 

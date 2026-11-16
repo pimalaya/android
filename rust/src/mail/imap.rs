@@ -1846,7 +1846,7 @@ fn uid_of(items: &[MessageDataItem<'static>]) -> Option<u32> {
 
 /// A day as `SENTSINCE` and `SENTBEFORE` compare it.
 fn imap_date(instant: jiff::Timestamp) -> Result<NaiveDate, BridgeError> {
-    let date = instant.to_zoned(jiff::tz::TimeZone::UTC).date();
+    let date = instant.to_zoned_datetime(jiff::tz::TimeZone::UTC).date();
     chrono::NaiveDate::from_ymd_opt(
         i32::from(date.year()),
         date.month() as u32,

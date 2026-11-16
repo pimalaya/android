@@ -133,7 +133,7 @@ impl<H: Host> Msgraph<'_, H> {
     /// The iCalendar objects of the named events, each at its master's
     /// `changeKey`, read by `$batch` ([`Self::read_entries`]).
     pub fn read_events(&mut self, ids: &[&str]) -> Result<Vec<Event>, BridgeError> {
-        let today = Timestamp::now().to_zoned(TimeZone::UTC).date();
+        let today = Timestamp::now().to_zoned_datetime(TimeZone::UTC).date();
 
         self.read_entries(ids, today)
     }
@@ -235,7 +235,12 @@ impl<H: Host> Msgraph<'_, H> {
             return Ok((master, Vec::new()));
         }
 
-        let today = self.client.host.now().to_zoned(TimeZone::UTC).date();
+        let today = self
+            .client
+            .host
+            .now()
+            .to_zoned_datetime(TimeZone::UTC)
+            .date();
         let Some(windows) = series_windows(&master, today) else {
             log::warn!("series {id} has no readable range, its exceptions are skipped");
             return Ok((master, Vec::new()));
@@ -706,7 +711,7 @@ fn series_windows(master: &MsgraphEvent, today: Date) -> Option<Vec<(String, Str
     let start = start.max(floor);
 
     let instant = |date: Date| -> Option<String> {
-        let timestamp = date.to_zoned(TimeZone::UTC).ok()?.timestamp();
+        let timestamp = date.to_zoned_datetime(TimeZone::UTC).ok()?.timestamp();
         Some(timestamp.strftime("%Y-%m-%dT%H:%M:%SZ").to_string())
     };
 
