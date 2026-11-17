@@ -18,7 +18,7 @@ public class StubHost extends Host {
 
     @Override
     public int titleOf(int panel) {
-        return 0;
+        return panel == Panels.ACCOUNT ? org.pimalaya.R.string.settings_account_label : 0;
     }
 
     @Override

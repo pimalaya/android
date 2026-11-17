@@ -822,7 +822,7 @@ public class MainActivity extends Host
         screen = PANEL_ROOT;
         applyChrome(PANEL_ROOT);
         reloadHome();
-        accountSettings.open(email);
+        accountSettings.resume(email);
     }
 
     /** Leaves the auth flow unfinished, onto the root, the drawer closed. */
@@ -1699,20 +1699,24 @@ public class MainActivity extends Host
     /** Fades the bar's title in or out as a large title leaves or returns. */
     @Override
     public void showBarTitle(boolean shown) {
-        if (SelectionBar.showing(this)) {
+        if (screen != Panels.ACCOUNT && SelectionBar.showing(this)) {
             return;
         }
-        findViewById(R.id.bar_title).animate().alpha(shown ? 1f : 0f).setDuration(150);
+        findViewById(screen == Panels.ACCOUNT ? R.id.account_title : R.id.bar_title)
+                .animate().alpha(shown ? 1f : 0f).setDuration(150);
     }
 
     @Override
     public int titleOf(int panel) {
-        return Domains.titleOf(panel);
+        return panel == Panels.ACCOUNT ? R.string.settings_account_label : Domains.titleOf(panel);
     }
 
     /** The large title heading one list. */
     @Override
     public ListHeader headerOf(int panel) {
+        if (panel == Panels.ACCOUNT) {
+            return accountSettings.header();
+        }
         if (panel == Panels.MAIL) {
             return mailList.header();
         }
@@ -1787,7 +1791,7 @@ public class MainActivity extends Host
      */
     @Override
     public void foldFab(boolean folded) {
-        if (folded == fabFolded) {
+        if (screen == Panels.ACCOUNT || folded == fabFolded) {
             return;
         }
         fabFolded = folded;
@@ -2598,7 +2602,7 @@ public class MainActivity extends Host
         // re-applying stays idempotent as the listener fires again; the
         // bottom folds in the keyboard so the FAB rides above it.
         padBottom(R.id.fab_frame, 0, bottom);
-        padBottom(R.id.account_page, 24, bottom);
+        padBottom(R.id.account_list, 24, bottom);
         // NOTE: the bottom navigation takes the system bar's inset, never
         // the keyboard's, and the extended FAB rides above it.
         padBottom(R.id.bottom_nav, 0, bars.bottom);

@@ -6,9 +6,11 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.CheckBox;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.RadioButton;
 import android.widget.ScrollView;
 import android.widget.Switch;
@@ -50,10 +52,13 @@ import org.pimalaya.task.GoogleLimits;
 import org.pimalaya.task.TaskStore;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.CardRows;
+import org.pimalaya.ui.CardSections;
 import org.pimalaya.ui.Host;
+import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.PillField;
 import org.pimalaya.ui.Sections;
+import org.pimalaya.ui.SectionsAdapter;
 import org.pimalaya.ui.Switches;
 import org.pimalaya.ui.SyncPill;
 
@@ -81,6 +86,12 @@ public final class AccountSettings {
 
     /** The account whose settings screen is open (null outside it). */
     private String settingsEmail;
+
+    private ListView list;
+    private ListHeader header;
+    private View deleteFooter;
+    private final CardSections<Integer> cards = new CardSections<>();
+    private final Adapter adapter = new Adapter();
 
     /**
      * The list screen the drawer was raised over, restored on the way out.
@@ -125,39 +136,46 @@ public final class AccountSettings {
         this.shell = shell;
     }
 
-    /** Wires the page's bar, scroll and remove button, once laid out. */
+    /** Wires the shared list header, bar and remove footer once laid out. */
     public void bind() {
-        // NOTE: the address moves into the bar once the identity block's
-        // own address has scrolled under it, as the lists hand over their
-        // large title.
-        ScrollView scroll = host.findViewById(R.id.account_scroll);
-        scroll.setOnScrollChangeListener(
-                (view, x, y, oldX, oldY) -> {
-                    View address = host.findViewById(R.id.account_address);
-                    View identity = host.findViewById(R.id.account_identity);
-                    boolean gone = y >= identity.getTop() + address.getBottom();
-                    View title = host.findViewById(R.id.account_title);
-                    float alpha = gone ? 1f : 0f;
-                    if (title.getAlpha() != alpha) {
-                        title.animate().alpha(alpha).setDuration(150);
-                    }
-                });
-        host.findViewById(R.id.account_back).setOnClickListener(view -> leave());
-        host.findViewById(R.id.account_delete)
+        list = host.findViewById(R.id.account_list);
+        list.setItemsCanFocus(true);
+        header = new ListHeader(host, list, Panels.ACCOUNT, R.layout.account_identity);
+        deleteFooter = host.getLayoutInflater().inflate(R.layout.account_removal, list, false);
+        list.addFooterView(deleteFooter, null, false);
+        deleteFooter.findViewById(R.id.account_delete)
                 .setOnClickListener(view -> confirmDeleteAccount(settingsEmail));
+        host.findViewById(R.id.account_back).setOnClickListener(view -> leave());
     }
 
-    /** Opens one account's settings screen, fading in over the drawer. */
+    /** The large title heading this account's list. */
+    public ListHeader header() {
+        return header;
+    }
+
+    /** Opens one account's settings screen from the beginning. */
     public void open(String email) {
+        open(email, true);
+    }
+
+    /** Returns from sign-in, retaining this account's native list position. */
+    public void resume(String email) {
+        open(email, adapter.account == null || !email.equals(adapter.account.email));
+    }
+
+    private void open(String email, boolean reset) {
         settingsEmail = email;
         cameFrom = host.screen;
-
-        ((TextView) host.findViewById(R.id.account_title)).setText(email);
-        host.findViewById(R.id.account_title).setAlpha(0f);
-        host.findViewById(R.id.account_scroll).scrollTo(0, 0);
         elsewhere = false;
         calendarsElsewhere = false;
         render();
+        if (reset) {
+            list.setAdapter(adapter);
+        }
+        TextView title = host.findViewById(R.id.account_title);
+        title.setText(email);
+        title.animate().cancel();
+        title.setAlpha(!reset && header.scrolled() ? 1f : 0f);
         host.openOverlay(Panels.ACCOUNT);
 
         // NOTE: one provider query each, off the main thread.
@@ -187,54 +205,80 @@ public final class AccountSettings {
         if (account == null) {
             return;
         }
+        cards.fill(
+                List.of(0, 1, 2),
+                card ->
+                        host.getString(
+                                switch (card) {
+                                    case 0 -> R.string.settings_account_label;
+                                    case 1 -> R.string.settings_domains_label;
+                                    default -> R.string.settings_signin_label;
+                                }));
+        adapter.account = account;
         renderIdentity(account);
-
-        LinearLayout content = host.findViewById(R.id.account_content);
-        Sections sections = new Sections(host, content);
-        sections.clear();
-        label(content, R.string.settings_account_label);
-        addAccount(sections, account);
-        label(content, R.string.settings_domains_label);
-        addDomains(sections, content, account);
-        label(content, R.string.settings_signin_label);
-        addServers(sections, account);
+        adapter.notifyDataSetChanged();
 
         boolean contactsOnly =
                 !account.covers(PimDomain.MAIL) && !account.covers(PimDomain.CALENDAR);
-        ((TextView) host.findViewById(R.id.account_delete_note))
+        ((TextView) deleteFooter.findViewById(R.id.account_delete_note))
                 .setText(
                         contactsOnly
                                 ? R.string.delete_account_contacts
                                 : R.string.delete_account_all);
     }
 
-    /** A label over the next card, naming what it holds. */
-    private void label(LinearLayout content, int text) {
-        TextView label = new TextView(host);
-        label.setText(text);
-        label.setTextColor(host.resolveColor(android.R.attr.textColorSecondary));
-        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        label.setTypeface(null, android.graphics.Typeface.BOLD);
-        label.setAllCaps(true);
-        label.setLetterSpacing(0.02f);
-        int gutter = host.getResources().getDimensionPixelSize(R.dimen.card_gutter);
-        LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT);
-        params.setMarginStart(gutter + host.dp(4));
-        params.setMarginEnd(gutter + host.dp(4));
-        params.topMargin = host.dp(content.getChildCount() == 0 ? 8 : 20);
-        content.addView(label, params);
+    /** Recycles the three settings cards, keeping their existing controls. */
+    private final class Adapter extends SectionsAdapter<Integer> {
+        private AccountEntry account;
+
+        Adapter() {
+            super(cards);
+        }
+
+        @Override
+        public boolean hasStableIds() {
+            return true;
+        }
+
+        @Override
+        public boolean areAllItemsEnabled() {
+            return false;
+        }
+
+        @Override
+        public boolean isEnabled(int position) {
+            return false;
+        }
+
+        @Override
+        protected View rowView(int position, View recycled, ViewGroup parent) {
+            LinearLayout content =
+                    recycled == null ? new LinearLayout(host) : (LinearLayout) recycled;
+            content.setOrientation(LinearLayout.VERTICAL);
+            Sections sections = new Sections(host, content);
+            sections.clear();
+            switch (cards.row(position)) {
+                case 0:
+                    addAccount(sections, account);
+                    break;
+                case 1:
+                    addDomains(sections, content, account);
+                    break;
+                case 2:
+                    addServers(sections, account);
+                    break;
+            }
+            return content;
+        }
     }
 
     /** The disc, the address, what it covers and where it stands. */
     private void renderIdentity(AccountEntry account) {
         String email = account.email;
-        TextView avatar = host.findViewById(R.id.account_avatar);
+        header.title(email);
+        TextView avatar = header.view.findViewById(R.id.account_avatar);
         avatar.setText(Avatar.letter(email));
         Avatar.paint(avatar, email);
-        ((TextView) host.findViewById(R.id.account_address)).setText(email);
 
         List<String> covered = new ArrayList<>();
         for (PimDomain domain : PimDomain.values()) {
@@ -242,10 +286,9 @@ public final class AccountSettings {
                 covered.add(host.getString(domain.label));
             }
         }
-        ((TextView) host.findViewById(R.id.account_domains))
-                .setText(android.text.TextUtils.join(" · ", covered));
+        header.meta(String.join(", ", covered));
 
-        FrameLayout pill = host.findViewById(R.id.account_pill);
+        FrameLayout pill = header.view.findViewById(R.id.account_pill);
         pill.removeAllViews();
         pill.addView(
                 SyncPill.of(
@@ -1197,7 +1240,7 @@ public final class AccountSettings {
         new AlertDialog.Builder(host)
                 .setTitle(R.string.delete_account_confirm)
                 .setMessage(
-                        ((TextView) host.findViewById(R.id.account_delete_note)).getText())
+                        ((TextView) deleteFooter.findViewById(R.id.account_delete_note)).getText())
                 .setPositiveButton(
                         R.string.delete_account,
                         (dialog, which) -> {

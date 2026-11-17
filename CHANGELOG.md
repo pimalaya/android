@@ -55,6 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Changed account settings to use ListView and the shared title handoff, preserving the original avatar, address, domains and sync-status layout.
 - Changed how contacts, calendar entries and tasks are identified on the phone: by their UID, as pimdir STORAGE §9 assigns it, rather than by the server's file name for an entry, so two files a calendar holds under one UID stay two entries and a card stating no UID is named from its content. Items already synced keep their identity until the store is rebuilt.
 - Changed a contact or calendar entry that is not UTF-8 text (an old Latin-1 vCard 2.1) to be kept exactly as its server sent it: it shows with replacement characters, and editing it in the app or in a contacts or calendar app is refused rather than writing those characters back to the server.
 - Changed the search engine to io-pimdir 0.16: the search index is rebuilt once after the update, and a calendar time zone or recurrence rule with a huge interval no longer stops the index nor a calendar summary, nor does an HTML comment closed by three dashes hide the rest of a message from search. A contact or entry edited on the phone keeps its own name and sort while the server still lists the earlier version.
@@ -122,6 +123,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Fixed the contact folders inside other folders of a Microsoft 365 account never showing: every folder, at any depth, is now an addressbook of its own.
 - Fixed a Microsoft 365 subject that literally contains an encoded word (`=?utf-8?q?...?=`) being shown decoded when Microsoft lists no header for it: it now shows as written.
 - Fixed a server typed during setup with a host that is not ASCII (such as `bücher.de`) being refused as unencrypted: the card now says the host is not ASCII and asks for its Punycode form (`xn--...`).
+- Fixed returning from Sign in again resetting account settings to the top instead of keeping their scroll position and toolbar title.
 - Fixed a task or a contact kept as the server sent it, not UTF-8 text, being moved to another list or merged into another contact with its accented letters turned into replacement marks: the move or the merge is now refused, as an edit already was.
 - Fixed an IMAP command after one whose answer could not be read to its end, or whose connection dropped, reading the wrong answer or going out unsigned: the connection is now opened again and signed in before the next command.
 - Fixed new mail, flags and deletions never reaching the phone after the first sync on iCloud and any IMAP server that advertises QRESYNC without enabling it: such a mailbox is now listed in full each time.

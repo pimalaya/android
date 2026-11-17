@@ -1,9 +1,11 @@
 package org.pimalaya.ui;
 
+import android.graphics.Rect;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.AbsListView;
 import android.widget.EditText;
 import android.widget.ImageButton;
@@ -31,6 +33,8 @@ public final class ListHeader {
     /** Whether the large title is scrolled out of sight. */
     private boolean scrolled;
 
+    private final Rect titleBounds = new Rect();
+
     /** Whether the filter panel shows, the FAB kept away meanwhile. */
     private boolean filtersShown;
 
@@ -44,10 +48,15 @@ public final class ListHeader {
 
     /** The header of {@code list}, the list shown on {@code panel}. */
     public ListHeader(Host host, ListView list, int panel) {
+        this(host, list, panel, R.layout.list_header);
+    }
+
+    /** Uses a layout containing header_title and header_meta TextViews. */
+    public ListHeader(Host host, ListView list, int panel, int layout) {
         this.host = host;
         this.panel = panel;
         this.list = list;
-        view = LayoutInflater.from(host).inflate(R.layout.list_header, list, false);
+        view = LayoutInflater.from(host).inflate(layout, list, false);
         list.addHeaderView(view, null, false);
         ((TextView) view.findViewById(R.id.header_title)).setText(host.titleOf(panel));
 
@@ -87,7 +96,7 @@ public final class ListHeader {
         return position - list.getHeaderViewsCount();
     }
 
-    void title(String title) {
+    public void title(String title) {
         ((TextView) view.findViewById(R.id.header_title)).setText(title);
     }
 
@@ -223,8 +232,10 @@ public final class ListHeader {
         // once before its first layout, the title then measuring nothing,
         // which is no scroll: read as one, the bar's title blinked in.
         View title = view.findViewById(R.id.header_title);
+        title.getDrawingRect(titleBounds);
+        ((ViewGroup) view).offsetDescendantRectToMyCoords(title, titleBounds);
         boolean gone =
-                first > 0 || title.getHeight() > 0 && view.getTop() + title.getBottom() <= 0;
+                first > 0 || title.getHeight() > 0 && view.getTop() + titleBounds.bottom <= 0;
         if (gone != scrolled) {
             scrolled = gone;
             if (host.screen == panel) {
