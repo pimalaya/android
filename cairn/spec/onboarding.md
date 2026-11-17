@@ -89,6 +89,16 @@ The advanced setup SHALL list one row per discovered submission endpoint and sig
 - WHEN the advanced setup switches mail on
 - THEN it is listed once, with its method
 
+### Requirement: Signing in again reopens the connection flow
+Choosing Sign in again from an account's settings SHALL open that account's connection flow, even when its last displayed step is still remembered from an earlier visit. Leaving the servers page with the toolbar back arrow or system Back SHALL return to the account's settings without changing its stored sign-in, and choosing Sign in again afterwards SHALL display the flow again rather than leave the app on its main screen.
+
+#### Scenario: Reopening after Back
+- GIVEN an account's Sign in again flow on its servers page
+- WHEN the user leaves with the toolbar back arrow or system Back
+- THEN the account's settings are shown and its stored sign-in is unchanged
+- WHEN Sign in again is chosen once more
+- THEN the servers page is visible again
+
 ### Requirement: An account can gain a sender after it is connected
 The account settings screen SHALL show, for an account covering mail, where that account submits, and SHALL let it be entered, changed or emptied. What is entered is read the way the advanced setup reads it: a host, or a host and a port, STARTTLS on port 587 and implicit TLS otherwise, on port 465 by default. Changing it SHALL leave the account's credential and the endpoint it reads from alone, and SHALL take effect without a sign-in.
 

@@ -117,6 +117,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Fixed
 
 - Fixed a repeating entry of a JMAP calendar ending its repetition at the wrong time: the end of a series (`UNTIL`) in a time zone is now shifted between the zone and UTC as it crosses between the phone and the server, a floating or all-day one stays floating or all-day rather than turning into a UTC time, and an entry's last-modified time is no longer dropped on its way to the server.
+- Fixed Sign in again returning to the main screen instead of reopening its form after leaving it with Back.
 - Fixed a background sync told to stop by the system still waiting up to a minute on a server that asked it to slow down: the wait now ends at once, and the request is tried again on the next sync.
 - Fixed the contact folders inside other folders of a Microsoft 365 account never showing: every folder, at any depth, is now an addressbook of its own.
 - Fixed a Microsoft 365 subject that literally contains an encoded word (`=?utf-8?q?...?=`) being shown decoded when Microsoft lists no header for it: it now shows as written.

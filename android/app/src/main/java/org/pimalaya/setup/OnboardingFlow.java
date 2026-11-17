@@ -308,6 +308,8 @@ public final class OnboardingFlow {
         planAgain();
         discovering = true;
         openServers();
+        // NOTE: the flipper keeps its step after the auth overlay closes.
+        shell.showAuth(STEP_SIGNIN);
         search();
     }
 

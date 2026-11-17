@@ -89,6 +89,19 @@ public class BrowserLeftTest {
         flow.openOn(AccountEntry.find(accounts, ALICE));
     }
 
+    /** Back keeps the flipper's step, but signing in again must reopen its overlay. */
+    @Test
+    public void signInAgainReopensAfterLeavingTheServersPage() {
+        flow.abortAuthSteps();
+        flow.leave();
+        int opened = host.authOpenings;
+
+        flow.openOn(AccountEntry.find(new SecureStore(host).loadAll(), ALICE));
+
+        assertEquals(opened + 1, host.authOpenings);
+        assertEquals(OnboardingFlow.STEP_SIGNIN, host.authStep());
+    }
+
     /** The consent page left in the browser: Continue offered again. */
     @Test
     public void backWithNoRedirectStopsTheLoader() {
@@ -120,6 +133,13 @@ public class BrowserLeftTest {
     /** The flow's host, each button's loader remembered. */
     public static class LoadingHost extends WrongGrantTest.FlowHost {
         final Map<Integer, Boolean> loading = new HashMap<>();
+        int authOpenings;
+
+        @Override
+        public void showAuth(int step) {
+            authOpenings++;
+            super.showAuth(step);
+        }
 
         @Override
         public void setAuthLoading(int buttonId, int progressId, boolean on) {
