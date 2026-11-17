@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Added checking CalDAV collection sync capabilities before a sync without a cursor: calendars that do not advertise collection sync, such as Mail.ru's, use a full PROPFIND listing instead of an unsupported sync REPORT. Real HTTP errors still fail the sync.
 - Added a notice before Google's sign-in page: Continue on a Google account first says which of your Google data the app will access (Gmail, Calendar, Tasks, Contacts, only those you connect) and how it uses it, with a link to the privacy policy, and opens Google's page only once you tap Agree. Not now or back opens nothing, and Continue asks again.
 - Added keeping the app's data when uninstalling it, on Android 10 and later: the uninstall dialog offers it with its size, and a reinstall from the same channel finds what was not synced yet, such as your outbox.
 - Added signing in again: an account whose password changed or whose sign-in ended says so in the drawer and after a sync, and *Sign in again*, in its settings, opens the setup's domains page on it, filled with its own settings, keeping its outbox, its changes not synced yet and everything on the phone. A domain can move to another server there, after a confirmation naming the changes it drops. A browser sign-in must be the account being set up, or one of its own aliases: signing in as another account is refused, at the first setup too.

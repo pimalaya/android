@@ -17,7 +17,7 @@ use io_pim_discovery::rfc6764::{service::DiscoveryDavService, well_known::Discov
 use io_webdav::{
     rfc4791::{
         calendar::{
-            CaldavCalendar as DavCalendar, home_set::CaldavCalendarHomeSet,
+            CALENDAR, CaldavCalendar as DavCalendar, home_set::CaldavCalendarHomeSet,
             list::CaldavCalendarList,
         },
         item::{
@@ -30,9 +30,13 @@ use io_webdav::{
             update::CaldavItemUpdate,
         },
     },
-    rfc4918::{WebdavAuth, collection_path},
-    rfc6578::sync_collection::WebdavSyncDelta,
+    rfc4918::{
+        RESOURCETYPE, SUPPORTED_REPORT_SET, WebdavAuth, WebdavMultistatus, collection_path,
+        propfind::WebdavPropfind,
+    },
+    rfc6578::sync_collection::{SYNC_COLLECTION, WebdavSyncCollectionOptions, WebdavSyncDelta},
 };
+use percent_encoding::percent_decode_str;
 use url::Url;
 
 use crate::{
@@ -93,13 +97,51 @@ impl<H: Host> Webdav<'_, H> {
     ///
     /// Answers hrefs and ETags alone, from the cursor the last pass
     /// stored: a pass needs which events moved, and every body would send
-    /// five hundred of them to report that none did.
+    /// five hundred of them to report that none did. A token-less round
+    /// checks collection capabilities before choosing REPORT or PROPFIND.
     pub fn sync_events(
         &mut self,
         url: &Url,
         sync_token: Option<&str>,
     ) -> Result<Option<WebdavSyncDelta>, BridgeError> {
-        self.sync_collection(url, sync_token)
+        let mut opts = WebdavSyncCollectionOptions::default();
+        if sync_token.is_none() {
+            let auth = self.auth.webdav();
+            let coroutine = WebdavPropfind::new(
+                url,
+                &auth,
+                USER_AGENT,
+                url.path(),
+                0,
+                &[RESOURCETYPE, SUPPORTED_REPORT_SET],
+            );
+            let properties: WebdavMultistatus = self.client.run(url, coroutine)?;
+            let collection = properties
+                .responses
+                .iter()
+                .find(|entry| {
+                    url.join(&entry.href).is_ok_and(|href| {
+                        href.origin() == url.origin()
+                            && percent_decode_str(href.path().trim_end_matches('/'))
+                                .eq(percent_decode_str(url.path().trim_end_matches('/')))
+                    })
+                })
+                .ok_or_else(|| format!("No calendar capabilities returned for {url}"))?;
+            if collection.status.is_some_and(|status| status / 100 != 2)
+                || !collection.has_resource_type(RESOURCETYPE, CALENDAR)
+            {
+                return Err(BridgeError {
+                    message: format!("Cannot read calendar capabilities at {url}"),
+                    status: collection.status,
+                    ..Default::default()
+                });
+            }
+            // NOTE: Mail.ru calendars must be enumerated without an unadvertised sync REPORT.
+            opts.fallback = !collection
+                .supported_reports()
+                .contains(SYNC_COLLECTION.local);
+        }
+        self.sync_collection(url, sync_token, opts)
     }
 
     /// Batch-fetches the named events of the collection at `url`, via
@@ -343,21 +385,337 @@ fn into_created_event(created: CaldavItemCreateOk) -> EventRef {
 
 #[cfg(test)]
 mod tests {
-    //! # CalDAV create tests
+    //! # CalDAV tests
     //!
-    //! The CalDAV create over a canned reply: the event is kept under the
-    //! name the server filed it by, which is what a later delete addresses.
+    //! Canned replies exercise collection capabilities, enumeration, fetching
+    //! and the names and statuses retained by writes.
+
+    use std::collections::HashMap;
 
     use io_webdav::coroutine::{WebdavCoroutine, WebdavCoroutineState, WebdavYield};
 
     use crate::{
-        calendar::caldav::*,
+        account::{Account, Backend},
+        calendar::{Calendars, caldav::*},
         client::{
             Auth, Client,
             fake::{FakeRequest, FakeResponse, FakeServer},
             webdav::Webdav,
         },
     };
+
+    const SYNC_REPORT: &str = "<D:supported-report><D:report>\
+        <D:sync-collection/></D:report></D:supported-report>";
+
+    fn multistatus(body: &str) -> FakeResponse {
+        FakeResponse {
+            content_type: "application/xml",
+            body: format!(
+                "<D:multistatus xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\">\
+                 {body}</D:multistatus>"
+            )
+            .into_bytes(),
+            ..FakeResponse::empty(207)
+        }
+    }
+
+    fn capabilities(path: &str, reports: &str) -> FakeResponse {
+        multistatus(&format!(
+            "<D:response><D:href>{path}</D:href><D:propstat><D:prop>\
+             <D:resourcetype><D:collection/><C:calendar/></D:resourcetype>\
+             <D:supported-report-set>{reports}</D:supported-report-set>\
+             </D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>"
+        ))
+    }
+
+    #[test]
+    fn calendars_without_collection_sync_are_listed_and_fetched_again() {
+        let mut rounds = HashMap::<String, usize>::new();
+        let server = FakeServer::new(move |request| {
+            let path = &request.path;
+            match (request.method.as_str(), request.header("Depth")) {
+                ("PROPFIND", Some("0")) => capabilities(path, ""),
+                ("PROPFIND", Some("1")) => {
+                    let round = rounds.entry(path.clone()).or_default();
+                    *round += 1;
+                    let ids = if *round == 1 {
+                        vec!["keep.ics", "gone.ics"]
+                    } else {
+                        vec!["keep.ics"]
+                    };
+                    let rows: String = ids
+                        .iter()
+                        .map(|id| {
+                            format!(
+                                "<D:response><D:href>{path}{id}</D:href><D:propstat><D:prop>\
+                         <D:getetag>\"e{round}\"</D:getetag></D:prop>\
+                         <D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>"
+                            )
+                        })
+                        .collect();
+                    multistatus(&rows)
+                }
+                ("REPORT", _) => {
+                    assert!(request.text.contains("calendar-multiget"));
+                    assert!(!request.text.contains("sync-collection"));
+                    let round = rounds[path];
+                    let ids = if round == 1 {
+                        vec!["keep.ics", "gone.ics"]
+                    } else {
+                        vec!["keep.ics"]
+                    };
+                    let rows: String = ids
+                        .iter()
+                        .map(|id| {
+                            assert!(request.text.contains(&format!("{path}{id}")));
+                            format!(
+                                "<D:response><D:href>{path}{id}</D:href><D:propstat><D:prop>\
+                             <D:getetag>\"e{round}\"</D:getetag><C:calendar-data>\
+                             BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n\
+                             UID:{path}{id}\r\nDTSTART:20261116T090000Z\r\n\
+                             END:VEVENT\r\nEND:VCALENDAR\r\n</C:calendar-data></D:prop>\
+                             <D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>"
+                            )
+                        })
+                        .collect();
+                    multistatus(&rows)
+                }
+                _ => panic!("unexpected request: {request:?}"),
+            }
+        });
+        let mut client = Client::new(server);
+        let account = Account {
+            base_url: "https://calendar.mail.ru/",
+            backend: Backend::Carddav,
+            auth: Auth::Basic {
+                login: "test",
+                password: "test",
+            },
+            zone: "UTC",
+        };
+
+        for round in 1..=2 {
+            for calendar in ["personal", "work"] {
+                let url = format!("https://calendar.mail.ru/calendars/{calendar}/");
+                let delta = Calendars {
+                    client: &mut client,
+                    account: &account,
+                }
+                .sync_events(&url, None)
+                .unwrap();
+                assert!(delta.complete);
+                assert!(delta.token.is_none());
+                assert!(delta.vanished.is_empty());
+                assert_eq!(delta.changed.len(), if round == 1 { 2 } else { 1 });
+                assert_eq!(
+                    delta.changed[0].etag.as_deref(),
+                    Some(if round == 1 { "e1" } else { "e2" })
+                );
+                let ids: Vec<_> = delta
+                    .changed
+                    .iter()
+                    .map(|entry| entry.id.as_str())
+                    .collect();
+                let events = Webdav {
+                    client: &mut client,
+                    auth: account.auth,
+                }
+                .multiget_events(&url.parse().unwrap(), &ids)
+                .unwrap();
+                assert_eq!(events.len(), ids.len());
+                assert!(
+                    events
+                        .iter()
+                        .all(|event| event.ical.contains(&format!("/calendars/{calendar}/")))
+                );
+            }
+        }
+        assert_eq!(client.host.requests.len(), 12);
+    }
+
+    #[test]
+    fn advertised_collection_sync_keeps_incremental_rounds() {
+        let server = FakeServer::new(|request| {
+            if request.method == "PROPFIND" {
+                assert_eq!(request.header("Depth"), Some("0"));
+                return capabilities(&request.path, SYNC_REPORT);
+            }
+            assert_eq!(request.method, "REPORT");
+            assert!(request.text.contains("sync-collection"));
+            let token = if request.text.contains("checkpoint-1") {
+                "checkpoint-2"
+            } else {
+                "checkpoint-1"
+            };
+            multistatus(&format!("<D:sync-token>{token}</D:sync-token>"))
+        });
+        let mut client = Client::new(server);
+        let url = "https://caldav.example.org/calendar/".parse().unwrap();
+        let auth = Auth::Basic {
+            login: "test",
+            password: "test",
+        };
+        let initial = Webdav {
+            client: &mut client,
+            auth,
+        }
+        .sync_events(&url, None)
+        .unwrap()
+        .unwrap();
+        assert_eq!(initial.sync_token.as_deref(), Some("checkpoint-1"));
+        let next = Webdav {
+            client: &mut client,
+            auth,
+        }
+        .sync_events(&url, initial.sync_token.as_deref())
+        .unwrap()
+        .unwrap();
+        assert_eq!(next.sync_token.as_deref(), Some("checkpoint-2"));
+        assert_eq!(client.host.requests.len(), 3);
+    }
+
+    #[test]
+    fn existing_report_refusals_still_use_the_listing_fallback() {
+        for status in [400, 405, 501] {
+            let server = FakeServer::new(|request| match request.method.as_str() {
+                "PROPFIND" if request.header("Depth") == Some("0") => {
+                    capabilities(&request.path, SYNC_REPORT)
+                }
+                "REPORT" => FakeResponse::empty(status),
+                "PROPFIND" => {
+                    assert_eq!(request.header("Depth"), Some("1"));
+                    multistatus("")
+                }
+                _ => panic!("unexpected request: {request:?}"),
+            });
+            let mut client = Client::new(server);
+            let delta = Webdav {
+                client: &mut client,
+                auth: Auth::Basic {
+                    login: "test",
+                    password: "test",
+                },
+            }
+            .sync_events(
+                &"https://caldav.example.org/calendar/".parse().unwrap(),
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            assert!(delta.sync_token.is_none());
+            assert_eq!(client.host.requests.len(), 3);
+        }
+    }
+
+    #[test]
+    fn real_http_failures_are_not_reinterpreted_as_missing_report_support() {
+        for failed_phase in [
+            "capabilities",
+            "listing",
+            "sync-collection",
+            "calendar-multiget",
+        ] {
+            for status in [404, 401, 403] {
+                let server = FakeServer::new(|request| {
+                    let phase = match (request.method.as_str(), request.header("Depth")) {
+                        ("PROPFIND", Some("0")) => "capabilities",
+                        ("PROPFIND", Some("1")) => "listing",
+                        ("REPORT", _) if request.text.contains("sync-collection") => {
+                            "sync-collection"
+                        }
+                        ("REPORT", _) => "calendar-multiget",
+                        _ => panic!("unexpected request: {request:?}"),
+                    };
+                    if phase == failed_phase {
+                        return FakeResponse::json(
+                            status,
+                            &serde_json::json!({"title":"not found","type":"caldav"}),
+                        );
+                    }
+                    assert_eq!(phase, "capabilities");
+                    capabilities(
+                        &request.path,
+                        if failed_phase == "sync-collection" {
+                            SYNC_REPORT
+                        } else {
+                            ""
+                        },
+                    )
+                });
+                let mut client = Client::new(server);
+                let url = "https://caldav.example.org/calendar/".parse().unwrap();
+                let mut dav = Webdav {
+                    client: &mut client,
+                    auth: Auth::Basic {
+                        login: "test",
+                        password: "test",
+                    },
+                };
+                let error = if failed_phase == "calendar-multiget" {
+                    dav.multiget_events(&url, &["keep.ics"]).err().unwrap()
+                } else {
+                    dav.sync_events(&url, None).err().unwrap()
+                };
+                assert_eq!(
+                    error.status,
+                    Some(status),
+                    "{failed_phase}: {}",
+                    error.message
+                );
+                assert_eq!(
+                    client.host.requests.len(),
+                    if matches!(failed_phase, "capabilities" | "calendar-multiget") {
+                        1
+                    } else {
+                        2
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn missing_or_mismatched_capabilities_never_become_an_empty_calendar() {
+        for path in ["/other/", "https://other.example.org/calendar/"] {
+            let server = FakeServer::new(|_| capabilities(path, ""));
+            let mut client = Client::new(server);
+            let result = Webdav {
+                client: &mut client,
+                auth: Auth::Basic {
+                    login: "test",
+                    password: "test",
+                },
+            }
+            .sync_events(
+                &"https://caldav.example.org/calendar/".parse().unwrap(),
+                None,
+            );
+            assert!(result.is_err());
+            assert_eq!(client.host.requests.len(), 1);
+        }
+        for body in [
+            "",
+            "<D:response><D:href>/calendar/</D:href><D:status>HTTP/1.1 404 Not Found</D:status></D:response>",
+        ] {
+            let server = FakeServer::new(|_| multistatus(body));
+            let mut client = Client::new(server);
+            assert!(
+                Webdav {
+                    client: &mut client,
+                    auth: Auth::Basic {
+                        login: "test",
+                        password: "test"
+                    },
+                }
+                .sync_events(
+                    &"https://caldav.example.org/calendar/".parse().unwrap(),
+                    None
+                )
+                .is_err()
+            );
+            assert_eq!(client.host.requests.len(), 1);
+        }
+    }
 
     /// Runs a create against one reply, answering the event the bridge
     /// keeps.

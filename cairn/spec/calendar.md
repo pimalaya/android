@@ -10,7 +10,7 @@ A calendar is a collection of kind `text/calendar` and an entry is one item in i
 
 Four backends answer: a CalDAV context root, the draft-ietf-jmap-calendars verbs behind the `jmap://` marker, Microsoft Graph behind the `msgraph://` one, or the Google Calendar API behind `google://`. The JMAP, Graph and Google payloads are converted at the client boundary, JSCalendar by ical-rs and Graph and Google events by io-msgraph and io-gcal, so the store keeps one shape.
 
-Every calendar runs io-pimdir's sync, and asks what changed. The enumerate is an RFC 6578 `sync-collection` REPORT from the cursor the last pass stored, answering resource names and ETags; the fetch is a `calendar-multiget` (RFC 4791 section 7.9) of the entries the merge asked about. A quiet calendar costs one report and no body. A reconcile is followed by an upgrade, which is not optional: a sync that finds the remote content changed drops the body on purpose, and the index expands an entry, as the agenda opens one, from its body.
+Every calendar runs io-pimdir's sync, and asks what changed. The default CalDAV enumerate is an RFC 6578 `sync-collection` REPORT from the cursor the last pass stored, answering resource names and ETags; the fetch is a `calendar-multiget` (RFC 4791 section 7.9) of the entries the merge asked about. A quiet calendar using collection sync costs one report and no body. A reconcile is followed by an upgrade, which is not optional: a sync that finds the remote content changed drops the body on purpose, and the index expands an entry, as the agenda opens one, from its body.
 
 Graph and Google have no multiget: a Graph pass reads the entries it names by `$batch`, 20 requests to a call, and a Google pass takes them from the complete listing it made anyway, as a JMAP one does. An account's calendars run side by side, each on its own connection, the store keeping one writer.
 
@@ -21,6 +21,22 @@ A JMAP calendar has no incremental read: draft-ietf-jmap-calendars would answer 
 The entry page is the reading screen and the form at once, the way a contact's is. It edits the stored component rather than the occurrence that was tapped, an override with its own `RECURRENCE-ID` being what changing one date of a series means and not being written yet.
 
 Every write is CalDAV or Graph: a JMAP calendar takes `CalendarEvent/set` in JSCalendar, which is the conversion the read path does in the other direction and is not written yet, so it refuses rather than silently doing nothing.
+
+### Requirement: CalDAV enumeration respects collection capabilities
+
+Before a token-less CalDAV enumeration, the bridge SHALL query the target collection's supported-report-set. A successfully identified calendar that does not advertise sync-collection SHALL be enumerated with io-webdav's existing PROPFIND Depth 1 fallback, returning a complete snapshot without a cursor. Following passes SHALL reconcile that snapshot normally. A provider advertising sync-collection SHALL keep the REPORT path, and existing incremental cursors SHALL keep their current handling. HTTP 404 from capabilities, enumeration or multiget SHALL remain an error, never an empty successful listing or an unconditional fallback trigger.
+
+#### Scenario: Two Mail.ru-style calendars without collection sync
+
+- GIVEN two existing calendars that do not advertise sync-collection
+- WHEN each is synchronized initially and again without a cursor
+- THEN each returns its own complete member list through PROPFIND, and event bodies remain fetched through calendar-multiget.
+
+#### Scenario: A real missing collection or failed multiget
+
+- GIVEN capabilities, enumeration or calendar-multiget returns HTTP 404
+- WHEN the bridge receives that failure
+- THEN synchronization fails with that error and does not treat the calendar as empty.
 
 ### Requirement: A pass puts back the bodies it dropped
 A calendar pass SHALL raise every placement its reconcile left below full back to its body, by reading the entries the merge named. An entry SHALL NOT leave the agenda because the server changed it.

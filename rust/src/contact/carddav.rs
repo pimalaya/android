@@ -184,7 +184,7 @@ impl<H: Host> Webdav<'_, H> {
         url: &Url,
         sync_token: Option<&str>,
     ) -> Result<Option<WebdavSyncDelta>, BridgeError> {
-        self.sync_collection(url, sync_token)
+        self.sync_collection(url, sync_token, Default::default())
     }
 
     /// Fetches the cards at the given resource names in the collection at

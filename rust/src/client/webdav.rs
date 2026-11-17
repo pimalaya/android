@@ -118,9 +118,9 @@ impl<H: Host> Webdav<'_, H> {
         &mut self,
         url: &Url,
         sync_token: Option<&str>,
+        mut opts: WebdavSyncCollectionOptions,
     ) -> Result<Option<WebdavSyncDelta>, BridgeError> {
         let auth = self.auth.webdav();
-        let mut opts = WebdavSyncCollectionOptions::default();
         let mut token = sync_token.map(str::to_string);
         let mut delta = WebdavSyncDelta::default();
         let mut rounds = 0;
@@ -275,10 +275,32 @@ pub mod tests {
         }
     }
 
+    /// A calendar at `path` advertising `sync-collection` (RFC 6578).
+    fn advertising(path: &str) -> FakeResponse {
+        let body = format!(
+            "<d:multistatus xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">\
+             <d:response><d:href>{path}</d:href><d:propstat><d:prop>\
+             <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>\
+             <d:supported-report-set><d:supported-report><d:report>\
+             <d:sync-collection/></d:report></d:supported-report></d:supported-report-set>\
+             </d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>\
+             </d:multistatus>"
+        );
+        FakeResponse {
+            content_type: "application/xml; charset=utf-8",
+            body: body.into_bytes(),
+            ..FakeResponse::empty(207)
+        }
+    }
+
     /// A server cutting every `REPORT` short, its first hundred at least,
-    /// counting them in `reports`.
+    /// counting them in `reports`; a calendar probe (`PROPFIND` at Depth 0)
+    /// finds `sync-collection` advertised.
     pub fn cutting(reports: &mut usize) -> FakeServer<impl FnMut(&FakeRequest) -> FakeResponse> {
         FakeServer::new(move |request: &FakeRequest| {
+            if request.method == "PROPFIND" {
+                return advertising(&request.path);
+            }
             assert_eq!(request.method, "REPORT");
             *reports += 1;
             page(*reports <= 100)
@@ -298,7 +320,7 @@ pub mod tests {
             client: &mut client,
             auth: Auth::Bearer("token"),
         }
-        .sync_collection(&url, None)
+        .sync_collection(&url, None, Default::default())
         .unwrap()
         .unwrap();
         drop(client);
