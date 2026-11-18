@@ -456,7 +456,11 @@ public class MailPoolTest {
                                 others.countDown();
                             });
         }
-        assertEquals(List.of("a", "c", "slow"), landed);
+        // NOTE: c counts down before its worker records it, so slow may land
+        // first: the order of two workers' landings is not what this proves.
+        List<String> sorted = new ArrayList<>(landed);
+        Collections.sort(sorted);
+        assertEquals(List.of("a", "c", "slow"), sorted);
         assertEquals(List.of("b"), failed);
         assertEquals(1, outcome.failures.size());
         assertEquals("b", outcome.failures.get(0).key);

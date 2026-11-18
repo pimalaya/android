@@ -28,7 +28,6 @@ fails 49-a-create-beside-a-held-copy-copies-from-its-origin: the create loads wi
 # The load carries no summary but a message's date, subject and sender, so
 # what a held body told (SYNC §6) is restated from the listing.
 fails 52-a-held-body-keeps-its-size: the held message's size and attachment mark are written null
-fails 58-a-local-file-edit-is-pushed: the listing's size replaces the held body's
 
 unbound 07-a-meta-upgrade-revisits-an-unheld-claim: the bridge upgrades to the full tier alone
 unbound 08-read-only-reverts-a-delete: the bridge always pushes

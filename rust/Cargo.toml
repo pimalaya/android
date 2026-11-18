@@ -18,7 +18,7 @@ strip = "symbols"
 opt-level = "s"
 
 [dev-dependencies]
-io-pimdir = { version = "0.15.1", features = ["client", "vendored"] }
+io-pimdir = { version = "0.16.0", features = ["client", "vendored"] }
 rusqlite = { version = "0.43", default-features = false, features = ["bundled"] }
 tempfile = { version = "3", default-features = false }
 
@@ -35,7 +35,7 @@ io-jmap = { version = "0.10", default-features = false, features = ["ical", "vca
 io-msgraph = { version = "0.9.3", default-features = false, features = ["ical", "vcard"] }
 io-oauth = { version = "0.7", default-features = false }
 io-pim-discovery = { version = "0.14", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
-io-pimdir = { version = "0.15.1", default-features = false, features = ["search"] }
+io-pimdir = { version = "0.16.0", default-features = false, features = ["search"] }
 io-smtp = { version = "0.9", default-features = false }
 io-webdav = { version = "0.11", default-features = false }
 jiff = { version = "1", default-features = false, features = ["std"] }
