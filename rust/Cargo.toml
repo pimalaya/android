@@ -18,7 +18,7 @@ strip = "symbols"
 opt-level = "s"
 
 [dev-dependencies]
-io-pimdir = { version = "0.16.0", features = ["client", "vendored"] }
+io-pimdir = { version = "0.17.0", features = ["client", "vendored"] }
 rusqlite = { version = "0.43", default-features = false, features = ["bundled"] }
 tempfile = { version = "3", default-features = false }
 
@@ -31,11 +31,11 @@ io-gpeople = { version = "0.8.1", default-features = false, features = ["vcard"]
 io-gtasks = { version = "0.2.1", default-features = false, features = ["ical"] }
 io-http = { version = "0.8", default-features = false }
 io-imap = { version = "0.11.2", default-features = false }
-io-jmap = { version = "0.10", default-features = false, features = ["ical", "vcard"] }
+io-jmap = { version = "0.10.1", default-features = false, features = ["ical", "vcard"] }
 io-msgraph = { version = "0.9.3", default-features = false, features = ["ical", "vcard"] }
 io-oauth = { version = "0.7", default-features = false }
 io-pim-discovery = { version = "0.14", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
-io-pimdir = { version = "0.16.0", default-features = false, features = ["search"] }
+io-pimdir = { version = "0.17.0", default-features = false, features = ["search"] }
 io-smtp = { version = "0.9", default-features = false }
 io-webdav = { version = "0.11", default-features = false }
 jiff = { version = "1", default-features = false, features = ["std"] }

@@ -6,6 +6,8 @@
 //! older one of this shape, or one built under another tokenizer, schema
 //! text or store, is rebuilt, never migrated.
 
+use std::cmp::Ordering;
+
 use serde::Serialize;
 
 use crate::{
@@ -16,8 +18,8 @@ use crate::{
     },
 };
 
-/// The draft of SEARCH.md this shape follows (SEARCH §2).
-const FORMAT_DRAFT: u32 = io_pimdir::sql::search::FORMAT_DRAFT;
+/// The version of SEARCH.md this shape follows (SEARCH §2).
+const FORMAT_VERSION: &str = io_pimdir::sql::search::FORMAT_VERSION;
 
 /// The revision of SEARCH §6 io-pimdir extracts under, which the index
 /// records in `index_meta.extraction` (SEARCH §2).
@@ -82,14 +84,13 @@ pub fn held(sql: &mut impl IndexSql) -> Result<Held, BridgeError> {
     if named_shape.as_deref() != Some(SHAPE) {
         return Ok(refused(version, named_shape));
     }
-    match draft(&found) {
-        Some(number) if number < FORMAT_DRAFT => {
-            return Ok(Held::Rebuild {
+    if found != FORMAT_VERSION {
+        return match order(&found, FORMAT_VERSION) {
+            Some(Ordering::Less) => Ok(Held::Rebuild {
                 reason: format!("an index of {found}"),
-            });
-        }
-        Some(number) if number == FORMAT_DRAFT => (),
-        _ => return Ok(refused(version, named_shape)),
+            }),
+            _ => Ok(refused(version, named_shape)),
+        };
     }
     if !has("extraction") || !has("extractor") {
         return Ok(Held::Rebuild {
@@ -153,20 +154,35 @@ pub fn held(sql: &mut impl IndexSql) -> Result<Held, BridgeError> {
 fn refused(version: Option<String>, named: Option<String>) -> Held {
     Held::Refused {
         detail: format!(
-            "index of version {} and shape {}, this app's search-draft-{FORMAT_DRAFT} {SHAPE}",
+            "index of version {} and shape {}, this app's {FORMAT_VERSION} {SHAPE}",
             version.as_deref().unwrap_or("none"),
             named.as_deref().unwrap_or("none"),
         ),
     }
 }
 
-/// The number of a draft version, `search-draft-N`; `None` for a release
-/// or a name of no known form, which no draft implements.
-fn draft(version: &str) -> Option<u32> {
-    let number = version.strip_prefix("search-draft-")?;
-    match number.bytes().all(|b| b.is_ascii_digit()) {
+/// Where an index of version `found` stands against `own` (SEARCH §2):
+/// drafts by their number, every draft below every release, releases by
+/// their major; `None` when either is of no form the order reads.
+pub fn order(found: &str, own: &str) -> Option<Ordering> {
+    Some(rank(found)?.cmp(&rank(own)?))
+}
+
+/// A version's place in the order of SEARCH §2: `search-draft-N` by its
+/// decimal number, `search-vN` above every draft by its major, written
+/// without a leading zero.
+fn rank(version: &str) -> Option<(u8, u64)> {
+    let digits = |number: &str| match number.bytes().all(|b| b.is_ascii_digit()) {
         true => number.parse().ok(),
         false => None,
+    };
+    if let Some(number) = version.strip_prefix("search-draft-") {
+        return digits(number).map(|number| (0, number));
+    }
+    let major = version.strip_prefix("search-v")?;
+    match major.starts_with('0') {
+        true => None,
+        false => digits(major).map(|major| (1, major)),
     }
 }
 

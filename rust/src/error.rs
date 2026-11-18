@@ -438,7 +438,7 @@ mod tests {
         assert!(dav(403, ""));
         assert!(dav(415, ""));
         assert!(!dav(403, "<d:error><d:quota-not-exceeded/></d:error>"));
-        for status in [401, 409, 412, 429, 500, 507] {
+        for status in [401, 407, 409, 412, 423, 429, 500, 507] {
             assert!(!dav(status, ""), "{status}");
         }
         let duplicate = WebdavSendError::DuplicateUid {

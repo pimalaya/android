@@ -695,19 +695,22 @@ public final class PimdirStorage {
      * and is retired: both silently lose the change.
      */
     private static String statusOf(Cursor cursor) {
-        // NOTE: a divergence wins over every rule below.
+        // NOTE: a bound tombstone wins over every rule below, whatever
+        // conflict stands (SYNC §3, draft-14): a delete settles none, the
+        // binding's conflict_revision it carries beating the delete, and an
+        // item's conflict holds no delete back. It keeps its content, so a
+        // later edit still beats the delete.
+        boolean bound = !cursor.isNull(5);
+        if (cursor.getInt(13) == 1 && bound) {
+            return "tombstone";
+        }
+
+        // NOTE: then a divergence, on every live binding.
         boolean conflicted =
                 (!cursor.isNull(10) && cursor.getInt(10) == 1)
                         || (!cursor.isNull(14) && cursor.getInt(14) == 1);
         if (conflicted) {
             return "conflict";
-        }
-
-        // NOTE: a bound tombstone keeps its content, so a later edit still
-        // beats the delete.
-        boolean bound = !cursor.isNull(5);
-        if (cursor.getInt(13) == 1 && bound) {
-            return "tombstone";
         }
 
         // NOTE: a create is an item nothing agreed on here: bound without base,

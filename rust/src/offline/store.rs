@@ -19,6 +19,7 @@ use io_pimdir::{
     intent::{PimdirSubmit, SUBMIT},
     sql,
     sync::SYNC_VERSION,
+    version::{PimdirFormatOrder, PimdirFormatRefusal},
 };
 use serde::{Deserialize, Serialize};
 
@@ -149,14 +150,12 @@ pub fn check(facts: &StoreFacts) -> Result<(), Refusal> {
         ));
     };
 
-    let Some(format_version) = meta.format_version.as_deref() else {
+    let format_version = meta.format_version.as_deref();
+    if format_version != Some(sql::FORMAT_VERSION) {
         return Err(Refusal::new(
             "store-version",
-            "no format_version, a draft before storage-draft-08",
+            ordered(format_version, sql::FORMAT_VERSION),
         ));
-    };
-    if format_version != sql::FORMAT_VERSION {
-        return Err(Refusal::new("store-version", format_version));
     }
     if meta.version != Some(facts.user_version) {
         return Err(Refusal::new(
@@ -199,6 +198,24 @@ pub fn check(facts: &StoreFacts) -> Result<(), Refusal> {
     match meta.sync_version.as_deref() {
         Some(found) if found != SYNC_VERSION => Err(Refusal::new("sync-version", found)),
         _ => Ok(()),
+    }
+}
+
+/// The refusal's detail for a store of `found` where the app reads `own`:
+/// which of the two is the earlier, by STORAGE §4.2's order (io-pimdir's
+/// [`PimdirFormatRefusal::order`]), or that the order reads neither.
+fn ordered(found: Option<&str>, own: &str) -> String {
+    let refusal = PimdirFormatRefusal {
+        found,
+        own,
+        program: "this app",
+    };
+    let found = found.unwrap_or("no format_version");
+    match refusal.order() {
+        PimdirFormatOrder::Earlier => format!("{found}, earlier than this app's {own}"),
+        PimdirFormatOrder::Later => format!("{found}, later than this app's {own}"),
+        PimdirFormatOrder::Unknown => format!("{found}, of no order beside this app's {own}"),
+        PimdirFormatOrder::Same => format!("{found}, not this app's {own} to the word"),
     }
 }
 
@@ -305,7 +322,7 @@ pub fn submit_payload(source: &str, from: &str, message: &[u8]) -> Result<String
 mod tests {
     use std::collections::BTreeMap;
 
-    use crate::offline::store::{MetaFacts, StoreFacts, action, check, submit_payload};
+    use crate::offline::store::{MetaFacts, StoreFacts, action, check, ordered, submit_payload};
 
     /// io-pimdir's payload vectors (spec/vectors/payloads.json): every valid
     /// payload reads, every malformed one is refused, every unknown one is
@@ -462,7 +479,7 @@ mod tests {
             objects,
             meta: Some(MetaFacts {
                 format: Some("pimdir".into()),
-                format_version: Some("storage-draft-13".into()),
+                format_version: Some("storage-draft-14".into()),
                 version: Some(1),
                 hash_algo: Some("blake3".into()),
                 sync_version: None,
@@ -506,8 +523,73 @@ mod tests {
         assert_eq!(check(&facts).unwrap_err().code, "store-version");
 
         let mut facts = current();
+        facts.meta.as_mut().unwrap().format_version = Some("storage-draft-13".into());
+        assert_eq!(check(&facts).unwrap_err().code, "store-version");
+
+        let mut facts = current();
         facts.meta.as_mut().unwrap().sync_version = Some("sync-draft-11".into());
         assert_eq!(check(&facts).unwrap_err().code, "sync-version");
+
+        let mut facts = current();
+        facts.meta.as_mut().unwrap().sync_version = Some("sync-draft-13".into());
+        assert_eq!(check(&facts).unwrap_err().code, "sync-version");
+    }
+
+    /// A store of another format version is refused saying which of the
+    /// two is the earlier (STORAGE §4.2): a draft-13 store an earlier
+    /// build wrote, a later draft's, a release's, and a marker the order
+    /// does not read.
+    #[test]
+    fn a_refused_store_says_which_is_the_earlier() {
+        let detail = |found: Option<&str>| {
+            let mut facts = current();
+            facts.meta.as_mut().unwrap().format_version = found.map(Into::into);
+            let refusal = check(&facts).unwrap_err();
+            assert_eq!(refusal.code, "store-version");
+            refusal.detail
+        };
+
+        let earlier = "earlier than this app's storage-draft-14";
+        assert_eq!(
+            detail(Some("storage-draft-13")),
+            format!("storage-draft-13, {earlier}")
+        );
+        assert_eq!(detail(None), format!("no format_version, {earlier}"));
+        let later = "later than this app's storage-draft-14";
+        assert_eq!(
+            detail(Some("storage-draft-15")),
+            format!("storage-draft-15, {later}")
+        );
+        assert_eq!(detail(Some("storage-v1")), format!("storage-v1, {later}"));
+        assert_eq!(
+            detail(Some("storage-v01")),
+            "storage-v01, of no order beside this app's storage-draft-14"
+        );
+    }
+
+    /// The order a refusal states is STORAGE §4.2's, as
+    /// spec/vectors/versions.json pins it for every pair.
+    #[test]
+    fn the_version_vectors_order_as_the_refusal_says() {
+        let path = crate::offline::tests::io_pimdir_spec("vectors/versions.json");
+        let vectors: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(vectors["v"], 1, "versions.json at another version");
+        let cases = vectors["cases"].as_array().unwrap();
+        assert!(cases.len() >= 24, "{}", path.display());
+
+        for case in cases {
+            let (found, own) = (case["found"].as_str(), case["own"].as_str().unwrap());
+            let said = match ordered(found, own) {
+                detail if detail.ends_with(&format!("earlier than this app's {own}")) => "earlier",
+                detail if detail.ends_with(&format!("later than this app's {own}")) => "later",
+                detail if detail.ends_with(&format!("of no order beside this app's {own}")) => {
+                    "unknown"
+                }
+                _ => "same",
+            };
+            assert_eq!(said, case["order"].as_str().unwrap(), "{case}");
+        }
     }
 
     #[test]

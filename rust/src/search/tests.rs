@@ -751,8 +751,13 @@ fn an_index_of_another_shape_is_refused_and_an_older_one_rebuilt() {
         Held::Refused { .. }
     ));
     floor.exec(&format!(
-        "UPDATE index_meta SET shape = '{SHAPE}', format_version = 'search-draft-14'"
+        "UPDATE index_meta SET shape = '{SHAPE}', format_version = 'search-draft-15'"
     ));
+    assert!(matches!(
+        held::held(&mut floor).unwrap(),
+        Held::Refused { .. }
+    ));
+    floor.exec("UPDATE index_meta SET format_version = 'search-v1'");
     assert!(matches!(
         held::held(&mut floor).unwrap(),
         Held::Refused { .. }
@@ -777,7 +782,12 @@ fn an_index_of_another_shape_is_refused_and_an_older_one_rebuilt() {
         held::held(&mut floor).unwrap(),
         Held::Rebuild { .. }
     ));
-    floor.exec("UPDATE index_meta SET format_version = 'search-draft-13', store_id = 'other'");
+    floor.exec("UPDATE index_meta SET format_version = 'search-draft-13'");
+    assert!(matches!(
+        held::held(&mut floor).unwrap(),
+        Held::Rebuild { .. }
+    ));
+    floor.exec("UPDATE index_meta SET format_version = 'search-draft-14', store_id = 'other'");
     assert!(matches!(
         held::held(&mut floor).unwrap(),
         Held::Rebuild { .. }
@@ -806,6 +816,39 @@ fn an_index_of_another_shape_is_refused_and_an_older_one_rebuilt() {
         held::held(&mut floor).unwrap(),
         Held::Rebuild { .. }
     ));
+}
+
+/// Index versions are ordered as SEARCH §2 says: drafts by their number,
+/// every draft below every release, releases by their major, for this
+/// draft and for a release alike; a version of no form the order reads
+/// stands nowhere.
+#[test]
+fn index_versions_order_drafts_by_number_below_every_release() {
+    use std::cmp::Ordering::{Equal, Greater, Less};
+
+    let draft = "search-draft-14";
+    assert_eq!(held::order("search-draft-13", draft), Some(Less));
+    assert_eq!(held::order("search-draft-9", draft), Some(Less));
+    assert_eq!(held::order("search-draft-14", draft), Some(Equal));
+    assert_eq!(held::order("search-draft-15", draft), Some(Greater));
+    assert_eq!(held::order("search-v1", draft), Some(Greater));
+
+    let release = "search-v1";
+    assert_eq!(held::order("search-draft-13", release), Some(Less));
+    assert_eq!(held::order("search-draft-99", release), Some(Less));
+    assert_eq!(held::order("search-v1", release), Some(Equal));
+    assert_eq!(held::order("search-v2", release), Some(Greater));
+    assert_eq!(held::order("search-v10", "search-v9"), Some(Greater));
+
+    for unread in [
+        "search-v01",
+        "search-v",
+        "search-draft-",
+        "search-draft-1a",
+        "other",
+    ] {
+        assert_eq!(held::order(unread, draft), None, "{unread}");
+    }
 }
 
 /// A query the language refuses answers its refusal, never hits.

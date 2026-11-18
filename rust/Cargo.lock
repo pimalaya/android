@@ -645,9 +645,9 @@ dependencies = [
 
 [[package]]
 name = "io-jmap"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0590fe7ab8e2bac4b3bcb219dc4f9a300505ad1bbf544163b9a05c36a2f6be8d"
+checksum = "aee41358457abdfedef4ad23f8b0c09447e4034db9d695b9e71439292b33a610"
 dependencies = [
  "ical-rs",
  "io-http",
@@ -716,9 +716,9 @@ dependencies = [
 
 [[package]]
 name = "io-pimdir"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0ddd7e4532b9cd78df189f07bd15dbfc580e4fa76fd7893c58f11f4c7b4bb98"
+checksum = "63fc488dcec28fa1165a5f41c0e439994d6de4e4ddc4ed2ff0e78f0a9b4a811f"
 dependencies = [
  "blake3",
  "encoding_rs",

@@ -1246,7 +1246,7 @@ public class PimdirStorageTest {
         assertEquals(0, scalar("SELECT count(*) FROM store_meta WHERE sync_version IS NOT NULL"));
         storage.applyWrites(batch(storeObject("aa01", "body"), upsert("a.vcf", "uid-a", h("aa01"), "a")));
         assertEquals(
-                1, scalar("SELECT count(*) FROM store_meta WHERE sync_version = 'sync-draft-13'"));
+                1, scalar("SELECT count(*) FROM store_meta WHERE sync_version = 'sync-draft-14'"));
 
         db.execSQL("UPDATE store_meta SET sync_version = 'sync-draft-06'");
         try {
@@ -1405,6 +1405,39 @@ public class PimdirStorageTest {
         assertEquals(List.of("c.vcf"), stringsOf(
                 PimdirStorage.written(effects).getJSONArray("conflicted")));
         assertEquals("conflict", statusOf("c.vcf"));
+        assertRefcountsHold();
+    }
+
+    /**
+     * A delete settles no conflict and is held back by none (pimdir SYNC §3,
+     * draft-14): a source binding the deleted item projects a tombstone over
+     * the item's conflict, so the delete propagates, and the item keeps its
+     * conflict and both bodies.
+     */
+    @Test
+    public void aDeleteElsewhereProjectsATombstoneOverTheItemConflict() throws Exception {
+        String server = "acct/Contacts";
+        String phone = PimdirStorage.phoneCollection(server);
+        storage.applyWrites(batch(storeObject("dd01", "BASE"),
+                sourced(server, "c.vcf", h("dd01"), "e1")));
+        storage.applyWrites(batch(sourced(phone, "raw-1", h("dd01"), "v1")));
+        storage.applyWrites(batch(storeObject("dd02", "PHONE"),
+                sourced(phone, "raw-1", h("dd02"), "v2")));
+        storage.applyWrites(batch(storeObject("dd03", "SERVER"),
+                sourced(server, "c.vcf", h("dd03"), "e2")));
+        assertEquals("conflict", statusOf("c.vcf"));
+
+        JSONObject drop = new JSONObject();
+        drop.put("op", "drop");
+        drop.put("collection", phone);
+        drop.put("handle", "raw-1");
+        drop.put("reason", "deleted");
+        storage.applyWrites(batch(drop));
+
+        assertEquals("tombstone", statusOf("c.vcf"));
+        assertEquals(1, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
+        assertEquals(h("dd03"),
+                stringOf("SELECT conflict_object FROM items WHERE link_id = 'uid-c'"));
         assertRefcountsHold();
     }
 
