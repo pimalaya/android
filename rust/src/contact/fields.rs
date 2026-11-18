@@ -818,6 +818,9 @@ pub struct CardIndex {
     pub hash: String,
     /// The list row's fallback line.
     pub info: String,
+    /// The key STORAGE §9 files the card under: its `UID`, escaped when it
+    /// begins with a reserved prefix, else the `hash:` fallback.
+    pub link_id: String,
     /// The display name to show.
     pub name: String,
     /// The first phone number.
@@ -881,6 +884,7 @@ pub fn index(vcard: &str) -> Result<CardIndex, String> {
         emails,
         hash: format!("{hash:016x}"),
         info,
+        link_id: derived.link_id.as_str().to_string(),
         name,
         phone,
         sort_key: derived.sort_key.as_str().to_string(),
@@ -979,6 +983,24 @@ mod tests {
         assert_eq!(index["phone"], "+331111");
         assert_eq!(index["uid"], "abc");
         assert!(!index["hash"].as_str().unwrap().is_empty());
+    }
+
+    #[test]
+    fn index_keys_the_card_as_storage_assigns() {
+        let keyed = |uid: &str| {
+            let vcard = format!("BEGIN:VCARD\r\nVERSION:4.0\r\n{uid}FN:J\r\nEND:VCARD\r\n");
+            indexed(&vcard).unwrap()["linkId"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+
+        assert_eq!(keyed("UID:abc\r\n"), "abc");
+        assert_eq!(keyed("UID:hash:0123\r\n"), "esc:hash:0123");
+        for blank in ["UID:  \r\n", ""] {
+            let key = keyed(blank);
+            assert!(key.starts_with("hash:") && key.len() == 21, "{key}");
+        }
     }
 
     #[test]

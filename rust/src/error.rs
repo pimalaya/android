@@ -35,9 +35,23 @@ pub struct BridgeError {
     /// Whether the server refused the change as it stands (pimdir SYNC
     /// §4), which no later attempt makes it take: a sync answers its push
     /// `Refused`, which the engine holds, where any other failure is pushed
-    /// again. Set by the mail connectors alone ([`refuses`]).
+    /// again. Read off the server's answer ([`refuses`]), or set by the
+    /// bridge on a write it refuses for good ([`BridgeError::refusal`]).
     #[serde(skip_serializing_if = "core::ops::Not::not")]
     pub refused: bool,
+}
+
+impl BridgeError {
+    /// A write refused for good as it stands, by the server or by the
+    /// bridge for an object no write of the backend can carry: [`REFUSED`],
+    /// which a sync answers `Refused` (pimdir SYNC §4).
+    pub fn refusal(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            status: Some(REFUSED),
+            refused: true,
+        }
+    }
 }
 
 impl fmt::Display for BridgeError {
@@ -82,28 +96,47 @@ pub fn coroutine_error(err: &(impl StdError + 'static)) -> BridgeError {
     }
 }
 
-/// Whether a mail server refused a request as it stands (pimdir SYNC §4),
-/// read from the failure's source chain: Graph, Gmail or JMAP answering a
-/// status naming the request ([`names_the_request`]) that names no quota
-/// nor rate limit, the account's state rather than the change's, which the
-/// same change outlives. Any other failure cannot tell.
+/// Whether a server refused a request as it stands (pimdir SYNC §4), read
+/// from the failure's source chain: Graph, a Google API, JMAP or a DAV
+/// server answering a status naming the request ([`names_the_request`])
+/// that names no quota nor rate limit, the account's state rather than the
+/// change's, which the same change outlives; a duplicate `UID` is that
+/// create's conflict, not a refusal. Any other failure cannot tell.
 pub fn refuses(err: &(dyn StdError + 'static)) -> bool {
     let mut cause = Some(err);
 
     while let Some(err) = cause {
         if let Some(send) = err.downcast_ref::<MsgraphSendError>() {
-            return send.api().is_some_and(|api| {
-                names_the_request(api.status)
-                    && api.code != "ErrorQuotaExceeded"
-                    && !throttled(&api.message)
-            });
+            return send
+                .api()
+                .is_some_and(|api| graph_refuses(api.status, &api.code, &api.message));
         }
         if let Some(GmailSendError::Api(api)) = err.downcast_ref::<GmailSendError>() {
-            let limited = api.reasons.iter().chain(&api.detail_reasons).any(|reason| {
-                let reason = reason.to_ascii_lowercase();
-                reason.contains("limitexceeded") || reason.contains("quota")
-            }) || api.google_status.as_deref() == Some("RESOURCE_EXHAUSTED");
-            return names_the_request(api.status) && !limited && !throttled(&api.message);
+            return google_refuses(api.status, &api.message, &api.reasons, &api.detail_reasons)
+                && api.google_status.as_deref() != Some("RESOURCE_EXHAUSTED");
+        }
+        if let Some(GcalSendError::Api(api)) = err.downcast_ref::<GcalSendError>() {
+            return google_refuses(api.status, &api.message, &api.reasons, &api.detail_reasons)
+                && api.google_status.as_deref() != Some("RESOURCE_EXHAUSTED");
+        }
+        if let Some(GpeopleSendError::Api(api)) = err.downcast_ref::<GpeopleSendError>() {
+            return google_refuses(api.status, &api.message, &api.reasons, &api.detail_reasons)
+                && api.google_status.as_deref() != Some("RESOURCE_EXHAUSTED");
+        }
+        if let Some(GtasksSendError::Api(api)) = err.downcast_ref::<GtasksSendError>() {
+            return google_refuses(api.status, &api.message, &api.reasons, &api.detail_reasons)
+                && api.google_status.as_deref() != Some("RESOURCE_EXHAUSTED");
+        }
+        if let Some(send) = err.downcast_ref::<WebdavSendError>() {
+            return match send {
+                WebdavSendError::HttpStatus { status, body } => dav_refuses(*status, body),
+                _ => false,
+            };
+        }
+        if let Some(WebdavFollowRedirectsError::HttpStatus { status, body }) =
+            err.downcast_ref::<WebdavFollowRedirectsError>()
+        {
+            return dav_refuses(*status, body);
         }
         if let Some(JmapSendError::HttpStatus(status) | JmapSendError::Request { status, .. }) =
             err.downcast_ref()
@@ -122,6 +155,30 @@ pub fn refuses(err: &(dyn StdError + 'static)) -> bool {
 /// neverest reads it.
 pub fn names_the_request(status: u16) -> bool {
     (400..500).contains(&status) && !matches!(status, 401 | 407 | 408 | 409 | 412 | 423 | 425 | 429)
+}
+
+/// Whether Graph refused a request as it stands, alone or inside a
+/// `$batch`: a status naming it, no quota (`ErrorQuotaExceeded`) nor rate
+/// limit.
+pub fn graph_refuses(status: u16, code: &str, message: &str) -> bool {
+    names_the_request(status) && code != "ErrorQuotaExceeded" && !throttled(message)
+}
+
+/// Whether a Google API (Gmail, Calendar, People, Tasks) refused a request
+/// as it stands: a status naming it, no reason nor text naming a quota or
+/// a rate limit.
+fn google_refuses(status: u16, message: &str, reasons: &[String], details: &[String]) -> bool {
+    let limited = reasons.iter().chain(details).any(|reason| {
+        let reason = reason.to_ascii_lowercase();
+        reason.contains("limitexceeded") || reason.contains("quota")
+    });
+    names_the_request(status) && !limited && !throttled(message)
+}
+
+/// Whether a DAV server refused a request as it stands: a status naming
+/// it, whose body names no exceeded quota (RFC 4331 section 6).
+fn dav_refuses(status: u16, body: &str) -> bool {
+    names_the_request(status) && !body.contains("quota-not-exceeded") && !throttled(body)
 }
 
 /// Whether a server's text names a quota or a rate limit, without case.
@@ -229,10 +286,13 @@ pub fn parts_failure(failures: Vec<BridgeError>) -> Option<BridgeError> {
         .find(|err| !refused_for_good(err))
         .or(failures.first())?;
 
-    Some(BridgeError {
-        message: first.message.clone(),
-        status: Some(if refused { REFUSED } else { 412 }),
-        ..Default::default()
+    Some(match refused {
+        true => BridgeError::refusal(first.message.clone()),
+        false => BridgeError {
+            message: first.message.clone(),
+            status: Some(412),
+            ..Default::default()
+        },
     })
 }
 
@@ -243,7 +303,7 @@ mod tests {
         session_get::JmapSessionGetError,
     };
 
-    use crate::error::{BridgeError, coroutine_error, refused_for_good};
+    use crate::error::{BridgeError, REFUSED, coroutine_error, parts_failure, refused_for_good};
 
     #[test]
     fn bridge_error_serializes_the_wire_shape() {
@@ -358,5 +418,71 @@ mod tests {
         assert!(coroutine_error(&JmapSendError::HttpStatus(400)).refused);
         assert!(!coroutine_error(&JmapSendError::HttpStatus(412)).refused);
         assert!(!coroutine_error(&JmapSessionGetError::HttpStatus(403)).refused);
+    }
+
+    /// A contact, calendar or task write is refused as it stands by a status
+    /// naming the request, a quota, a rate limit and a duplicate `UID` aside;
+    /// a write the bridge refuses for good ([`REFUSED`]) is refused too.
+    #[test]
+    fn a_pim_refusal_is_told_by_its_status_and_never_by_a_quota() {
+        use io_gcal::v3::send::{GcalApiError, GcalSendError};
+        use io_gpeople::v1::send::{GpeopleApiError, GpeopleSendError};
+        use io_gtasks::v1::send::{GtasksApiError, GtasksSendError};
+        use io_webdav::rfc4918::send::WebdavSendError;
+
+        let dav = |status, body: &str| {
+            let body = body.to_string();
+            coroutine_error(&WebdavSendError::HttpStatus { status, body }).refused
+        };
+        assert!(dav(400, ""));
+        assert!(dav(403, ""));
+        assert!(dav(415, ""));
+        assert!(!dav(403, "<d:error><d:quota-not-exceeded/></d:error>"));
+        for status in [401, 409, 412, 429, 500, 507] {
+            assert!(!dav(status, ""), "{status}");
+        }
+        let duplicate = WebdavSendError::DuplicateUid {
+            status: 403,
+            body: String::new(),
+        };
+        assert!(!coroutine_error(&duplicate).refused);
+
+        let body = |status: u16, reason: &str| {
+            format!(
+                r#"{{"error": {{"code": {status}, "message": "m",
+                    "errors": [{{"reason": "{reason}", "message": "m"}}]}}}}"#
+            )
+        };
+        let gcal = |status, reason: &str| {
+            let api = GcalApiError::parse(status, body(status, reason).as_bytes());
+            coroutine_error(&GcalSendError::Api(api)).refused
+        };
+        assert!(gcal(400, "invalid"));
+        assert!(gcal(403, "forbiddenForNonOrganizer"));
+        assert!(!gcal(403, "rateLimitExceeded"));
+        assert!(!gcal(403, "quotaExceeded"));
+        assert!(!gcal(412, "conditionNotMet"));
+        let people = |status, reason: &str| {
+            let api = GpeopleApiError::parse(status, body(status, reason).as_bytes());
+            coroutine_error(&GpeopleSendError::Api(api)).refused
+        };
+        assert!(people(400, "badRequest"));
+        assert!(!people(429, "rateLimitExceeded"));
+        let tasks = |status, reason: &str| {
+            let api = GtasksApiError::parse(status, body(status, reason).as_bytes());
+            coroutine_error(&GtasksSendError::Api(api)).refused
+        };
+        assert!(tasks(400, "invalid"));
+        assert!(!tasks(403, "userRateLimitExceeded"));
+
+        let failed = |status, message: &str| BridgeError {
+            message: message.into(),
+            status: Some(status),
+            ..Default::default()
+        };
+        let refused = parts_failure(vec![failed(400, "invalid")]).unwrap();
+        assert_eq!((refused.status, refused.refused), (Some(REFUSED), true));
+        let waiting = parts_failure(vec![failed(400, "invalid"), failed(503, "")]).unwrap();
+        assert_eq!((waiting.status, waiting.refused), (Some(412), false));
     }
 }

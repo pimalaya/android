@@ -41,7 +41,7 @@ use crate::{
         Auth, Client, Host,
         trust::{CrossOrigin, Redirects},
     },
-    error::{BridgeError, REFUSED, coroutine_error},
+    error::{BridgeError, coroutine_error},
     mail::listing::JMAP_PAGE,
 };
 
@@ -307,13 +307,10 @@ pub fn paged<T>(
     }
 }
 
-/// A failure no later pass changes, answered with [`REFUSED`].
+/// A failure no later pass changes, answered refused
+/// ([`BridgeError::refusal`]).
 pub fn refused(message: impl Into<String>) -> BridgeError {
-    BridgeError {
-        message: message.into(),
-        status: Some(REFUSED),
-        ..Default::default()
-    }
+    BridgeError::refusal(message)
 }
 
 /// The capabilities this app reads that have a primary account.

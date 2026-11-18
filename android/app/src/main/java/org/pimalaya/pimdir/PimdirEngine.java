@@ -160,6 +160,54 @@ public abstract class PimdirEngine extends Stager {
     protected abstract JSONObject enumerate(JSONObject yielded) throws JSONException;
 
     /**
+     * The changes left to push once each add or update whose stored body is
+     * not UTF-8 is answered refused into {@code refused}: such a body is kept
+     * as its server sent it, and the text a push would write holds U+FFFD
+     * where its bytes were (owner decision 2026-11-18).
+     */
+    protected JSONArray withoutLossy(String collection, JSONArray changes, JSONArray refused)
+            throws JSONException {
+        JSONArray kept = new JSONArray();
+        for (int index = 0; index < changes.length(); index++) {
+            JSONObject change = changes.getJSONObject(index);
+            String op = change.optString("op");
+            if ("add".equals(op) || "update".equals(op)) {
+                String handle = change.getString("handle");
+                JSONObject row;
+                synchronized (locks.store) {
+                    row = offline.loadRow(collection, handle);
+                }
+                if (row != null && row.optBoolean("lossy")) {
+                    Log.w("pimalaya", "push of " + handle + " refused: not UTF-8");
+                    refused.put(refusedResult(handle, NOT_UTF8));
+                    continue;
+                }
+            }
+            kept.put(change);
+        }
+        return kept;
+    }
+
+    /** Why a body that is not UTF-8 is never written back as text. */
+    public static final String NOT_UTF8 =
+            "not UTF-8 text: kept as its server sent it, never written back as text";
+
+    /**
+     * Puts a body read from a server on the engine wire: the hash of the
+     * bytes it sent, and its text, or those bytes in base64 where they are
+     * not UTF-8, so the store keeps it as served (STORAGE §5).
+     */
+    protected static void putBody(JSONObject item, byte[] bytes, String text, String base64)
+            throws JSONException {
+        item.put("hash", PimdirHash.of(bytes));
+        if (base64 == null) {
+            item.put("body", text);
+        } else {
+            item.put("bodyBase64", base64);
+        }
+    }
+
+    /**
      * Whether this driver's listings already name every member (SYNC §4).
      *
      * <p>A mail listing does, off its headers; a driver answering handles and
@@ -202,6 +250,16 @@ public abstract class PimdirEngine extends Stager {
         return reply;
     }
 
+    /** What a member carries about its body, dropped when it is bound. */
+    private static final String[] BODY_FIELDS = {
+        "summary", "sortKey", "hash", "body", "bodyBase64"
+    };
+
+    /** What a naming read hands a listed member. */
+    private static final String[] NAMING_FIELDS = {
+        "linkId", "summary", "sortKey", "hash", "body", "bodyBase64"
+    };
+
     /** How many bodies one naming read asks for: the DAV multiget batch. */
     private static final int NAMING_BATCH = 64;
 
@@ -234,11 +292,11 @@ public abstract class PimdirEngine extends Stager {
             String[] held = bound.get(item.getString("handle"));
             String revision = item.isNull("revision") ? null : item.optString("revision", null);
             if (held != null && java.util.Objects.equals(held[1], revision)) {
-                for (String field : new String[] {"summary", "sortKey", "hash", "body"}) {
+                for (String field : BODY_FIELDS) {
                     item.remove(field);
                 }
                 item.put("linkId", held[0]);
-            } else if (!item.has("body")) {
+            } else if (!item.has("body") && !item.has("bodyBase64")) {
                 item.remove("linkId");
                 unread.add(item.getString("handle"));
             } else if (held != null && held[0] != null) {
@@ -284,7 +342,7 @@ public abstract class PimdirEngine extends Stager {
                 Log.w("pimalaya", "listed but unreadable, left out: " + item.getString("handle"));
                 continue;
             }
-            for (String field : new String[] {"linkId", "summary", "sortKey", "hash", "body"}) {
+            for (String field : NAMING_FIELDS) {
                 if (body.has(field) && !body.isNull(field)) {
                     item.put(field, body.get(field));
                 }

@@ -62,6 +62,9 @@ public class CalendarDavWriteTest {
         /** The entries by resource name, as (ETag, body). */
         final Map<String, String[]> entries = new LinkedHashMap<>();
         final List<String> deleted = new ArrayList<>();
+
+        /** The bytes an entry is served as, where they are not its text's. */
+        final Map<String, byte[]> served = new LinkedHashMap<>();
         int revisions;
 
         @Override
@@ -80,7 +83,16 @@ public class CalendarDavWriteTest {
             List<Event> read = new ArrayList<>();
             for (String id : ids) {
                 String[] entry = entries.get(id);
-                if (entry != null) {
+                byte[] bytes = served.get(id);
+                if (entry != null && bytes != null) {
+                    // NOTE: as the bridge hands a body that is not UTF-8.
+                    read.add(
+                            new Event(
+                                    id,
+                                    entry[0],
+                                    new String(bytes, java.nio.charset.StandardCharsets.UTF_8),
+                                    java.util.Base64.getEncoder().encodeToString(bytes)));
+                } else if (entry != null) {
                     read.add(new Event(id, entry[0], entry[1]));
                 }
             }
@@ -165,7 +177,7 @@ public class CalendarDavWriteTest {
     @Test
     public void anEntryCreatedEditedThenDeletedIsDeletedOnAServerAnsweringNoEtag()
             throws Exception {
-        engine.mutateAdd(calendar, "e-1.ics", ical("Created"), Flags.none(), null, "");
+        engine.mutateAdd(calendar, "e-1", ical("Created"), Flags.none(), null, "");
         engine.sync(calendar);
         assertEquals(List.of("e-1.ics"), new ArrayList<>(dav.entries.keySet()));
 
@@ -204,6 +216,63 @@ public class CalendarDavWriteTest {
         assertTrue(body, body.contains("SUMMARY:Retro\r\n"));
         assertEquals(body, "Retro", row.getString("summary"));
         assertEquals(body, "Room 2", row.getString("location"));
+    }
+
+    /**
+     * An entry that is not UTF-8 is stored as the bytes its server sent,
+     * hashed as those, and an edit of its text, which holds U+FFFD where the
+     * bytes were, is refused rather than written to the server.
+     */
+    @Test
+    public void anEntryThatIsNotUtf8IsStoredAsServedAndNeverWrittenBackAsText()
+            throws Exception {
+        byte[] served =
+                ical("Réunion").getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        dav.entries.put("e-1.ics", new String[] {"e1", ical("R�union")});
+        dav.served.put("e-1.ics", served);
+
+        engine.sync(calendar);
+
+        EventStore.StoredEvent entry = stored();
+        assertEquals("e-1", entry.id);
+        assertTrue(java.util.Arrays.equals(
+                served, new org.pimalaya.pimdir.PimdirItems(pimdir).objectBytes(calendar, "e-1")));
+        assertEquals(org.pimalaya.pimdir.PimdirHash.of(served), entry.object);
+
+        org.junit.Assert.assertThrows(
+                PimalayaException.class,
+                () -> engine.mutateEdit(calendar, entry.handle, ical("Edited"), null, ""));
+        engine.sync(calendar);
+        assertEquals("e1", dav.entries.get("e-1.ics")[0]);
+    }
+
+    /** The link ids the calendar holds, sorted. */
+    private List<String> linkIds() {
+        List<String> ids = new ArrayList<>();
+        for (EventStore.StoredEvent event : events.loadEvents()) {
+            if (event.collectionId.equals(calendar)) {
+                ids.add(event.id);
+            }
+        }
+        java.util.Collections.sort(ids);
+        return ids;
+    }
+
+    /**
+     * An entry is keyed by its UID (STORAGE §9, Annex A.3), escaped when it
+     * is spelled like a derived key, and a second resource under one UID is
+     * kept as an item of its own under a minted key.
+     */
+    @Test
+    public void anEntryIsKeyedByItsUidAndASecondResourceIsMinted() throws Exception {
+        dav.entries.put("a.ics", new String[] {"e1", ical("First")});
+        dav.entries.put("b.ics", new String[] {"e2", ical("Second")});
+        String escaped = ical("Escaped").replace("UID:e-1", "UID:hash:0123");
+        dav.entries.put("c.ics", new String[] {"e3", escaped});
+
+        engine.sync(calendar);
+
+        assertEquals(List.of("dup:e-1#b.ics", "e-1", "esc:hash:0123"), linkIds());
     }
 
     /** An entry on {@code day} at {@code location}. */

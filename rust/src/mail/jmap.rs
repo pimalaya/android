@@ -18,13 +18,14 @@ use io_jmap::{
         filter::JmapFilter,
         get::JmapUnparsed,
         query::{JmapQuery, JmapQueryOptions},
+        send::JmapSendError,
         session::JmapSession,
     },
     rfc8621::{
         JMAP_MAIL_CAPABILITY,
         email::{
             JMAP_KEYWORD_ANSWERED, JMAP_KEYWORD_DRAFT, JMAP_KEYWORD_FLAGGED, JMAP_KEYWORD_SEEN,
-            JmapEmail, JmapEmailAddress, JmapEmailProperty,
+            JmapEmail, JmapEmailProperty,
             changes::{JmapEmailChanges, JmapEmailChangesError, JmapEmailChangesOptions},
             get::*,
             import::*,
@@ -40,8 +41,8 @@ use io_jmap::{
     },
 };
 use io_pimdir::summary::{
-    PimdirAddress,
-    mail::{PimdirMailSummary, decode},
+    PimdirSummary,
+    mail::{PimdirMailSummary, derive_meta},
 };
 use secrecy::SecretString;
 use url::Url;
@@ -54,7 +55,7 @@ use crate::{
     },
     error::{BridgeError, converged, coroutine_error},
     mail::{
-        Mailbox,
+        Mailbox, SendFailure,
         compose::Composed,
         jmap_step::{
             JmapDelta, JmapRun, JmapStepped, Sources, Start, StepItem, StepQuery, StepRequest,
@@ -63,25 +64,21 @@ use crate::{
         listing::{
             Floor, Listing, MailPage, MailRequest, Named, RECEIVED_MARGIN_DAYS, Scope, flags, utc,
         },
+        path_label, path_segment,
     },
 };
 
 /// The `Email` properties a listing names a member by.
 ///
-/// Annex A's summary, the markers, and the mailboxes a delta checks the
-/// member is still in. The date is `sentAt` (the `Date` header), never
-/// `receivedAt`.
-const SUMMARY_PROPERTIES: [JmapEmailProperty; 12] = [
+/// Annex A's summary, read off the raw header fields ([`email_summary`]),
+/// the markers, and the mailboxes a delta checks the member is still in.
+/// `sentAt` is the server's parse of `Date`, which a band pages by.
+const SUMMARY_PROPERTIES: [JmapEmailProperty; 7] = [
     JmapEmailProperty::Id,
     JmapEmailProperty::MailboxIds,
     JmapEmailProperty::Keywords,
     JmapEmailProperty::Size,
-    JmapEmailProperty::MessageId,
-    JmapEmailProperty::InReplyTo,
-    JmapEmailProperty::From,
-    JmapEmailProperty::To,
-    JmapEmailProperty::Cc,
-    JmapEmailProperty::Subject,
+    JmapEmailProperty::Headers,
     JmapEmailProperty::SentAt,
     JmapEmailProperty::HasAttachment,
 ];
@@ -97,14 +94,26 @@ impl<H: Host> Jmap<'_, H> {
         Ok(self
             .list_mailboxes(&session, &auth, &api_url)?
             .into_iter()
-            .map(|(id, path, role)| (id, Mailbox { name: path, role }))
+            .map(|(id, path, role)| {
+                let label = path_label(&path);
+                (
+                    id,
+                    Mailbox {
+                        name: path,
+                        label,
+                        role,
+                    },
+                )
+            })
             .collect())
     }
 
     /// One page of a mailbox's listing (pimdir SYNC §4, §5).
     ///
     /// A round pages `Email/query` by `receivedAt`, its position the cursor,
-    /// the state read first the checkpoint. A delta projects ([`project`]) the
+    /// the state read first the checkpoint, from the scope's floor alone: a
+    /// message arrives after its `Date`, so a ceiling on its arrival would
+    /// miss one the band holds. A delta projects ([`project`]) the
     /// pool run's one replay; one too old is refused, for a round to open.
     pub fn list_page(
         &mut self,
@@ -149,9 +158,6 @@ impl<H: Host> Jmap<'_, H> {
             after: scope
                 .received_since(RECEIVED_MARGIN_DAYS)
                 .map(|since| since.strftime("%Y-%m-%dT%H:%M:%SZ").to_string()),
-            before: scope
-                .received_until(RECEIVED_MARGIN_DAYS)
-                .map(|until| until.strftime("%Y-%m-%dT%H:%M:%SZ").to_string()),
             ..Default::default()
         };
         let opts = JmapEmailQueryOptions {
@@ -663,14 +669,16 @@ impl<H: Host> Jmap<'_, H> {
     ///
     /// A session advertising no submission is refused for good before
     /// anything is written: no later pass changes what the server offers.
-    pub fn send_message(&mut self, composed: &Composed) -> Result<(), BridgeError> {
+    pub fn send_message(&mut self, composed: &Composed) -> Result<(), SendFailure> {
         let mut calls = self.calls()?;
         if !calls
             .session
             .capabilities
             .contains_key(JMAP_SUBMISSION_CAPABILITY)
         {
-            return Err(refused("This server does not offer sending over JMAP"));
+            return Err(SendFailure::unsent(refused(
+                "This server does not offer sending over JMAP",
+            )));
         }
         let max_upload = calls.session.core_capability().max_size_upload;
 
@@ -680,17 +688,12 @@ impl<H: Host> Jmap<'_, H> {
 
 /// The `Email` properties a step reads: the summary's, the reception, and
 /// the blob the source is downloaded from.
-const STEP_PROPERTIES: [JmapEmailProperty; 14] = [
+const STEP_PROPERTIES: [JmapEmailProperty; 9] = [
     JmapEmailProperty::Id,
     JmapEmailProperty::MailboxIds,
     JmapEmailProperty::Keywords,
     JmapEmailProperty::Size,
-    JmapEmailProperty::MessageId,
-    JmapEmailProperty::InReplyTo,
-    JmapEmailProperty::From,
-    JmapEmailProperty::To,
-    JmapEmailProperty::Cc,
-    JmapEmailProperty::Subject,
+    JmapEmailProperty::Headers,
     JmapEmailProperty::SentAt,
     JmapEmailProperty::HasAttachment,
     JmapEmailProperty::ReceivedAt,
@@ -784,8 +787,9 @@ impl<H: Host> JmapCalls<'_, '_, H> {
     /// Imported into Drafts without `Bcc`, submitted as [`identity_for`] to
     /// the envelope its intent states ([`compose::stated`]), the blind
     /// recipients among them, moved to Sent. What no later pass changes is
-    /// refused for good ([`refused`]).
-    fn send(&mut self, composed: &Composed, max_upload: Option<u64>) -> Result<(), BridgeError> {
+    /// refused for good ([`refused`]). Only the submission's own request may
+    /// have sent it ([`SendFailure::taken`]).
+    fn send(&mut self, composed: &Composed, max_upload: Option<u64>) -> Result<(), SendFailure> {
         let Composed {
             message,
             sender,
@@ -810,9 +814,9 @@ impl<H: Host> JmapCalls<'_, '_, H> {
         let sent = role("sent");
 
         if let Some(max) = max_upload.filter(|max| message.len() as u64 > *max) {
-            return Err(refused(format!(
+            return Err(SendFailure::unsent(refused(format!(
                 "The message is larger than the {max} bytes the server takes"
-            )));
+            ))));
         }
 
         let blob = self.upload_message(message.clone())?;
@@ -820,7 +824,7 @@ impl<H: Host> JmapCalls<'_, '_, H> {
         if let Some(err) = imported.not_created.into_values().next() {
             let message = format!("The server refused the message: {err}");
             // NOTE: one already held may be an earlier try's, sent or not.
-            return Err(match err {
+            return Err(SendFailure::unsent(match err {
                 JmapEmailImportItemError::AlreadyExists { .. }
                 | JmapEmailImportItemError::OverQuota { .. }
                 | JmapEmailImportItemError::RateLimit { .. }
@@ -830,14 +834,14 @@ impl<H: Host> JmapCalls<'_, '_, H> {
                 | JmapEmailImportItemError::InvalidProperties { .. }
                 | JmapEmailImportItemError::Forbidden { .. }
                 | JmapEmailImportItemError::TooLarge { .. } => refused(message),
-            });
+            }));
         }
         let email = imported
             .created
             .into_values()
             .next()
             .and_then(|email| email.id)
-            .ok_or("The server imported the message under no id")?;
+            .ok_or_else(|| SendFailure::unsent("The server imported the message under no id"))?;
 
         let address = |email: &str| JmapEmailAddressWithParameters {
             email: email.to_string(),
@@ -884,15 +888,17 @@ impl<H: Host> JmapCalls<'_, '_, H> {
             log::warn!("draft {email} left behind: {err}");
         }
         let Some(err) = out.not_created.into_values().next() else {
-            return Err("The server answered the submission with nothing".into());
+            return Err(SendFailure::unsent(
+                "The server answered the submission with nothing",
+            ));
         };
         let message = format!("The server refused to send the message: {err}");
-        Err(match err {
+        Err(SendFailure::unsent(match err {
             JmapEmailSubmissionSetItemError::RateLimit { .. }
             | JmapEmailSubmissionSetItemError::NotFound { .. }
             | JmapEmailSubmissionSetItemError::Other { .. } => message.into(),
             _ => refused(message),
-        })
+        }))
     }
 
     /// The identities the account may send as.
@@ -941,13 +947,41 @@ impl<H: Host> JmapCalls<'_, '_, H> {
     }
 
     /// Runs one `EmailSubmission/set`.
+    ///
+    /// Past its request written whole, a failure with no status nor
+    /// method error read back may have created the submission.
     fn submit(
         &mut self,
         args: JmapEmailSubmissionSetArgs,
-    ) -> Result<JmapEmailSubmissionSetOutput, BridgeError> {
+    ) -> Result<JmapEmailSubmissionSetOutput, SendFailure> {
         let coroutine = JmapEmailSubmissionSet::new(&self.session, &self.auth, args)
-            .map_err(|err| err.to_string())?;
-        self.jmap.run(&self.session.api_url, coroutine)
+            .map_err(|err| SendFailure::unsent(err.to_string()))?;
+        let api_url = self.session.api_url.clone();
+        let failed = match self.jmap.try_run(&api_url, coroutine) {
+            Ok(Ok(out)) => return Ok(out),
+            Ok(Err(err)) => {
+                sessions().forget(&api_url);
+                SendFailure {
+                    taken: !matches!(
+                        err,
+                        JmapEmailSubmissionSetError::Account(_)
+                            | JmapEmailSubmissionSetError::SerializeArgs(_)
+                            | JmapEmailSubmissionSetError::Method(_)
+                            | JmapEmailSubmissionSetError::Send(
+                                JmapSendError::HttpStatus(_)
+                                    | JmapSendError::Request { .. }
+                                    | JmapSendError::SerializeRequest(_)
+                            )
+                    ),
+                    error: coroutine_error(&err),
+                }
+            }
+            Err(error) => SendFailure {
+                taken: self.jmap.client.sent(),
+                error,
+            },
+        };
+        Err(failed)
     }
 
     /// Destroys one draft; one gone already is destroyed ([`converged`]).
@@ -987,12 +1021,14 @@ fn identity_for<'i>(identities: &'i [JmapIdentity], sender: &str) -> Option<&'i 
 }
 
 /// The path of a mailbox: its ancestors' names and its own joined by `/`,
-/// the hierarchical name IMAP hands the app.
+/// the hierarchical name IMAP hands the app, each name escaped
+/// ([`path_segment`]) so a `/` in one never reads as a level.
 ///
 /// A parent the roster lacks ends the walk: a partial path still names the
 /// mailbox, while dropping it for a missing ancestor would hide its mail.
 fn mailbox_path(named: &BTreeMap<String, JmapMailbox>, mailbox: &JmapMailbox) -> String {
-    let mut segments = vec![mailbox.name.clone().unwrap_or_default()];
+    let segment = |mailbox: &JmapMailbox| path_segment(mailbox.name.as_deref().unwrap_or_default());
+    let mut segments = vec![segment(mailbox)];
     let mut parent = mailbox.parent_id.clone();
 
     // NOTE: bounded by the roster size, so a server answering with a
@@ -1004,7 +1040,7 @@ fn mailbox_path(named: &BTreeMap<String, JmapMailbox>, mailbox: &JmapMailbox) ->
         if segments.len() > named.len() {
             break;
         }
-        segments.push(ancestor.name.clone().unwrap_or_default());
+        segments.push(segment(ancestor));
         parent = ancestor.parent_id.clone();
     }
 
@@ -1058,42 +1094,31 @@ fn project(delta: &JmapDelta, mailbox_id: &str, scope: &Scope) -> MailPage {
     MailPage::delta(items, vanished, delta.next.clone())
 }
 
-/// The Annex A summary of one JMAP Email, dated by `sentAt` in UTC.
+/// The Annex A summary of one JMAP Email, read off its raw header fields.
+///
+/// Each field as the message carries it (RFC 8621 §4.1.3, the `headers`
+/// property), joined into the header block a fetched body starts with and
+/// read by the derivation a body is read with (pimdir STORAGE Annex A.1),
+/// so the two agree byte for byte: never the server's parsed `sentAt`,
+/// `messageId` or decoded `subject`. The size and the attachment mark are
+/// the server's.
 fn email_summary(email: &JmapEmail) -> PimdirMailSummary {
-    let list = |addresses: &Option<Vec<JmapEmailAddress>>| -> Vec<PimdirAddress> {
-        addresses
-            .iter()
-            .flatten()
-            .filter_map(|address| {
-                let canonical = PimdirAddress::canonical(&address.email);
-                (!canonical.is_empty()).then(|| PimdirAddress {
-                    address: canonical,
-                    name: Some(display_name(address)).filter(|name| !name.is_empty()),
-                })
-            })
-            .collect()
-    };
-    let from = list(&email.from);
-    let first = from.first().cloned();
+    let mut block = String::new();
+    for field in email.headers.iter().flatten() {
+        block.push_str(&field.name);
+        block.push(':');
+        block.push_str(&field.value);
+        block.push_str("\r\n");
+    }
+    block.push_str("\r\n");
 
-    PimdirMailSummary {
-        message_id: email
-            .message_id
-            .as_ref()
-            .and_then(|ids| ids.first())
-            .cloned(),
-        in_reply_to: email.in_reply_to.clone().unwrap_or_default(),
-        subject: email.subject.as_deref().map(decode).unwrap_or_default(),
-        sender: first.as_ref().map(|address| address.address.clone()),
-        sender_name: first.and_then(|address| address.name),
-        date: email.sent_at.as_deref().and_then(utc),
-        size: email.size,
-        attachment: email.has_attachment,
-        invitation: None,
-        from,
-        to: list(&email.to),
-        cc: list(&email.cc),
-        bcc: Vec::new(),
+    match derive_meta(block.as_bytes(), email.size, email.has_attachment).summary {
+        Some(PimdirSummary::Mail(summary)) => summary,
+        _ => PimdirMailSummary {
+            size: email.size,
+            attachment: email.has_attachment,
+            ..PimdirMailSummary::default()
+        },
     }
 }
 
@@ -1104,14 +1129,6 @@ fn keyword(email: &JmapEmail, keyword: &str) -> bool {
         .as_ref()
         .and_then(|keywords| keywords.get(keyword).copied())
         .unwrap_or(false)
-}
-
-/// An email address's display name, empty when it carries none.
-fn display_name(address: &JmapEmailAddress) -> String {
-    match address.name.as_deref() {
-        Some(name) if !name.trim().is_empty() => name.to_string(),
-        _ => String::new(),
-    }
 }
 
 #[cfg(test)]

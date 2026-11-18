@@ -26,7 +26,10 @@ use url::Url;
 use vcard::tree::cst::VcardCst;
 
 use crate::{
-    client::{Host, USER_AGENT, webdav::Webdav},
+    client::{
+        Host, USER_AGENT,
+        webdav::{Webdav, gone_row, is_gone, maybe_lossy, served, unreadable},
+    },
     contact::{Addressbook, Card},
     error::BridgeError,
 };
@@ -121,12 +124,14 @@ impl<H: Host> Webdav<'_, H> {
         let auth = self.auth.webdav();
         let coroutine = CarddavCardRead::new(url, &auth, USER_AGENT, url.path(), uri);
         let body = self.client.run(url, coroutine)?;
+        let (vcard, vcard_base64) = served(body.data);
 
         Ok(Card {
             id: uri.trim_end_matches(".vcf").to_string(),
             uri: uri.to_string(),
             etag: body.etag,
-            vcard: String::from_utf8_lossy(&body.data).into_owned(),
+            vcard,
+            vcard_base64,
             books: Vec::new(),
         })
     }
@@ -184,17 +189,50 @@ impl<H: Host> Webdav<'_, H> {
 
     /// Fetches the cards at the given resource names in the collection at
     /// `url`, by an addressbook-multiget REPORT.
+    ///
+    /// A row answered 404 or 410 is a card gone, left out. Any other row
+    /// answered without its data is read alone, and fails the fetch if still
+    /// unreadable: a card left out would be retired by a complete round.
     pub fn multiget_cards(&mut self, url: &Url, uris: &[&str]) -> Result<Vec<Card>, BridgeError> {
         let auth = self.auth.webdav();
         let coroutine = CarddavCardMultiget::new(url, &auth, USER_AGENT, url.path(), uris);
         let fetched = self.client.run(url, coroutine)?;
-        // NOTE: a card answered without its data is left out, as one the
-        // server did not answer at all; only the log says which.
+
+        let mut alone = Vec::new();
         for entry in &fetched.unreadable {
             log::warn!("{url}: card {} unreadable: {:?}", entry.id, entry.status);
+            if gone_row(entry.status) {
+                continue;
+            }
+            match self.read_card(url, &entry.id) {
+                Ok(card) => alone.push(Card {
+                    id: entry.id.clone(),
+                    ..card
+                }),
+                Err(err) if is_gone(&err) => {}
+                Err(err) => return Err(unreadable(url, &entry.id, err)),
+            }
         }
 
-        Ok(fetched.cards.into_iter().map(into_card).collect())
+        let mut cards: Vec<Card> = fetched.cards.into_iter().map(into_card).collect();
+        for card in cards.iter_mut().filter(|card| maybe_lossy(&card.vcard)) {
+            match self.read_card(url, &card.uri) {
+                Ok(read) if read.vcard_base64.is_some() => {
+                    card.vcard = read.vcard;
+                    card.vcard_base64 = read.vcard_base64;
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    log::warn!(
+                        "{url}: card {} not read as served: {}",
+                        card.uri,
+                        err.message
+                    )
+                }
+            }
+        }
+        cards.extend(alone);
+        Ok(cards)
     }
 }
 
@@ -243,14 +281,18 @@ fn into_created_card(created: CarddavCardCreateOk, vcard: &str) -> Card {
         uri: created.id,
         etag: created.etag,
         vcard: vcard.to_string(),
+        vcard_base64: None,
         books: Vec::new(),
     }
 }
 
-/// An io-webdav card entry as a [`Card`], its bytes decoded lossily.
+/// An io-webdav card entry as a [`Card`], its bytes kept as served
+/// ([`served`]).
 fn into_card(entry: CarddavCardEntry) -> Card {
+    let (vcard, vcard_base64) = served(entry.data);
     Card {
-        vcard: String::from_utf8_lossy(&entry.data).into_owned(),
+        vcard,
+        vcard_base64,
         id: entry.id.clone(),
         uri: entry.id,
         etag: entry.etag,
@@ -268,7 +310,14 @@ mod tests {
         rfc4918::WebdavAuth,
     };
 
-    use crate::contact::carddav::*;
+    use crate::{
+        client::{
+            Auth, Client,
+            fake::{FakeRequest, FakeResponse, FakeServer},
+            webdav::Webdav,
+        },
+        contact::carddav::*,
+    };
 
     /// Runs a create against one reply, answering the request line and the
     /// card the bridge keeps.
@@ -333,5 +382,119 @@ mod tests {
 
         assert_eq!(card.uri, "3f2a.vcf");
         assert_eq!(card.id, "3f2a.vcf");
+    }
+
+    /// A card read whole crosses as the bytes its server sent, a Latin-1
+    /// one (vCard 2.1) included, beside the text the phone is shown: the
+    /// multistatus is read as UTF-8 by io-webdav, so the card is read again
+    /// by GET, whose bytes the server answers as stored.
+    #[test]
+    fn a_card_read_whole_keeps_the_bytes_served() {
+        let served = b"BEGIN:VCARD\r\nVERSION:2.1\r\nUID:u1\r\nFN:Ren\xe9\r\nEND:VCARD\r\n";
+        let mut body = b"<?xml version=\"1.0\" encoding=\"utf-8\"?>\
+            <d:multistatus xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:carddav\">\
+            <d:response><d:href>/book/c1.vcf</d:href><d:propstat><d:prop>\
+            <d:getetag>\"e1\"</d:getetag><c:address-data>"
+            .to_vec();
+        body.extend_from_slice(served);
+        body.extend_from_slice(
+            b"</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status>\
+            </d:propstat></d:response></d:multistatus>",
+        );
+        let answer = FakeResponse {
+            status: 207,
+            headers: Vec::new(),
+            content_type: "application/xml; charset=utf-8",
+            body,
+            lost: false,
+            cut: false,
+        };
+        let resource = FakeResponse {
+            status: 200,
+            body: served.to_vec(),
+            ..answer.clone()
+        };
+        let mut client = Client::new(FakeServer::new(move |request: &FakeRequest| match request
+            .method
+            .as_str()
+        {
+            "GET" => resource.clone(),
+            _ => answer.clone(),
+        }));
+        let mut dav = Webdav {
+            client: &mut client,
+            auth: Auth::Bearer("token"),
+        };
+        let url: Url = "https://dav.example.com/book/".parse().unwrap();
+
+        let cards = dav.multiget_cards(&url, &["c1.vcf"]).unwrap();
+
+        let card = serde_json::to_value(&cards[0]).unwrap();
+        let encoded = card["vcardBase64"].as_str().unwrap_or_default();
+        assert_eq!(crate::mail::unbase64(encoded).unwrap(), served);
+        assert!(card["vcard"].as_str().unwrap().contains("FN:Ren\u{fffd}"));
+    }
+
+    /// A multiget answered row by row: `c1.vcf` whole, `c2.vcf` refused
+    /// (403) and `c3.vcf` gone (404), `c2.vcf` then read alone with `get`.
+    fn multiget_refusing_one(get: FakeResponse) -> Result<Vec<Card>, BridgeError> {
+        let rows = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\
+            <d:multistatus xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:carddav\">\
+            <d:response><d:href>/book/c1.vcf</d:href><d:propstat><d:prop>\
+            <d:getetag>\"e1\"</d:getetag><c:address-data>BEGIN:VCARD\r\nVERSION:3.0\r\n\
+            UID:c1\r\nFN:One\r\nEND:VCARD\r\n</c:address-data></d:prop>\
+            <d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>\
+            <d:response><d:href>/book/c2.vcf</d:href>\
+            <d:status>HTTP/1.1 403 Forbidden</d:status></d:response>\
+            <d:response><d:href>/book/c3.vcf</d:href>\
+            <d:status>HTTP/1.1 404 Not Found</d:status></d:response>\
+            </d:multistatus>";
+        let answer = FakeResponse {
+            status: 207,
+            content_type: "application/xml; charset=utf-8",
+            body: rows.as_bytes().to_vec(),
+            ..FakeResponse::empty(207)
+        };
+        let mut client = Client::new(FakeServer::new(move |request: &FakeRequest| match request
+            .method
+            .as_str()
+        {
+            "GET" => {
+                assert_eq!(request.path, "/book/c2.vcf", "only the refused row");
+                get.clone()
+            }
+            _ => answer.clone(),
+        }));
+        let mut dav = Webdav {
+            client: &mut client,
+            auth: Auth::Bearer("token"),
+        };
+        let url: Url = "https://dav.example.com/book/".parse().unwrap();
+        dav.multiget_cards(&url, &["c1.vcf", "c2.vcf", "c3.vcf"])
+    }
+
+    /// A row the server refused is read alone: a member it did not answer
+    /// as gone is never left out, so a complete round never retires it.
+    #[test]
+    fn a_multiget_row_refused_is_read_alone() {
+        let card = FakeResponse {
+            content_type: "text/vcard",
+            body: b"BEGIN:VCARD\r\nVERSION:3.0\r\nUID:c2\r\nFN:Two\r\nEND:VCARD\r\n".to_vec(),
+            ..FakeResponse::empty(200)
+        };
+
+        let cards = multiget_refusing_one(card).unwrap();
+
+        let uris: Vec<&str> = cards.iter().map(|card| card.uri.as_str()).collect();
+        assert_eq!(uris, ["c1.vcf", "c2.vcf"], "the 404 alone is gone");
+        assert!(cards[1].vcard.contains("FN:Two"));
+    }
+
+    /// A row still unreadable alone fails the read, which fails the round.
+    #[test]
+    fn a_multiget_row_unreadable_alone_fails_the_read() {
+        let refused = multiget_refusing_one(FakeResponse::empty(403));
+
+        assert!(refused.is_err(), "the member would be retired");
     }
 }

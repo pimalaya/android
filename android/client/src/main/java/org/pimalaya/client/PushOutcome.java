@@ -16,15 +16,24 @@ import org.json.JSONObject;
  * @param id the server-assigned id of an accepted create, or null
  * @param etag the accepted write's revision, null where the backend has none
  * @param error what the server objected, on a rejected change, or null
+ * @param refused whether the server refused the change as it stands (pimdir
+ *     SYNC §4), which a sync answers refused rather than pushing it again
  */
-public record PushOutcome(String ref, boolean accepted, String id, String etag, String error) {
+public record PushOutcome(
+        String ref, boolean accepted, String id, String etag, String error, boolean refused) {
+    /** An outcome the server did not refuse as it stands. */
+    public PushOutcome(String ref, boolean accepted, String id, String etag, String error) {
+        this(ref, accepted, id, etag, error, false);
+    }
+
     static PushOutcome from(JSONObject reply) {
         return new PushOutcome(
                 Json.string(reply, "ref"),
                 reply.optBoolean("accepted"),
                 Json.optString(reply, "id"),
                 Json.optString(reply, "etag"),
-                Json.optString(reply, "error"));
+                Json.optString(reply, "error"),
+                reply.optBoolean("refused"));
     }
 
     static List<PushOutcome> list(JSONArray reply) {

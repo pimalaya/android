@@ -338,8 +338,8 @@ impl<H: Host> JmapCalls<'_, '_, H> {
 /// What one event a `CalendarEvent/set` refused answers.
 ///
 /// Refused for good ([`crate::error::REFUSED`]) when the server objects to
-/// the change itself; 412 otherwise (gone, rate limit, anything unknown),
-/// kept staged for a pass that reads the event again.
+/// the change itself; 412 otherwise (gone, quota, rate limit, anything
+/// unknown), kept staged for a pass that reads the event again.
 fn item_failure(what: &str, err: &JmapCalendarEventSetItemError) -> BridgeError {
     let message = format!("{what}: {err}");
     match err {
@@ -347,10 +347,10 @@ fn item_failure(what: &str, err: &JmapCalendarEventSetItemError) -> BridgeError 
         | JmapCalendarEventSetItemError::InvalidProperties { .. }
         | JmapCalendarEventSetItemError::InvalidPatch { .. }
         | JmapCalendarEventSetItemError::TooLarge { .. }
-        | JmapCalendarEventSetItemError::OverQuota { .. }
         | JmapCalendarEventSetItemError::Singleton { .. }
         | JmapCalendarEventSetItemError::NoSupportedScheduleMethods { .. } => refused(message),
         JmapCalendarEventSetItemError::NotFound { .. }
+        | JmapCalendarEventSetItemError::OverQuota { .. }
         | JmapCalendarEventSetItemError::RateLimit { .. }
         | JmapCalendarEventSetItemError::WillDestroy { .. }
         | JmapCalendarEventSetItemError::Other { .. } => moved(message),
@@ -431,6 +431,7 @@ fn jmap_event(event: JmapCalendarEvent) -> Result<Event, String> {
         id,
         etag,
         ical: ical.to_string(),
+        ical_base64: None,
     })
 }
 

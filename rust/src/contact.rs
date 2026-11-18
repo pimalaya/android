@@ -72,8 +72,13 @@ pub struct Card {
     pub uri: String,
     /// Entity tag guarding concurrent updates, when the server sent one.
     pub etag: Option<String>,
-    /// Raw vCard text.
+    /// The vCard as text, read lossily where its bytes are not UTF-8.
     pub vcard: String,
+    /// The bytes the server sent, as base64, where they are not UTF-8: what
+    /// the store keeps and hashes (pimdir STORAGE §5), `vcard` being only
+    /// what the phone is shown.
+    #[serde(rename = "vcardBase64", skip_serializing_if = "Option::is_none")]
+    pub vcard_base64: Option<String>,
     /// Ids of the addressbooks the card is a member of.
     ///
     /// Set where cards are account-level with m:n memberships (JMAP book
@@ -243,7 +248,8 @@ impl<H: Host> Contacts<'_, H> {
     ///
     /// No cursor runs the initial round: the complete member set and the
     /// next cursor. A rejected cursor, or a DAV server without
-    /// sync-collection, re-runs one; the delta says whether it is complete.
+    /// sync-collection, re-runs one; the delta says whether it is complete,
+    /// never a DAV listing the server cut short ([`Webdav::sync_collection`]).
     pub fn sync_cards(
         &mut self,
         addressbook_url: &str,
@@ -252,11 +258,12 @@ impl<H: Host> Contacts<'_, H> {
         // NOTE: a JMAP initial round is paged, and only it knows whether
         // its listing reached the end; its deltas are never complete.
         let paged = self.account.backend == Backend::Jmap;
+        let dav = self.account.backend == Backend::Carddav;
         let delta = self.sync_cards_round(addressbook_url, cursor)?;
 
         if let Some(mut delta) = delta {
             if !paged {
-                delta.complete = cursor.is_none();
+                delta.complete = cursor.is_none() && (!dav || delta.complete);
             }
             return Ok(delta);
         }
@@ -267,7 +274,7 @@ impl<H: Host> Contacts<'_, H> {
         match self.sync_cards_round(addressbook_url, None)? {
             Some(mut delta) => {
                 if !paged {
-                    delta.complete = true;
+                    delta.complete = !dav || delta.complete;
                 }
                 Ok(delta)
             }
@@ -420,6 +427,7 @@ impl<H: Host> Contacts<'_, H> {
                     uri: key,
                     etag,
                     vcard: card.vcard.to_string(),
+                    vcard_base64: None,
                     books: Vec::new(),
                 })
             }
@@ -578,7 +586,8 @@ impl<H: Host> Contacts<'_, H> {
     }
 }
 
-/// A sync-collection delta as a [`CardDelta`], hrefs as resource names.
+/// A sync-collection delta as a [`CardDelta`], hrefs as resource names,
+/// complete as far as the listing goes unless the server cut it short.
 ///
 /// The collection's own href, when a server lists it, yields an empty
 /// name and is skipped.
@@ -593,6 +602,7 @@ fn into_card_delta(delta: WebdavSyncDelta) -> CardDelta {
                 uri,
                 etag: change.etag,
                 vcard: String::new(),
+                vcard_base64: None,
                 books: Vec::new(),
             })
         })
@@ -607,6 +617,39 @@ fn into_card_delta(delta: WebdavSyncDelta) -> CardDelta {
         changed,
         vanished,
         token: delta.sync_token,
-        complete: false,
+        complete: !delta.truncated,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        account::{Account, Backend},
+        client::{Auth, Client, webdav::tests::cutting},
+        contact::Contacts,
+    };
+
+    /// A first round the server cut short is no complete listing, so the
+    /// engine retires no card it did not list (RFC 6578 section 3.6).
+    #[test]
+    fn a_first_round_cut_short_is_not_complete() {
+        let mut reports = 0;
+        let mut client = Client::new(cutting(&mut reports));
+        let account = Account {
+            base_url: "https://dav.example.com/",
+            backend: Backend::Carddav,
+            auth: Auth::Bearer("token"),
+            zone: "",
+        };
+
+        let delta = Contacts {
+            client: &mut client,
+            account: &account,
+        }
+        .sync_cards("https://dav.example.com/book/", None)
+        .unwrap();
+
+        assert!(!delta.complete, "nothing is retired by absence");
+        assert_eq!(delta.changed.len(), 1);
     }
 }

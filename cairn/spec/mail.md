@@ -59,7 +59,12 @@ A long press on a message SHALL start a selection holding it, and while one runs
 - THEN all three are starred
 
 ### Requirement: An extension is enabled before it is used
-A connection SHALL ENABLE CONDSTORE and QRESYNC when it opens, where the server advertises them, RFC 7162 section 3.1 requiring it before a SELECT may carry the QRESYNC parameter. A refused ENABLE SHALL forget the capability rather than fail the connection, and a QRESYNC select the server refuses anyway SHALL fall back to a full round.
+A connection SHALL ENABLE CONDSTORE and QRESYNC when it opens, where the server advertises them, RFC 7162 section 3.1 requiring it before a SELECT may carry the QRESYNC parameter. QRESYNC SHALL be used only on a connection whose `ENABLED` answer named it, compared without regard to case: a server answering ENABLE with a bare `OK` enabled nothing, and its `HIGHESTMODSEQ` moves with nothing listed under a QRESYNC SELECT (iCloud). A refused ENABLE, or one naming no QRESYNC, SHALL forget the capability rather than fail the connection, every listing after taking the full round, and a QRESYNC select the server refuses anyway SHALL fall back to a full round.
+
+#### Scenario: iCloud
+- GIVEN a server advertising QRESYNC that answers `ENABLE` with a bare `OK`
+- WHEN a mailbox is listed again
+- THEN the listing is the full round, no SELECT carrying QRESYNC, and a message arrived since is listed
 
 #### Scenario: A second pass over a mailbox
 - GIVEN a mailbox synced once against a QRESYNC server
@@ -139,7 +144,7 @@ Opening a message SHALL mark it read in the store, once its body has arrived, an
 ### Requirement: A message is deleted into the account's trash
 Deleting a message outside the trash SHALL stage a move into the mailbox the account records as its trash: the row SHALL leave its mailbox and show in the trash at once. The next sync SHALL relocate it as staged: on IMAP with MOVE, or where the server implements no MOVE with COPY and `\Deleted`, then `UID EXPUNGE` where it announces `UIDPLUS`; on Graph into the folder Graph names `deleteditems`, recognised by id when the roster is read; on Gmail with `messages.trash`; on JMAP through `mailboxIds`.
 
-Deleting a message in the trash SHALL stage a removal, pushed as a permanent delete: on IMAP `\Deleted` then `UID EXPUNGE` (RFC 4315); on Graph `permanentDelete`; on Gmail `messages.delete`; on JMAP `Email/set` destroy. On an account listed account-wide (Gmail, JMAP), where one id names a message in every mailbox, a removal SHALL take the message out of its mailbox alone while the account holds the same server id live in another mailbox (Gmail's All Mail aside; a Message-ID, which two messages may share, tells nothing): a Gmail label removed, `messages.untrash` out of the trash, a JMAP mailbox removed from `mailboxIds`; only a message held nowhere else SHALL be deleted for good. Where an IMAP account records no trash, or the message sits in the trash of an account whose last session announced no `UIDPLUS` (an expunge without it is mailbox-wide), a delete SHALL stage `\Deleted` in place: the row stays, its line saying it is marked deleted, and the toast says so. An account no session recorded yet SHALL read as announcing it. A JMAP account recording none SHALL refuse the delete outright: RFC 8621 has no counterpart to `\Deleted`. Deleting a message still in the outbox SHALL cancel its submission and withdraw its staged sent copy, there being nothing on the server to tell.
+Deleting a message in the trash SHALL stage a removal, pushed as a permanent delete: on IMAP `\Deleted` then `UID EXPUNGE` (RFC 4315); on Graph `permanentDelete`; on Gmail `messages.delete`; on JMAP `Email/set` destroy. On an account listed account-wide (Gmail, JMAP), where one id names a message in every mailbox, a removal SHALL take the message out of its mailbox alone while the account holds the same server id live in another mailbox (Gmail's All Mail aside; a Message-ID, which two messages may share, tells nothing): a Gmail label removed, `messages.untrash` out of the trash, `messages.trash` out of `SENT` or `DRAFT` (which Gmail takes no label change of), a JMAP mailbox removed from `mailboxIds`; only a message held nowhere else SHALL be deleted for good. Where an IMAP account records no trash, or the message sits in the trash of an account whose last session announced no `UIDPLUS` (an expunge without it is mailbox-wide), a delete SHALL stage `\Deleted` in place: the row stays, its line saying it is marked deleted, and the toast says so. An account no session recorded yet SHALL read as announcing it. A JMAP account recording none SHALL refuse the delete outright: RFC 8621 has no counterpart to `\Deleted`. Deleting a message still in the outbox SHALL cancel its submission and withdraw its staged sent copy, there being nothing on the server to tell.
 
 On an account listed account-wide (Gmail, JMAP), where one id names a message in every mailbox, the trash row SHALL stay through the sync that relocates it, keeping its body, and SHALL be bound to the server's id by the trash's listing in that same sync when the trash is listed after the move; elsewhere it SHALL come back with the trash's next listing. Until it is bound, a delete for good, a restore or a read marker staged on it, while the move is being pushed too, SHALL wait for that listing, then reach the server against the id the listing binds it to: the create is recorded delivered (pimdir SYNC §2) before the relocation leaves, and what is staged on it is held rather than withdrawn. Once a pass ends, the app SHALL say which mailboxes hold a delete or a move waiting so for the server, each told once, a restart included; a create waiting with nothing staged on it SHALL tell nothing. A JMAP pass, like a Gmail one, SHALL read the account's changes again after it pushes a move, so the trash listed after it lands the message in that pass.
 
@@ -243,7 +248,12 @@ An HTML body SHALL fit the screen's width, reflowed where its layout allows and 
 - THEN it shows whole across the width, scrolls only up and down, and a pinch zooms into it
 
 ### Requirement: A message is moved or copied
-Move and copy SHALL list the message's account's mailboxes under the names the list shows, all but the one it is in, the outbox and Gmail's All Mail, and SHALL stage, in the store alone, a move or a copy into the one picked. A move SHALL show the message in its new mailbox at once and leave the reader; a copy SHALL keep it where it is and show it in both. The next sync SHALL carry a move out as deleting into the trash does (A message is deleted into the account's trash), and a copy as a server-side copy with no body uploaded: IMAP `UID COPY`, a Graph `copy`, a Gmail label added, a JMAP mailbox added to `mailboxIds`.
+Move and copy SHALL list the message's account's mailboxes under the names the list shows, all but the one it is in, the outbox and Gmail's All Mail, and SHALL stage, in the store alone, a move or a copy into the one picked. A move SHALL show the message in its new mailbox at once and leave the reader; a copy SHALL keep it where it is and show it in both. The next sync SHALL carry a move out as deleting into the trash does (A message is deleted into the account's trash), and a copy as a server-side copy with no body uploaded: IMAP `UID COPY`, a Graph `copy`, a Gmail label added, a JMAP mailbox added to `mailboxIds`. Gmail takes no label change naming its `SENT` or `DRAFT` (400 "Invalid label", any `messages.modify` naming either): a move into or out of either, but a move out into the trash, and a copy into either SHALL be refused before any request, with a reason naming Gmail, and held as a refused push is (A mail push refused as it stands is held); a move out of either into the trash, and a removal from either, SHALL go through `messages.trash`. A copy out of either adds the target label alone and is carried out.
+
+#### Scenario: A Gmail sent message moved to a label
+- GIVEN a message in a Gmail account's Sent
+- WHEN it is moved to a label and the account syncs
+- THEN no request reaches Gmail for it, and the move is refused with a reason naming Gmail
 
 #### Scenario: Copying a message
 - GIVEN a message in the inbox
@@ -279,7 +289,7 @@ The submission SHALL file no copy itself: the copy is the create staged in the s
 
 The row SHALL be removed by cancelling it once the message has been handed over, and never claimed before: a submission's effect is not a store mutation, so there is nothing to apply, and a claim that deleted the row before the server accepted the message would lose the message. A row SHALL be noted on the device as being handed over before the handover and until its verdict is recorded: a drain finding a row still noted, the app having stopped between the two, SHALL park it as uncertain rather than send it again, and a failure after the handover SHALL NOT send it again either (A send that may have gone waits for the user), and an SMTP `QUIT` failing after the message was accepted SHALL NOT fail the send.
 
-A submission the server refuses for good, which is a 5yz reply (RFC 5321 section 4.2.1), SHALL park the row with what the server said, the recipient named when the refusal is one recipient's, counted as one attempt, shown as failed to send and never retried on its own; the drain SHALL carry on to the rows behind it. A refusal for a rate or a quota, a 429 or a 403 naming one that the retries outlasted or a daily quota, SHALL NOT be one for good: the row SHALL stay pending for the next drain. An uncertain one SHALL be parked as such and stop the drain. Any other failure SHALL count an attempt, leave the row pending and stop the drain, the usual cause being that there is no network and the next message would fail too. An action of a kind this app does not carry out SHALL be left pending and untouched, its attempts unbumped.
+A submission the server refuses for good, which is a 5yz reply (RFC 5321 section 4.2.1) naming no sending limit, SHALL park the row with what the server said, the recipient named when the refusal is one recipient's, counted as one attempt, shown as failed to send and never retried on its own; the drain SHALL carry on to the rows behind it. A refusal for a rate or a quota, a 429 or a 403 naming one that the retries outlasted or a daily quota, SHALL NOT be one for good: the row SHALL stay pending for the next drain. Nor SHALL an SMTP 5yz naming a sending limit, by its enhanced code (Gmail's `5.4.5`, Microsoft's `5.1.90`, `5.7.232`, `5.7.233`, `5.7.236`) or its wording (a submission quota, a sending limit exceeded, a daily limit for message recipients, rate limited): it SHALL leave the row pending and stop the drain, as any other failure does. An SMTP session a send failed on SHALL be ended, `QUIT` sent where the server answered, and its connection dropped, so the next send opens its own: left open, the next send would wait for a greeting on a connection waiting for a command. An uncertain one SHALL be parked as such and stop the drain. Any other failure SHALL count an attempt, leave the row pending and stop the drain, the usual cause being that there is no network and the next message would fail too. An action of a kind this app does not carry out SHALL be left pending and untouched, its attempts unbumped.
 
 #### Scenario: The next sync
 - GIVEN a queued message and an IMAP account with a submit endpoint and a `\Sent` mailbox
@@ -302,9 +312,14 @@ A submission the server refuses for good, which is a 5yz reply (RFC 5321 section
 - THEN no command carries the address, the row is parked saying it is not an email address, and the rows behind it are handed over
 
 #### Scenario: One refusal among several
-- GIVEN two queued messages, the first of which is refused
+- GIVEN two queued messages over one SMTP connection, the first of which is refused at its `RCPT TO` with a 550
 - WHEN the sync drains the queue
-- THEN the second is still handed over
+- THEN the second is still handed over, on a session of its own
+
+#### Scenario: A daily sending limit
+- GIVEN a server answering `550 5.4.5 Daily user sending limit exceeded`
+- WHEN the sync drains the queue
+- THEN the message stays queued for a later drain, not parked
 
 #### Scenario: No network
 - GIVEN a queued message and no network
@@ -370,7 +385,7 @@ An `smtp://` submission endpoint SHALL be upgraded to TLS with `STARTTLS` before
 - THEN the session is encrypted before `AUTH`, and nothing goes over the plain socket but `EHLO` and `STARTTLS`
 
 ### Requirement: A message's date is its Date header
-A message's date SHALL be its `Date` header, which pimdir STORAGE Annex A.1 stores and sorts mail by, on every backend: the header itself on IMAP and Gmail (asked for among the metadata headers) and on Graph (among `internetMessageHeaders`), `sentDateTime` on a Graph row listing no header field, `sentAt` on JMAP. A message with no date SHALL be stored with none, never with its reception time in its place.
+A message's date SHALL be its `Date` header, which pimdir STORAGE Annex A.1 stores and sorts mail by, on every backend: the header itself on IMAP and Gmail (asked for among the metadata headers) and on Graph (among `internetMessageHeaders`), `sentDateTime` on a Graph row listing no header field, and on JMAP the `Date` field of the raw `headers` it lists. A message with no date SHALL be stored with none, never with its reception time in its place.
 
 #### Scenario: A message received late
 - GIVEN a message sent at 08:00 and received at 08:05
@@ -414,7 +429,7 @@ Gmail API requests SHALL be paced per account, every worker, the body step and t
 - THEN they go out in batches of 10, one at a time, and a read refused for concurrency rides the next batch
 
 ### Requirement: A mailbox is stored whole
-A mail round SHALL list every message of a mailbox within its scope (its floor, within the account's bound), newest first in the source's own recency order, a page at a time (500 UIDs per IMAP `UID FETCH`, 1,000 per Graph `/messages` page, 500 ids per Gmail `messages.list`, 500 per JMAP `Email/query` capped by the server's `maxObjectsInGet`), each page landing in one write. Every message a page lists SHALL arrive named by the summary and sort key of pimdir STORAGE Annex A read in the listing itself, with no body: IMAP from `FLAGS`, `RFC822.SIZE` and the header fields Annex A reads, `Content-Type` among them and no `BODYSTRUCTURE`; Graph from the summary `$select`, or for a delta's member the store does not bind, from that `$select` read by id; JMAP from `Email/get`'s summary properties. A Gmail round, which a history Gmail no longer holds or a label new to the store opens, SHALL list the label's ids received since the oldest reception the account holds, named by their markers alone (the unread and starred labels' ids), the store keeping the summary it holds and reading by metadata only the members it holds in another mailbox or that arrived ahead of every message it holds, never one read per held message. An interrupted round SHALL resume from the cursor its last landed page left, and a cursor the source refuses SHALL restart the round. A round's last page SHALL retire only what it found absent within its scope; mail outside it SHALL never be deleted by a sync. The chunks and the fill (A mailbox is listed a chunk at a time, Older mail fills in behind) SHALL bring a mailbox whole within the account's bound, except on Gmail and JMAP, whose steps decide what it holds.
+A mail round SHALL list every message of a mailbox within its scope (its floor, within the account's bound), newest first in the source's own recency order, a page at a time (500 UIDs per IMAP `UID FETCH`, 1,000 per Graph `/messages` page, 500 ids per Gmail `messages.list`, 500 per JMAP `Email/query` capped by the server's `maxObjectsInGet`), each page landing in one write. Every message a page lists SHALL arrive named by the summary and sort key of pimdir STORAGE Annex A read in the listing itself, with no body: IMAP from `FLAGS`, `RFC822.SIZE` and the header fields Annex A reads, `Content-Type` among them and no `BODYSTRUCTURE`; Graph from the summary `$select`, or for a delta's member the store does not bind, from that `$select` read by id; JMAP from `Email/get`'s raw `headers` (A JMAP message is named from its header bytes). A Gmail round, which a history Gmail no longer holds or a label new to the store opens, SHALL list the label's ids received since the oldest reception the account holds, named by their markers alone (the unread and starred labels' ids), the store keeping the summary it holds and reading by metadata only the members it holds in another mailbox or that arrived ahead of every message it holds, never one read per held message. An interrupted round SHALL resume from the cursor its last landed page left, and a cursor the source refuses SHALL restart the round. A round's last page SHALL retire only what it found absent within its scope; mail outside it SHALL never be deleted by a sync. The chunks and the fill (A mailbox is listed a chunk at a time, Older mail fills in behind) SHALL bring a mailbox whole within the account's bound, except on Gmail and JMAP, whose steps decide what it holds.
 
 #### Scenario: A first pass over a large mailbox
 - GIVEN an IMAP mailbox of 100k messages and an empty store
@@ -438,7 +453,7 @@ A mail round SHALL list every message of a mailbox within its scope (its floor, 
 - THEN the inbox's ids are listed with their markers, and no message the store holds is read again
 
 ### Requirement: An account bounds its mail
-An account's settings SHALL offer to sync all of its mail or the last 1, 3, 6, 12 or 24 months, the floor being the first day of the month that many months back, on the `Date` header (a message with no usable date in every scope). A mailbox's floor SHALL never go below its bound: its account's, or none for a mailbox kept whole or an account set to whole mailbox. A chunk reaching past the bound stops at it, and a mailbox whose floor is the bound is whole. A provider's received-date filter SHALL only narrow a listing, two days below the floor (IMAP `SENTSINCE` one day below). Widening the bound SHALL have the fill carry on below the old floor, chunk by chunk. Narrowing it SHALL collect the stored messages dated below the new floor that owe nothing to the server, their mailboxes keeping them there, except in a mailbox kept whole.
+An account's settings SHALL offer to sync all of its mail or the last 1, 3, 6, 12 or 24 months, the floor being the first day of the month that many months back, on the `Date` header (a message with no usable date in every scope). A mailbox's floor SHALL never go below its bound: its account's, or none for a mailbox kept whole or an account set to whole mailbox. A chunk reaching past the bound stops at it, and a mailbox whose floor is the bound is whole. A provider's received-date filter SHALL only narrow a listing, two days below the floor (IMAP `SENTSINCE` one day below). A Graph or JMAP band SHALL be listed from its floor alone, never below a ceiling on the provider's date (Graph's `sentDateTime`, JMAP's `receivedAt`): a message is submitted and received after its `Date`, often long after, so a ceiling on those dates would miss a member its `Date` puts in the band, which no round lists then. A Graph band's later pages still resume below the oldest `sentDateTime` reached (A Graph mailbox keeps one unfiltered delta link), and a widening lists again what the mailbox holds above the band, which the store binds already. Widening the bound SHALL have the fill carry on below the old floor, chunk by chunk. Narrowing it SHALL collect the stored messages dated below the new floor that owe nothing to the server, their mailboxes keeping them there, except in a mailbox kept whole.
 
 #### Scenario: Narrowing to a year
 - GIVEN an account syncing all of its mail
@@ -450,6 +465,11 @@ An account's settings SHALL offer to sync all of its mail or the last 1, 3, 6, 1
 - GIVEN that account
 - WHEN its bound is set back to all mail and the app stays open on an unmetered network
 - THEN the older messages are listed again, a chunk at a time
+
+#### Scenario: A message submitted after its date
+- GIVEN a Graph mailbox listed down to 50 hours back, holding a message dated 70 hours back whose `sentDateTime` is 20 hours back
+- WHEN it is widened down to 100 hours back
+- THEN the band lists it
 
 ### Requirement: The mail list loads lazily
 The mail list SHALL hold only the rows near the scroll position, read a page at a time from the store and the far pages evicted, sized by a count of what the filter, the chips, the search and the list's floor let through, with a placeholder row while a page loads. It SHALL place its day headers from one count per day, without loading rows. The messages waiting to go out SHALL stay on top, outside the paged query. Search, the chips and the unread badge SHALL be conditions of the store's query, search and the badge covering every stored message. A list showing the store SHALL redraw as a pass's pages land.
@@ -1046,12 +1066,22 @@ On every start, the app SHALL remove the folders a body download writes into and
 - THEN the folder is gone
 
 ### Requirement: A send that may have gone waits for the user
-A submission that fails after the whole message was handed over and before any verdict came back SHALL be uncertain: over SMTP once the data's final `.` was written, over JMAP, Graph or Gmail once the request was written whole and no byte of its answer came, or when a 500, 502, 503 or 504 answered. An uncertain submission SHALL park its row by `unconfirm_action`, the statement alone writing the reserved prefix `unconfirmed: ` its error begins with (pimdir STORAGE §15.2), shown as *May have been sent*, and SHALL never be handed over again on its own. The reader SHALL offer *Send again* on it, which puts the same row back among the pending ones (`retry_action`, STORAGE §15.5), its id and its attempts kept, in its place in the queue's order.
+A submission that fails after the whole message was handed over and before any verdict came back SHALL be uncertain: over SMTP once the data's final `.` was written, over JMAP, Graph or Gmail once the submission's own request was written whole and no verdict was read back: no answer, an answer cut short after its status line, a 2xx whose body does not parse; or when a 500, 502, 503 or 504 answered. It is told by the failure, never by its status alone: only a request that could not be built (an unparsable URL, a body that does not serialize, an argument refused before sending) or was never written whole, and on JMAP any failure before the `EmailSubmission/set` (the identities, the mailboxes, the upload, the import into Drafts), SHALL leave the message pending. A Gmail 403 naming no rate keeps parking the message as refused, the user sending it again (owner decision 2026-11-18). An uncertain submission SHALL park its row by `unconfirm_action`, the statement alone writing the reserved prefix `unconfirmed: ` its error begins with (pimdir STORAGE §15.2), shown as *May have been sent*, and SHALL never be handed over again on its own. The reader SHALL offer *Send again* on it, which puts the same row back among the pending ones (`retry_action`, STORAGE §15.5), its id and its attempts kept, in its place in the queue's order.
 
 #### Scenario: The connection dies after the final dot
 - GIVEN an SMTP server that closes the connection after the message's final `.`
 - WHEN the sync drains the queue
 - THEN the row is parked, reads *May have been sent*, and the next sync hands nothing over
+
+#### Scenario: A 200 that does not parse
+- GIVEN Gmail answers a send 200 with a body that is not JSON
+- WHEN the drain ends
+- THEN the message is parked as *May have been sent* and the next drain does not send it
+
+#### Scenario: A 202 cut short
+- GIVEN Graph answers `sendMail` 202 and the connection drops before the answer's end
+- WHEN the drain ends
+- THEN the message is parked as *May have been sent*
 
 #### Scenario: The app stops while sending
 - GIVEN a message the drain is handing over
@@ -1203,3 +1233,27 @@ An `Email/query`, an `Email/get` and a `Mailbox/get` whose answer holds an objec
 - GIVEN a JMAP account whose `Mailbox/get` lists a mailbox whose name is no string
 - WHEN the roster is read
 - THEN it fails, and no mailbox is dropped for being absent from it
+
+### Requirement: A folder's key escapes its own name
+A Graph mail folder's and a JMAP mailbox's collection key SHALL be its path of names joined by `/`, ancestors first, each name with `%` written `%25` and `/` written `%2F`, so two folders never share a key. The mailbox's name a person reads (its stored collection name, the onboarding's mailbox list) SHALL be the path with those escapes undone, and every request SHALL address the mailbox by the key.
+
+#### Scenario: A slash in a name
+- GIVEN a top-level folder `A/B` and a folder `B` under `A`
+- WHEN the roster is listed
+- THEN they are two collections, keyed `A%2FB` and `A/B`, both shown as `A/B`
+
+### Requirement: A JMAP message is named from its header bytes
+A JMAP message's summary and link id SHALL be derived by io-pimdir's `derive_meta` from its raw header fields, the `headers` property of `Email/get` (RFC 8621 §4.1.3) joined into the header block a fetched body starts with, as an IMAP, Gmail or Graph message's are, never from JMAP's parsed `messageId`, `sentAt` or decoded `subject`. The size and the attachment mark SHALL stay the server's `size` and `hasAttachment`. `sentAt` SHALL still be asked for, as a step and a band page by it.
+
+#### Scenario: A subject holding an encoded word literally
+- GIVEN a message whose `Subject` encodes the text `=?utf-8?q?x?=`, and whose `Date` is in a military zone
+- WHEN it is listed
+- THEN its subject is `=?utf-8?q?x?=`, and its date and link id are those a fetch of the same bytes gives
+
+### Requirement: An IMAP session out of step is opened again
+A batched body `FETCH` that fails with part of its answer left unread on the connection (a body announced past its bound, a FETCH line naming no UID, a line past its bound, an answer ending before its tagged status, `BYE`) SHALL drop the connection and open it again, greeted and signed in, before any other command is written on it, so no command reads another's lines; the batch SHALL then be read one message after another, as a batch refused with `NO` or `BAD` is. A server whose batched FETCH line names no UID SHALL have every later batch of the session read one message after another. A session that cannot sign in again at once SHALL open again before its next verb.
+
+#### Scenario: A body announced past its bound
+- GIVEN an IMAP server answering a batch of three bodies with the second announced at 10 MB over a 65 KB bound, the rest of the answer following
+- WHEN the bodies are read, then read again
+- THEN both reads hand the three bodies whole, the connection opened again once

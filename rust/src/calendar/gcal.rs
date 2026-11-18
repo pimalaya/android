@@ -56,7 +56,8 @@ use crate::{
     calendar::{
         Calendar, Event, EventDelta, EventRef, EventUpdate,
         occurrence::{
-            OccurrenceChange, OccurrenceWrite, occurrence_changes, occurrence_window, occurrences,
+            OccurrenceChange, OccurrenceWrite, no_instance, occurrence_changes, occurrence_window,
+            occurrences, refuse_ranges, set_apart, unattended,
         },
         read::organized,
     },
@@ -393,25 +394,91 @@ impl<H: Host> Gcal<'_, H> {
     /// An event the user organizes with attendees is inserted, notifying
     /// every guest, under the object's `iCalUID` (taken in place of an
     /// `id`). Any other is imported, which has no `sendUpdates`.
+    ///
+    /// A series overriding occurrences is created whole: inserted without
+    /// its guests telling nobody, each override written through its
+    /// instance, then the guests added to the master, Google inviting them
+    /// once. One not landing whole is deleted again, a refused occurrence
+    /// answering [`REFUSED`], any other failure 412, the create staying
+    /// staged. An override of this and future occurrences is refused before
+    /// anything is written. Its `EXDATE`s ride in the master's recurrence.
     fn create_entry(
         &mut self,
         calendar: &str,
         ical: &str,
         addresses: &[String],
     ) -> Result<EventRef, BridgeError> {
-        let event = GcalEvent::from_ical(ical.as_bytes()).map_err(|err| err.to_string())?;
-        let created = match organized(ical, addresses) {
-            true => match self.insert(calendar, &event, GcalSendUpdates::All) {
-                Err(err) if err.status == Some(409) => self.held(calendar, &event).ok_or(err)?,
-                inserted => inserted?,
-            },
+        refuse_ranges(ical, "Google Calendar")?;
+        let (overridden, _) = set_apart(ical)?;
+        let organizes = organized(ical, addresses);
+        let quiet = match overridden && organizes {
+            true => unattended(ical)?,
+            false => None,
+        };
+        let master = quiet.as_deref().unwrap_or(ical);
+
+        let event = GcalEvent::from_ical(master.as_bytes()).map_err(|err| err.to_string())?;
+        let created = match organizes {
+            true => {
+                let send_updates = match quiet {
+                    Some(_) => GcalSendUpdates::None,
+                    None => GcalSendUpdates::All,
+                };
+                match self.insert(calendar, &event, send_updates) {
+                    Err(err) if err.status == Some(409) => {
+                        self.held(calendar, &event).ok_or(err)?
+                    }
+                    inserted => inserted?,
+                }
+            }
             false => self.import(calendar, &event)?,
         };
+        let id = created.id.clone().unwrap_or_default();
+        if !overridden {
+            return Ok(EventRef {
+                etag: revision(&created, &[]),
+                id,
+            });
+        }
 
-        Ok(EventRef {
-            etag: revision(&created, &[]),
-            id: created.id.unwrap_or_default(),
-        })
+        let mut entry = GcalEntry {
+            gcal: Gcal {
+                client: self.client,
+                token: self.token,
+            },
+            calendar,
+            id: &id,
+        };
+        let mut told = GcalSendUpdates::None;
+        let written = entry
+            .write_occurrences(master, None, GcalSendUpdates::None)
+            .and_then(|written| match &quiet {
+                Some(_) => {
+                    told = GcalSendUpdates::All;
+                    entry.invite(ical)
+                }
+                None => Ok(written),
+            });
+        match written {
+            Ok(etag) => Ok(EventRef { etag, id }),
+            Err(err) => {
+                if let Err(undo) = entry.gcal.delete(calendar, &id, None, told) {
+                    log::warn!("cannot delete series {id} of {calendar} again: {undo}");
+                }
+                let message = format!(
+                    "Google took the series created in {calendar} without all its \
+                     occurrences, so it was deleted again: {err}"
+                );
+                Err(match err.status {
+                    Some(REFUSED) => BridgeError::refusal(message),
+                    _ => BridgeError {
+                        message,
+                        status: Some(412),
+                        ..Default::default()
+                    },
+                })
+            }
+        }
     }
 
     /// The live event already filed under `event`'s `iCalUID`, if any.
@@ -459,19 +526,36 @@ impl<H: Host> GcalEntry<'_, H> {
     /// Deletes the entry, the whole series for a master, on `if_match`.
     ///
     /// Read first either way: the guests hear of the deletion when the
-    /// user organizes the copy it removes.
+    /// user organizes the copy it removes. An entry read gone (404, 410) or
+    /// as a cancelled master, or whose delete is answered gone, is deleted
+    /// already: the removal is done, whatever its revision.
     pub fn delete(
         &mut self,
         if_match: Option<&str>,
         addresses: &[String],
     ) -> Result<(), BridgeError> {
-        let (current, instances) = self.gcal.series(self.calendar, self.id)?;
+        let (current, instances) = match self.gcal.series(self.calendar, self.id) {
+            Err(err) if matches!(err.status, Some(404 | 410)) => {
+                log::debug!("event {} of {} gone already", self.id, self.calendar);
+                return Ok(());
+            }
+            read => read?,
+        };
+        if standing(current.clone()).is_none() {
+            log::debug!("event {} of {} cancelled already", self.id, self.calendar);
+            return Ok(());
+        }
         check_revision(self.id, &current, &instances, if_match)?;
 
         let held = entry(current.clone(), &instances).ical;
         let etag = if_match.and(current.etag.as_deref());
-        self.gcal
+        match self
+            .gcal
             .delete(self.calendar, self.id, etag, notified(&[&held], addresses))
+        {
+            Err(err) if matches!(err.status, Some(404 | 410)) => Ok(()),
+            deleted => deleted,
+        }
     }
 
     /// Writes the master, merged onto the server copy, then each occurrence.
@@ -486,6 +570,7 @@ impl<H: Host> GcalEntry<'_, H> {
         addresses: &[String],
     ) -> Result<Option<String>, BridgeError> {
         let id = self.id;
+        refuse_ranges(ical, "Google Calendar")?;
         let (current, instances) = self.gcal.series(self.calendar, id)?;
         check_revision(id, &current, &instances, if_match)?;
 
@@ -517,11 +602,9 @@ impl<H: Host> GcalEntry<'_, H> {
         let read = (!wrote).then_some((current, instances));
         self.write_occurrences(ical, read, send_updates)
             .map_err(|err| match err.status {
-                Some(REFUSED) => BridgeError {
-                    message: format!("Google refuses an occurrence of event {id} for good: {err}"),
-                    status: Some(REFUSED),
-                    ..Default::default()
-                },
+                Some(REFUSED) => BridgeError::refusal(format!(
+                    "Google refuses an occurrence of event {id} for good: {err}"
+                )),
                 _ => BridgeError {
                     message: format!(
                         "Event {id} was written to Google without all its occurrences: {err}"
@@ -568,6 +651,21 @@ impl<H: Host> GcalEntry<'_, H> {
         Ok(revision(&master, &instances))
     }
 
+    /// Adds the guests `ical` names to the series, Google inviting them to
+    /// it and to each occurrence it overrides; answers the entry's revision.
+    fn invite(&mut self, ical: &str) -> Result<Option<String>, BridgeError> {
+        let (calendar, id) = (self.calendar, self.id);
+        let current = self.gcal.event(calendar, id)?;
+        let event = GcalEvent::from_ical(ical.as_bytes())
+            .map_err(|err| err.to_string())?
+            .merge(&current);
+        let etag = current.etag.as_deref();
+        self.gcal
+            .update(calendar, id, &event, etag, GcalSendUpdates::All)?;
+        let (master, instances) = self.gcal.series(calendar, id)?;
+        Ok(revision(&master, &instances))
+    }
+
     /// Writes one occurrence through its instance: among the changed and
     /// cancelled ones read with the series, else among the instances of a
     /// window around it, each told by the identity its projection gives it.
@@ -599,13 +697,10 @@ impl<H: Host> GcalEntry<'_, H> {
         // a removal asks, or an override of no occurrence the series has,
         // which Google has nowhere to keep.
         let Some(instance) = instance.filter(|instance| instance.id.is_some()) else {
-            if change.write != OccurrenceWrite::Delete {
-                log::warn!(
-                    "occurrence {} of event {id} is no instance on Google, left out",
-                    change.stamp()
-                );
-            }
-            return Ok(());
+            return match change.write {
+                OccurrenceWrite::Delete => Ok(()),
+                OccurrenceWrite::Update { .. } => Err(no_instance("Google", id, change)),
+            };
         };
         let handle = instance.id.as_deref().unwrap_or_default();
         let etag = instance.etag.as_deref();
@@ -803,6 +898,7 @@ fn entry(master: GcalEvent, instances: &[GcalEvent]) -> Event {
     Event {
         etag: revision(&master, instances),
         ical: master.to_ical_series(&overrides),
+        ical_base64: None,
         id: master.id.unwrap_or_default(),
     }
 }

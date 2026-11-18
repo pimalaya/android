@@ -61,7 +61,7 @@ use crate::{
     client::{Client, Host, throttle},
     error::{BridgeError, converged, coroutine_error},
     mail::{
-        Mailbox, derivable,
+        Mailbox, SendFailure, derivable,
         listing::{GMAIL_PAGE, Named, Scope, flags},
         source_path,
     },
@@ -114,6 +114,11 @@ pub const UNREAD: &str = "UNREAD";
 
 /// The label marking a message starred.
 pub const STARRED: &str = "STARRED";
+
+/// The system labels Gmail takes in no label change, added or removed
+/// (400 "Invalid label"): a message enters them as Gmail files it, and
+/// leaves them for the trash alone.
+pub const FIXED_LABELS: [&str; 2] = ["SENT", "DRAFT"];
 
 /// Reads per batch.
 ///
@@ -228,12 +233,22 @@ pub enum GmailRelocation {
         add: Vec<String>,
         remove: Vec<String>,
     },
+    /// None: Gmail takes no change of this fixed label ([`FIXED_LABELS`]).
+    Refused { label: String },
 }
 
 /// How a message labelled `from` is relocated under `to`.
 pub fn relocation(from: &str, to: &str) -> GmailRelocation {
     if to == TRASH {
         return GmailRelocation::Trash;
+    }
+    if let Some(fixed) = [from, to]
+        .into_iter()
+        .find(|label| FIXED_LABELS.contains(label))
+    {
+        return GmailRelocation::Refused {
+            label: fixed.to_string(),
+        };
     }
     if from == TRASH {
         return GmailRelocation::Untrash {
@@ -243,6 +258,19 @@ pub fn relocation(from: &str, to: &str) -> GmailRelocation {
     GmailRelocation::Modify {
         add: vec![to.to_string()],
         remove: vec![from.to_string()],
+    }
+}
+
+/// The refusal of a change of the fixed label `label` ([`FIXED_LABELS`]),
+/// as it stands: no attempt makes Gmail take it.
+fn fixed_label(label: &str) -> BridgeError {
+    BridgeError {
+        message: format!(
+            "Gmail moves no message into or out of {label}: it files mail there \
+             itself, and a message leaves it for the trash alone"
+        ),
+        refused: true,
+        ..Default::default()
     }
 }
 
@@ -488,6 +516,7 @@ impl<H: Host> Gmail<'_, H> {
                     _ => "",
                 };
                 let mailbox = Mailbox {
+                    label: label.name.clone(),
                     name: label.name,
                     role: role.into(),
                 };
@@ -830,23 +859,37 @@ impl<H: Host> Gmail<'_, H> {
             GmailRelocation::Modify { add, remove } => {
                 converged(self.modify_labels(id, &add, &remove))?;
             }
+            GmailRelocation::Refused { label } => return Err(fixed_label(&label)),
         }
         Ok(())
     }
 
-    /// Files one message under the label `to` too, the copy a label is.
+    /// Files one message under the label `to` too, the copy a label is;
+    /// refused before any request into a fixed label ([`FIXED_LABELS`]).
     ///
     /// A message gone fails with its 404: a copy of nothing has no
     /// arrival to wait for, so the caller refuses it.
     pub fn copy_message(&mut self, id: &str, to: &str) -> Result<(), BridgeError> {
+        if FIXED_LABELS.contains(&to) {
+            return Err(fixed_label(to));
+        }
         self.modify_labels(id, &[to.to_string()], &[])
     }
 
     /// Takes one message out of the label `from` alone, every other label it
-    /// holds kept: out of the trash by `untrash`, which owns that label.
+    /// holds kept: out of the trash by `untrash`, which owns that label, and
+    /// out of a fixed label ([`FIXED_LABELS`]) by `trash`, the one way out
+    /// Gmail takes.
     ///
     /// A message gone stays gone ([`converged`]).
     pub fn detach_message(&mut self, id: &str, from: &str) -> Result<(), BridgeError> {
+        if FIXED_LABELS.contains(&from) {
+            let auth = HttpAuthBearer::new(self.token);
+            let coroutine =
+                GmailMessageTrash::new(&auth, "me", id).map_err(|err| err.to_string())?;
+            converged(self.run(quota::MESSAGES_TRASH, coroutine))?;
+            return Ok(());
+        }
         if from == TRASH {
             let auth = HttpAuthBearer::new(self.token);
             let coroutine =
@@ -882,17 +925,34 @@ impl<H: Host> Gmail<'_, H> {
 
     /// Sends one RFC 5322 message, returning the id of its copy.
     ///
-    /// Gmail files the copy under `SENT` itself.
-    pub fn send_message(&mut self, raw: &[u8]) -> Result<String, BridgeError> {
+    /// Gmail files the copy under `SENT` itself. A failure past the request
+    /// written whole with no status read back may have sent it
+    /// ([`SendFailure::taken`]): only a request never built did not.
+    pub fn send_message(&mut self, raw: &[u8]) -> Result<String, SendFailure> {
         let auth = HttpAuthBearer::new(self.token);
         let message = GmailMessage {
             raw: Some(encode_raw(raw)),
             ..Default::default()
         };
-        let coroutine =
-            GmailMessageSend::new(&auth, "me", &message).map_err(|err| err.to_string())?;
-        let sent = self.run(quota::MESSAGES_SEND, coroutine)?;
-        Ok(sent.id)
+        let coroutine = GmailMessageSend::new(&auth, "me", &message)
+            .map_err(|err| SendFailure::unsent(err.to_string()))?;
+        match self.run_at(GMAIL_API_BASE, quota::MESSAGES_SEND, coroutine) {
+            Ok(Ok(sent)) => Ok(sent.id),
+            Ok(Err(err)) => Err(SendFailure {
+                taken: !matches!(
+                    err,
+                    GmailSendError::ParseUrl(_)
+                        | GmailSendError::SerializeRequest(_)
+                        | GmailSendError::InvalidRequest(_)
+                        | GmailSendError::Api(_)
+                ),
+                error: coroutine_error(&err),
+            }),
+            Err(error) => Err(SendFailure {
+                taken: self.client.sent(),
+                error,
+            }),
+        }
     }
 
     /// Runs one Gmail API coroutine costing `units` ([`Self::run_at`]).

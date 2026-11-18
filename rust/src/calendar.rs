@@ -14,6 +14,7 @@
 //! side resolves only the zones an object defines itself ([`zone`]).
 
 pub mod alarm;
+mod anchor;
 mod caldav;
 pub mod conflict;
 pub mod edit;
@@ -115,8 +116,13 @@ pub struct Event {
     pub id: String,
     /// Entity tag guarding concurrent updates, when the server sent one.
     pub etag: Option<String>,
-    /// Raw iCalendar text, one VCALENDAR.
+    /// One VCALENDAR as text, read lossily where its bytes are not UTF-8.
     pub ical: String,
+    /// The bytes the server sent, as base64, where they are not UTF-8: what
+    /// the store keeps and hashes (pimdir STORAGE §5), `ical` being only
+    /// what the phone is shown.
+    #[serde(rename = "icalBase64", skip_serializing_if = "Option::is_none")]
+    pub ical_base64: Option<String>,
 }
 
 /// One incremental round of a calendar collection, surfaced to Java.
@@ -169,6 +175,10 @@ pub struct EventCreate<'a> {
     /// The account's address, which Google and JMAP announce a meeting
     /// the user organizes by.
     pub address: &'a str,
+    /// The phone's zone as Java defines it, a `VTIMEZONE`, which a floating
+    /// time is anchored in for Google and Graph ([`anchor::anchored`]); empty
+    /// for none.
+    pub anchor: &'a str,
 }
 
 /// The object [`Calendars::update_event`] writes.
@@ -181,6 +191,8 @@ pub struct EventUpdate<'a> {
     pub etag: Option<&'a str>,
     /// The account's address, as [`EventCreate::address`].
     pub address: &'a str,
+    /// The phone's zone, as [`EventCreate::anchor`].
+    pub anchor: &'a str,
 }
 
 /// The object [`Calendars::delete_event`] removes.
@@ -276,24 +288,26 @@ impl<H: Host> Calendars<'_, H> {
     ///
     /// As [`crate::contact::Contacts::sync_cards`]: a still-rejected
     /// initial round errors, since an empty collection would read as every
-    /// event deleted.
+    /// event deleted, and a DAV listing the server cut short is never
+    /// complete.
     pub fn sync_events(
         &mut self,
         calendar_url: &str,
         cursor: Option<&str>,
     ) -> Result<EventDelta, BridgeError> {
+        let dav = self.account.backend == Backend::Carddav;
         if let Some(mut delta) = self.sync_events_round(calendar_url, cursor)? {
             // NOTE: a JMAP round has no cursor and lists in full, and only
             // it knows whether the listing reached its end.
             if self.account.backend != Backend::Jmap {
-                delta.complete = cursor.is_none();
+                delta.complete = cursor.is_none() && (!dav || delta.complete);
             }
             return Ok(delta);
         }
 
         match self.sync_events_round(calendar_url, None)? {
             Some(mut delta) => {
-                delta.complete = true;
+                delta.complete = !dav || delta.complete;
                 Ok(delta)
             }
             None => Err(format!("Initial sync round rejected for {calendar_url}").into()),
@@ -476,23 +490,29 @@ impl<H: Host> Calendars<'_, H> {
                 event.ical,
                 event.address,
             ),
-            Backend::Graph => Msgraph {
-                client: self.client,
-                token: account.auth.secret(),
+            Backend::Graph => {
+                let anchored = anchor::anchored(event.ical, event.anchor)?;
+                Msgraph {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .create_event(
+                    account::book_segment(account.base_url, calendar_url),
+                    anchored.as_deref().unwrap_or(event.ical),
+                )
             }
-            .create_event(
-                account::book_segment(account.base_url, calendar_url),
-                event.ical,
-            ),
-            Backend::Google => Gcal {
-                client: self.client,
-                token: account.auth.secret(),
+            Backend::Google => {
+                let anchored = anchor::anchored(event.ical, event.anchor)?;
+                Gcal {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .create_event(
+                    account::book_segment(account.base_url, calendar_url),
+                    anchored.as_deref().unwrap_or(event.ical),
+                    event.address,
+                )
             }
-            .create_event(
-                account::book_segment(account.base_url, calendar_url),
-                event.ical,
-                event.address,
-            ),
             _ => Webdav {
                 client: self.client,
                 auth: account.auth,
@@ -538,16 +558,33 @@ impl<H: Host> Calendars<'_, H> {
                 auth: account.auth,
             }
             .update_event(event.id, event.ical, event.etag, event.address),
-            Backend::Graph => Msgraph {
-                client: self.client,
-                token: account.auth.secret(),
+            Backend::Graph => {
+                let anchored = anchor::anchored(event.ical, event.anchor)?;
+                Msgraph {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .update_event(
+                    event.id,
+                    anchored.as_deref().unwrap_or(event.ical),
+                    event.etag,
+                )
             }
-            .update_event(event.id, event.ical, event.etag),
-            Backend::Google => Gcal {
-                client: self.client,
-                token: account.auth.secret(),
+            Backend::Google => {
+                let anchored = anchor::anchored(event.ical, event.anchor)?;
+                let event = EventUpdate {
+                    ical: anchored.as_deref().unwrap_or(event.ical),
+                    ..*event
+                };
+                Gcal {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .update_event(
+                    account::book_segment(account.base_url, calendar_url),
+                    &event,
+                )
             }
-            .update_event(account::book_segment(account.base_url, calendar_url), event),
             _ => Webdav {
                 client: self.client,
                 auth: account.auth,
@@ -693,7 +730,8 @@ fn task_lists(
     }
 }
 
-/// One WebDAV sync round as the calendar delta it stands for.
+/// One WebDAV sync round as the calendar delta it stands for, complete as
+/// far as the listing goes unless the server cut it short.
 fn into_event_delta(delta: WebdavSyncDelta) -> EventDelta {
     let changed = delta
         .changed
@@ -716,7 +754,7 @@ fn into_event_delta(delta: WebdavSyncDelta) -> EventDelta {
         bodies: Vec::new(),
         vanished,
         token: delta.sync_token,
-        complete: false,
+        complete: !delta.truncated,
     }
 }
 
@@ -950,7 +988,17 @@ pub fn raw_value(prop: &IcalProp) -> Option<String> {
 mod tests {
     use std::thread;
 
-    use crate::calendar::expand::expand;
+    use serde_json::{Value, json};
+
+    use crate::{
+        account::{Account, Backend},
+        calendar::{Calendars, EventCreate, expand::expand},
+        client::{
+            Auth, Client,
+            fake::{FakeRequest, FakeResponse, FakeServer},
+        },
+        error::BridgeError,
+    };
 
     pub fn object(body: &str) -> String {
         format!("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n{body}END:VCALENDAR\r\n")
@@ -994,5 +1042,125 @@ mod tests {
             .unwrap();
 
         assert_eq!(refused, (true, true));
+    }
+
+    /// Paris as Java's `Zones.vtimezone` defines it, from 2025 on.
+    const PARIS: &str = "BEGIN:VTIMEZONE\r\nTZID:Europe/Paris\r\n\
+         BEGIN:DAYLIGHT\r\nDTSTART:20250330T020000\r\nTZOFFSETFROM:+0100\r\n\
+         TZOFFSETTO:+0200\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\nEND:DAYLIGHT\r\n\
+         BEGIN:STANDARD\r\nDTSTART:20251026T030000\r\nTZOFFSETFROM:+0200\r\n\
+         TZOFFSETTO:+0100\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\nEND:STANDARD\r\n\
+         END:VTIMEZONE\r\n";
+
+    /// A weekly series at 10:00 floating, bounded at 10:00 floating on 31
+    /// December 2026, as a CalDAV server may hold one.
+    fn floating_series() -> String {
+        object(
+            "BEGIN:VEVENT\r\nUID:floating\r\nDTSTAMP:20261101T000000Z\r\n\
+             DTSTART:20261123T100000\r\nDTEND:20261123T110000\r\n\
+             RRULE:FREQ=WEEKLY;UNTIL=20261231T100000\r\nSUMMARY:Weekly\r\n\
+             END:VEVENT\r\n",
+        )
+    }
+
+    /// Creates the floating series on an account of `backend` over a server
+    /// answering a create with what it was sent, and answers the body it
+    /// was sent.
+    fn created_floating(backend: Backend, base_url: &str) -> Result<Value, BridgeError> {
+        let mut posted = Value::Null;
+        let mut client = Client::new(FakeServer::new(|request: &FakeRequest| {
+            match request.method.as_str() {
+                "POST" => {
+                    posted = request.json();
+                    let mut created = posted.clone();
+                    created["id"] = json!("m");
+                    created["etag"] = json!("\"1\"");
+                    created["changeKey"] = json!("k1");
+                    FakeResponse::json(201, &created)
+                }
+                "GET" => {
+                    let mut stored = posted.clone();
+                    stored["id"] = json!("m");
+                    stored["changeKey"] = json!("k1");
+                    FakeResponse::json(200, &stored)
+                }
+                other => panic!("unexpected {other} {}", request.path),
+            }
+        }));
+        let account = Account {
+            base_url,
+            backend,
+            auth: Auth::Bearer("token"),
+            zone: "Europe/Paris",
+        };
+        let ical = floating_series();
+        let event = EventCreate {
+            id: "floating.ics",
+            ical: &ical,
+            address: "jane@example.com",
+            anchor: PARIS,
+        };
+        let calendar = format!("{base_url}/cal");
+        let created = Calendars {
+            client: &mut client,
+            account: &account,
+        }
+        .create_event(&calendar, &event);
+        drop(client);
+        created.map(|_| posted)
+    }
+
+    /// A floating series is anchored in the phone's zone for Google and
+    /// Graph, which store no floating time: its start in that zone, its
+    /// `UNTIL` the UTC instant 10:00 in Paris names (RFC 5545 3.3.10).
+    #[test]
+    fn a_floating_series_is_created_anchored_in_the_phones_zone() {
+        let google = created_floating(Backend::Google, "google://jane@example.com")
+            .map_err(|err| err.message)
+            .unwrap();
+        assert_eq!(
+            google["start"]["dateTime"], "2026-11-23T10:00:00",
+            "{google}"
+        );
+        assert_eq!(google["start"]["timeZone"], "Europe/Paris", "{google}");
+        assert_eq!(
+            google["recurrence"],
+            json!(["RRULE:FREQ=WEEKLY;UNTIL=20261231T090000Z"]),
+            "{google}"
+        );
+
+        let graph = created_floating(Backend::Graph, "msgraph://outlook")
+            .map_err(|err| err.message)
+            .unwrap();
+        assert_eq!(graph["start"]["dateTime"], "2026-11-23T10:00:00", "{graph}");
+        assert_ne!(graph["start"]["timeZone"], "UTC", "{graph}");
+        assert_eq!(
+            graph["recurrence"]["range"]["endDate"], "2026-12-31",
+            "{graph}"
+        );
+    }
+
+    /// A first round the server cut short is no complete listing, so the
+    /// engine retires no entry it did not list (RFC 6578 section 3.6).
+    #[test]
+    fn a_first_round_cut_short_is_not_complete() {
+        let mut reports = 0;
+        let mut client = Client::new(crate::client::webdav::tests::cutting(&mut reports));
+        let account = Account {
+            base_url: "https://dav.example.com/",
+            backend: Backend::Carddav,
+            auth: Auth::Bearer("token"),
+            zone: "",
+        };
+
+        let delta = Calendars {
+            client: &mut client,
+            account: &account,
+        }
+        .sync_events("https://dav.example.com/book/", None)
+        .unwrap();
+
+        assert!(!delta.complete, "nothing is retired by absence");
+        assert_eq!(delta.changed.len(), 1);
     }
 }

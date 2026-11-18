@@ -17,11 +17,11 @@ import org.pimalaya.client.EventTarget;
 import org.pimalaya.client.Transport;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
-import org.pimalaya.pimdir.PimdirHash;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.pimdir.PimdirEngine;
 
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -63,6 +63,12 @@ public final class CalendarEngine extends PimdirEngine {
 
     /** The store, for the phone queue its writes reach. */
     private final PimdirDb pimdir;
+
+    /**
+     * The phone's zone as a {@code VTIMEZONE}, read once a pass: what Google
+     * and Graph read a floating time of a pushed object in.
+     */
+    private String anchor;
 
     /** The driver of one account's calendars, against {@code remote}. */
     public CalendarEngine(PimdirDb pimdir, Clients clients, RemoteAccount remote) {
@@ -133,6 +139,19 @@ public final class CalendarEngine extends PimdirEngine {
     @Override
     protected void staged(String collection) {
         CalendarStager.staged(pimdir, collection);
+    }
+
+    /**
+     * The phone's zone as a {@code VTIMEZONE}, from this year's rules on.
+     *
+     * <p>Google and Graph store no floating time: the bridge reads one in
+     * this zone, and a floating {@code UNTIL} as the instant it names here.
+     */
+    private String anchor() {
+        if (anchor == null) {
+            anchor = Zones.vtimezone(ZoneId.systemDefault(), System.currentTimeMillis());
+        }
+        return anchor;
     }
 
     /** The calendar URL behind a collection id, which every request names. */
@@ -287,16 +306,17 @@ public final class CalendarEngine extends PimdirEngine {
     /** One entry at full tier, as a read or a whole listing hands it over. */
     private static JSONObject entry(Event event) throws JSONException {
         JSONObject item = new JSONObject();
-        item.put("handle", event.id());
-        // NOTE: the resource name is the identity: an entry is one object in
-        // one calendar, and its UID names the series rather than the resource.
-        item.put("linkId", event.id());
-        item.put("hash", PimdirHash.of(event.ical()));
-        item.put("body", event.ical());
         // NOTE: the summary and key io-pimdir derives, which a reader listing
         // items without their bodies reads (the Tasks tab, task_summary). An
         // agenda row still expands at render time against its window.
-        Derived derived = CalendarSummaries.of(event.ical());
+        Derived derived = CalendarSummaries.of(event.bytes());
+        item.put("handle", event.id());
+        // NOTE: the key STORAGE §9 assigns: the UID, escaped when spelled like
+        // a derived key, else the hash of the bytes. The engine mints a
+        // second resource under one UID apart (Annex A.3).
+        item.put("linkId", CalendarSummaries.keyOf(derived, event.id()));
+        // NOTE: the bytes the server sent, a body that is not UTF-8 included.
+        putBody(item, event.bytes(), event.ical(), event.icalBase64());
         item.put("sortKey", derived == null ? "" : derived.sortKey());
         if (derived != null && derived.summary() != null) {
             item.put("summary", derived.summary());
@@ -315,6 +335,7 @@ public final class CalendarEngine extends PimdirEngine {
         step(Progress.STAGE_UPLOAD, changes.length());
 
         JSONArray results = new JSONArray();
+        changes = withoutLossy(collection, changes, results);
         for (int index = 0; index < changes.length(); index++) {
             results.put(pushOne(collection, changes.getJSONObject(index)));
         }
@@ -329,7 +350,9 @@ public final class CalendarEngine extends PimdirEngine {
      *
      * <p>A refused precondition is reported as a rejection, not raised: the
      * entry moved under the edit and the next pass reconciles. Raising would
-     * abort the round, every later change downed by one stale ETag.
+     * abort the round, every later change downed by one stale ETag. A change
+     * the server refuses as it stands is answered refused ({@link #refused}),
+     * held by the engine rather than pushed again.
      */
     private JSONObject pushOne(String collection, JSONObject change) throws JSONException {
         String url = urlOf(collection);
@@ -353,14 +376,19 @@ public final class CalendarEngine extends PimdirEngine {
                 // waits under a provisional handle until this push assigns one
                 // (SYNC §2). The handle is what came back: the name a CalDAV
                 // server filed it by (Google picks it), or the id Graph,
-                // Google or JMAP minted.
-                String name = PimdirStorage.statedOf(handle);
+                // Google or JMAP minted. An entry is keyed by its UID and filed
+                // as UID.ics (a create staged before keyed by that name
+                // already), a key the writer derived under a fresh name.
+                String name = PimdirStorage.resourceOf(handle);
+                if (!name.endsWith(".ics")) {
+                    name += ".ics";
+                }
                 try {
                     EventRef created =
                             clients.calendar().createEvent(
                                     transport,
                                     account,
-                                    new EventTarget(url, name, null),
+                                    new EventTarget(url, name, null, anchor()),
                                     row.getString("vcard"));
                     return result(
                             handle, true, created.id(), landed(url, created.id(), created.etag()));
@@ -370,7 +398,11 @@ public final class CalendarEngine extends PimdirEngine {
                     if (isPreconditionFailure(failure)) {
                         return result(handle, false, null, null);
                     }
-                    if (isRefusal(failure) || isCreateRefusal(failure)) {
+                    JSONObject refused = refused(collection, handle, failure);
+                    if (refused != null) {
+                        return refused;
+                    }
+                    if (isCreateRefusal(failure)) {
                         return result(handle, false, null, null);
                     }
                     throw failure;
@@ -386,7 +418,7 @@ public final class CalendarEngine extends PimdirEngine {
                             clients.calendar().updateEvent(
                                     transport,
                                     account,
-                                    new EventTarget(url, handle, ifMatch),
+                                    new EventTarget(url, handle, ifMatch, anchor()),
                                     row.getString("vcard"));
                     return result(handle, true, null, landed(url, handle, etag));
                 } catch (RuntimeException failure) {
@@ -395,8 +427,9 @@ public final class CalendarEngine extends PimdirEngine {
                     }
                     // NOTE: a 422 refuses part of the edit for good, whatever
                     // else of it landed.
-                    if (isRefusal(failure)) {
-                        return result(handle, false, null, null);
+                    JSONObject refused = refused(collection, handle, failure);
+                    if (refused != null) {
+                        return refused;
                     }
                     throw failure;
                 }
@@ -423,10 +456,12 @@ public final class CalendarEngine extends PimdirEngine {
                         if (!absent(url, handle)) {
                             return result(handle, false, null, null);
                         }
-                    } else if (isRefusal(failure)) {
-                        return result(handle, false, null, null);
                     } else {
-                        throw failure;
+                        JSONObject refused = refused(collection, handle, failure);
+                        if (refused == null) {
+                            throw failure;
+                        }
+                        return refused;
                     }
                 }
                 return result(handle, true, null, null);
@@ -503,7 +538,7 @@ public final class CalendarEngine extends PimdirEngine {
                     clients.calendar().updateEvent(
                             transport,
                             account,
-                            new EventTarget(url, moved.id(), moved.etag()),
+                            new EventTarget(url, moved.id(), moved.etag(), anchor()),
                             ical);
             return result(handle, true, moved.id(), landed(url, moved.id(), etag));
         } catch (RuntimeException failure) {
@@ -552,6 +587,31 @@ public final class CalendarEngine extends PimdirEngine {
      */
     private static boolean isRefusal(Exception failure) {
         return Integer.valueOf(422).equals(status(failure));
+    }
+
+    /**
+     * A change the server refused as it stands, answered refused with its
+     * reason (pimdir SYNC §4): the engine holds it on its binding and reports
+     * it, the calendar's other changes pushed. Null for any other failure,
+     * and for an entry gone (404), which is never a refusal.
+     *
+     * <p>The bridge reads the refusal off the server's answer, a status
+     * naming the request, and answers its own refusals for good as a 422.
+     */
+    private static JSONObject refused(String collection, String handle, Exception failure)
+            throws JSONException {
+        if (isGone(failure)) {
+            return null;
+        }
+        String reason = refusal(failure);
+        if (reason == null && isRefusal(failure)) {
+            reason = failure.getMessage();
+        }
+        if (reason == null) {
+            return null;
+        }
+        Log.w("pimalaya", "change refused: " + collection + " " + handle + ": " + reason);
+        return refusedResult(handle, reason);
     }
 
     /**

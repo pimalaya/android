@@ -463,6 +463,7 @@ fn json_response(status: u16, json: &str) -> FakeResponse {
         content_type: "application/json",
         body: json.as_bytes().to_vec(),
         lost: false,
+        cut: false,
     }
 }
 
@@ -551,6 +552,7 @@ pub fn batch_response(parts: &[(&str, &str, String)]) -> FakeResponse {
         content_type: "multipart/mixed; boundary=batch_x",
         body: batch_body(parts).into_bytes(),
         lost: false,
+        cut: false,
     }
 }
 
@@ -775,4 +777,85 @@ fn a_write_failing_otherwise_still_fails() {
     );
     let written = write_answered(modify, &done).unwrap().unwrap();
     assert_eq!(written.label_ids, vec!["INBOX", "STARRED"]);
+}
+
+/// Runs `verb` on a Gmail account that answers a `messages.modify` naming
+/// `SENT` or `DRAFT` 400 "Invalid label", as Gmail does, and any other
+/// write with the message; the requests it was sent, method and path.
+fn fixed_labels<T>(
+    verb: impl FnOnce(&mut Gmail<'_, BoxedServer<'_>>) -> T,
+) -> (T, Vec<(String, String)>) {
+    let mut requests = Vec::new();
+    let mut client = Client::new(FakeServer::boxed(|request: &FakeRequest| {
+        requests.push((request.method.clone(), request.path.clone()));
+        let body = String::from_utf8_lossy(&request.body);
+        if let Some(fixed) = ["SENT", "DRAFT"]
+            .into_iter()
+            .find(|label| body.contains(&format!("\"{label}\"")))
+        {
+            let refusal = format!(
+                r#"{{"error":{{"code":400,"message":"Invalid label: {fixed}","status":"INVALID_ARGUMENT"}}}}"#
+            );
+            return json_response(400, &refusal);
+        }
+        json_response(200, r#"{"id":"m1","labelIds":["TRASH"]}"#)
+    }));
+    client.urgent = true;
+    let served = verb(&mut Gmail {
+        client: &mut client,
+        token: "token-s3",
+    });
+    drop(client);
+    (served, requests)
+}
+
+/// One write of a test, over a Gmail account.
+type Write = fn(&mut Gmail<'_, BoxedServer<'_>>) -> Result<(), BridgeError>;
+
+/// Gmail takes no label change naming `SENT` or `DRAFT`: a move into or out
+/// of either, other than into the trash, and a copy into either, are
+/// refused before any request, saying why.
+#[test]
+fn a_move_or_copy_naming_sent_or_drafts_is_refused_unsent() {
+    let writes: [(&str, Write); 5] = [
+        ("SENT to a label", |gmail| {
+            gmail.relocate_message("m1", "SENT", "Label_7")
+        }),
+        ("DRAFT to the inbox", |gmail| {
+            gmail.relocate_message("m1", "DRAFT", INBOX)
+        }),
+        ("the inbox to SENT", |gmail| {
+            gmail.relocate_message("m1", INBOX, "SENT")
+        }),
+        ("the trash to DRAFT", |gmail| {
+            gmail.relocate_message("m1", TRASH, "DRAFT")
+        }),
+        ("a copy into SENT", |gmail| gmail.copy_message("m1", "SENT")),
+    ];
+    for (write, verb) in writes {
+        let (written, requests) = fixed_labels(verb);
+        let err = written.expect_err(write);
+        assert!(err.refused, "{write}: {}", err.message);
+        assert!(err.message.contains("Gmail"), "{write}: {}", err.message);
+        assert_eq!(requests, Vec::new(), "{write}");
+    }
+}
+
+/// A removal from `SENT` or `DRAFT`, and a move out of either into the
+/// trash, go to the trash, the one way out Gmail takes.
+#[test]
+fn a_removal_from_sent_or_drafts_is_a_trash() {
+    let trash = vec![(
+        "POST".to_string(),
+        "/gmail/v1/users/me/messages/m1/trash".to_string(),
+    )];
+    for from in ["SENT", "DRAFT"] {
+        let (detached, requests) = fixed_labels(|gmail| gmail.detach_message("m1", from));
+        detached.unwrap();
+        assert_eq!(requests, trash, "{from}");
+
+        let (moved, requests) = fixed_labels(|gmail| gmail.relocate_message("m1", from, TRASH));
+        moved.unwrap();
+        assert_eq!(requests, trash, "{from}");
+    }
 }

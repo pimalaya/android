@@ -28,6 +28,8 @@ import org.pimalaya.client.CardDelta;
 import org.pimalaya.client.CardFetch;
 import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Derived;
+import org.pimalaya.client.PimdirSql;
 import org.pimalaya.client.ConflictForm;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.NewCard;
@@ -675,7 +677,6 @@ public final class ContactEngine extends PimdirEngine {
      */
     private JSONObject fetchedItem(String url, String handle, Card card) throws JSONException {
         CardIndex index = ContactClient.indexCard(card.vcard());
-        String uid = index.uid();
 
         Map<String, String> listed = listedEtags.get(url);
         String listedEtag = listed == null ? null : listed.get(handle);
@@ -683,15 +684,22 @@ public final class ContactEngine extends PimdirEngine {
 
         JSONObject item = new JSONObject();
         item.put("handle", handle);
-        item.put("linkId", uid.isEmpty() ? handle : uid);
+        // NOTE: the key STORAGE §9 assigns from the card: its UID, escaped
+        // when spelled like a derived key, else the hash of its bytes.
+        item.put("linkId", index.linkId());
         // NOTE: the standard's summary, not the raw card index beside it: the
         // index is this app's projection and the summary is what any reader of
         // the store understands. Both come back from one derivation, so the
         // fetch path and the edit path cannot write different shapes.
         item.put("summary", index.summary());
         item.put("sortKey", index.sortKey());
-        item.put("hash", CardStore.byteHash(card.vcard()));
-        item.put("body", card.vcard());
+        putBody(item, card.bytes(), card.vcard(), card.vcardBase64());
+        if (card.vcardBase64() != null) {
+            // NOTE: a body that is not UTF-8 (a Latin-1 vCard 2.1) is stored
+            // as served, and keyed from those bytes when it states no UID.
+            Derived derived = PimdirSql.derive(PimdirSummary.CONTACT, card.bytes());
+            item.put("linkId", derived.linkId());
+        }
         if (revision != null) {
             item.put("revision", revision);
         }
@@ -703,7 +711,8 @@ public final class ContactEngine extends PimdirEngine {
      *
      * <p>One result per change. A 412 retries unguarded when the last enumerate
      * proves the remote unchanged (SabreDAV's If-Match quirk), else reports the
-     * change rejected; any other failure aborts the pass.
+     * change rejected; a change refused as it stands is answered refused;
+     * any other failure aborts the pass.
      */
     @Override
     protected JSONObject push(JSONObject yielded) throws JSONException {
@@ -711,6 +720,8 @@ public final class ContactEngine extends PimdirEngine {
         JSONArray changes = yielded.getJSONArray("changes");
         serverOnly(url);
         step(Progress.STAGE_UPLOAD, changes.length());
+        JSONArray refused = new JSONArray();
+        changes = withoutLossy(url, changes, refused);
 
         JSONArray results;
         try {
@@ -736,6 +747,9 @@ public final class ContactEngine extends PimdirEngine {
             // NOTE: drop the pass caches once per round, not per change; no
             // fetch interleaves a push, and the workers must not race them.
             invalidate(url);
+        }
+        for (int index = 0; index < refused.length(); index++) {
+            results.put(refused.get(index));
         }
         Report.tallyPushes(tally, url, changes, results);
 
@@ -1086,7 +1100,10 @@ public final class ContactEngine extends PimdirEngine {
                     }
                 }
                 String revision = reply.etag();
-                results[index] = result(ref, accepted, assigned, revision);
+                results[index] =
+                        !accepted && reply.refused()
+                                ? refusedResult(ref, reply.error())
+                                : result(ref, accepted, assigned, revision);
             }
 
             // NOTE: an unanswered ref counts rejected, so the next sync
@@ -1105,19 +1122,36 @@ public final class ContactEngine extends PimdirEngine {
         return ordered;
     }
 
-    /** Dispatches one push change to its verb. */
+    /**
+     * Dispatches one push change to its verb.
+     *
+     * <p>A change the server refuses as it stands (the bridge reads a status
+     * naming the request) is answered refused with its reason, which the
+     * engine holds on its binding and reports, the book's other changes
+     * pushed (pimdir SYNC §4); a card gone (404) is never a refusal.
+     */
     private JSONObject pushOne(Transport transport, String url, JSONObject change)
             throws JSONException {
-        switch (change.getString("op")) {
-            case "add":
-                return pushAdd(transport, url, change);
-            case "update":
-                return pushUpdate(transport, url, change);
-            case "remove":
-                return pushRemove(transport, url, change);
-            default:
-                // NOTE: no flag pushes on any contacts backend.
-                return result(change.getString("handle"), true, null, null);
+        try {
+            switch (change.getString("op")) {
+                case "add":
+                    return pushAdd(transport, url, change);
+                case "update":
+                    return pushUpdate(transport, url, change);
+                case "remove":
+                    return pushRemove(transport, url, change);
+                default:
+                    // NOTE: no flag pushes on any contacts backend.
+                    return result(change.getString("handle"), true, null, null);
+            }
+        } catch (RuntimeException failure) {
+            String reason = isGone(failure) ? null : refusal(failure);
+            if (reason == null) {
+                throw failure;
+            }
+            String handle = change.getString("handle");
+            Log.w("pimalaya", "change refused: " + url + " " + handle + ": " + reason);
+            return refusedResult(handle, reason);
         }
     }
 
@@ -1152,8 +1186,9 @@ public final class ContactEngine extends PimdirEngine {
         // the provisional handle until this push assigns a real one (SYNC §2),
         // and io-webdav names the resource verbatim now instead of appending
         // .vcf itself, so what goes out is the name this side calls the card
-        // by. Sending the handle would file it under a control character.
-        String name = PimdirStorage.statedOf(handle);
+        // by. Sending the handle would file it under a control character,
+        // and a key the writer derived names nothing: a fresh name instead.
+        String name = PimdirStorage.resourceOf(handle);
         if (account.info().namesResources()) {
             name += ".vcf";
         }

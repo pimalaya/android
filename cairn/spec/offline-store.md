@@ -1026,7 +1026,7 @@ The attachments the reader lists, and the store records stand-ins from, SHALL be
 - THEN the part is listed as first.csv and opens to what its base64 decodes to
 
 ### Requirement: The sync vectors run through the app's load and write
-The app SHALL run every case of the sync vectors of the io-pimdir it pins (pimdir SYNC §11) in a host test, on a store of its own over Android 8.0's SQLite: the case's rows seeded by the standard's own statements and plain SQL, never through the write under test; its run driven by io-pimdir's engine through the coroutines the bridge's sync, upgrade and mutate exports build, every load, lookup, verification and write served by the app's storage half and the remote scripted from the case on the wire a connector answers; its pushes, events, failure, park and rows compared as §11 says. Under format 7 a binding's `refusal` and `refused_key` are seeded and compared, and a `Refused` outcome is fed back with its reason. A case the app does not pass SHALL be listed beside the test with its reason, as `fails` when the app runs it and departs from it, as `unbound` when the bridge states no such verb, option or mutation or the case binds another kind of owner, and the test SHALL fail when a listed case passes, an unlisted one fails, a case listed unbound binds, an unlisted one cannot be bound, or a listed one is not among the vectors. At io-pimdir 0.14, 167 cases: 125 pass, 11 fail, 31 are unbound. While a case is listed `fails`, the app's `sync-draft-13 engine` statement stands short of SYNC §12 by it.
+The app SHALL run every case of the sync vectors of the io-pimdir it pins (pimdir SYNC §11) in a host test, on a store of its own over Android 8.0's SQLite: the case's rows seeded by the standard's own statements and plain SQL, never through the write under test; its run driven by io-pimdir's engine through the coroutines the bridge's sync, upgrade and mutate exports build, every load, lookup, verification and write served by the app's storage half and the remote scripted from the case on the wire a connector answers; its pushes, events, failure, park and rows compared as §11 says. Under format 7 a binding's `refusal` and `refused_key` are seeded and compared, and a `Refused` outcome is fed back with its reason. A case the app does not pass SHALL be listed beside the test with its reason, as `fails` when the app runs it and departs from it, as `unbound` when the bridge states no such verb, option or mutation or the case binds another kind of owner, and the test SHALL fail when a listed case passes, an unlisted one fails, a case listed unbound binds, an unlisted one cannot be bound, or a listed one is not among the vectors. At io-pimdir 0.16, 167 cases: 126 pass, 10 fail, 31 are unbound. While a case is listed `fails`, the app's `sync-draft-13 engine` statement stands short of SYNC §12 by it.
 
 #### Scenario: A rule the Java write lacks
 - GIVEN a vector whose expected rows the Java write does not leave
@@ -1060,7 +1060,7 @@ The bridge SHALL hand the engine a listed page as its connector states it: a pag
 - THEN the sync fails, the round stays open on the first page's cursor, and no member is dropped
 
 ### Requirement: A change refused as it stands is held
-A change a source's server refuses as it stands (pimdir SYNC §4) SHALL be answered to the engine `Refused` with the server's text, which the engine records on the binding the change was pushed for and holds while it derives the same change, under the same key, reporting it every run (SYNC §5); any other failure SHALL stay a rejection, pushed again by the next run. The store SHALL record a refusal by the canonical `refuse_binding` and clear one by `clear_refusal`, after the batch's upserts and stamps, the reason scrubbed of credentials (STORAGE §18) before it crosses to Java, and SHALL hand the source's refusals on every load (`list_refusals`). A sync report SHALL carry each refusal once with its reason, and the app SHALL log it; no screen shows it yet.
+A change a source's server refuses as it stands (pimdir SYNC §4) SHALL be answered to the engine `Refused` with the server's text, which the engine records on the binding the change was pushed for and holds while it derives the same change, under the same key, reporting it every run (SYNC §5); any other failure SHALL stay a rejection, pushed again by the next run. The store SHALL record a refusal by the canonical `refuse_binding` and clear one by `clear_refusal`, after the batch's upserts and stamps, the reason scrubbed of credentials (STORAGE §18) before it crosses to Java, and SHALL hand the source's refusals on every load (`list_refusals`). A sync report SHALL carry each refusal once with its reason, and the app SHALL log it; no screen shows it yet. Every source answers so: mail (mail, "A mail push refused as it stands is held"), contacts (carddav-sync, "A contact push refused as it stands is held"), calendars and tasks (calendar, "A calendar push refused as it stands is held").
 
 #### Scenario: A change the server will never take
 - GIVEN a staged change whose push the server refuses as it stands
@@ -1071,3 +1071,24 @@ A change a source's server refuses as it stands (pimdir SYNC §4) SHALL be answe
 - GIVEN a refusal standing on a message's binding
 - WHEN the user stages another change of it and its push is accepted
 - THEN the refusal is cleared
+
+### Requirement: An item's link id follows STORAGE §9
+A card's, an entry's and a task's link id SHALL be the key pimdir STORAGE §9 assigns from the hint io-pimdir derives from its bytes (Annex A.2 to A.4): the `UID` verbatim when it is not empty once trimmed of spaces and tabs, `esc:` before a `UID` beginning with a reserved prefix (`alt:`, `hash:`, `dup:`, `part:`, `file:`, `esc:`), the `hash:` fallback over the bytes for none. The bridge SHALL hand the engine that key for every member a server or the phone lists or fetches, and the app SHALL stage a create under it; io-pimdir's engine takes the key verbatim and mints a second member under one key in a collection apart (`dup:<key>#<handle>`). A member its source already binds keeps the key the store holds (A bound member keeps its identity), a stated departure from §9's retiring of a `hash:` key that changes under its handle. A create SHALL be pushed under its stated `UID` (the one leading `esc:` stripped), and a create keyed by a key the writer derived (`hash:`, `dup:`, `alt:`) under a fresh name, never under the key.
+
+#### Scenario: A UID that looks like a derived key
+- GIVEN a server card whose `UID` is `hash:0123`
+- WHEN it is listed
+- THEN its link id is `esc:hash:0123`
+
+#### Scenario: A blank UID
+- GIVEN a server card whose `UID` is spaces, and one with no `UID`
+- WHEN they are listed
+- THEN each link id is `hash:` and sixteen hexadecimal digits
+
+### Requirement: A DAV body is stored as served
+A CardDAV or CalDAV body SHALL be stored and hashed as the bytes its server sent, whatever their encoding. The bridge reads a multiget's body as io-webdav hands it, as UTF-8 text with each ill-formed sequence replaced by U+FFFD; a body holding U+FFFD SHALL be read again by GET, whose bytes are the server's, and bytes that are not UTF-8 SHALL cross the bridge in base64 beside the text the phone is shown, the text read lossily. A phone edit or an app edit of such a body SHALL NOT be pushed: the app edit is refused before it is staged, the phone's rows are put back from the store, and any add or update whose stored body is not UTF-8 is answered refused at the push; each is logged. (As decided by the owner, Q2.)
+
+#### Scenario: A Latin-1 vCard 2.1
+- GIVEN a CardDAV server answering a card holding the byte 0xE9
+- WHEN the card is read
+- THEN the store keeps those bytes under their hash, and an edit of the card is refused rather than written to the server

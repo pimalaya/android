@@ -172,6 +172,7 @@ impl<H: Host> Gtasks<'_, H> {
                     id,
                     etag: task.etag.clone(),
                     ical: task.to_ical(),
+                    ical_base64: None,
                 });
             }
 
@@ -202,6 +203,7 @@ impl<H: Host> Gtasks<'_, H> {
                     id: id.to_string(),
                     etag: task.etag.clone(),
                     ical: task.to_ical(),
+                    ical_base64: None,
                 }),
                 Ok(_) => {}
                 Err(err) if err.status() == Some(404) => {}

@@ -402,6 +402,7 @@ mod batch {
             id: master.id.clone(),
             etag: master.change_key.clone(),
             ical: master.to_ical_series(&exceptions),
+            ical_base64: None,
         }
     }
 
@@ -704,6 +705,13 @@ mod write {
         /// Answers one Graph request, routed on its method and path.
         fn answer(&mut self, request: &FakeRequest) -> FakeResponse {
             assert_eq!(request.header("Authorization"), Some("Bearer token"));
+            if let Some(calendar) = request
+                .path
+                .strip_prefix("/v1.0/me/calendars/")
+                .and_then(|path| path.strip_suffix("/events"))
+            {
+                return self.created(calendar, request);
+            }
             let path = request.path.strip_prefix("/v1.0/me/events/").unwrap();
             let segments: Vec<&str> = path.split('/').collect();
 
@@ -756,6 +764,19 @@ mod write {
                 })
                 .collect();
             FakeResponse::json(200, &json!({ "value": value }))
+        }
+
+        /// Answers an event create: the series becomes what was posted,
+        /// filed as `m`.
+        fn created(&mut self, calendar: &str, request: &FakeRequest) -> FakeResponse {
+            let body: Value = request.json();
+            self.sent.push(("POST", calendar.to_string(), body.clone()));
+            let mut master: MsgraphEvent = from_value(body).unwrap();
+            master.id = "m".into();
+            master.change_key = Some("ck-0".into());
+            master.event_type = Some(MsgraphEventType::SeriesMaster);
+            self.master = master;
+            FakeResponse::json(201, &self.master)
         }
 
         /// The entry as a read hands it over.
@@ -976,4 +997,132 @@ mod write {
 
         assert_eq!(refused.status, Some(412), "{}", refused.message);
     }
+
+    /// The weekly series as a new object, Ada invited: the 26 October
+    /// excluded, and an override named by `recurrence_id` moving the 19
+    /// October to 10:00.
+    fn new_series(recurrence_id: &str) -> String {
+        format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Pimalaya//Android//EN\r\n\
+             BEGIN:VEVENT\r\nUID:uid-m\r\nDTSTAMP:20261001T080000Z\r\n\
+             DTSTART:20261005T090000Z\r\nDTEND:20261005T100000Z\r\nSUMMARY:Series\r\n\
+             RRULE:FREQ=WEEKLY;COUNT=6\r\nEXDATE:20261026T090000Z\r\n\
+             ORGANIZER:mailto:jane@example.com\r\nATTENDEE:mailto:ada@example.com\r\n\
+             END:VEVENT\r\n\
+             BEGIN:VEVENT\r\nUID:uid-m\r\nDTSTAMP:20261001T080000Z\r\n{recurrence_id}\r\n\
+             DTSTART:20261019T100000Z\r\nDTEND:20261019T103000Z\r\nSUMMARY:Series\r\n\
+             ORGANIZER:mailto:jane@example.com\r\nATTENDEE:mailto:ada@example.com\r\n\
+             END:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+    }
+
+    /// A series is created whole: the master without its attendees, its
+    /// occurrences, then its attendees, so they are invited once.
+    #[test]
+    fn a_new_series_is_created_whole_its_attendees_last() {
+        let mut graph = graph();
+        let ical = new_series("RECURRENCE-ID:20261019T090000Z");
+
+        let created = graph
+            .serve(|mut msgraph| msgraph.create_event("cal", &ical))
+            .unwrap();
+
+        assert_eq!(created.id, "m");
+        assert_eq!(
+            graph.writes(),
+            [
+                ("POST", "cal"),
+                ("PATCH", "m-2026-10-19"),
+                ("DELETE", "m-2026-10-26"),
+                ("PATCH", "m"),
+            ]
+        );
+        let body = |index: usize| &graph.sent[index].2;
+        assert!(body(0).get("attendees").is_none(), "{}", body(0));
+        assert_eq!(body(1)["start"]["dateTime"], "2026-10-19T10:00:00");
+        assert!(body(1).get("attendees").is_none(), "{}", body(1));
+        let invited = &body(3)["attendees"][0]["emailAddress"]["address"];
+        assert_eq!(invited, "ada@example.com", "{}", body(3));
+    }
+
+    /// An override of no occurrence the series has refuses the create, the
+    /// master deleted again.
+    #[test]
+    fn a_new_series_overriding_no_occurrence_is_refused_and_deleted() {
+        let mut graph = graph();
+        let ical = new_series("RECURRENCE-ID:20261020T090000Z");
+
+        let Err(refused) = graph.serve(|mut msgraph| msgraph.create_event("cal", &ical)) else {
+            panic!("created: {:?}", graph.writes());
+        };
+
+        assert_eq!(refused.status, Some(422), "{}", refused.message);
+        let writes = graph.writes();
+        assert_eq!(writes.first(), Some(&("POST", "cal")));
+        assert_eq!(writes.last(), Some(&("DELETE", "m")));
+        assert!(!writes.contains(&("PATCH", "m")), "nobody invited");
+    }
+
+    /// An override of this and future occurrences has no instance to
+    /// carry it: refused before anything is written.
+    #[test]
+    fn a_new_series_overriding_this_and_future_is_refused_unwritten() {
+        let mut graph = graph();
+        let ical = new_series("RECURRENCE-ID;RANGE=THISANDFUTURE:20261019T090000Z");
+
+        let Err(refused) = graph.serve(|mut msgraph| msgraph.create_event("cal", &ical)) else {
+            panic!("created: {:?}", graph.writes());
+        };
+
+        assert_eq!(refused.status, Some(422), "{}", refused.message);
+        assert!(graph.sent.is_empty(), "{:?}", graph.writes());
+    }
+}
+
+/// A delete of an event Graph no longer holds, read gone (404, 410) or
+/// answered gone, is done: nothing is left to delete.
+#[test]
+fn a_delete_of_an_event_already_gone_is_done() {
+    use crate::client::{
+        Client,
+        fake::{FakeRequest, FakeResponse, FakeServer},
+    };
+
+    let mut answered = Vec::new();
+    for (read, delete) in [(404, 204), (410, 204), (200, 404), (200, 410)] {
+        let mut deletes = 0;
+        let mut client = Client::new(FakeServer::new(|request: &FakeRequest| {
+            let gone = json!({"error": {"code": "ErrorItemNotFound", "message": "gone"}});
+            match request.method.as_str() {
+                "GET" if read != 200 => FakeResponse::json(read, &gone),
+                "GET" => FakeResponse::json(200, &json!({"id": "m", "changeKey": "k1"})),
+                "DELETE" => {
+                    deletes += 1;
+                    match delete {
+                        204 => FakeResponse::empty(204),
+                        status => FakeResponse::json(status, &gone),
+                    }
+                }
+                other => panic!("unexpected {other}"),
+            }
+        }));
+        let deleted = Msgraph {
+            client: &mut client,
+            token: "token",
+        }
+        .delete_event("m", Some("k1"));
+        drop(client);
+        let deleted = deleted.map_err(|err| err.status);
+        answered.push((read, delete, deleted, deletes));
+    }
+
+    assert_eq!(
+        answered,
+        [
+            (404, 204, Ok(()), 0),
+            (410, 204, Ok(()), 0),
+            (200, 404, Ok(()), 1),
+            (200, 410, Ok(()), 1)
+        ]
+    );
 }

@@ -1007,7 +1007,11 @@ public final class MailStore {
                 new StoredMessage.MessageHeader(
                         mailbox.accountEmail,
                         cursor.getString(0),
-                        mailbox.name,
+                        // NOTE: the key the server names it by, which the
+                        // stored name (a label) may spell otherwise.
+                        PimdirAccount.nameOf(
+                                PimdirAccount.accountIdOf(cursor.getString(0)),
+                                cursor.getString(0)),
                         cursor.getString(2),
                         cursor.isNull(8) ? "" : cursor.getString(8),
                         cursor.isNull(10) ? "" : cursor.getString(10),

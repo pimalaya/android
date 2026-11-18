@@ -121,29 +121,21 @@ pub struct Exchange {
     reused: bool,
     /// Whether it was sent again on a new connection already.
     resent: bool,
-    /// Whether any byte of its answer came.
-    heard: bool,
     /// Whether its answer refused it for a rate or a quota.
     limited: bool,
     /// How far its answer was read, to settle it at its end.
     follow: Follow,
 }
 
-impl Exchange {
-    /// Whether the request was written whole and no answer byte came.
-    fn unanswered(&self) -> bool {
-        self.answering && !self.heard
-    }
-}
-
 /// HTTP exchange with throttling, every HTTP runner's `read` and `write`.
 impl<H: Host> Client<H> {
-    /// Whether the last request was written whole and no answer byte came.
+    /// Whether the last request was written whole, its answer awaited.
     ///
-    /// The server may have carried it out, so a failed request that is not
-    /// idempotent (a send) may have happened.
-    pub fn unanswered(&self) -> bool {
-        self.exchange.unanswered()
+    /// The server may have carried it out, so a request that is not
+    /// idempotent (a send) failing past it with no verdict read may have
+    /// happened.
+    pub fn sent(&self) -> bool {
+        self.exchange.answering
     }
 
     /// Whether the last answer refused the request for a rate or a quota.
@@ -165,7 +157,6 @@ impl<H: Host> Client<H> {
             exchange.answering = false;
             exchange.resent = false;
             exchange.follow = Follow::Unknown;
-            exchange.heard = false;
             exchange.limited = false;
             let reused = self.host.begin(url);
             self.exchange.reused = reused;
@@ -206,7 +197,6 @@ impl<H: Host> Client<H> {
         loop {
             let refusal = match self.read_answer(url)? {
                 Answered::Passed(bytes) => {
-                    self.exchange.heard = !bytes.is_empty();
                     self.begin_follow(url, &bytes);
                     return Ok(bytes);
                 }
@@ -232,7 +222,6 @@ impl<H: Host> Client<H> {
                 }
                 Answered::Throttled(refusal) => refusal,
             };
-            self.exchange.heard = true;
 
             // NOTE: a 503 may come from a gateway after the server behind it
             // did the work: only a request that may be applied twice is sent
@@ -290,7 +279,6 @@ impl<H: Host> Client<H> {
             self.host.sleep(delay);
             self.waited += delay;
             retries += 1;
-            self.exchange.heard = false;
 
             let request = std::mem::take(&mut self.exchange.request);
             let written = self.write(url, &request);
@@ -1636,23 +1624,24 @@ mod tests {
         assert_eq!(client.host.writes, [GRAPH_PUT]);
     }
 
-    /// A send left unanswered may have happened; one refused mid-write not.
+    /// A send written whole may have happened, answered or not; a new
+    /// request starts unsent.
     #[test]
-    fn a_request_without_an_answer_is_unanswered() {
+    fn a_request_written_whole_is_sent() {
         let mut lost = Client::new(Scripted::new(&[b""], "2026-10-11T08:00:00Z"));
         lost.http_write(GRAPH, GRAPH_POST).unwrap();
-        assert!(!lost.unanswered(), "nothing read yet");
+        assert!(!lost.sent(), "its answer not awaited yet");
         assert!(lost.http_read(GRAPH).unwrap().is_empty());
-        assert!(lost.unanswered());
+        assert!(lost.sent());
 
         let served = answer("500 Internal Server Error", b"{}");
         let mut answered = Client::new(Scripted::new(&[&served], "2026-10-11T08:00:00Z"));
         answered.http_write(GRAPH, GRAPH_POST).unwrap();
         answered.http_read(GRAPH).unwrap();
-        assert!(!answered.unanswered());
+        assert!(answered.sent(), "its status is the verdict, read beside it");
 
         answered.http_write(GRAPH, GRAPH_POST).unwrap();
-        assert!(!answered.unanswered(), "a new request resets it");
+        assert!(!answered.sent(), "a new request resets it");
     }
 
     /// A gateway's 503 may follow the work: a POST is not resent, a GET is.

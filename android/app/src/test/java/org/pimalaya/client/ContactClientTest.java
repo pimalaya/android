@@ -59,10 +59,10 @@ public class ContactClientTest {
     public void aCardReadsAsTheBridgeListsIt() throws Exception {
         String raw =
                 "{\"id\":\"a\",\"uri\":\"a.vcf\",\"etag\":\"\\\"e1\\\"\",\"vcard\":\"V\","
-                        + "\"books\":[\"b1\",\"b2\"]}";
+                        + "\"vcardBase64\":\"6Q==\",\"books\":[\"b1\",\"b2\"]}";
         assertMirrors(Card.class, raw);
         assertEquals(
-                new Card("a", "a.vcf", "\"e1\"", "V", List.of("b1", "b2")),
+                new Card("a", "a.vcf", "\"e1\"", "V", "6Q==", List.of("b1", "b2")),
                 Card.from(new JSONObject(raw)));
 
         // NOTE: a spine-only row, and a card of a collection-bound backend
@@ -102,23 +102,27 @@ public class ContactClientTest {
 
     @Test
     public void outcomesReadAsAPushRoundAnswersThem() throws Exception {
-        // NOTE: Rust skips the absent options, so no outcome carries all five
-        // keys; the shape check reads a literal that does.
+        // NOTE: Rust skips the absent options and a false refusal, so no
+        // outcome carries all six keys; the shape check reads a literal that
+        // does.
         assertMirrors(
                 PushOutcome.class,
-                "{\"ref\":\"r\",\"accepted\":false,\"id\":\"i\",\"etag\":\"e\",\"error\":\"x\"}");
+                "{\"ref\":\"r\",\"accepted\":false,\"id\":\"i\",\"etag\":\"e\",\"error\":\"x\","
+                        + "\"refused\":true}");
 
         String raw =
                 "[{\"ref\":\"n1\",\"accepted\":true,\"id\":\"srv-n1\"},"
                         + "{\"ref\":\"b\",\"accepted\":true,\"etag\":\"k-b\"},"
                         + "{\"ref\":\"c\",\"accepted\":false,\"error\":\"refused\"},"
-                        + "{\"ref\":\"d\",\"accepted\":true}]";
+                        + "{\"ref\":\"d\",\"accepted\":true},"
+                        + "{\"ref\":\"e\",\"accepted\":false,\"error\":\"bad\",\"refused\":true}]";
         assertEquals(
                 List.of(
                         new PushOutcome("n1", true, "srv-n1", null, null),
                         new PushOutcome("b", true, null, "k-b", null),
                         new PushOutcome("c", false, null, null, "refused"),
-                        new PushOutcome("d", true, null, null, null)),
+                        new PushOutcome("d", true, null, null, null),
+                        new PushOutcome("e", false, null, null, "bad", true)),
                 PushOutcome.list(new JSONArray(raw)));
     }
 

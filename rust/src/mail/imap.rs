@@ -157,6 +157,12 @@ pub struct ImapState {
     /// What was read of the mailbox last examined, while it has not
     /// moved ([`Cache`]).
     cache: Option<Cache>,
+    /// Whether an answer was left part unread on the connection, which is
+    /// then dropped and opened again before its next command.
+    out_of_step: bool,
+    /// Whether the server names no UID on a batched body's FETCH line, so
+    /// bodies are read one message after another.
+    alone: bool,
 }
 
 /// What was read of one mailbox, kept while its UIDVALIDITY and stamp
@@ -203,6 +209,8 @@ impl ImapState {
             capabilities: Vec::new(),
             selected: None,
             cache: None,
+            out_of_step: false,
+            alone: false,
         }
     }
 
@@ -276,12 +284,58 @@ impl ImapState {
 pub struct ImapSession<'a, H> {
     client: &'a mut Client<H>,
     state: &'a mut ImapState,
+    /// The credential the connection signs in with again once out of
+    /// step ([`Self::reopen`]), none for a session that cannot.
+    auth: Option<Auth<'a>>,
 }
 
 impl<'a, H: Host> ImapSession<'a, H> {
     /// Binds a held session to the call that is about to use it.
     pub fn bind(client: &'a mut Client<H>, state: &'a mut ImapState) -> Self {
-        Self { client, state }
+        Self {
+            client,
+            state,
+            auth: None,
+        }
+    }
+
+    /// [`Self::bind`], signing in with `auth` whenever the connection
+    /// opens again: first of all when an answer was left part unread on
+    /// it, so no command reads another's lines.
+    pub fn signed(
+        client: &'a mut Client<H>,
+        state: &'a mut ImapState,
+        auth: Auth<'a>,
+    ) -> Result<Self, BridgeError> {
+        let mut session = Self {
+            client,
+            state,
+            auth: Some(auth),
+        };
+        if session.state.out_of_step {
+            session.reopen()?;
+        }
+        Ok(session)
+    }
+
+    /// Drops the connection, an answer left part unread on it, and opens
+    /// it again signed in, nothing selected; with no credential to sign in
+    /// with, the next [`Self::signed`] does.
+    fn reopen(&mut self) -> Result<(), BridgeError> {
+        log::debug!("imap answer left unread, opening the connection again");
+        self.client.reset(&self.state.url);
+        let url = Url::parse(&self.state.url).map_err(|err| err.to_string())?;
+        let alone = self.state.alone;
+        *self.state = ImapState::new(&url);
+        self.state.alone = alone;
+        self.state.out_of_step = true;
+
+        let Some(auth) = self.auth else {
+            return Err("The IMAP connection left an answer unread, it opens again".into());
+        };
+        self.connect(&auth)?;
+        self.state.out_of_step = false;
+        Ok(())
     }
 
     /// Drives a coroutine to completion, servicing every read and write
@@ -406,8 +460,15 @@ impl<'a, H: Host> ImapSession<'a, H> {
             // NOTE: a refused ENABLE costs only the incremental round, so
             // the capability is forgotten rather than the connection failed,
             // and every listing after takes the full round directly.
-            if let Err(err) = self.run(ImapExtensionEnable::new(enabled)) {
-                log::warn!("QRESYNC not enabled, enumerating whole: {err}");
+            let enabled = match self.run(ImapExtensionEnable::new(enabled)) {
+                Ok(enabled) => names_qresync(&enabled.unwrap_or_default()),
+                Err(err) => {
+                    log::warn!("QRESYNC not enabled, enumerating whole: {err}");
+                    false
+                }
+            };
+            if !enabled {
+                log::debug!("QRESYNC not named enabled, enumerating whole");
                 self.state
                     .capabilities
                     .retain(|capability| capability != &Capability::QResync);
@@ -1081,6 +1142,10 @@ impl<H: Host> ImapSession<'_, H> {
     /// Sizes first, then one streamed `UID FETCH` per batch ([`batches`]).
     /// A UID with no size is gone ([`ImapSources::gone`]); a refused batch
     /// is read one message at a time, one the server fails to hand left out.
+    /// A batch failing with its answer part unread (a body over its bound,
+    /// a FETCH line naming no UID) opens the connection again first
+    /// ([`Self::reopen`]); one naming no UID reads every batch after it one
+    /// message at a time.
     pub fn fetch_sources(
         &mut self,
         mailbox: &str,
@@ -1113,21 +1178,32 @@ impl<H: Host> ImapSession<'_, H> {
         );
         let mut written = Vec::with_capacity(sizes.len());
         for batch in batches(&uids, &sizes) {
-            match self.stream_batch(&batch, &sizes, dir, &mut written) {
-                Ok(()) => {}
-                Err(Refusal::Refused(err)) => {
-                    log::warn!("batch of {} refused in {mailbox}: {err}", batch.len());
-                    for uid in batch {
-                        if written.iter().any(|source| source.id == uid.to_string()) {
-                            continue;
-                        }
-                        match self.fetch_raw(mailbox, &uid.to_string()) {
-                            Ok(bytes) => written.push(write_source(dir, uid, &bytes)?),
-                            Err(err) => log::warn!("source of {uid} not read: {err}"),
-                        }
-                    }
+            let streamed = match self.state.alone {
+                true => Err(Refusal::Refused(
+                    "the server names no UID in a batch".into(),
+                )),
+                false => self.stream_batch(&batch, &sizes, dir, &mut written),
+            };
+            let refused = match streamed {
+                Ok(()) => None,
+                Err(Refusal::Refused(err)) => Some(err),
+                Err(Refusal::OutOfStep(err)) => {
+                    self.reopen()?;
+                    Some(err)
                 }
                 Err(Refusal::Failed(err)) => return Err(err),
+            };
+            if let Some(err) = refused {
+                log::warn!("batch of {} refused in {mailbox}: {err}", batch.len());
+                for uid in batch {
+                    if written.iter().any(|source| source.id == uid.to_string()) {
+                        continue;
+                    }
+                    match self.fetch_raw(mailbox, &uid.to_string()) {
+                        Ok(bytes) => written.push(write_source(dir, uid, &bytes)?),
+                        Err(err) => log::warn!("source of {uid} not read: {err}"),
+                    }
+                }
             }
         }
         Ok(ImapSources {
@@ -1213,7 +1289,11 @@ impl<H: Host> ImapSession<'_, H> {
                         | ImapMessageFetchStreamBatchError::Bad(_) => {
                             Refusal::Refused(err.to_string().into())
                         }
-                        _ => Refusal::Failed(err.to_string().into()),
+                        ImapMessageFetchStreamBatchError::UidMissing => {
+                            self.state.alone = true;
+                            Refusal::OutOfStep(err.to_string().into())
+                        }
+                        _ => Refusal::OutOfStep(err.to_string().into()),
                     });
                 }
                 ImapCoroutineState::Yielded(ImapMessageFetchStreamBatchYield::WantsTag) => {
@@ -1301,6 +1381,9 @@ enum Refusal {
     /// The server answered NO or BAD: the connection stands, and the batch
     /// can be read one message after another.
     Refused(BridgeError),
+    /// The batch failed with its answer part unread on the connection,
+    /// which opens again before the batch is read one message after another.
+    OutOfStep(BridgeError),
     /// The connection or the disk failed: nothing more is read.
     Failed(BridgeError),
 }
@@ -1764,6 +1847,14 @@ fn relocation(capabilities: &[Capability<'static>]) -> Relocation {
     }
 }
 
+/// Whether an `ENABLED` answer names QRESYNC, in any case (RFC 7162
+/// section 3.1): a bare `OK` enabled nothing.
+fn names_qresync(enabled: &[CapabilityEnable<'static>]) -> bool {
+    enabled
+        .iter()
+        .any(|capability| capability.to_string().eq_ignore_ascii_case("QRESYNC"))
+}
+
 /// How a server announcing `capabilities` disposes of one message.
 fn disposal(capabilities: &[Capability<'static>]) -> Disposal {
     match capabilities.contains(&Capability::UidPlus) {
@@ -1886,6 +1977,7 @@ pub fn list_mailboxes<H: Host>(
         .into_iter()
         .map(|(name, attributes)| MailboxEntry {
             role: role_of(&name, &attributes),
+            label: name.clone(),
             name,
         })
         .collect())
@@ -1949,4 +2041,4 @@ fn decode_cursor(cursor: &str) -> Option<(u32, u64)> {
 }
 
 #[cfg(test)]
-mod tests;
+pub mod tests;

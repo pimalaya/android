@@ -5,7 +5,6 @@ import android.content.Intent;
 import android.net.Uri;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.LocalBook;
@@ -123,8 +122,7 @@ public final class VcfTransfer {
         AccountEntry account = parts.accountFor(target.accountEmail);
         int count = 0;
         for (String vcard : Vcf.split(text)) {
-            String uid = editor.cardIndex(vcard).uid();
-            String id = uid.isEmpty() ? UUID.randomUUID().toString() : uid;
+            String id = ContactWriter.keyOf(editor.cardIndex(vcard));
             parts.contacts().save(target.book.url(), new Card(id, null, null, vcard));
             count++;
         }

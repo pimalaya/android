@@ -200,10 +200,10 @@ public class EventWritesTest {
 
         assertEquals(
                 List.of(
-                        "add " + calendar.id + " s-2.ics",
+                        "add " + calendar.id + " s-2",
                         "edit " + calendar.id + " " + target.handle),
                 client.staged);
-        assertTrue(stored("s-2.ics").ical().contains("UID:s-2\r\n"));
+        assertTrue(stored("s-2").ical().contains("UID:s-2\r\n"));
         assertTrue(stored("s.ics").ical().contains("UNTIL="));
     }
 

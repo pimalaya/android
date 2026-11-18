@@ -423,14 +423,15 @@ public class MailClientTest {
     @Test
     public void mailboxesReadAsBefore() throws Exception {
         String raw =
-                "[{\"name\":\"INBOX\",\"role\":\"inbox\"},{\"name\":\"Trash\",\"role\":\"trash\"},"
-                        + "{\"name\":\"Projets/Alpha\",\"role\":\"\"}]";
+                "[{\"name\":\"INBOX\",\"label\":\"INBOX\",\"role\":\"inbox\"},"
+                        + "{\"name\":\"Trash\",\"label\":\"Trash\",\"role\":\"trash\"},"
+                        + "{\"name\":\"A%2FB\",\"label\":\"A/B\",\"role\":\"\"}]";
         assertMirrors(Mailbox.class, elements(raw).get(0));
         assertEquals(
                 List.of(
                         new Mailbox("INBOX", "inbox"),
                         new Mailbox("Trash", "trash"),
-                        new Mailbox("Projets/Alpha", "")),
+                        new Mailbox("A%2FB", "A/B", "")),
                 Mailbox.list(Replies.array(raw)));
         assertEquals(List.of(), Mailbox.list(Replies.array("[]")));
     }

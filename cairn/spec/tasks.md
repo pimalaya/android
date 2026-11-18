@@ -290,3 +290,11 @@ Pulling the Tasks list down SHALL sync the calendars, within the filter, as the 
 - GIVEN a task created on the phone, on a Google Tasks list, shown in the Tasks tab
 - WHEN a sync pushes it and the task is then ticked in the list
 - THEN the task is closed, no unknown handle being reported
+
+### Requirement: A task push refused as it stands is held
+A task push the server refuses as it stands (a CalDAV, Google Tasks or Microsoft To Do status naming the request, no quota nor rate limit) SHALL be answered refused, held on its binding and reported every sync, the list's other changes pushed, as a calendar push is (calendar, "A calendar push refused as it stands is held"). A task gone (404) stays gone first, a 412 the stale guard, and a create refused for its `UID` (Fastmail's 403) or in conflict (409) stays staged for the next sync.
+
+#### Scenario: A capture refused as it stands
+- GIVEN three captures filed in a CalDAV calendar, the server answering one create 400
+- WHEN the calendar syncs
+- THEN the other two land, the refused one is recorded on its binding and reported, and the next sync asks the server nothing for it

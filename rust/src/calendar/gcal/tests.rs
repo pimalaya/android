@@ -155,6 +155,10 @@ struct FakeCalendar {
     /// The event whose write Google refuses, with the status and the
     /// message it answers.
     failing: Option<(String, u16, &'static str)>,
+    /// The id the next created event is filed under, `new` when none.
+    created_id: Option<String>,
+    /// What a read of an event the calendar lacks answers, 404 when none.
+    gone: Option<u16>,
 }
 
 /// One write asked of a [`FakeCalendar`]: its method, the event it
@@ -304,10 +308,12 @@ impl FakeCalendar {
             .find(|event| event.id.as_deref() == Some(id))
         {
             Some(event) => FakeResponse::json(200, event),
-            None => FakeResponse::json(
-                404,
-                &json!({"error": {"code": 404, "message": "Not Found"}}),
-            ),
+            None => {
+                let status = self.gone.unwrap_or(404);
+                let body =
+                    json!({"error": {"code": status, "message": "Resource has been deleted"}});
+                FakeResponse::json(status, &body)
+            }
         }
     }
 
@@ -565,15 +571,17 @@ impl FakeCalendar {
 
     /// Answers `events.insert` or `events.import`.
     fn created(&mut self, method: &'static str, request: &FakeRequest) -> FakeResponse {
-        if let Err(refused) = self.written(method, "new", request) {
+        let id = self.created_id.clone().unwrap_or_else(|| "new".into());
+        if let Err(refused) = self.written(method, &id, request) {
             return refused;
         }
         let event: GcalEvent = request.json();
         let created = GcalEvent {
-            id: Some("new".into()),
+            id: Some(id),
             etag: Some("\"1\"".into()),
             ..event
         };
+        self.events.push(created.clone());
         FakeResponse::json(200, &created)
     }
 
@@ -590,8 +598,23 @@ impl FakeCalendar {
         FakeResponse::json(200, &updated)
     }
 
-    /// Answers `events.delete`.
+    /// Answers `events.delete`: 410 for an event cancelled already, as
+    /// Google answers.
     fn deleted(&mut self, id: &str, request: &FakeRequest) -> FakeResponse {
+        let cancelled = self.events.iter().any(|event| {
+            event.id.as_deref() == Some(id) && event.status == Some(GcalEventStatus::Cancelled)
+        });
+        if cancelled {
+            self.sent.push(Sent {
+                method: "DELETE",
+                id: id.to_string(),
+                body: Value::Null,
+                if_match: request.header("If-Match").map(str::to_string),
+                send_updates: None,
+            });
+            let body = json!({"error": {"code": 410, "message": "Resource has been deleted"}});
+            return FakeResponse::json(410, &body);
+        }
         match self.written("DELETE", id, request) {
             Ok(()) => FakeResponse::empty(204),
             Err(refused) => refused,
@@ -1028,4 +1051,127 @@ fn an_answer_to_someone_elses_invitation_tells_nobody() {
     let mut calendar = meeting("boss@example.com", people);
     calendar.entry(|entry| entry.delete(None, &jane())).unwrap();
     assert_eq!(calendar.notified(), [Some(GcalSendUpdates::None)]);
+}
+
+/// The weekly series as a new object Jane organizes, Ada invited: the 26
+/// October excluded, and an override named by `recurrence_id` moving the
+/// 19 October to 10:00.
+fn new_series(recurrence_id: &str) -> String {
+    format!(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Pimalaya//Android//EN\r\n\
+         BEGIN:VEVENT\r\nUID:uid-m\r\nDTSTAMP:20261001T080000Z\r\n\
+         DTSTART:20261005T090000Z\r\nDTEND:20261005T093000Z\r\nSUMMARY:Series\r\n\
+         RRULE:FREQ=WEEKLY;COUNT=6\r\nEXDATE:20261026T090000Z\r\n\
+         ORGANIZER:mailto:jane@example.com\r\nATTENDEE:mailto:ada@example.com\r\n\
+         END:VEVENT\r\n\
+         BEGIN:VEVENT\r\nUID:uid-m\r\nDTSTAMP:20261001T080000Z\r\n{recurrence_id}\r\n\
+         DTSTART:20261019T100000Z\r\nDTEND:20261019T103000Z\r\nSUMMARY:Series\r\n\
+         ORGANIZER:mailto:jane@example.com\r\nATTENDEE:mailto:ada@example.com\r\n\
+         END:VEVENT\r\nEND:VCALENDAR\r\n"
+    )
+}
+
+/// An empty calendar whose next event is filed as the series `m`.
+fn filing_m() -> FakeCalendar {
+    FakeCalendar {
+        created_id: Some("m".into()),
+        ..weekly(Vec::new())
+    }
+}
+
+/// A series is created whole: inserted without its guests and telling
+/// nobody, its moved occurrence written, then its guests invited once.
+#[test]
+fn a_new_series_is_created_whole_its_guests_invited_last() {
+    let mut calendar = filing_m();
+    calendar.events.clear();
+    let ical = new_series("RECURRENCE-ID:20261019T090000Z");
+
+    let created = calendar
+        .serve(|mut gcal| gcal.create_entry("jane@example.com", &ical, &jane()))
+        .unwrap();
+
+    assert_eq!(created.id, "m");
+    assert_eq!(
+        calendar.writes(),
+        [("INSERT", "m"), ("PUT", "m_20261019T090000Z"), ("PUT", "m")]
+    );
+    let none = Some(GcalSendUpdates::None);
+    assert_eq!(
+        calendar.notified(),
+        [none, none, Some(GcalSendUpdates::All)]
+    );
+    let body = |index: usize| &calendar.sent[index].body;
+    assert!(body(0).get("attendees").is_none(), "{}", body(0));
+    assert!(
+        body(0)["recurrence"][1]
+            .as_str()
+            .unwrap()
+            .starts_with("EXDATE"),
+        "{}",
+        body(0)
+    );
+    assert_eq!(body(1)["start"]["dateTime"], "2026-10-19T10:00:00Z");
+    assert!(body(1).get("attendees").is_none(), "{}", body(1));
+    assert_eq!(body(2)["attendees"][0]["email"], "ada@example.com");
+}
+
+/// An override of no occurrence the series has refuses the create, the
+/// series deleted again before anyone was told.
+#[test]
+fn a_new_series_overriding_no_occurrence_is_refused_and_deleted() {
+    let mut calendar = filing_m();
+    calendar.events.clear();
+    let ical = new_series("RECURRENCE-ID:20261020T090000Z");
+
+    let Err(refused) =
+        calendar.serve(|mut gcal| gcal.create_entry("jane@example.com", &ical, &jane()))
+    else {
+        panic!("created: {:?}", calendar.writes());
+    };
+
+    assert_eq!(refused.status, Some(422), "{}", refused.message);
+    assert_eq!(calendar.writes(), [("INSERT", "m"), ("DELETE", "m")]);
+    assert_eq!(calendar.notified()[1], Some(GcalSendUpdates::None));
+}
+
+/// An override of this and future occurrences has no instance to carry
+/// it: refused before anything is written.
+#[test]
+fn a_new_series_overriding_this_and_future_is_refused_unwritten() {
+    let mut calendar = filing_m();
+    calendar.events.clear();
+    let ical = new_series("RECURRENCE-ID;RANGE=THISANDFUTURE:20261019T090000Z");
+
+    let Err(refused) =
+        calendar.serve(|mut gcal| gcal.create_entry("jane@example.com", &ical, &jane()))
+    else {
+        panic!("created: {:?}", calendar.writes());
+    };
+
+    assert_eq!(refused.status, Some(422), "{}", refused.message);
+    assert!(calendar.sent.is_empty(), "{:?}", calendar.writes());
+}
+
+/// A delete of an entry Google no longer holds, read gone (410, or 404) or
+/// read as a cancelled master, is done: nothing is left to delete, and
+/// nothing is sent.
+#[test]
+fn a_delete_of_an_entry_already_gone_is_done() {
+    let mut answered = Vec::new();
+    for status in [404, 410] {
+        let mut calendar = FakeCalendar {
+            gone: Some(status),
+            ..Default::default()
+        };
+        let deleted = calendar.entry(|entry| entry.delete(Some("\"1\""), &jane()));
+        answered.push((deleted.map_err(|err| err.status), calendar.writes().len()));
+    }
+    let mut calendar = weekly(Vec::new());
+    calendar.events[0].status = Some(GcalEventStatus::Cancelled);
+    calendar.events[0].etag = Some("\"2\"".into());
+    let deleted = calendar.entry(|entry| entry.delete(Some("\"1\""), &jane()));
+    answered.push((deleted.map_err(|err| err.status), calendar.writes().len()));
+
+    assert_eq!(answered, [(Ok(()), 0), (Ok(()), 0), (Ok(()), 0)]);
 }

@@ -600,7 +600,7 @@ public class CalendarClientTest {
         String raw =
                 "{\"changed\":[{\"id\":\"a\",\"etag\":\"\\\"e1\\\"\"},"
                         + "{\"id\":\"b\",\"etag\":null}],"
-                        + "\"bodies\":[{\"id\":\"a\",\"etag\":\"\\\"e1\\\"\",\"ical\":\"A\"}],"
+                        + "\"bodies\":[{\"id\":\"a\",\"etag\":\"\\\"e1\\\"\",\"ical\":\"A\",\"icalBase64\":\"6Q==\"}],"
                         + "\"vanished\":[\"gone\"],\"token\":\"t2\",\"complete\":true}";
         assertMirrors(EventDelta.class, raw);
         assertMirrors(EventRef.class, elements(field(raw, "changed")).get(0));
@@ -608,7 +608,7 @@ public class CalendarClientTest {
         assertEquals(
                 new EventDelta(
                         List.of(new EventRef("a", "\"e1\""), new EventRef("b", null)),
-                        List.of(new Event("a", "\"e1\"", "A")),
+                        List.of(new Event("a", "\"e1\"", "A", "6Q==")),
                         List.of("gone"),
                         "t2",
                         true),

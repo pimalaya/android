@@ -36,7 +36,7 @@ use crate::{
 };
 
 /// One message of the scripted mailbox.
-struct Message {
+pub struct Message {
     uid: u32,
     /// Its `Date` header, RFC 3339.
     date: String,
@@ -54,7 +54,7 @@ impl Message {
         )
     }
 
-    fn body(&self) -> String {
+    pub fn body(&self) -> String {
         format!(
             "{}message {} {}\r\n",
             self.header(),
@@ -65,7 +65,7 @@ impl Message {
 }
 
 /// A server holding one mailbox, its answers queued as its commands come.
-struct Scripted {
+pub struct Scripted {
     messages: Vec<Message>,
     uid_next: u32,
     modseq: u64,
@@ -73,9 +73,22 @@ struct Scripted {
     chunk: usize,
     /// Whether a streamed body batch is refused (`NO`).
     refuse_batches: bool,
+    /// The UID whose streamed body a batch announces longer than any
+    /// bound, the rest of the answer following.
+    pub oversized: Option<u32>,
+    /// Whether a streamed body batch names no UID on its FETCH lines.
+    pub uidless: bool,
+    /// The tag of an `AUTHENTICATE` waiting for its response line.
+    authenticating: Option<String>,
+    /// How many times the connection was dropped.
+    pub resets: usize,
     /// What EXAMINE answers in place of opening the mailbox, `TAG` standing
     /// for the command's tag: a refusal, or the session closing.
     examine_refused: Option<&'static str>,
+    /// The capabilities a sign-in answers with.
+    pub capabilities: &'static str,
+    /// What `ENABLE` answers, `TAG` standing for the command's tag.
+    pub enable: &'static str,
     /// UIDs a search still names whose header fetch Gmail refuses (`NO`),
     /// gone meanwhile.
     gone: Vec<u32>,
@@ -86,13 +99,13 @@ struct Scripted {
     /// What `UID STORE` answers, `TAG` standing for the command's tag.
     store: &'static str,
     pending: VecDeque<u8>,
-    commands: Vec<String>,
+    pub commands: Vec<String>,
     /// Every UID whose header fields were fetched, in order.
     headers_read: Vec<u32>,
 }
 
 impl Scripted {
-    fn new(messages: Vec<Message>) -> Self {
+    pub fn new(messages: Vec<Message>) -> Self {
         let uid_next = messages
             .iter()
             .map(|message| message.uid)
@@ -105,7 +118,13 @@ impl Scripted {
             modseq: 9,
             chunk: 7,
             refuse_batches: false,
+            oversized: None,
+            uidless: false,
+            authenticating: None,
+            resets: 0,
             examine_refused: None,
+            capabilities: "IMAP4rev1",
+            enable: "TAG BAD unscripted\r\n",
             gone: Vec::new(),
             garbled: Vec::new(),
             noisy: Vec::new(),
@@ -116,7 +135,7 @@ impl Scripted {
         }
     }
 
-    fn sent(&self, prefix: &str) -> usize {
+    pub fn sent(&self, prefix: &str) -> usize {
         self.commands
             .iter()
             .filter(|command| command.starts_with(prefix))
@@ -129,7 +148,7 @@ impl Scripted {
         uids.iter().position(|held| *held == uid).unwrap() + 1
     }
 
-    fn message(&self, uid: u32) -> Option<&Message> {
+    pub fn message(&self, uid: u32) -> Option<&Message> {
         self.messages.iter().find(|message| message.uid == uid)
     }
 
@@ -155,6 +174,9 @@ impl Scripted {
     }
 
     fn answer(&mut self, line: &str) -> String {
+        if let Some(tag) = self.authenticating.take() {
+            return format!("{tag} OK [CAPABILITY {}] signed in\r\n", self.capabilities);
+        }
         let (_, command) = line.trim_end().split_once(' ').unwrap();
         let noise = match self.noisy.iter().any(|noisy| command.starts_with(noisy)) {
             true => unreadable(99, 99),
@@ -167,6 +189,13 @@ impl Scripted {
         let (tag, command) = line.trim_end().split_once(' ').unwrap();
         self.commands.push(command.to_string());
 
+        if command.starts_with("AUTHENTICATE PLAIN") {
+            self.authenticating = Some(tag.to_string());
+            return String::from("+ \r\n");
+        }
+        if command.starts_with("ENABLE ") {
+            return self.enable.replace("TAG", tag);
+        }
         if command.starts_with("LIST ") {
             return format!(
                 "* LIST (\\HasNoChildren) \"/\" INBOX\r\n\
@@ -249,12 +278,20 @@ impl Scripted {
             if self.refuse_batches && items == "(UID BODY.PEEK[])" {
                 return format!("{tag} NO busy\r\n");
             }
+            let batch = items == "(UID BODY.PEEK[])";
             for uid in uids {
                 let body = self.message(uid).unwrap().body();
+                let len = match batch && self.oversized == Some(uid) {
+                    true => 10_000_000,
+                    false => body.len(),
+                };
+                let named = match batch && self.uidless {
+                    true => String::new(),
+                    false => format!("UID {uid} "),
+                };
                 reply += &format!(
-                    "* {} FETCH (UID {uid} BODY[] {{{}}}\r\n{body})\r\n",
+                    "* {} FETCH ({named}BODY[] {{{len}}}\r\n{body})\r\n",
                     self.seq(uid),
-                    body.len()
                 );
             }
         } else if items.contains("HEADER.FIELDS") {
@@ -308,7 +345,13 @@ impl Host for Scripted {
 
     fn settle(&mut self, _url: &str) {}
 
-    fn reset(&mut self, _url: &str) {}
+    fn reset(&mut self, _url: &str) {
+        self.resets += 1;
+        self.authenticating = None;
+        self.pending.clear();
+        self.pending
+            .extend(b"* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] ready\r\n");
+    }
 
     fn starttls(&mut self, _url: &str) -> Result<(), BridgeError> {
         Err("Unscripted".into())
@@ -381,7 +424,7 @@ fn back(days: i64, hours: i64) -> String {
 
 /// `count` messages, UID `count` the newest, one a day back from the top,
 /// each received when it was sent.
-fn daily(count: u32) -> Vec<Message> {
+pub fn daily(count: u32) -> Vec<Message> {
     (1..=count)
         .map(|uid| {
             let date = back(i64::from(count - uid), 12);
@@ -394,7 +437,7 @@ fn daily(count: u32) -> Vec<Message> {
         .collect()
 }
 
-fn state(capabilities: Vec<Capability<'static>>) -> ImapState {
+pub fn state(capabilities: Vec<Capability<'static>>) -> ImapState {
     let mut state = ImapState::new(&Url::parse("imaps://jane@example.org").unwrap());
     state.capabilities = capabilities;
     state
@@ -917,6 +960,45 @@ fn a_delta_that_skipped_a_line_keeps_its_checkpoint() {
     assert_eq!(page.vanished, ["2"]);
     let changed: Vec<&str> = page.items.iter().map(|item| item.handle.as_str()).collect();
     assert_eq!(changed, ["3"]);
+}
+
+/// Signs in to a server advertising QRESYNC whose `ENABLE` answers
+/// `enable`, then lists the INBOX from the checkpoint `7:9`.
+fn delta_after_enable(enable: &'static str) -> Scripted {
+    let mut client = Client::new(Scripted::new(daily(3)));
+    client.host.capabilities = "IMAP4rev1 CONDSTORE QRESYNC";
+    client.host.enable = enable;
+    client.host.modseq = 12;
+    let mut state = state(Vec::new());
+    client.reset(&state.url);
+    let delta: MailRequest =
+        from_str(r#"{"listing":{"kind":"delta","checkpoint":"7:9"}}"#).unwrap();
+
+    let auth = Auth::Basic {
+        login: "jane",
+        password: "secret",
+    };
+    let mut session = ImapSession::bind(&mut client, &mut state);
+    session.connect(&auth).unwrap();
+    session.list_page("INBOX", &delta).unwrap();
+    client.host
+}
+
+/// A server answering `ENABLE` with a bare `OK` did not enable QRESYNC,
+/// whatever it advertises: the delta is a full round (iCloud).
+#[test]
+fn qresync_not_named_enabled_is_not_used() {
+    let host = delta_after_enable("TAG OK enabled\r\n");
+    assert_eq!(host.sent("ENABLE "), 1);
+    assert_eq!(host.sent("SELECT INBOX (QRESYNC "), 0);
+    assert_eq!(host.sent("EXAMINE "), 1);
+}
+
+/// QRESYNC named in the `ENABLED` answer, in any case, is used.
+#[test]
+fn qresync_named_enabled_is_used() {
+    let host = delta_after_enable("* ENABLED CONDSTORE qresync\r\nTAG OK enabled\r\n");
+    assert_eq!(host.sent("SELECT INBOX (QRESYNC "), 1);
 }
 
 /// A member is named by its header, its UID only its handle.

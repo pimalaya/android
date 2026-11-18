@@ -87,7 +87,7 @@ The app SHALL stage an edit against the ETag the entry was read at, and the agen
 - THEN the server refuses on the precondition and the edit stays staged
 
 ### Requirement: A calendar entry can be deleted
-The app SHALL stage a calendar entry's deletion, after asking, and the entry SHALL leave the agenda at once. The next sync SHALL delete it guarded by the ETag it was read at; a delete the server refuses SHALL leave the removal staged for the sync that follows. A delete finding the entry already gone SHALL count as done: a 404, or a 412 when the server, read back, holds no entry of that name (an `If-Match` on an object gone being false, RFC 9110 section 13.1.1).
+The app SHALL stage a calendar entry's deletion, after asking, and the entry SHALL leave the agenda at once. The next sync SHALL delete it guarded by the ETag it was read at; a delete the server refuses SHALL leave the removal staged for the sync that follows. A delete finding the entry already gone SHALL count as done: a 404, or a 412 when the server, read back, holds no entry of that name (an `If-Match` on an object gone being false, RFC 9110 section 13.1.1). On Google and Graph the bridge SHALL settle it itself, whatever the revision: an entry read or answered 404 or 410, or read back as a cancelled master (Google's tombstone), is deleted already, and nothing is sent.
 
 #### Scenario: Deleting an entry
 - GIVEN an entry open on its page
@@ -108,6 +108,11 @@ The app SHALL stage a calendar entry's deletion, after asking, and the entry SHA
 - GIVEN a new entry that has not been saved
 - WHEN it is deleted
 - THEN the page closes and nothing is ever sent
+
+#### Scenario: A Google entry already cancelled
+- GIVEN an entry deleted on the phone that Google holds as a cancelled master, its ETag moved by the cancellation
+- WHEN the sync pushes the delete
+- THEN Google is asked nothing more, and the removal is done
 
 ### Requirement: A Microsoft calendar runs over Graph
 A calendar connection behind the `msgraph://` marker SHALL list the user's calendars and read their events as iCalendar, a series with its exceptions as one entry. Every pass SHALL list the calendar in full. The entries a pass reads SHALL be read 20 requests to a `$batch`, the events and then each series' instances, a request the batch could not serve being sent again on its own; an event Graph no longer holds when it is read SHALL be left out. A write SHALL be refused when the event's revision moved since the edit was staged, and a created event SHALL be filed under the id Graph gave it.
@@ -220,6 +225,22 @@ A Graph event create SHALL carry a `transactionId`, the hex of the first 16 byte
 - GIVEN an event with attendees created on Graph, the answer lost
 - WHEN the next pass pushes the staged create again
 - THEN it names the same transaction, and Graph keeps one event
+
+### Requirement: A series is created whole
+A series created on Graph or Google SHALL carry what it sets apart: on Graph its `EXDATE`s and overrides, each written through its instance after the master (an excluded or cancelled occurrence deleted, an override patched); on Google its overrides the same way, its `EXDATE`s riding in the master's recurrence. Where attendees would be told, the master SHALL be created without them (Google: inserted with `sendUpdates=none`), the occurrences written telling nobody, an override naming the series' attendees leaving them to the series, and the attendees added to the master last (Google: `sendUpdates=all`), so each is invited once. If an occurrence or the attendees cannot be written, the master SHALL be deleted again and the push answered rejected (412, the create staying staged), or refused (422, held as a calendar push refused as it stands is) when the occurrence was refused for good. An override of an occurrence the series does not have, and an override of this and future occurrences (`RANGE=THISANDFUTURE`), SHALL be refused, on a create before anything is written, as on an update.
+
+#### Scenario: A weekly series with an exception
+- GIVEN a new weekly series with Ada invited, one occurrence excluded and one moved
+- WHEN it is pushed to a Graph calendar
+- THEN Graph receives the master without Ada, the moved instance, the excluded instance deleted, then Ada added to the master
+
+#### Scenario: An override of no occurrence
+- GIVEN a new series overriding a day its rule never reaches
+- WHEN it is pushed to Google
+- THEN the inserted master is deleted again, telling nobody, and the push is refused
+
+### Requirement: A multiget row not answered as gone keeps its entry
+A `calendar-multiget` row answered without its data SHALL be logged and, unless it is a 404 or a 410 (the entry gone, left out), read alone by a `GET`; one still unreadable alone SHALL fail the fetch, and with it the round, never be left out of a complete round, which would retire the entry on the phone.
 
 ### Requirement: The agenda builds off the main thread
 The agenda SHALL read its window on a thread of its own and draw the result on the main thread, the last reload asked winning. With no index, an entry's expansion SHALL be kept while the window shown (the week, or the list's) and its object stay the same.
@@ -351,3 +372,33 @@ A phone pass finding more than half of at least 20 of a calendar's entries delet
 
 ### Requirement: A new alarm carries its own UID
 An alarm added on the phone SHALL carry a UID of its own, a random UUID (RFC 9074), so a merge matches it by identity rather than by position; alarms read without one are kept as they are.
+
+### Requirement: An entry is keyed by its UID
+A calendar entry or task SHALL be filed under the key pimdir STORAGE §9 assigns from its `UID` (Annex A.3, A.4; offline-store "An item's link id follows STORAGE §9"), never under its resource name: the `UID` verbatim, `esc:` before one beginning with a reserved prefix, the `hash:` fallback over its bytes for none. A second resource a calendar holds under one `UID` SHALL be kept as an item of its own, under the key io-pimdir mints over its handle (`dup:<UID>#<handle>`). An entry created in the app or on the phone SHALL be staged under its `UID`, and filed on a CalDAV server as `<UID>.ics`.
+
+#### Scenario: Two resources, one UID
+- GIVEN a CalDAV calendar holding `a.ics` and `b.ics`, both stating `UID:e-1`
+- WHEN it is synced
+- THEN the store holds `e-1` and `dup:e-1#b.ics`
+
+### Requirement: An entry that is not UTF-8 is kept as served
+A CalDAV entry whose bytes are not UTF-8 SHALL be stored as its server sent them (offline-store "A DAV body is stored as served"), shown on the phone read lossily, and never written back as text: an edit of it in the app is refused, one in a calendar app is put back from the store, and the push of such a body is answered refused.
+
+### Requirement: A calendar push refused as it stands is held
+An entry or task push the server refuses as it stands SHALL be answered refused with the server's reason, held by the engine on its binding and reported every sync (offline-store, "A change refused as it stands is held"), the calendar's other changes pushed. The bridge SHALL read the refusal off the answer, as for a contact push (carddav-sync, "A contact push refused as it stands is held"): a CalDAV, Calendar API, Tasks API or Graph status naming the request, no quota nor rate limit, and a JMAP `CalendarEvent/set` error naming the change; and it SHALL answer refused every write it refuses for good itself (422): an occurrence no write of the backend can carry, an override of no instance or of this and future occurrences. A JMAP `overQuota` SHALL stay a wait (412). An entry gone (404) SHALL stay gone first, a removal converging on it; a 412 SHALL stay the stale guard, rejected; a create Fastmail answers 403 for a second resource of one `UID`, or 409, SHALL stay rejected and staged, as before; a move into another calendar keeps its own rule, rejected.
+
+#### Scenario: One entry of three refused
+- GIVEN three entries created on the phone in a CalDAV calendar, the server answering one create 400
+- WHEN the calendar syncs
+- THEN the other two land, the refused one is recorded on its binding and reported, and the next sync asks the server nothing for it
+
+### Requirement: A floating entry is anchored for Google and Graph
+An entry holding a floating date-time (RFC 5545 3.3.5) pushed to Google or Graph, neither of which stores one, SHALL be anchored in the phone's zone: each floating `DTSTART`, `DTEND`, `RECURRENCE-ID`, `EXDATE` and `RDATE` of its events SHALL take that zone's `TZID`, the object SHALL define the zone by the `VTIMEZONE` Java's platform rules give (from the year before the pass on), and a floating `UNTIL` bounding a series whose start is floating SHALL be written as the UTC instant its wall time names in that zone (RFC 5545 3.3.10). With no zone of the phone's, the times SHALL be read in UTC. An entry holding no floating time SHALL be written as it stands. A phone-made entry is zoned already; this reaches an entry uploaded from a CalDAV or JMAP account.
+
+#### Scenario: A floating series copied to Google
+- GIVEN a weekly series at 10:00 floating, `UNTIL=20261231T100000`, on a phone in Europe/Paris
+- WHEN it is pushed to a Google or a Graph calendar
+- THEN it is accepted, starting at 10:00 Europe/Paris, its rule ending at `20261231T090000Z`
+
+### Requirement: A calendar listing is bounded
+A CalDAV `sync-collection` drain SHALL be bounded and answer a listing cut short incomplete, as a CardDAV one does (carddav-sync, "A DAV listing is bounded"), so no entry is retired by absence from it.

@@ -12,6 +12,7 @@ import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Card;
+import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.ContactFields;
 import org.pimalaya.pimdir.PimdirStorage;
@@ -73,8 +74,7 @@ final class ContactWriter {
                     return;
                 }
                 String vcard = ContactClient.applyCard(editor.edit().vcard, model);
-                String uid = editor.cardIndex(vcard).uid();
-                String id = uid.isEmpty() ? UUID.randomUUID().toString() : uid;
+                String id = keyOf(editor.cardIndex(vcard));
                 parts.contacts().save(editor.edit().book.url(), new Card(id, null, null, vcard));
             } else if (editor.edit().resolvingConflict) {
                 saveConflictResolution(model);
@@ -313,9 +313,22 @@ final class ContactWriter {
             }
         }
 
-        String uid = editor.cardIndex(vcard).uid();
-        String id = uid.isEmpty() ? UUID.randomUUID().toString() : uid;
-        editor.createCopy(target, account, id, vcard);
+        Map<String, String> from = new HashMap<>();
+        for (Entry entry : editor.edit().replicas) {
+            from.put(entry.book.url(), entry.id);
+        }
+        String id = keyOf(editor.cardIndex(vcard));
+        editor.createCopy(target, account, id, vcard, from);
+    }
+
+    /**
+     * The key a new card is staged under: the one STORAGE §9 assigns from its
+     * body, as the listing that lands it will name it, else a fresh one for a
+     * card the bridge cannot read.
+     */
+    static String keyOf(CardIndex index) {
+        String key = index.linkId();
+        return key.isEmpty() ? UUID.randomUUID().toString() : key;
     }
 
     /**

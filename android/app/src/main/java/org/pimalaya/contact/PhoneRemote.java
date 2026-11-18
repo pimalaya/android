@@ -28,11 +28,13 @@ import org.json.JSONObject;
 import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.ContactFields;
+import org.pimalaya.client.PimdirSql;
 import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PhoneSpoke;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.pimdir.PimdirSummary;
 
 /**
  * The phone spoke's remote adapter for io-pimdir, over ContactsContract.
@@ -293,6 +295,21 @@ final class PhoneRemote implements PhoneSpoke {
         ContactFields phoneModel = Mapping.model(dataRows(resolver, account, rawId));
         ContactFields merged = Mapping.merge(baseModel, phoneModel);
 
+        // NOTE: a card stored as its server sent it, bytes that are not
+        // UTF-8, reads here as text with U+FFFD: an edit made over it would
+        // write those to the server, so it is refused and the phone's rows
+        // put back from the store (owner decision 2026-11-18).
+        String[] served = servedBase(collection, handle);
+        if (served != null && merged != null) {
+            Log.w("pimalaya", "phone edit on " + handle + " refused: the card is not UTF-8");
+            try {
+                rewrite(resolver, account, rawId, baseModel);
+            } catch (Exception failure) {
+                Log.w("pimalaya", "phone rows of " + handle + " not put back", failure);
+            }
+            merged = null;
+        }
+
         // NOTE: no field taken means no edit, so ride the base back byte
         // for byte; re-encoding a no-op canonicalizes bytes and the
         // hash-diffing engine would read it as a phone edit and cascade.
@@ -323,16 +340,44 @@ final class PhoneRemote implements PhoneSpoke {
             revision = revisionOf(heldToken, dirty, version);
         }
 
+        // NOTE: the key STORAGE §9 assigns, as the server spoke names it.
         CardIndex index = ContactClient.indexCard(body);
-        String uid = index.uid();
 
         JSONObject item = new JSONObject();
         item.put("handle", handle);
-        item.put("linkId", uid.isEmpty() ? handle : uid);
-        item.put("hash", token);
-        item.put("body", body);
+        item.put("linkId", index.linkId());
+        if (served == null) {
+            item.put("hash", token);
+            item.put("body", body);
+        } else {
+            // NOTE: unedited, so the bytes the store holds, not their text.
+            item.put("hash", served[0]);
+            item.put("bodyBase64", served[1]);
+            byte[] bytes = java.util.Base64.getDecoder().decode(served[1]);
+            item.put("linkId", PimdirSql.derive(PimdirSummary.CONTACT, bytes).linkId());
+        }
         item.put("revision", revision);
         return item;
+    }
+
+    /**
+     * The phone's base as the store holds it, {@code [hash, base64]}, where
+     * its bytes are not UTF-8 (a card kept as its server sent it); null
+     * otherwise, the base's text then being its bytes.
+     */
+    private String[] servedBase(String collection, String handle) throws JSONException {
+        JSONObject row = offline.loadRow(PimdirStorage.phoneCollection(
+                PimdirStorage.collectionOf(collection)), handle);
+        if (row == null) {
+            return null;
+        }
+        boolean based = !row.isNull("baseVcard") && !row.getString("baseVcard").isEmpty();
+        String object = row.optString(based ? "baseObject" : "object", null);
+        boolean lossy = row.optBoolean(based ? "baseLossy" : "lossy");
+        if (!lossy || object == null) {
+            return null;
+        }
+        return new String[] {object, offline.base64Of(object)};
     }
 
     /**

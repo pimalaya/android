@@ -385,10 +385,31 @@ public abstract class Stager implements OfflineDriver {
     public void mutateResolve(String collection, String handle, String body,
             JSONObject summary, String sortKey, java.util.List<String> resolves,
             String ifMatch) throws JSONException {
+        requireText(collection, handle);
         mutate(
                 collection,
                 Mutation.edit(
                         handle, PimdirHash.of(body), body, summary, sortKey, resolves, ifMatch));
+    }
+
+    /**
+     * Refuses, staging nothing, a write carrying the text of what {@code
+     * handle} holds in {@code collection} when that body is kept as its
+     * server sent it, bytes that are not UTF-8: an edit of it or a copy of it
+     * made in the app (owner decision 2026-11-18).
+     */
+    public void requireText(String collection, String handle) throws JSONException {
+        // NOTE: such a body reads as text with U+FFFD where its bytes were,
+        // which a write of that text would send to a server.
+        JSONObject held = offline.loadRow(collection, handle);
+        if (held != null && held.optBoolean("lossy")) {
+            android.util.Log.w("pimalaya", "write of " + handle + " refused: not UTF-8");
+            throw new org.pimalaya.client.PimalayaException(
+                    "This item is not UTF-8 text: it is kept as its server sent it and"
+                            + " cannot be edited or copied here",
+                    null,
+                    true);
+        }
     }
 
     /** Stages a local item the remote never saw; the next sync appends it. */

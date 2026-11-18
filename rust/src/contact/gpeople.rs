@@ -27,9 +27,7 @@ use io_gpeople::{
                 get::GpeoplePersonGet,
                 get_batch_get::GpeoplePersonsBatchGet,
                 update_contact::GpeopleContactUpdate,
-                vcard::{
-                    GPEOPLE_PERSON_STASH_KEY, GPEOPLE_PERSON_VCARD_FIELDS, GpeoplePersonVcard,
-                },
+                vcard::{GPEOPLE_PERSON_VCARD_FIELDS, GpeoplePersonVcard},
             },
         },
         send::{GPEOPLE_API_BASE, GpeopleSendError, GpeopleSendOutput},
@@ -243,11 +241,19 @@ impl<H: Host> Gpeople<'_, H> {
     }
 
     /// Updates the contact `id`, masked to the fields changed since the
-    /// base, else every [`MANAGED_FIELDS`].
+    /// base, else to those its vCard shows apart from the person read.
     ///
     /// A missing or refused etag reads the person again (People refuses a
     /// listing's), merged three ways against the base: a field both changed
     /// apart is a conflict (412), never written over.
+    ///
+    /// People replaces a masked field whole, so the update is the edit
+    /// merged over the person read ([`GpeoplePerson::merge_unprojected`]):
+    /// what the vCard cannot hold (a second organization, an HTML
+    /// biography, a foreign `clientData` entry) is sent back as held. The
+    /// etag guards the race between that read and the update. A field the
+    /// vCard shows unchanged is never masked: an HTML biography the vCard
+    /// does not hold would be erased.
     pub fn update_card(
         &mut self,
         id: &str,
@@ -271,6 +277,7 @@ impl<H: Host> Gpeople<'_, H> {
                 uri: id.to_string(),
                 etag: etag.map(str::to_string),
                 vcard: vcard.to_string(),
+                vcard_base64: None,
                 books: Vec::new(),
             });
         }
@@ -278,38 +285,24 @@ impl<H: Host> Gpeople<'_, H> {
         let mut etag = etag.map(str::to_string);
         let mut fields = changed.clone();
         for last in [false, true] {
-            // NOTE: a masked clientData update replaces the whole list, so
-            // the server's foreign entries are merged in first (the etag
-            // guards the race); the same read sources a missing etag.
-            let stash = changed.contains(&GpeoplePersonField::ClientData);
-            let read = match etag.is_none() || stash {
-                true => Some(self.read_person(&resource_name)?),
-                false => None,
-            };
-            if etag.is_none()
-                && let Some(read) = &read
-            {
-                fields = merged_fields(read, &edit, base.as_ref(), &changed)?
+            let read = self.read_person(&resource_name)?;
+            if etag.is_none() {
+                fields = merged_fields(&read, &edit, base.as_ref(), &changed)?
                     .ok_or_else(|| changed_since_base(id))?;
                 if fields.is_empty() {
-                    return Ok(google_card(read.clone()));
+                    return Ok(google_card(read));
                 }
                 etag = Some(read.etag.clone());
+            } else if base.is_none() {
+                fields = projected_person(&read.to_vcard())?.changed_fields(&edit);
+                if fields.is_empty() {
+                    return Ok(google_card(read));
+                }
             }
 
             let mut person = edit.clone();
+            person.merge_unprojected(&read, &fields);
             person.etag = etag.clone().unwrap_or_default();
-            if let Some(read) = read
-                && fields.contains(&GpeoplePersonField::ClientData)
-            {
-                let mut kept: Vec<_> = read
-                    .client_data
-                    .into_iter()
-                    .filter(|entry| entry.key.as_deref() != Some(GPEOPLE_PERSON_STASH_KEY))
-                    .collect();
-                kept.append(&mut person.client_data);
-                person.client_data = kept;
-            }
 
             let auth = HttpAuthBearer::new(self.token);
             let coroutine = GpeopleContactUpdate::new(
@@ -645,6 +638,7 @@ fn google_card(person: GpeoplePerson) -> Card {
         id,
         etag: (!person.etag.is_empty()).then_some(person.etag),
         vcard,
+        vcard_base64: None,
         books,
     }
 }
@@ -1074,20 +1068,35 @@ mod tests {
                         }}),
                     );
                 }
-                for field in request.param("updatePersonFields").unwrap().split(',') {
-                    match sent.get(field) {
-                        Some(value) => held[field] = value.clone(),
-                        None => {
-                            held.as_object_mut().unwrap().remove(field);
-                        }
-                    }
-                }
+                held = applied(&held, request);
                 revision += 1;
                 held["etag"] = json!(format!("e-{revision}"));
                 FakeResponse::json(200, &held)
             }
             other => panic!("unexpected request {other:?}: {}", request.text),
         }
+    }
+
+    /// What People holds of `held` once the update `request` applies: each
+    /// masked field replaced whole, the output-only `displayName` of a name
+    /// computed again from it.
+    fn applied(held: &Value, request: &FakeRequest) -> Value {
+        let sent: Value = request.json();
+        let mut held = held.clone();
+        for field in request.param("updatePersonFields").unwrap().split(',') {
+            match sent.get(field) {
+                Some(value) => held[field] = value.clone(),
+                None => {
+                    held.as_object_mut().unwrap().remove(field);
+                }
+            }
+        }
+        if let Some(names) = held["names"].as_array_mut() {
+            for name in names {
+                name["displayName"] = name["unstructuredName"].clone();
+            }
+        }
+        held
     }
 
     /// The updates a run sent.
@@ -1173,6 +1182,72 @@ mod tests {
         assert!(vcard.contains("FN:Jane Edit"), "{vcard}");
         assert!(vcard.contains("+2"), "{vcard}");
         assert_eq!(updates(&requests), 2);
+    }
+
+    /// Jane at People with what her vCard cannot hold: a location on her
+    /// first organization, a second one, an HTML biography.
+    fn rich(phone: &str, title: &str) -> Value {
+        let mut person = named("Jane", Some(phone));
+        person["organizations"] = json!([
+            {"name": "Acme", "title": title, "location": "Paris"},
+            {"name": "Beta"},
+        ]);
+        person["biographies"] = json!([{"value": "<b>Hi</b>", "contentType": "TEXT_HTML"}]);
+        person
+    }
+
+    /// What People holds of `held` once the one update sent applies.
+    fn held_after(held: &Value, requests: &[FakeRequest]) -> Value {
+        let patches: Vec<_> = requests.iter().filter(|r| r.method == "PATCH").collect();
+        assert_eq!(patches.len(), 1, "one update");
+        applied(held, patches[0])
+    }
+
+    /// An edit of the first organization keeps its location and the second
+    /// one, which the vCard never showed.
+    #[test]
+    fn an_update_keeps_the_organizations_the_card_cannot_hold() {
+        let held = rich("+1", "Eng");
+        let edit = vcard_of(&rich("+2", "Lead"));
+        let mut client = Client::new(FakeServer::new(holding(held.clone())));
+        let updated = Gpeople {
+            client: &mut client,
+            token: "token",
+        }
+        .update_card("c1", &edit, Some(&vcard_of(&held)), Some("e-1"));
+
+        updated.unwrap();
+        let after = held_after(&held, &client.host.requests);
+        assert_eq!(
+            after["organizations"],
+            json!([
+                {"name": "Acme", "title": "Lead", "location": "Paris"},
+                {"name": "Beta"},
+            ]),
+            "{after}"
+        );
+        assert_eq!(after["biographies"], held["biographies"], "{after}");
+        assert_eq!(after["phoneNumbers"], json!([{"value": "+2"}]), "{after}");
+    }
+
+    /// An update with no base, which would mask every field, keeps what
+    /// the vCard cannot hold as People holds it.
+    #[test]
+    fn an_update_with_no_base_keeps_what_the_card_cannot_hold() {
+        let held = rich("+1", "Eng");
+        let edit = vcard_of(&rich("+2", "Eng"));
+        let mut client = Client::new(FakeServer::new(holding(held.clone())));
+        let updated = Gpeople {
+            client: &mut client,
+            token: "token",
+        }
+        .update_card("c1", &edit, None, Some("e-1"));
+
+        updated.unwrap();
+        let after = held_after(&held, &client.host.requests);
+        assert_eq!(after["organizations"], held["organizations"], "{after}");
+        assert_eq!(after["biographies"], held["biographies"], "{after}");
+        assert_eq!(after["phoneNumbers"], json!([{"value": "+2"}]), "{after}");
     }
 
     /// A person already holding the edit is not written again.

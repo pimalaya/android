@@ -290,7 +290,7 @@ public final class MailEngine extends PimdirEngine {
         List<Mailbox> ordered = new ArrayList<>(mailboxes);
         ordered.sort(
                 java.util.Comparator.comparingInt((Mailbox mailbox) -> rank(mailbox.role()))
-                        .thenComparing(mailbox -> mailbox.name(), String.CASE_INSENSITIVE_ORDER));
+                        .thenComparing(mailbox -> mailbox.label(), String.CASE_INSENSITIVE_ORDER));
         return ordered;
     }
 
@@ -1488,7 +1488,7 @@ public final class MailEngine extends PimdirEngine {
                     new PimdirCollections.Stored(
                             PimdirAccount.collectionId(accountId, mailbox.name()),
                             accountEmail,
-                            mailbox.name(),
+                            mailbox.label(),
                             null,
                             null));
         }

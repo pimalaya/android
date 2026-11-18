@@ -614,7 +614,9 @@ final class Native {
      * Pushes an edited object back to its calendar, guarded by any ETag.
      *
      * <p>The account's address makes Google and JMAP announce a meeting it
-     * organizes. Returns {@code {etag}}, the new ETag or null.
+     * organizes; {@code anchor}, the phone's zone as a {@code VTIMEZONE} (empty
+     * for none), is what Google and Graph read a floating time in. Returns
+     * {@code {etag}}, the new ETag or null.
      */
     static native String updateEvent(
             Transport transport,
@@ -622,7 +624,8 @@ final class Native {
             String calendarUrl,
             String id,
             String ical,
-            String etag);
+            String etag,
+            String anchor);
 
     /**
      * The object a new entry starts from, with RFC 5545's required properties.
@@ -648,7 +651,8 @@ final class Native {
             String account,
             String calendarUrl,
             String id,
-            String ical);
+            String ical,
+            String anchor);
 
     /**
      * Moves one object into another calendar of the account, guarded by any

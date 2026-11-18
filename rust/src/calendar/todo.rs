@@ -183,6 +183,7 @@ impl<H: Host> Msgraph<'_, H> {
                     id: task.id.clone(),
                     etag: task.etag.clone(),
                     ical: to_app(&task.to_ical(zone))?,
+                    ical_base64: None,
                 });
             }
         }

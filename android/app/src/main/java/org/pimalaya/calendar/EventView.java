@@ -375,7 +375,7 @@ public final class EventView {
             return;
         }
 
-        String id = uid + ".ics";
+        String id = CalendarSummaries.keyOf(ical, uid);
         leaveConflict();
         back = Panels.CALENDAR;
         afterWrite = null;

@@ -26,14 +26,36 @@ public final class CalendarSummaries {
      * nothing, the caller then writing none, which keeps the stored row.
      */
     public static Derived of(String ical) {
+        return ical == null ? null : of(ical.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** What io-pimdir derives from a body's bytes, as {@link #of(String)}. */
+    public static Derived of(byte[] ical) {
         if (ical == null) {
             return null;
         }
         try {
-            return PimdirSql.derive(PimdirSummary.CALENDAR, ical.getBytes(StandardCharsets.UTF_8));
+            return PimdirSql.derive(PimdirSummary.CALENDAR, ical);
         } catch (RuntimeException underivable) {
             Log.w("pimalaya", "calendar summary not derived", underivable);
             return null;
         }
+    }
+
+    /**
+     * The key an entry is filed under (STORAGE §9, Annex A.3): the one
+     * io-pimdir derives, its UID escaped when spelled like a derived key or
+     * the hash of its bytes, else {@code fallback} when nothing derives.
+     */
+    public static String keyOf(Derived derived, String fallback) {
+        return derived == null || derived.linkId() == null ? fallback : derived.linkId();
+    }
+
+    /**
+     * The key a create of {@code ical} is staged under, as the listing that
+     * lands it will name it; {@code uid} when nothing derives.
+     */
+    public static String keyOf(String ical, String uid) {
+        return keyOf(of(ical), uid);
     }
 }

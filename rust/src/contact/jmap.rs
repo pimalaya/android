@@ -101,6 +101,7 @@ impl<H: Host> Jmap<'_, H> {
             uri: id,
             etag: None,
             vcard: vcard.to_string(),
+            vcard_base64: None,
             books: vec![book_id.to_string()],
         })
     }
@@ -173,6 +174,7 @@ impl<H: Host> Jmap<'_, H> {
             uri: id.to_string(),
             etag: None,
             vcard: vcard.to_string(),
+            vcard_base64: None,
             books: Vec::new(),
         })
     }
@@ -313,7 +315,7 @@ impl<H: Host> Jmap<'_, H> {
 
             for (key, reference) in create_refs {
                 if let Some(err) = out.not_created.get(&key) {
-                    outcomes.push(rejected(reference, err.to_string()));
+                    outcomes.push(rejected(reference, err.to_string(), refuses(err)));
                 } else if let Some(id) = out.created.get(&key).and_then(|card| card.id.clone()) {
                     outcomes.push(PushOutcome {
                         reference,
@@ -327,7 +329,7 @@ impl<H: Host> Jmap<'_, H> {
             }
             for (id, reference) in update_refs {
                 match out.not_updated.get(&id) {
-                    Some(err) => outcomes.push(rejected(reference, err.to_string())),
+                    Some(err) => outcomes.push(rejected(reference, err.to_string(), refuses(err))),
                     None => outcomes.push(PushOutcome {
                         reference,
                         accepted: true,
@@ -346,7 +348,7 @@ impl<H: Host> Jmap<'_, H> {
                             ..Default::default()
                         })
                     }
-                    Some(err) => outcomes.push(rejected(reference, err.to_string())),
+                    Some(err) => outcomes.push(rejected(reference, err.to_string(), refuses(err))),
                 }
             }
         }
@@ -521,8 +523,26 @@ pub fn to_card(card: JmapContactCard) -> Result<Card, String> {
         id,
         etag,
         vcard,
+        vcard_base64: None,
         books,
     })
+}
+
+/// Whether a `ContactCard/set` error refuses the change as it stands
+/// (pimdir SYNC §4, RFC 8620 section 5.3), as the mail side reads an
+/// `Email/set` one: never a card gone, a quota nor a rate limit.
+fn refuses(err: &JmapContactCardSetItemError) -> bool {
+    match err {
+        JmapContactCardSetItemError::BlobNotFound { .. }
+        | JmapContactCardSetItemError::Forbidden { .. }
+        | JmapContactCardSetItemError::InvalidPatch { .. }
+        | JmapContactCardSetItemError::InvalidProperties { .. } => true,
+        JmapContactCardSetItemError::Other { type_name, .. } => {
+            matches!(type_name.as_str(), "tooLarge" | "singleton")
+        }
+        JmapContactCardSetItemError::NotFound { .. }
+        | JmapContactCardSetItemError::WillDestroy { .. } => false,
+    }
 }
 
 #[cfg(test)]
@@ -742,5 +762,68 @@ mod tests {
         book.expired = true;
 
         assert!(round(book, Some("s1"), 500).0.is_none());
+    }
+
+    /// A card JMAP refuses as it stands (`invalidProperties`) is answered
+    /// refused, one over the account's quota is not.
+    #[test]
+    fn a_card_refused_as_it_stands_is_told_refused() {
+        let session = jmap_session(
+            json!({ "urn:ietf:params:jmap:core": {}, "urn:ietf:params:jmap:contacts": {} }),
+            json!({ "urn:ietf:params:jmap:contacts": "a1" }),
+        );
+        let mut client = Client::new(FakeServer::new(|request: &FakeRequest| {
+            if request.method == "GET" {
+                return FakeResponse::json(200, &session);
+            }
+            let (name, _, id): (String, Value, String) =
+                serde_json::from_value(request.json::<Value>()["methodCalls"][0].take()).unwrap();
+            assert_eq!(name, "ContactCard/set");
+            let result = json!({
+                "accountId": "a1",
+                "newState": "s2",
+                "created": { "c0": { "id": "k1" } },
+                "notCreated": {
+                    "c1": { "type": "invalidProperties", "properties": ["name"] },
+                    "c2": { "type": "overQuota" },
+                },
+            });
+            FakeResponse::json(
+                200,
+                &json!({ "methodResponses": [[name, result, id]], "sessionState": "s1" }),
+            )
+        }));
+        let vcard = "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Jane\r\nEND:VCARD\r\n";
+        let changes: Vec<PushChange> = ["a", "b", "c"]
+            .iter()
+            .map(|reference| {
+                serde_json::from_value(json!({"ref": reference, "op": "create", "vcard": vcard}))
+                    .unwrap()
+            })
+            .collect();
+
+        let outcomes = Jmap {
+            client: &mut client,
+            session_url: Url::parse("https://api.example.com/jmap/session").unwrap(),
+            auth: Auth::Bearer("token-s4-contacts"),
+        }
+        .push_cards("b1", &changes)
+        .unwrap();
+
+        let mut told: Vec<(&str, bool, bool)> = outcomes
+            .iter()
+            .map(|outcome| {
+                (
+                    outcome.reference.as_str(),
+                    outcome.accepted,
+                    outcome.refused,
+                )
+            })
+            .collect();
+        told.sort();
+        assert_eq!(
+            told,
+            [("a", true, false), ("b", false, true), ("c", false, false)]
+        );
     }
 }

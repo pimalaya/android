@@ -187,6 +187,22 @@ impl<'a, H: Host> SmtpSession<'a, H> {
         }
         Ok(())
     }
+
+    /// Ends a session a send failed on, so the next send opens its own:
+    /// left open, the transport would hand that send a connection waiting
+    /// for a command, never a greeting.
+    ///
+    /// `QUIT` first where the server answered (RFC 5321 section 4.1.1.10),
+    /// none where the message may have gone with no verdict read, whose
+    /// connection is in no known state.
+    fn abandon(&mut self, err: &SmtpSendError) {
+        if !err.is_uncertain()
+            && let Err(quit) = self.run(SmtpQuit::new())
+        {
+            log::debug!("quit after a failed send failed: {quit}");
+        }
+        self.client.reset(&self.url);
+    }
 }
 
 /// Why one submission failed, in the only terms the outbox cares about.
@@ -254,9 +270,11 @@ impl Display for SmtpSendError {
 
 /// One send failure as the queue reads it.
 ///
-/// A 5yz reply is the server's final word, parked; a 4yz asks for the
-/// message later (RFC 5321 section 4.2.1), pending. No reply code is no
-/// verdict: a retry before the message was `handed_over`, uncertain after.
+/// A 5yz reply is the server's final word, parked, unless it names a
+/// sending limit ([`names_a_sending_limit`]), which the account outlives;
+/// a 4yz asks for the message later (RFC 5321 section 4.2.1), pending. No
+/// reply code is no verdict: a retry before the message was
+/// `handed_over`, uncertain after.
 fn refusal(err: SmtpMessageSendError, handed_over: bool) -> SmtpSendError {
     let code = match &err {
         SmtpMessageSendError::MailFrom(SmtpMailError::Rejected { code, .. })
@@ -279,13 +297,39 @@ fn refusal(err: SmtpMessageSendError, handed_over: bool) -> SmtpSendError {
         | SmtpMessageSendError::Data(_) => 0,
     };
 
-    if (500..600).contains(&code) {
+    if (500..600).contains(&code) && names_a_sending_limit(&err.to_string()) {
+        SmtpSendError::Transient(err.to_string())
+    } else if (500..600).contains(&code) {
         SmtpSendError::Refused(err.to_string())
     } else if code == 0 {
         SmtpSendError::lost(err, handed_over)
     } else {
         SmtpSendError::Transient(err.to_string())
     }
+}
+
+/// Enhanced status codes (RFC 3463) naming a sending rate or quota alone:
+/// Gmail's daily limit, Microsoft's recipient and submission limits.
+const SENDING_LIMIT_CODES: [&str; 5] = ["5.4.5", "5.1.90", "5.7.232", "5.7.233", "5.7.236"];
+
+/// Wording of a sending rate or quota refusal under an ambiguous code.
+const SENDING_LIMIT_WORDS: [&str; 5] = [
+    "submissionquotaexceeded",
+    "submission quota",
+    "sending limit exceeded",
+    "rate limited",
+    "daily limit for message recipients",
+];
+
+/// Whether a refusal's text names a sending rate or quota: the account's
+/// state, not the message's, which a later drain may send.
+fn names_a_sending_limit(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    text.split_ascii_whitespace()
+        .any(|word| SENDING_LIMIT_CODES.contains(&word))
+        || SENDING_LIMIT_WORDS
+            .iter()
+            .any(|words| lower.contains(words))
 }
 
 /// Whether a write carries the end of a message's data, its final `.`
@@ -343,8 +387,14 @@ pub fn send<H: Host>(
     composed: &Composed,
 ) -> Result<(), SmtpSendError> {
     let mut session = SmtpSession::new(client, url);
-    session.connect(auth).map_err(SmtpSendError::connecting)?;
-    session.submit(composed)
+    let sent = session
+        .connect(auth)
+        .map_err(SmtpSendError::connecting)
+        .and_then(|()| session.submit(composed));
+    if let Err(err) = &sent {
+        session.abandon(err);
+    }
+    sent
 }
 
 #[cfg(test)]
@@ -355,17 +405,21 @@ mod tests {
         send::SmtpCommandSendError,
     };
 
+    use std::collections::VecDeque;
+
     use url::Url;
 
     use crate::{
         client::{
-            Client,
+            Auth, Client, Host,
             fake::{FakeRequest, FakeResponse, FakeServer},
         },
         error::BridgeError,
         mail::{
             compose::Composed,
-            smtp::{EHLO_DOMAIN, SmtpSendError, SmtpSession, domain, handed, mailbox, refusal},
+            smtp::{
+                EHLO_DOMAIN, SmtpSendError, SmtpSession, domain, handed, mailbox, refusal, send,
+            },
         },
     };
 
@@ -543,5 +597,163 @@ mod tests {
         assert!(handed(b"Subject: x\r\n\r\n..hello\r\n.\r\n"));
         assert!(!handed(b"DATA\r\n"));
         assert!(!handed(b"RCPT TO:<a@b.c>\r\n"));
+    }
+
+    /// An SMTP server over one connection the transport keeps between two
+    /// sends, as Java's does by origin: a greeting on each connection it
+    /// opens, the end of stream once it answered `QUIT`, and a read timing
+    /// out while it waits for a command nobody sends.
+    #[derive(Default)]
+    struct Scripted {
+        /// Whether a connection is open, and whether the server ended it.
+        open: bool,
+        ended: bool,
+        pending: VecDeque<u8>,
+        /// Whether the client's lines are the message's data.
+        data: bool,
+        /// Every command, connections apart.
+        commands: Vec<String>,
+        /// How many connections were opened.
+        connections: usize,
+    }
+
+    impl Scripted {
+        fn answer(&mut self, line: &str) -> &'static str {
+            if self.data {
+                if line == "." {
+                    self.data = false;
+                    return "250 2.0.0 queued\r\n";
+                }
+                return "";
+            }
+            self.commands.push(line.to_string());
+            let verb = line.split([' ', ':']).next().unwrap_or_default();
+            match verb.to_ascii_uppercase().as_str() {
+                "EHLO" => "250-smtp.example.org\r\n250 AUTH PLAIN\r\n",
+                "AUTH" => "235 2.7.0 accepted\r\n",
+                "MAIL" | "RSET" => "250 2.1.0 ok\r\n",
+                "RCPT" if line.contains("refused@") => "550 5.1.1 no such user\r\n",
+                "RCPT" if line.contains("limited@") => {
+                    "550 5.4.5 Daily user sending limit exceeded\r\n"
+                }
+                "RCPT" => "250 2.1.5 ok\r\n",
+                "DATA" => {
+                    self.data = true;
+                    "354 go ahead\r\n"
+                }
+                "QUIT" => {
+                    self.ended = true;
+                    "221 2.0.0 bye\r\n"
+                }
+                _ => "502 5.5.2 unscripted\r\n",
+            }
+        }
+    }
+
+    impl Host for Scripted {
+        fn read(&mut self, _url: &str) -> Result<Vec<u8>, BridgeError> {
+            if !self.open {
+                self.open = true;
+                self.ended = false;
+                self.connections += 1;
+                self.pending.extend(b"220 smtp.example.org ready\r\n");
+            }
+            if self.pending.is_empty() {
+                if self.ended {
+                    self.open = false;
+                    return Ok(Vec::new());
+                }
+                return Err("Read timed out".into());
+            }
+            Ok(self.pending.drain(..).collect())
+        }
+
+        fn write(&mut self, _url: &str, bytes: &[u8]) -> Result<(), BridgeError> {
+            let text = String::from_utf8_lossy(bytes).into_owned();
+            for line in text.split_terminator("\r\n") {
+                let reply = self.answer(line);
+                self.pending.extend(reply.as_bytes());
+            }
+            Ok(())
+        }
+
+        fn begin(&mut self, _url: &str) -> bool {
+            false
+        }
+
+        fn settle(&mut self, _url: &str) {}
+
+        fn reset(&mut self, _url: &str) {
+            self.open = false;
+            self.data = false;
+            self.pending.clear();
+        }
+
+        fn starttls(&mut self, _url: &str) -> Result<(), BridgeError> {
+            Err("Unscripted".into())
+        }
+
+        fn serve(&mut self, _request: &str) -> Result<String, BridgeError> {
+            Err("Unscripted".into())
+        }
+    }
+
+    /// A message to `to`, from Jane.
+    fn to(to: &str) -> Composed {
+        Composed {
+            message: format!("From: jane@example.org\r\nTo: {to}\r\nSubject: x\r\n\r\nhi\r\n")
+                .into_bytes(),
+            sender: "jane@example.org".into(),
+            recipients: vec![to.into()],
+        }
+    }
+
+    /// Two queued messages over one connection, the first refused at its
+    /// `RCPT`: the second is sent all the same, as mail.md asks of one
+    /// refusal among several.
+    #[test]
+    fn a_submission_refused_leaves_the_next_one_sent() {
+        let mut client = Client::new(Scripted::default());
+        let url = Url::parse("smtps://jane@smtp.example.org").unwrap();
+        let auth = Auth::Basic {
+            login: "jane",
+            password: "secret",
+        };
+
+        let first = send(&mut client, &url, &auth, &to("refused@example.org"));
+        let second = send(&mut client, &url, &auth, &to("bob@example.org"));
+
+        assert!(first.is_err_and(|err| err.is_permanent()));
+        assert_eq!(second.map_err(|err| err.to_string()), Ok(()));
+        assert_eq!(
+            client.host.commands.last().map(String::as_str),
+            Some("QUIT")
+        );
+    }
+
+    /// A 5yz naming a sending limit (Gmail's 5.4.5, Microsoft's 5.7.232 and
+    /// their wording) keeps the message queued: the account may send again
+    /// later, where any other 5yz is the server's last word.
+    #[test]
+    fn a_sending_limit_keeps_the_message_queued() {
+        let mut client = Client::new(Scripted::default());
+        let url = Url::parse("smtps://jane@smtp.example.org").unwrap();
+        let auth = Auth::Basic {
+            login: "jane",
+            password: "secret",
+        };
+
+        let limited = send(&mut client, &url, &auth, &to("limited@example.org")).unwrap_err();
+
+        assert!(!limited.is_permanent(), "{limited}");
+        assert!(!limited.is_uncertain(), "{limited}");
+
+        let microsoft = SmtpMessageSendError::Data(SmtpDataError::BodyRejected {
+            code: 554,
+            message: "5.7.232 Your message can't be sent because your trial tenant has \
+                      exceeded its daily limit for message recipients"
+                .into(),
+        });
+        assert!(!refusal(microsoft, true).is_permanent());
     }
 }

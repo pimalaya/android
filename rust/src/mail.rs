@@ -33,6 +33,8 @@ use mime::{
 };
 use serde::Serialize;
 
+use crate::error::BridgeError;
+
 /// A message's `Message-ID`, its angle brackets taken off, read from its
 /// header alone; [`None`] when it carries none.
 pub fn message_id(raw: &[u8]) -> Option<String> {
@@ -168,12 +170,59 @@ pub fn unbase64(encoded: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+/// A folder's own name as one segment of its `/`-joined path: a `/` it
+/// holds written `%2F`, and a `%` written `%25` so the two never meet.
+///
+/// Unescaped, a top-level `A/B` and the child `B` of `A` are one key.
+pub fn path_segment(name: &str) -> String {
+    name.replace('%', "%25").replace('/', "%2F")
+}
+
+/// A path of [`path_segment`]s as a person reads it, the escapes undone.
+pub fn path_label(path: &str) -> String {
+    path.replace("%2F", "/").replace("%25", "%")
+}
+
+/// An HTTP send that failed, and whether the server may have taken it.
+///
+/// Told by the failure, not by its status alone: a request never built or
+/// never written whole cannot have been sent, while one written whole whose
+/// verdict was not read (no answer, a cut answer, a 2xx that does not
+/// parse) may have been.
+pub struct SendFailure {
+    /// What went wrong.
+    pub error: BridgeError,
+    /// Whether the request went whole and no verdict was read back.
+    pub taken: bool,
+}
+
+impl SendFailure {
+    /// A failure that sent nothing, or that the server answered with its
+    /// verdict.
+    pub fn unsent(error: impl Into<BridgeError>) -> Self {
+        Self {
+            error: error.into(),
+            taken: false,
+        }
+    }
+}
+
+/// A failure before the send's own request, or the server's verdict on it.
+impl From<BridgeError> for SendFailure {
+    fn from(error: BridgeError) -> Self {
+        Self::unsent(error)
+    }
+}
+
 /// One mailbox the account holds, and what the server says it is for.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Mailbox {
     /// The name a collection is keyed by, hierarchical where the backend nests.
     pub name: String,
+    /// The name a person reads: the key with the escapes of its path's
+    /// segments undone ([`path_segment`]), the key itself elsewhere.
+    pub label: String,
     /// The mailbox's pimdir role (`inbox`, `sent`, `trash`, ...), or empty.
     ///
     /// From RFC 6154 attributes, RFC 8621 roles, Gmail system labels or Graph

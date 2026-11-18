@@ -4,6 +4,7 @@ import org.json.JSONException;
 
 import org.pimalaya.calendar.CalendarParts;
 import org.pimalaya.calendar.CalendarStager;
+import org.pimalaya.calendar.CalendarSummaries;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.StaleEdit;
 import org.pimalaya.calendar.Zones;
@@ -52,7 +53,13 @@ public final class TaskWrites {
         String ical =
                 CalendarClient.newEvent(new EventDraft("VTODO", uid, edit.stamp(), "", "", ""));
         String written = CalendarClient.writeTask(ical, edit);
-        stager().mutateAdd(calendar.id, uid + ".ics", written, Flags.none(), null, "");
+        stager().mutateAdd(
+                calendar.id,
+                CalendarSummaries.keyOf(written, uid),
+                written,
+                Flags.none(),
+                null,
+                "");
         return uid;
     }
 

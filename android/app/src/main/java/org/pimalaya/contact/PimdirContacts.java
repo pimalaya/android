@@ -325,6 +325,29 @@ public final class PimdirContacts {
     }
 
     /**
+     * Stages a copy of a card into another book, as {@link #save} stages it;
+     * refused, staging nothing, when a placement it is copied from holds a
+     * body kept as served that is not UTF-8 ({@link
+     * org.pimalaya.pimdir.Stager#requireText}): the copy would carry its text.
+     *
+     * @param from the link id it is held under, by the book it is copied from
+     */
+    public void copy(String target, Card card, Map<String, String> from) {
+        try {
+            for (Map.Entry<String, String> source : from.entrySet()) {
+                String collection = source.getKey();
+                if (held(collection, source.getValue())) {
+                    stager.requireText(
+                            collection, stager.offline.handleFor(collection, source.getValue()));
+                }
+            }
+        } catch (JSONException error) {
+            throw new IllegalStateException(error);
+        }
+        save(target, card);
+    }
+
+    /**
      * Stages a local delete as a pimdir mutation; the next sync pushes it.
      *
      * <p>A create never pushed is withdrawn by the engine instead.
@@ -697,7 +720,7 @@ public final class PimdirContacts {
             return ContactClient.indexCard(vcard);
         } catch (Exception error) {
             Log.w("pimalaya", "card index failed", error);
-            return new CardIndex("", List.of(), "", "", "", "", "", null, "");
+            return new CardIndex("", List.of(), "", "", "", "", "", "", null, "");
         }
     }
 

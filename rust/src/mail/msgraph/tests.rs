@@ -738,7 +738,11 @@ fn widening_three_times_lists_each_band_once() {
     sync(&mut store, &mut graph, dir.path(), Some(&floor)).unwrap();
 
     assert_eq!(handles(dir.path()).len(), 200);
-    assert_eq!(graph.listed, 200, "the first chunk and three bands of 50");
+    assert_eq!(
+        graph.listed,
+        50 + 100 + 150 + 200,
+        "the first chunk, then three bands of 50 each listed from its floor"
+    );
     assert_eq!(
         graph.delta_starts, 1,
         "one delta link, kept across widenings"
@@ -979,6 +983,42 @@ fn an_undated_message_survives_a_widening() {
     );
 }
 
+/// A message dated in a widened band and submitted after the band's
+/// ceiling, its `sentDateTime` among the first chunk's, is listed by the
+/// band: a band lists from its floor alone, never below a ceiling on
+/// `sentDateTime`.
+#[test]
+fn a_band_lists_a_message_sent_after_its_date() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(dir.path());
+    let mut graph = FakeGraph::new(200);
+    let dated: Timestamp = hours_back(70).parse().unwrap();
+    let date = dated.strftime("%a, %d %b %Y %H:%M:%S +0000").to_string();
+    graph.folder.insert(
+        "late".into(),
+        Message {
+            date: Some(hours_back(20)),
+            read: false,
+            size: Some(1),
+            fields: vec![("Date".into(), date)],
+        },
+    );
+
+    let mut floor = graph.floor(None, 50).unwrap();
+    sync(&mut store, &mut graph, dir.path(), Some(&floor)).unwrap();
+    assert!(
+        !handles(dir.path()).contains("late"),
+        "dated below the first chunk"
+    );
+
+    floor = graph.floor(Some(&floor), 50).unwrap();
+    sync(&mut store, &mut graph, dir.path(), Some(&floor)).unwrap();
+    assert!(
+        handles(dir.path()).contains("late"),
+        "listed by the band its Date falls in"
+    );
+}
+
 /// The delta's first pass keeps a row by `sentDateTime`, stamped at
 /// submission, not by the `Date` a member is in scope by: a member it leaves
 /// out, with no `Date` or with one in scope, is kept through the folder's
@@ -1092,6 +1132,7 @@ fn a_fresh_session_widens_and_fills_a_folder_it_never_listed() {
             (
                 "AAMk-inbox".into(),
                 Mailbox {
+                    label: INBOX.into(),
                     name: INBOX.into(),
                     role: "inbox".into(),
                 },
@@ -1099,6 +1140,7 @@ fn a_fresh_session_widens_and_fills_a_folder_it_never_listed() {
             (
                 "AAMk-archive".into(),
                 Mailbox {
+                    label: "Archive".into(),
                     name: "Archive".into(),
                     role: String::new(),
                 },
@@ -2321,4 +2363,56 @@ fn a_copy_run_again_after_a_lost_answer_files_one_copy() {
     }
     drop(answer);
     assert_eq!(copies, 1, "copied once");
+}
+
+/// A `/` or a `%` in a folder's own name is escaped in its key, so a
+/// top-level `A/B` and the child `B` of `A` are two collections, each shown
+/// under its path as a person reads it.
+#[test]
+fn a_slash_in_a_folders_own_name_keys_a_collection_of_its_own() {
+    let folder = |id: &str, name: &str, children: u32| json!({ "id": id, "displayName": name, "childFolderCount": children });
+    let mut answer = |request: &FakeRequest| match request.path.as_str() {
+        "/v1.0/me/mailFolders/deleteditems" => {
+            FakeResponse::json(200, &folder("trash", "Deleted Items", 0))
+        }
+        "/v1.0/me/mailFolders" => FakeResponse::json(
+            200,
+            &json!({ "value": [
+                folder("ab", "A/B", 0),
+                folder("a", "A", 1),
+                folder("pc", "100%", 0),
+                folder("trash", "Deleted Items", 0),
+            ] }),
+        ),
+        "/v1.0/me/mailFolders/a/childFolders" => {
+            FakeResponse::json(200, &json!({ "value": [folder("b", "B", 0)] }))
+        }
+        _ => FakeResponse::json(404, &json!({ "error": { "code": "ErrorItemNotFound" } })),
+    };
+
+    let mut client = Client::new(FakeServer::boxed(&mut answer));
+    let mut graph = Msgraph {
+        client: &mut client,
+        token: "token",
+    };
+    let mut roster: Vec<(String, String, String)> = graph
+        .list_mailboxes()
+        .unwrap()
+        .into_iter()
+        .map(|(id, mailbox)| (id, mailbox.name, mailbox.label))
+        .collect();
+    roster.sort();
+
+    let expected = [
+        ("a", "A", "A"),
+        ("ab", "A%2FB", "A/B"),
+        ("b", "A/B", "A/B"),
+        ("pc", "100%25", "100%"),
+        ("trash", "Deleted Items", "Deleted Items"),
+    ];
+    let expected: Vec<(String, String, String)> = expected
+        .iter()
+        .map(|(id, name, label)| (id.to_string(), name.to_string(), label.to_string()))
+        .collect();
+    assert_eq!(roster, expected);
 }

@@ -4478,7 +4478,7 @@ public final class OnboardingFlow {
                     chosenMailboxes == null
                             ? keptByDefault(mailbox)
                             : chosenMailboxes.contains(mailbox.name());
-            addChoice(card, mailbox.name(), mailbox.name(), on);
+            addChoice(card, mailbox.label(), mailbox.name(), on);
         }
 
         shell.showAuth(STEP_BOOKS);

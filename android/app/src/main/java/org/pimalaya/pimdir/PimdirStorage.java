@@ -147,6 +147,25 @@ public final class PimdirStorage {
     private static final String ESCAPED = "esc:";
 
     /**
+     * The name a create is filed under on a server that takes the client's:
+     * {@link #statedOf}, else a fresh one for a key the writer derived
+     * ({@code hash:}, {@code dup:}, {@code alt:}), which names no identity
+     * and is never pushed as one (STORAGE §9).
+     */
+    public static String resourceOf(String handle) {
+        String name = nameOf(handle);
+        for (String derived : DERIVED) {
+            if (name.startsWith(derived)) {
+                return java.util.UUID.randomUUID().toString();
+            }
+        }
+        return statedOf(handle);
+    }
+
+    /** The prefixes of the keys a writer derives (STORAGE §9). */
+    private static final String[] DERIVED = {"alt:", "hash:", "dup:"};
+
+    /**
      * The collection's placements and sync cursor, replying to a load yield.
      *
      * <p>Retained rows are left out (SPEC.md §11), staged tombstones kept or
@@ -2003,9 +2022,24 @@ public final class PimdirStorage {
             if (!cursor.isNull(4)) {
                 row.put("etag", cursor.getString(4));
             }
-            row.put("vcard", bodyOf(cursor.isNull(0) ? null : cursor.getString(0)));
+            String object = cursor.isNull(0) ? null : cursor.getString(0);
+            row.put("vcard", bodyOf(object));
+            // NOTE: a body stored as served that is not UTF-8 (a Latin-1 vCard
+            // 2.1) reads as text with U+FFFD: pushing that text would write
+            // the replacement characters to the server.
+            if (object != null) {
+                row.put("object", object);
+                if (!wellFormed(object)) {
+                    row.put("lossy", true);
+                }
+            }
             if (!cursor.isNull(3)) {
-                row.put("baseVcard", bodyOf(cursor.getString(3)));
+                String base = cursor.getString(3);
+                row.put("baseVcard", bodyOf(base));
+                row.put("baseObject", base);
+                if (!wellFormed(base)) {
+                    row.put("baseLossy", true);
+                }
             }
             row.put("deleted", cursor.getInt(1) == 1);
             return row;
@@ -2705,6 +2739,42 @@ public final class PimdirStorage {
                 return "";
             }
             return body;
+        } catch (IOException error) {
+            throw new JSONException("Could not read the body " + hash + ": " + error.getMessage());
+        }
+    }
+
+    /**
+     * The bytes of the body {@code hash} names, as base64, the way a body
+     * that is not UTF-8 crosses to the engine; null when it is not stored.
+     */
+    public String base64Of(String hash) throws JSONException {
+        try {
+            byte[] body = blobs.get(hash);
+            return body == null ? null : java.util.Base64.getEncoder().encodeToString(body);
+        } catch (IOException error) {
+            throw new JSONException("Could not read the body " + hash + ": " + error.getMessage());
+        }
+    }
+
+    /**
+     * Whether the body {@code hash} names is well-formed UTF-8, read as text
+     * without loss; true for one not stored, which reads as empty.
+     */
+    public boolean wellFormed(String hash) throws JSONException {
+        try {
+            byte[] body = blobs.get(hash);
+            if (body == null) {
+                return true;
+            }
+            StandardCharsets.UTF_8
+                    .newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(body));
+            return true;
+        } catch (java.nio.charset.CharacterCodingException malformed) {
+            return false;
         } catch (IOException error) {
             throw new JSONException("Could not read the body " + hash + ": " + error.getMessage());
         }

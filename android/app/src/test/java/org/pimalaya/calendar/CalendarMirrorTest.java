@@ -378,7 +378,8 @@ public class CalendarMirrorTest {
         Map<String, Object> event = events().get(0);
         String handle = String.valueOf(event.get(Events._SYNC_ID));
         assertTrue(handle.endsWith(".ics"));
-        String body = stored().get(handle);
+        // NOTE: keyed by its UID (STORAGE §9), the phone's handle apart.
+        String body = stored().get(String.valueOf(event.get(Events.UID_2445)));
         assertNotNull(body);
         assertTrue(body.contains("SUMMARY:Lunch\r\n"));
         assertTrue(body.contains("UID:" + event.get(Events.UID_2445) + "\r\n"));

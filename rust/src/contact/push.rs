@@ -52,6 +52,10 @@ pub struct PushOutcome {
     /// logging only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Whether the server refused the change as it stands (pimdir SYNC
+    /// §4), which the driver answers refused rather than pushing again.
+    #[serde(skip_serializing_if = "core::ops::Not::not")]
+    pub refused: bool,
 }
 
 /// A required field of a push change, named in the error when absent.
@@ -65,12 +69,14 @@ pub fn required<'a>(
         .ok_or_else(|| format!("Push {op} change is missing its {name}").into())
 }
 
-/// One rejected push outcome carrying what the server objected.
-pub fn rejected(reference: String, error: String) -> PushOutcome {
+/// One rejected push outcome carrying what the server objected, and
+/// whether it refused the change as it stands.
+pub fn rejected(reference: String, error: String, refused: bool) -> PushOutcome {
     PushOutcome {
         reference,
         accepted: false,
         error: Some(error),
+        refused,
         ..Default::default()
     }
 }

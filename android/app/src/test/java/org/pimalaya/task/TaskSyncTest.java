@@ -2,6 +2,7 @@ package org.pimalaya.task;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -28,6 +29,7 @@ import org.pimalaya.client.EventTarget;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.PimalayaException;
+import org.pimalaya.client.SyncReport;
 import org.pimalaya.client.Task;
 import org.pimalaya.client.TaskEdit;
 import org.pimalaya.client.Transport;
@@ -342,6 +344,39 @@ public class TaskSyncTest {
     @Test
     public void aCreateRefusedInConflictLeavesTheRestOfThePass() throws Exception {
         refusedCreate(new PimalayaException("WebDAV server returned HTTP 409", 409));
+    }
+
+    /**
+     * A create the server refuses as it stands (a 400 naming the request, as
+     * the bridge reads it) is that item's: the calendar's other creates land,
+     * the refusal is recorded on its binding and reported, and the next pass
+     * holds it rather than asking the server again (pimdir SYNC §4, §5).
+     */
+    @Test
+    public void aCreateRefusedAsItStandsIsHeldAndReported() throws Exception {
+        list(new Calendar("work", "Work", WORK, "", null, "", true));
+        engine.sync(calendar("Work").id);
+        String refused = writes.capture(calendar("Work"), "Call Ann", null, null);
+        String first = writes.capture(calendar("Work"), "Fix the gate", null, null);
+        String second = writes.capture(calendar("Work"), "Pay the bill", null, null);
+        dav.refusing.put(
+                refused + ".ics",
+                new PimalayaException("WebDAV server returned HTTP 400", 400, true));
+
+        engine.sync(calendar("Work").id);
+
+        assertTrue("the rest is pushed", dav.of(WORK).containsKey(first + ".ics"));
+        assertTrue("the rest is pushed", dav.of(WORK).containsKey(second + ".ics"));
+        assertFalse(dav.of(WORK).containsKey(refused + ".ics"));
+        assertNotNull(
+                "recorded on the binding",
+                one("SELECT refusal FROM bindings WHERE refusal IS NOT NULL"));
+
+        dav.creates.clear();
+        SyncReport report = clients.offline().sync(engine, calendar("Work").id, false);
+        assertTrue("held: " + dav.creates, dav.creates.isEmpty());
+        assertEquals("reported again", 1, report.refusals().size());
+        assertTrue(report.refusals().get(0).reason().contains("400"));
     }
 
     /**

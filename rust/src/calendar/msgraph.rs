@@ -54,7 +54,8 @@ use crate::{
     calendar::{
         Calendar, Event, EventRef,
         occurrence::{
-            OccurrenceChange, OccurrenceWrite, occurrence_changes, occurrence_window, occurrences,
+            OccurrenceChange, OccurrenceWrite, no_instance, occurrence_changes, occurrence_window,
+            occurrences, refuse_ranges, set_apart, unattended,
         },
     },
     client::{
@@ -143,7 +144,65 @@ impl<H: Host> Msgraph<'_, H> {
     /// A `transactionId` ([`create_body`]) lands a resent create on the
     /// first's event, not a second inviting twice. Read back with its
     /// stash: one whose UID was lost (a second event elsewhere) is deleted.
+    ///
+    /// A series setting occurrences apart is created whole: the master
+    /// without its attendees, each occurrence through its instance, then
+    /// the attendees, Graph inviting them once. One not landing whole is
+    /// deleted again, a refused occurrence answering [`REFUSED`], any other
+    /// failure 412, the create staying staged. An override of this and
+    /// future occurrences is refused before anything is written.
     pub fn create_event(&mut self, calendar: &str, ical: &str) -> Result<EventRef, BridgeError> {
+        refuse_ranges(ical, "Microsoft Graph")?;
+        let (overridden, excluded) = set_apart(ical)?;
+        let quiet = match overridden || excluded {
+            true => unattended(ical)?,
+            false => None,
+        };
+        let created = self.create_master(calendar, quiet.as_deref().unwrap_or(ical))?;
+        if !overridden && !excluded {
+            return Ok(created);
+        }
+
+        let mut entry = GraphEntry {
+            msgraph: Msgraph {
+                client: self.client,
+                token: self.token,
+            },
+            id: &created.id,
+        };
+        let written = entry
+            .write_occurrences(quiet.as_deref().unwrap_or(ical), None)
+            .and_then(|change_key| match &quiet {
+                Some(_) => entry.invite(ical),
+                None => Ok(change_key),
+            });
+        match written {
+            Ok(change_key) => Ok(EventRef {
+                id: created.id,
+                etag: change_key,
+            }),
+            Err(err) => {
+                if let Err(undo) = entry.msgraph.remove_event(&created.id) {
+                    log::warn!("cannot delete series {} again: {undo}", created.id);
+                }
+                let message = format!(
+                    "Graph took the series created in {calendar} without all its \
+                     occurrences, so it was deleted again: {err}"
+                );
+                Err(match err.status {
+                    Some(REFUSED) => BridgeError::refusal(message),
+                    _ => BridgeError {
+                        message,
+                        status: Some(412),
+                        ..Default::default()
+                    },
+                })
+            }
+        }
+    }
+
+    /// Files an iCalendar object's master as an event ([`Self::create_event`]).
+    fn create_master(&mut self, calendar: &str, ical: &str) -> Result<EventRef, BridgeError> {
         let auth = HttpAuthBearer::new(self.token);
         let event =
             MsgraphEvent::create_from_ical(ical.as_bytes()).map_err(|err| err.to_string())?;
@@ -198,18 +257,26 @@ impl<H: Host> Msgraph<'_, H> {
     }
 
     /// Deletes an event, the whole series for a master, conditionally on
-    /// `if_match`.
+    /// `if_match`; one read or answered gone (404, 410) is deleted already.
     pub fn delete_event(&mut self, id: &str, if_match: Option<&str>) -> Result<(), BridgeError> {
         let auth = HttpAuthBearer::new(self.token);
+        let gone = |err: &BridgeError| matches!(err.status, Some(404 | 410));
         if if_match.is_some() {
-            let current = self.fetch_event(id)?;
+            let current = match self.fetch_event(id) {
+                Err(err) if gone(&err) => {
+                    log::debug!("event {id} gone already");
+                    return Ok(());
+                }
+                read => read?,
+            };
             check_revision(id, &current, if_match)?;
         }
 
         let coroutine = MsgraphEventDelete::new(&auth, "me", id).map_err(|err| err.to_string())?;
-        self.run(coroutine)?;
-
-        Ok(())
+        match self.run(coroutine) {
+            Err(err) if gone(&err) => Ok(()),
+            deleted => deleted.map(|_| ()),
+        }
     }
 
     /// Reads one event with everything the projection reads, its stash
@@ -363,6 +430,7 @@ impl<H: Host> GraphEntry<'_, H> {
         if_match: Option<&str>,
     ) -> Result<Option<String>, BridgeError> {
         let id = self.id;
+        refuse_ranges(ical, "Microsoft Graph")?;
         let (current, exceptions) = self.msgraph.fetch_series(id)?;
         check_revision(id, &current, if_match)?;
 
@@ -385,11 +453,9 @@ impl<H: Host> GraphEntry<'_, H> {
         let read = (!wrote).then_some((current, exceptions));
         self.write_occurrences(ical, read)
             .map_err(|err| match err.status {
-                Some(REFUSED) => BridgeError {
-                    message: format!("Graph refuses an occurrence of event {id} for good: {err}"),
-                    status: Some(REFUSED),
-                    ..Default::default()
-                },
+                Some(REFUSED) => BridgeError::refusal(format!(
+                    "Graph refuses an occurrence of event {id} for good: {err}"
+                )),
                 _ => BridgeError {
                     message: format!(
                         "Event {id} was written to Graph without all its occurrences: {err}"
@@ -435,6 +501,18 @@ impl<H: Host> GraphEntry<'_, H> {
         }
     }
 
+    /// Adds the attendees `ical` names to the series, Graph inviting them
+    /// to it and to each occurrence it sets apart; answers its revision.
+    fn invite(&mut self, ical: &str) -> Result<Option<String>, BridgeError> {
+        let event =
+            MsgraphEvent::create_from_ical(ical.as_bytes()).map_err(|err| err.to_string())?;
+        let patch = MsgraphEvent {
+            attendees: event.attendees,
+            ..Default::default()
+        };
+        Ok(self.msgraph.patch_event(self.id, &patch)?.change_key)
+    }
+
     /// Writes one occurrence through its instance: among the exceptions read
     /// with the series, else among the instances of a window around it, each
     /// told by the identity its projection gives it.
@@ -466,13 +544,10 @@ impl<H: Host> GraphEntry<'_, H> {
         // a removal asks, or an override of no occurrence the series has,
         // which Graph has nowhere to keep.
         let Some(instance) = instance else {
-            if change.write != OccurrenceWrite::Delete {
-                log::warn!(
-                    "occurrence {} of event {id} is no instance on Graph, left out",
-                    change.stamp()
-                );
-            }
-            return Ok(());
+            return match change.write {
+                OccurrenceWrite::Delete => Ok(()),
+                OccurrenceWrite::Update { .. } => Err(no_instance("Graph", id, change)),
+            };
         };
 
         match &change.write {
@@ -660,6 +735,7 @@ impl<H: Host> Msgraph<'_, H> {
                 id: master.id.clone(),
                 etag: master.change_key.clone(),
                 ical: master.to_ical_series(&exceptions),
+                ical_base64: None,
             });
         }
 

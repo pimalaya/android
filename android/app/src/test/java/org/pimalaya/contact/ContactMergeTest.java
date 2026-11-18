@@ -104,7 +104,7 @@ public class ContactMergeTest {
 
     private static Entry entry(Addressbook book, String id, String hash) throws Exception {
         Card card = new Card(id, null, null, vcard(id));
-        CardIndex index = new CardIndex("", List.of(), hash, "", "", "", "", null, "");
+        CardIndex index = new CardIndex("", List.of(), hash, "", "", "", "", "", null, "");
         return new Entry(book, "jane@example.org", new PimdirContacts.Indexed(card, index, false));
     }
 

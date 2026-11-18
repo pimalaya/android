@@ -1133,14 +1133,25 @@ struct RemoteItemJson {
     hash: Option<String>,
     #[serde(default)]
     body: Option<String>,
+    /// The body as base64 in place of a non-UTF-8 `body`: a DAV body kept
+    /// as its server sent it.
+    #[serde(default)]
+    body_base64: Option<String>,
 }
 
 impl From<RemoteItemJson> for PimdirRemoteItem {
     fn from(wire: RemoteItemJson) -> Self {
-        let body = match (wire.hash, wire.body) {
-            (Some(hash), Some(body)) => Some(PimdirFetchedBody::Inline {
+        let bytes = match (wire.body, wire.body_base64) {
+            (Some(body), _) => Some(body.into_bytes()),
+            (None, Some(encoded)) => unbase64(&encoded)
+                .inspect_err(|err| log::warn!("unreadable body of {}: {err}", wire.handle))
+                .ok(),
+            (None, None) => None,
+        };
+        let body = match (wire.hash, bytes) {
+            (Some(hash), Some(bytes)) => Some(PimdirFetchedBody::Inline {
                 hash: PimdirHash(hash),
-                bytes: body.into_bytes(),
+                bytes,
             }),
             _ => None,
         };
@@ -1593,6 +1604,23 @@ pub mod tests {
         assert!(snapshot.last);
         assert_eq!(snapshot.items[0].meta.link_id.as_str(), "a.ics");
         assert_eq!(snapshot.items[0].meta.body, None);
+    }
+
+    #[test]
+    fn a_listed_body_that_is_not_utf8_crosses_as_its_bytes() {
+        let PimdirEnumerated::Page(snapshot) = page(
+            r#"{"items": [{"handle": "a.ics", "linkId": "a", "hash": "h",
+                "bodyBase64": "/wBh"}], "complete": true}"#,
+        ) else {
+            panic!("a page");
+        };
+        let Some(io_pimdir::remote::PimdirFetchedBody::Inline { hash, bytes }) =
+            &snapshot.items[0].meta.body
+        else {
+            panic!("no body: {:?}", snapshot.items[0].meta.body);
+        };
+        assert_eq!(hash.0, "h");
+        assert_eq!(bytes, &[0xff, 0x00, 0x61]);
     }
 
     #[test]

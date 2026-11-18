@@ -81,6 +81,8 @@ pub struct FakeResponse {
     pub body: Vec<u8>,
     /// Whether the connection drops before any answer byte, as a reset.
     pub lost: bool,
+    /// Whether the connection drops after the head, before the body.
+    pub cut: bool,
 }
 
 impl FakeResponse {
@@ -92,6 +94,7 @@ impl FakeResponse {
             content_type: "application/json",
             body: serde_json::to_vec(body).unwrap(),
             lost: false,
+            cut: false,
         }
     }
 
@@ -103,6 +106,7 @@ impl FakeResponse {
             content_type: "text/plain",
             body: Vec::new(),
             lost: false,
+            cut: false,
         }
     }
 
@@ -111,6 +115,16 @@ impl FakeResponse {
         Self {
             lost: true,
             ..Self::empty(500)
+        }
+    }
+
+    /// A head answering `status` for a body of `length` bytes, the
+    /// connection dropping before any of it.
+    pub fn cut(status: u16, length: usize) -> Self {
+        Self {
+            body: vec![b' '; length],
+            cut: true,
+            ..Self::empty(status)
         }
     }
 
@@ -127,7 +141,9 @@ impl FakeResponse {
         ));
 
         let mut bytes = head.into_bytes();
-        bytes.extend_from_slice(&self.body);
+        if !self.cut {
+            bytes.extend_from_slice(&self.body);
+        }
         bytes
     }
 }

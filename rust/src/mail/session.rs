@@ -33,7 +33,7 @@ use crate::{
     client::{Auth, Client, Host, jmap::Jmap, msgraph::Msgraph, parse_url},
     error::{BridgeError, REFUSED},
     mail::{
-        Mailbox, compose,
+        Mailbox, SendFailure, compose,
         gmail::{Gmail, belongs},
         gmail_step::{self, GmailRun},
         imap::{self, ImapState},
@@ -222,7 +222,9 @@ impl MailSession {
         }
     }
 
-    /// The IMAP session bound to the call about to use it.
+    /// The IMAP session bound to the call about to use it, opened again
+    /// first where a call before left an answer part unread on it
+    /// ([`imap::ImapSession::signed`]).
     ///
     /// Refuses an HTTP session rather than opening a second connection
     /// behind the caller's back: a verb reaching for this there has not
@@ -231,8 +233,9 @@ impl MailSession {
         &'a mut self,
         client: &'a mut Client<H>,
     ) -> Result<imap::ImapSession<'a, H>, BridgeError> {
+        let auth = self.account.account().auth;
         match &mut self.kind {
-            MailKind::Imap(state) => Ok(imap::ImapSession::bind(client, state)),
+            MailKind::Imap(state) => imap::ImapSession::signed(client, state, auth),
             MailKind::Jmap(_) | MailKind::Graph(_) | MailKind::Gmail(_) => {
                 Err("This account speaks HTTP, which has no IMAP session".into())
             }
@@ -1096,10 +1099,9 @@ impl<H: Host> Mail<'_, '_, H> {
                     session_url: url,
                     auth: self.session.auth(),
                 };
-                if let Err(err) = jmap.send_message(&composed) {
-                    let unanswered = jmap.client.unanswered();
+                if let Err(failed) = jmap.send_message(&composed) {
                     let limited = jmap.client.limited();
-                    return Err(Refused::http(err, unanswered, limited, |status| {
+                    return Err(Refused::http(failed, limited, |status| {
                         matches!(status, 413 | REFUSED)
                     }));
                 }
@@ -1112,10 +1114,9 @@ impl<H: Host> Mail<'_, '_, H> {
                     client: self.client,
                     token: self.session.auth().secret(),
                 };
-                if let Err(err) = graph.send_message(raw) {
-                    let unanswered = graph.client.unanswered();
+                if let Err(failed) = graph.send_message(raw) {
                     let limited = graph.client.limited();
-                    return Err(Refused::http(err, unanswered, limited, refused_by_api));
+                    return Err(Refused::http(failed, limited, refused_by_api));
                 }
                 Ok(None)
             }
@@ -1130,10 +1131,9 @@ impl<H: Host> Mail<'_, '_, H> {
                 };
                 let id = match gmail.send_message(raw) {
                     Ok(id) => id,
-                    Err(err) => {
-                        let unanswered = gmail.client.unanswered();
+                    Err(failed) => {
                         let limited = gmail.client.limited();
-                        return Err(Refused::http(err, unanswered, limited, refused_by_api));
+                        return Err(Refused::http(failed, limited, refused_by_api));
                     }
                 };
                 let filed = match gmail.envelope(&id) {
@@ -1247,11 +1247,13 @@ impl Refused {
 
     /// A failed HTTP send: refused for good when `refused` says so of its
     /// status and no rate or quota refused it (`limited`); uncertain when it
-    /// went whole and no answer came (`unanswered`) or a server error did,
-    /// which a gateway may give after the work was done; else transient.
-    fn http(err: BridgeError, unanswered: bool, limited: bool, refused: fn(u16) -> bool) -> Self {
+    /// went whole and no verdict was read ([`SendFailure::taken`]) or a
+    /// server error came, which a gateway may give after the work was done;
+    /// else transient.
+    fn http(failed: SendFailure, limited: bool, refused: fn(u16) -> bool) -> Self {
+        let SendFailure { error: err, taken } = failed;
         let permanent = !limited && err.status.is_some_and(refused);
-        let uncertain = !permanent && uncertain(err.status, unanswered);
+        let uncertain = !permanent && uncertain(err.status, taken);
         Self {
             message: err.to_string(),
             permanent,
@@ -1261,24 +1263,36 @@ impl Refused {
     }
 }
 
-/// Whether an HTTP send that failed with `status` (none when no answer
-/// was read) may have been carried out.
-fn uncertain(status: Option<u16>, unanswered: bool) -> bool {
+/// Whether an HTTP send that failed with `status` (none when no status
+/// was read) may have been carried out, `taken` when its request went
+/// whole.
+fn uncertain(status: Option<u16>, taken: bool) -> bool {
     match status {
-        None => unanswered,
+        None => taken,
         Some(status) => matches!(status, 500 | 502 | 503 | 504),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::mail::{Mailbox, session::*};
+    use std::fs;
+
+    use serde_json::json;
+
+    use crate::{
+        client::fake::{FakeRequest, FakeResponse, FakeServer, jmap_session},
+        mail::{
+            Mailbox,
+            imap::tests::{Scripted, daily, state as imap_state},
+            session::*,
+        },
+    };
 
     /// A send with no answer, or a server error a gateway may give after
     /// the work, may have gone; a refusal before the work did not.
     #[test]
     fn a_send_is_uncertain_without_a_verdict() {
-        assert!(uncertain(None, true), "written whole, never answered");
+        assert!(uncertain(None, true), "written whole, no verdict read");
         assert!(!uncertain(None, false), "failed before it was written");
         assert!(uncertain(Some(503), false));
         assert!(uncertain(Some(504), false));
@@ -1293,9 +1307,9 @@ mod tests {
             status: Some(403),
             ..Default::default()
         };
-        let limited = Refused::http(forbidden(), false, true, refused_by_api);
+        let limited = Refused::http(forbidden().into(), true, refused_by_api);
         assert!(!limited.permanent && !limited.uncertain);
-        assert!(Refused::http(forbidden(), false, false, refused_by_api).permanent);
+        assert!(Refused::http(forbidden().into(), false, refused_by_api).permanent);
     }
 
     fn roster(names: &[&str]) -> Vec<(String, Mailbox)> {
@@ -1305,6 +1319,7 @@ mod tests {
                 (
                     format!("id-{name}"),
                     Mailbox {
+                        label: name.to_string(),
                         name: name.to_string(),
                         role: String::new(),
                     },
@@ -1356,5 +1371,298 @@ mod tests {
         let failed = listing.resolve("Inbox", || Err("offline".into()));
         assert_eq!(failed.unwrap_err().message, "offline");
         assert!(listing.ids.is_empty());
+    }
+
+    /// A message from Jane to Ada.
+    const SENT: &str = "From: jane@example.com\r\n\
+        To: ada@example.com\r\n\
+        Subject: Hi\r\n\
+        Message-ID: <m1@example.com>\r\n\
+        \r\n\
+        Hello\r\n";
+
+    /// Submits [`SENT`] through an HTTP session over `base_url`, signed in
+    /// with `token`, to a server answering with `handler`; answers the
+    /// verdict and how many requests reached the server.
+    fn submitted(
+        kind: MailKind,
+        base_url: &str,
+        token: &str,
+        handler: impl FnMut(&FakeRequest) -> FakeResponse,
+    ) -> (Result<Option<String>, Refused>, usize) {
+        let account = serde_json::from_value(json!({ "baseUrl": base_url, "secret": token }));
+        let mut session = MailSession {
+            account: account.unwrap(),
+            kind,
+            gmail: Arc::default(),
+            jmap: Arc::default(),
+            run: 0,
+        };
+        let intent = PimdirSubmit::from_payload(
+            r#"{"v":1,"source":"s","from":"jane@example.com","rcpts":["ada@example.com"]}"#,
+        )
+        .unwrap();
+        let mut client = Client::new(FakeServer::new(handler));
+        let mut mail = Mail {
+            session: &mut session,
+            client: &mut client,
+        };
+        let verdict = mail.submit(SENT.as_bytes(), &intent);
+        (verdict, client.host.requests.len())
+    }
+
+    /// What a verdict says, for a failed assertion.
+    fn said(verdict: &Result<Option<String>, Refused>) -> String {
+        match verdict {
+            Ok(id) => format!("sent: {id:?}"),
+            Err(refused) => format!(
+                "{} (permanent {}, uncertain {})",
+                refused.message, refused.permanent, refused.uncertain
+            ),
+        }
+    }
+
+    /// Whether a verdict parks the message as possibly sent.
+    fn parked_uncertain(verdict: &Result<Option<String>, Refused>) -> bool {
+        match verdict {
+            Ok(_) => false,
+            Err(refused) => !refused.permanent && refused.uncertain,
+        }
+    }
+
+    /// Gmail took the message and answered a body that does not parse: the
+    /// send may have gone, so it is never sent again.
+    #[test]
+    fn a_gmail_send_answered_200_unparsed_is_parked_uncertain() {
+        let (verdict, requests) = submitted(
+            MailKind::Gmail(MailListing::default()),
+            "google://",
+            "token-d1-gmail",
+            |request| {
+                assert_eq!(request.path, "/gmail/v1/users/me/messages/send");
+                FakeResponse {
+                    content_type: "application/json",
+                    body: b"<html>accepted</html>".to_vec(),
+                    ..FakeResponse::empty(200)
+                }
+            },
+        );
+        assert!(
+            parked_uncertain(&verdict),
+            "a 200 is a send that went: {}",
+            said(&verdict)
+        );
+        assert_eq!(requests, 1);
+    }
+
+    /// Graph answered its 202 and the connection dropped before the body.
+    #[test]
+    fn a_graph_send_cut_after_its_status_is_parked_uncertain() {
+        let (verdict, requests) = submitted(
+            MailKind::Graph(MailListing::default()),
+            "msgraph://",
+            "token-d1-graph",
+            |request| {
+                assert_eq!(request.path, "/v1.0/me/sendMail");
+                FakeResponse::cut(202, 16)
+            },
+        );
+        assert!(
+            parked_uncertain(&verdict),
+            "a 202 is a send that went: {}",
+            said(&verdict)
+        );
+        assert_eq!(requests, 1);
+    }
+
+    /// The JMAP server answered the submission with a body that does not
+    /// parse: the submission may have been created.
+    #[test]
+    fn a_jmap_submission_answered_200_unparsed_is_parked_uncertain() {
+        let session = jmap_session(
+            json!({
+                "urn:ietf:params:jmap:core": {},
+                "urn:ietf:params:jmap:mail": {},
+                "urn:ietf:params:jmap:submission": {},
+            }),
+            json!({
+                "urn:ietf:params:jmap:mail": "u42",
+                "urn:ietf:params:jmap:submission": "u42",
+            }),
+        );
+        let mut session = serde_json::to_value(session).unwrap();
+        session["uploadUrl"] = json!("https://api.example.com/jmap/upload/{accountId}/");
+        let (verdict, _) = submitted(
+            MailKind::Jmap(MailListing::default()),
+            "jmap://api.example.com/jmap/session",
+            "token-d1-jmap",
+            |request| jmap_answer(request, &session),
+        );
+        assert!(
+            parked_uncertain(&verdict),
+            "the submission may exist: {}",
+            said(&verdict)
+        );
+
+        let (verdict, _) = submitted(
+            MailKind::Jmap(MailListing::default()),
+            "jmap://api.example.com/jmap/session",
+            "token-d1-jmap-unbuilt",
+            |request| match request.path.as_str() {
+                "/jmap/session" => FakeResponse::json(200, &session),
+                _ => FakeResponse::lost(),
+            },
+        );
+        assert!(
+            !parked_uncertain(&verdict),
+            "nothing was submitted before the submission's own request: {}",
+            said(&verdict)
+        );
+    }
+
+    /// A JMAP server serving `session`, taking the message into Drafts and
+    /// answering its submission with a body that does not parse.
+    fn jmap_answer(request: &FakeRequest, session: &serde_json::Value) -> FakeResponse {
+        match (request.method.as_str(), request.path.as_str()) {
+            ("GET", "/jmap/session") => FakeResponse::json(200, session),
+            ("POST", "/jmap/upload/u42/") => FakeResponse::json(
+                201,
+                &json!({
+                    "accountId": "u42",
+                    "blobId": "blob1",
+                    "type": "message/rfc822",
+                    "size": request.body.len(),
+                }),
+            ),
+            ("POST", "/jmap/") => {
+                let calls = request.json::<serde_json::Value>()["methodCalls"].clone();
+                let (name, id) = (calls[0][0].as_str().unwrap(), &calls[0][2]);
+                let result = match name {
+                    "Identity/get" => json!({
+                        "accountId": "u42", "state": "i1", "notFound": [],
+                        "list": [{ "id": "i1", "name": "", "email": "jane@example.com" }],
+                    }),
+                    "Mailbox/get" => json!({
+                        "accountId": "u42", "state": "m1", "notFound": [],
+                        "list": [
+                            { "id": "mb-drafts", "name": "Drafts", "role": "drafts" },
+                            { "id": "mb-sent", "name": "Sent", "role": "sent" },
+                        ],
+                    }),
+                    "Email/import" => json!({
+                        "accountId": "u42", "oldState": "e1", "newState": "e2",
+                        "created": { "m0": {
+                            "id": "email1", "blobId": "blob1", "threadId": "t1", "size": 1,
+                        } },
+                    }),
+                    "EmailSubmission/set" => {
+                        return FakeResponse {
+                            content_type: "application/json",
+                            body: b"<html>accepted</html>".to_vec(),
+                            ..FakeResponse::empty(200)
+                        };
+                    }
+                    other => panic!("unexpected method {other}"),
+                };
+                let body = json!({
+                    "methodResponses": [[name, result, id]],
+                    "sessionState": "s1",
+                });
+                FakeResponse::json(200, &body)
+            }
+            other => panic!("unexpected request {other:?}"),
+        }
+    }
+
+    /// Reads messages 1 to 3 of the INBOX through an IMAP session held
+    /// over `client`, as a fill reads bodies.
+    fn read_three(
+        session: &mut MailSession,
+        client: &mut Client<Scripted>,
+    ) -> Result<Vec<(String, String)>, BridgeError> {
+        let dir = tempfile::tempdir().unwrap();
+        let ids: Vec<String> = ["1", "2", "3"].map(String::from).to_vec();
+        let fetch = MessageFetch {
+            mailbox: "INBOX",
+            ids: &ids,
+            dir: dir.path(),
+        };
+        let read = Mail { session, client }.fetch_sources(&fetch)?;
+        let mut bodies: Vec<(String, String)> = read
+            .items
+            .into_iter()
+            .map(|source| match source {
+                MessageSource::Plain { id, path, .. } => (id, fs::read_to_string(path).unwrap()),
+                MessageSource::Labelled { .. } => panic!("an IMAP source is plain"),
+            })
+            .collect();
+        bodies.sort();
+        Ok(bodies)
+    }
+
+    /// An IMAP account's session, signed in already.
+    fn imap_session() -> MailSession {
+        let account = serde_json::from_value(json!({
+            "baseUrl": "imaps://jane@example.org",
+            "login": "jane",
+            "secret": "secret",
+        }));
+        MailSession {
+            account: account.unwrap(),
+            kind: MailKind::Imap(Box::new(imap_state(Vec::new()))),
+            gmail: Arc::default(),
+            jmap: Arc::default(),
+            run: 0,
+        }
+    }
+
+    /// The bodies of messages 1 to 3 as the scripted server holds them.
+    fn three_bodies(host: &Scripted) -> Vec<(String, String)> {
+        (1..=3)
+            .map(|uid| (uid.to_string(), host.message(uid).unwrap().body()))
+            .collect()
+    }
+
+    /// A batch failing on a body announced past its bound leaves the rest
+    /// of its answer on the connection: the connection opens again, so the
+    /// commands after it read their own answers, and the batch is read one
+    /// message after another.
+    #[test]
+    fn an_imap_batch_failing_mid_answer_opens_the_connection_again() {
+        let mut client = Client::new(Scripted::new(daily(3)));
+        client.host.oversized = Some(2);
+        let mut session = imap_session();
+
+        let first = read_three(&mut session, &mut client);
+        client.host.oversized = None;
+        let second = read_three(&mut session, &mut client);
+
+        let bodies = three_bodies(&client.host);
+        let message = |read: Result<_, BridgeError>| read.map_err(|err| err.message);
+        assert_eq!(
+            (message(first), message(second)),
+            (Ok(bodies.clone()), Ok(bodies))
+        );
+        assert_eq!(client.host.resets, 1);
+    }
+
+    /// A batch naming no UID on its FETCH lines cannot tell its bodies
+    /// apart: every batch after it is read one message after another.
+    #[test]
+    fn an_imap_batch_naming_no_uid_is_read_one_message_after_another() {
+        let mut client = Client::new(Scripted::new(daily(3)));
+        client.host.uidless = true;
+        let mut session = imap_session();
+
+        let first = read_three(&mut session, &mut client);
+        let second = read_three(&mut session, &mut client);
+
+        let bodies = three_bodies(&client.host);
+        let message = |read: Result<_, BridgeError>| read.map_err(|err| err.message);
+        assert_eq!(
+            (message(first), message(second)),
+            (Ok(bodies.clone()), Ok(bodies))
+        );
+        assert_eq!(client.host.resets, 1, "the second read sends no batch");
     }
 }

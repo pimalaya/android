@@ -268,6 +268,9 @@ pub extern "system" fn Java_org_pimalaya_client_Native_removeEvent<'local>(
 
 /// `Native.updateEvent`: pushes an edited object back, guarded by its ETag.
 ///
+/// `anchor` is the phone's zone, a `VTIMEZONE`, a floating time is read in
+/// for Google and Graph ([`EventUpdate::anchor`]).
+///
 /// Returns `{etag}`, the new ETag, or the error the server answered with.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_updateEvent<'local>(
@@ -279,6 +282,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateEvent<'local>(
     id: JString<'local>,
     ical: JString<'local>,
     etag: JString<'local>,
+    anchor: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let account = read_string(env, &account);
@@ -286,6 +290,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateEvent<'local>(
         let id = read_string(env, &id);
         let ical = read_string(env, &ical);
         let etag = read_string(env, &etag);
+        let anchor = read_string(env, &anchor);
 
         let json = match parse_account(&account) {
             Err(err) => error_json(err),
@@ -296,6 +301,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateEvent<'local>(
                     ical: &ical,
                     etag: (!etag.is_empty()).then_some(etag.as_str()),
                     address: &owned.address,
+                    anchor: &anchor,
                 };
                 let mut client = Client::new(JniHost::new(env, &transport, None));
                 let mut calendars = Calendars {
@@ -649,6 +655,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_newEvent<'local>(
 
 /// `Native.createEvent`: files a new object, guarded on it not existing.
 ///
+/// `anchor` as [`Java_org_pimalaya_client_Native_updateEvent`]'s.
+///
 /// Returns `{id, etag}`, the resource it landed under, or the error the
 /// server answered with.
 #[unsafe(no_mangle)]
@@ -660,12 +668,14 @@ pub extern "system" fn Java_org_pimalaya_client_Native_createEvent<'local>(
     calendar_url: JString<'local>,
     id: JString<'local>,
     ical: JString<'local>,
+    anchor: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let account = read_string(env, &account);
         let calendar_url = read_string(env, &calendar_url);
         let id = read_string(env, &id);
         let ical = read_string(env, &ical);
+        let anchor = read_string(env, &anchor);
 
         let json = match parse_account(&account) {
             Err(err) => error_json(err),
@@ -675,6 +685,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_createEvent<'local>(
                     id: &id,
                     ical: &ical,
                     address: &owned.address,
+                    anchor: &anchor,
                 };
                 let mut client = Client::new(JniHost::new(env, &transport, None));
                 let mut calendars = Calendars {

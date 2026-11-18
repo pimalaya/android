@@ -7,6 +7,7 @@
 //! 4.8, 6.1, 7.5 and RFC 8620 section 6.1) the way a server does where it
 //! matters here, and records what it was asked.
 
+use io_pimdir::summary::{PimdirSummary, mail::derive_meta};
 use secrecy::SecretString;
 use serde_json::{Map, Value, from_value, json, to_value};
 
@@ -16,7 +17,7 @@ use crate::{
         fake::{FakeRequest, FakeResponse, FakeServer, jmap_session},
     },
     error::REFUSED,
-    mail::jmap::*,
+    mail::{jmap::*, listing::Named},
 };
 
 /// A message to Ada, copying Bob, blind to Carol.
@@ -98,7 +99,9 @@ impl FakeMail {
             session,
             auth: SecretString::from("Bearer token"),
         };
-        calls.send(&crate::mail::compose::envelope(raw)?, max_upload)
+        calls
+            .send(&crate::mail::compose::envelope(raw)?, max_upload)
+            .map_err(|failed| failed.error)
     }
 
     /// Answers one request: a blob upload (RFC 8620 section 6.1), or one
@@ -608,4 +611,216 @@ fn a_roster_holding_a_mailbox_unread_is_refused() {
         "{}",
         err.message
     );
+}
+
+/// A `/` or a `%` in a mailbox's own name is escaped in its path, so a
+/// top-level `A/B` and the child `B` of `A` are two collections.
+#[test]
+fn a_slash_in_a_mailboxs_own_name_keys_a_collection_of_its_own() {
+    let mut client = Client::new(FakeServer::new(|request: &FakeRequest| {
+        let calls: Vec<(String, Map<String, Value>, String)> =
+            from_value(request.json::<Value>()["methodCalls"].take()).unwrap();
+        let (_, _, id) = calls.into_iter().next().unwrap();
+        let result = json!({
+            "accountId": "u42",
+            "state": "m1",
+            "list": [
+                { "id": "ab", "name": "A/B" },
+                { "id": "a", "name": "A" },
+                { "id": "b", "name": "B", "parentId": "a" },
+                { "id": "pc", "name": "100%" },
+            ],
+            "notFound": [],
+        });
+        let body =
+            json!({ "methodResponses": [["Mailbox/get", result, id]], "sessionState": "s1" });
+        FakeResponse::json(200, &body)
+    }));
+    let mut jmap = Jmap {
+        client: &mut client,
+        session_url: Url::parse("https://api.example.com/jmap/session").unwrap(),
+        auth: Auth::Bearer("token"),
+    };
+    let api_url = Url::parse("https://api.example.com/jmap/").unwrap();
+    let roster = jmap
+        .list_mailboxes(&session(""), &SecretString::from("Bearer token"), &api_url)
+        .unwrap();
+
+    let paths: Vec<(&str, &str)> = roster
+        .iter()
+        .map(|(id, path, _)| (id.as_str(), path.as_str()))
+        .collect();
+    assert_eq!(
+        paths,
+        [("a", "A"), ("ab", "A%2FB"), ("b", "A/B"), ("pc", "100%25")]
+    );
+}
+
+/// A message is named from its raw header fields by the derivation a body
+/// is read with (STORAGE Annex A.1), never from what the server parsed: a
+/// `Date` in a military zone, a `Message-ID` with a comment and a subject
+/// literally holding an encoded word read as the same bytes fetched whole.
+#[test]
+fn a_message_is_named_from_its_header_bytes() {
+    let fields = [
+        ("Message-ID", " <a@b> (comment)"),
+        ("Date", " Sat, 10 Oct 2026 12:00:00 A"),
+        ("From", " Jane <jane@example.com>"),
+        ("To", " ada@example.com"),
+        ("Subject", " =?utf-8?q?=3D=3Futf-8=3Fq=3Fx=3F=3D?="),
+    ];
+    let headers: Vec<Value> = fields
+        .iter()
+        .map(|(name, value)| json!({ "name": name, "value": value }))
+        .collect();
+    let email: JmapEmail = from_value(json!({
+        "id": "m1",
+        "mailboxIds": { "inbox": true },
+        "size": 120,
+        "hasAttachment": false,
+        "messageId": ["a@b"],
+        "subject": "=?utf-8?q?x?=",
+        "from": [{ "name": "Jane", "email": "jane@example.com" }],
+        "to": [{ "email": "ada@example.com" }],
+        "sentAt": "2026-10-10T11:00:00Z",
+        "headers": headers,
+    }))
+    .unwrap();
+    let delta = JmapDelta {
+        next: "s2".into(),
+        emails: vec![email],
+        gone: Vec::new(),
+    };
+
+    let page = project(&delta, "inbox", &Scope::default());
+
+    let mut block = String::new();
+    for (name, value) in fields {
+        block.push_str(&format!("{name}:{value}\r\n"));
+    }
+    block.push_str("\r\n");
+    let Some(PimdirSummary::Mail(summary)) =
+        derive_meta(block.as_bytes(), Some(120), Some(false)).summary
+    else {
+        panic!("no mail summary");
+    };
+    let expected = Named::new("m1".into(), Vec::new(), summary);
+    let named = &page.items[0];
+    assert_eq!(named.link_id, expected.link_id);
+    assert_eq!(
+        serde_json::to_value(&named.summary).unwrap(),
+        serde_json::to_value(&expected.summary).unwrap(),
+    );
+    let summary = serde_json::to_value(&named.summary).unwrap();
+    assert_eq!(summary["mail"]["subject"], "=?utf-8?q?x?=");
+}
+
+/// A band round over a mailbox holding a message dated in the band and
+/// received three days after its `Date`, past the band's ceiling and its
+/// margin: listed, `Email/query` bounded by the floor alone.
+#[test]
+fn a_band_lists_a_message_received_after_its_date() {
+    let held = [
+        (
+            "late",
+            "Sat, 03 Oct 2026 12:00:00 +0000",
+            "2026-10-06T12:00:00Z",
+        ),
+        (
+            "near",
+            "Fri, 02 Oct 2026 12:00:00 +0000",
+            "2026-10-02T12:00:00Z",
+        ),
+    ];
+    let email = |(id, date, received): (&str, &str, &str)| {
+        json!({
+            "id": id,
+            "mailboxIds": { "mb-inbox": true },
+            "keywords": {},
+            "size": 100,
+            "hasAttachment": false,
+            "receivedAt": received,
+            "headers": [
+                { "name": "Message-ID", "value": format!(" <{id}@example.com>") },
+                { "name": "Date", "value": format!(" {date}") },
+            ],
+        })
+    };
+    let session = jmap_session(
+        json!({ "urn:ietf:params:jmap:core": {}, "urn:ietf:params:jmap:mail": {} }),
+        json!({ "urn:ietf:params:jmap:mail": "u42" }),
+    );
+    let mut filters = Vec::new();
+    let mut client = Client::new(FakeServer::new(|request: &FakeRequest| {
+        if request.method == "GET" {
+            return FakeResponse::json(200, &session);
+        }
+        let calls: Vec<(String, Map<String, Value>, String)> =
+            from_value(request.json::<Value>()["methodCalls"].take()).unwrap();
+        let mut responses = Vec::new();
+        let mut matched: Vec<&str> = Vec::new();
+        for (name, args, id) in calls {
+            let result = match name.as_str() {
+                "Email/query" => {
+                    let filter = args["filter"].clone();
+                    let after = filter["after"].as_str().map(String::from);
+                    let before = filter["before"].as_str().map(String::from);
+                    filters.push(filter);
+                    matched = held
+                        .iter()
+                        .filter(|(_, _, received)| {
+                            after.as_deref().is_none_or(|after| *received >= after)
+                                && before.as_deref().is_none_or(|before| *received < before)
+                        })
+                        .map(|(id, _, _)| *id)
+                        .collect();
+                    json!({
+                        "accountId": "u42",
+                        "queryState": "q1",
+                        "canCalculateChanges": false,
+                        "position": 0,
+                        "ids": matched,
+                        "total": matched.len(),
+                    })
+                }
+                "Email/get" => json!({
+                    "accountId": "u42",
+                    "state": "s1",
+                    "list": held
+                        .iter()
+                        .filter(|(id, _, _)| matched.contains(id))
+                        .map(|held| email(*held))
+                        .collect::<Vec<Value>>(),
+                    "notFound": [],
+                }),
+                other => panic!("unexpected method {other}"),
+            };
+            responses.push(json!([name, result, id]));
+        }
+        FakeResponse::json(
+            200,
+            &json!({ "methodResponses": responses, "sessionState": "s1" }),
+        )
+    }));
+    let mut jmap = Jmap {
+        client: &mut client,
+        session_url: Url::parse("https://api.example.com/jmap/session").unwrap(),
+        auth: Auth::Bearer("token-s2-band"),
+    };
+    let request: MailRequest = from_value(json!({
+        "listing": { "kind": "round", "band": true },
+        "scope": { "since": "2026-10-01T00:00:00Z", "until": "2026-10-04T00:00:00Z" },
+    }))
+    .unwrap();
+
+    let page = jmap
+        .list_page(&JmapRun::default(), "mb-inbox", &request)
+        .unwrap();
+    drop(jmap);
+    drop(client);
+
+    let mut listed: Vec<&str> = page.items.iter().map(|item| item.handle.as_str()).collect();
+    listed.sort();
+    assert_eq!(listed, ["late", "near"]);
+    assert_eq!(filters[0].get("before"), None, "{:?}", filters[0]);
 }

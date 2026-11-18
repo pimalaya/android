@@ -14,7 +14,7 @@ use ical::{
 };
 
 use crate::{
-    calendar::{child, cst_of, line, scheduled, series::Series, text, zone::stamp},
+    calendar::{child, child_mut, cst_of, line, scheduled, series::Series, text, zone::stamp},
     error::BridgeError,
 };
 
@@ -122,6 +122,89 @@ pub fn occurrences(ical: &str) -> Result<Vec<IcalRecurDateTime>, BridgeError> {
     Ok(series.overrides.iter().map(|(_, id)| *id).collect())
 }
 
+/// Whether an object's series sets occurrences apart: whether it
+/// overrides some, and whether its `EXDATE`s exclude some.
+pub fn set_apart(ical: &str) -> Result<(bool, bool), BridgeError> {
+    let cst = parse(ical)?;
+    let series = Series::of(&cst)?;
+    Ok((
+        !series.overrides.is_empty(),
+        !series.exdates(&cst).is_empty(),
+    ))
+}
+
+/// Refuses an override of this and future occurrences
+/// (`RANGE=THISANDFUTURE`, RFC 5545 3.8.4.4), which `server`, writing a
+/// series through one instance at a time, has no instance to carry.
+pub fn refuse_ranges(ical: &str, server: &str) -> Result<(), BridgeError> {
+    let cst = parse(ical)?;
+    let series = Series::of(&cst)?;
+    let ranged = series.overrides.iter().any(|(index, _)| {
+        line(child(&cst, *index), "RECURRENCE-ID").is_some_and(|line| {
+            let line = line.to_string().to_ascii_uppercase();
+            let params = line.split(':').next().unwrap_or_default();
+            params.contains(";RANGE=THISANDFUTURE")
+        })
+    });
+
+    match ranged {
+        true => Err(BridgeError::refusal(format!(
+            "{server} cannot override this and future occurrences of a series"
+        ))),
+        false => Ok(()),
+    }
+}
+
+/// The object with its series' attendees taken off, from the series and
+/// from each override naming the same ones, which then takes them from
+/// the series once they are added to it; [`None`] when it names none.
+///
+/// A series written occurrence by occurrence is so told of once, whole,
+/// rather than of each write.
+pub fn unattended(ical: &str) -> Result<Option<String>, BridgeError> {
+    let mut cst = parse(ical)?;
+    let series = Series::of(&cst)?;
+    let overrides: Vec<usize> = series.overrides.iter().map(|(index, _)| *index).collect();
+    let Some(master) = scheduled(&cst)
+        .into_iter()
+        .find(|index| line(child(&cst, *index), "RECURRENCE-ID").is_none())
+    else {
+        return Ok(None);
+    };
+
+    let invited = attendees(child(&cst, master));
+    if invited.is_empty() {
+        return Ok(None);
+    }
+    for index in overrides.into_iter().chain([master]) {
+        if attendees(child(&cst, index)) == invited {
+            child_mut(&mut cst, index)
+                .items
+                .retain(|item| attendee(item).is_none());
+        }
+    }
+
+    text(&cst).map(Some)
+}
+
+/// The addresses a component's `ATTENDEE`s name, without case, sorted.
+fn attendees(component: &IcalCst<'static>) -> Vec<String> {
+    let mut addresses: Vec<String> = component.items.iter().filter_map(attendee).collect();
+    addresses.sort_unstable();
+    addresses
+}
+
+/// The address an `ATTENDEE` line names, without case; [`None`] for any
+/// other item.
+fn attendee(item: &IcalItem<'static>) -> Option<String> {
+    match item {
+        IcalItem::Prop(line) if line.name.get().eq_ignore_ascii_case("ATTENDEE") => {
+            Some(line.value.decode().to_ascii_lowercase())
+        }
+        _ => None,
+    }
+}
+
 fn parse(ical: &str) -> Result<IcalCst<'static>, BridgeError> {
     Ok(cst_of(ical)?.into_static())
 }
@@ -151,6 +234,15 @@ impl OccurrenceChange {
     pub fn stamp(&self) -> String {
         stamp(self.id, false)
     }
+}
+
+/// The refusal of an override of an occurrence series `id` does not have,
+/// which `server`, keeping overrides on instances, has nowhere to keep.
+pub fn no_instance(server: &str, id: &str, change: &OccurrenceChange) -> BridgeError {
+    BridgeError::refusal(format!(
+        "{server} has no occurrence {} of series {id} to override",
+        change.stamp()
+    ))
 }
 
 /// Two UTC instants around an occurrence's original start, as RFC 3339

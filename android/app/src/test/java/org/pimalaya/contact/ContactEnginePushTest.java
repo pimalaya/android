@@ -57,6 +57,8 @@ public class ContactEnginePushTest {
         final List<String> calls = new ArrayList<>();
         final List<List<PushChange>> batches = new ArrayList<>();
         final Map<String, String> held = new LinkedHashMap<>();
+        /** The refs a batch refuses as they stand, as Graph answers a 400. */
+        final java.util.Set<String> refusing = new java.util.HashSet<>();
         final String bookId;
         int created;
 
@@ -132,6 +134,10 @@ public class ContactEnginePushTest {
             for (PushChange change : changes) {
                 String ref = change.ref();
                 if (ref.equals("n2")) {
+                    continue;
+                }
+                if (refusing.contains(ref)) {
+                    outcomes.add(new PushOutcome(ref, false, null, null, "HTTP 400 bad", true));
                     continue;
                 }
                 if (change.op() == PushOp.DESTROY) {
@@ -369,6 +375,26 @@ public class ContactEnginePushTest {
                         "deleteCard " + book + " uid-c c e-c",
                         "updateCardBooks d +[] -[b1]"),
                 server.calls);
+    }
+
+    /**
+     * A change a batch refuses as it stands is answered refused, its reason
+     * the server's, for the engine to hold (pimdir SYNC §4); the round's other
+     * changes land.
+     */
+    @Test
+    public void aGraphRoundAnswersAChangeRefusedAsItStandsRefused() throws Exception {
+        String book = "msgraph://example/b1";
+        account("msgraph://example", book, "b1");
+        server.refusing.add("b");
+
+        assertSameResults(
+                "[{\"handle\":\"n1\",\"accepted\":true,\"assigned\":\"srv-n1\"},"
+                        + "{\"handle\":\"b\",\"accepted\":false,\"refused\":\"HTTP 400 bad\"}]",
+                push(
+                        book,
+                        change("add", "n1"),
+                        change("update", "b").put("ifMatch", "e-b")));
     }
 
     @Test

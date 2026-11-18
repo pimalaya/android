@@ -26,6 +26,7 @@ use io_webdav::{
             delete::CaldavItemDelete,
             r#move::CaldavItemMove,
             multiget::CaldavItemMultiget,
+            read::CaldavItemRead,
             update::CaldavItemUpdate,
         },
     },
@@ -36,7 +37,11 @@ use url::Url;
 
 use crate::{
     calendar::{Calendar, Event, EventRef},
-    client::{Client, Host, USER_AGENT, trust::trusted_href, webdav::Webdav},
+    client::{
+        Client, Host, USER_AGENT,
+        trust::trusted_href,
+        webdav::{Webdav, gone_row, is_gone, maybe_lossy, served, unreadable},
+    },
     error::BridgeError,
 };
 
@@ -99,17 +104,59 @@ impl<H: Host> Webdav<'_, H> {
 
     /// Batch-fetches the named events of the collection at `url`, via
     /// REPORT `calendar-multiget` (RFC 4791 section 7.9).
+    ///
+    /// A row answered 404 or 410 is an event gone, left out. Any other row
+    /// answered without its data is read alone, and fails the fetch if still
+    /// unreadable: an event left out would be retired by a complete round.
     pub fn multiget_events(&mut self, url: &Url, ids: &[&str]) -> Result<Vec<Event>, BridgeError> {
         let auth = self.auth.webdav();
         let coroutine = CaldavItemMultiget::new(url, &auth, USER_AGENT, url.path(), ids);
         let fetched = self.client.run(url, coroutine)?;
-        // NOTE: an event answered without its data is left out, as one the
-        // server did not answer at all; only the log says which.
+
+        let mut alone = Vec::new();
         for entry in &fetched.unreadable {
             log::warn!("{url}: event {} unreadable: {:?}", entry.id, entry.status);
+            if gone_row(entry.status) {
+                continue;
+            }
+            let coroutine = CaldavItemRead::new(url, &auth, USER_AGENT, url.path(), &entry.id);
+            match self.client.run(url, coroutine) {
+                Ok(body) => {
+                    let (ical, ical_base64) = served(body.data);
+                    alone.push(Event {
+                        id: entry.id.clone(),
+                        etag: body.etag,
+                        ical,
+                        ical_base64,
+                    });
+                }
+                Err(err) if is_gone(&err) => {}
+                Err(err) => return Err(unreadable(url, &entry.id, err)),
+            }
         }
 
-        Ok(fetched.items.into_iter().map(into_event).collect())
+        let mut events: Vec<Event> = fetched.items.into_iter().map(into_event).collect();
+        for event in events.iter_mut().filter(|event| maybe_lossy(&event.ical)) {
+            let coroutine = CaldavItemRead::new(url, &auth, USER_AGENT, url.path(), &event.id);
+            match self.client.run(url, coroutine) {
+                Ok(body) => {
+                    let (ical, ical_base64) = served(body.data);
+                    if ical_base64.is_some() {
+                        event.ical = ical;
+                        event.ical_base64 = ical_base64;
+                    }
+                }
+                Err(err) => {
+                    log::warn!(
+                        "{url}: event {} not read as served: {}",
+                        event.id,
+                        err.message
+                    )
+                }
+            }
+        }
+        events.extend(alone);
+        Ok(events)
     }
 
     /// Replaces the object `id` at `url`, answering the new ETag if sent.
@@ -270,12 +317,15 @@ fn vtodo_of(components: &BTreeSet<String>) -> Option<bool> {
     })
 }
 
-/// An io-webdav item entry as an [`Event`], its bytes decoded lossily.
+/// An io-webdav item entry as an [`Event`], its bytes kept as served
+/// ([`served`]).
 fn into_event(entry: CaldavItemEntry) -> Event {
+    let (ical, ical_base64) = served(entry.data);
     Event {
         id: entry.id,
         etag: entry.etag,
-        ical: String::from_utf8_lossy(&entry.data).into_owned(),
+        ical,
+        ical_base64,
     }
 }
 
@@ -300,7 +350,14 @@ mod tests {
 
     use io_webdav::coroutine::{WebdavCoroutine, WebdavCoroutineState, WebdavYield};
 
-    use crate::calendar::caldav::*;
+    use crate::{
+        calendar::caldav::*,
+        client::{
+            Auth, Client,
+            fake::{FakeRequest, FakeResponse, FakeServer},
+            webdav::Webdav,
+        },
+    };
 
     /// Runs a create against one reply, answering the event the bridge
     /// keeps.
@@ -514,5 +571,126 @@ mod tests {
         assert_eq!(listed(&["VEVENT"]), Some(false));
         assert_eq!(listed(&["VEVENT", "VTODO"]), Some(true));
         assert_eq!(listed(&[]), None);
+    }
+
+    /// An entry read whole crosses as the bytes its server sent, a Latin-1
+    /// one included, beside the text the phone is shown.
+    #[test]
+    fn an_entry_read_whole_keeps_the_bytes_served() {
+        let served = b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:e1\r\n\
+            DTSTART:20261013T090000Z\r\nSUMMARY:R\xe9union\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let mut body = b"<?xml version=\"1.0\" encoding=\"utf-8\"?>\
+            <d:multistatus xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">\
+            <d:response><d:href>/cal/e1.ics</d:href><d:propstat><d:prop>\
+            <d:getetag>\"e1\"</d:getetag><c:calendar-data>"
+            .to_vec();
+        body.extend_from_slice(served);
+        body.extend_from_slice(
+            b"</c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status>\
+            </d:propstat></d:response></d:multistatus>",
+        );
+        let answer = FakeResponse {
+            status: 207,
+            headers: Vec::new(),
+            content_type: "application/xml; charset=utf-8",
+            body,
+            lost: false,
+            cut: false,
+        };
+        let resource = FakeResponse {
+            status: 200,
+            body: served.to_vec(),
+            ..answer.clone()
+        };
+        let mut client = Client::new(FakeServer::new(move |request: &FakeRequest| match request
+            .method
+            .as_str()
+        {
+            "GET" => resource.clone(),
+            _ => answer.clone(),
+        }));
+        let mut dav = Webdav {
+            client: &mut client,
+            auth: Auth::Bearer("token"),
+        };
+        let url: Url = "https://dav.example.com/cal/".parse().unwrap();
+
+        let events = dav.multiget_events(&url, &["e1.ics"]).unwrap();
+
+        let event = serde_json::to_value(&events[0]).unwrap();
+        let encoded = event["icalBase64"].as_str().unwrap_or_default();
+        assert_eq!(crate::mail::unbase64(encoded).unwrap(), served);
+        assert!(
+            event["ical"]
+                .as_str()
+                .unwrap()
+                .contains("SUMMARY:R\u{fffd}union")
+        );
+    }
+
+    /// A multiget answered row by row: `e1.ics` whole, `e2.ics` refused
+    /// (403) and `e3.ics` gone (404), `e2.ics` then read alone with `get`.
+    fn multiget_refusing_one(get: FakeResponse) -> Result<Vec<Event>, BridgeError> {
+        let rows = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\
+            <d:multistatus xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">\
+            <d:response><d:href>/cal/e1.ics</d:href><d:propstat><d:prop>\
+            <d:getetag>\"e1\"</d:getetag><c:calendar-data>\
+            BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n\
+            UID:e1\r\nSUMMARY:One\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n</c:calendar-data></d:prop>\
+            <d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>\
+            <d:response><d:href>/cal/e2.ics</d:href>\
+            <d:status>HTTP/1.1 403 Forbidden</d:status></d:response>\
+            <d:response><d:href>/cal/e3.ics</d:href>\
+            <d:status>HTTP/1.1 404 Not Found</d:status></d:response>\
+            </d:multistatus>";
+        let answer = FakeResponse {
+            status: 207,
+            content_type: "application/xml; charset=utf-8",
+            body: rows.as_bytes().to_vec(),
+            ..FakeResponse::empty(207)
+        };
+        let mut client = Client::new(FakeServer::new(move |request: &FakeRequest| match request
+            .method
+            .as_str()
+        {
+            "GET" => {
+                assert_eq!(request.path, "/cal/e2.ics", "only the refused row");
+                get.clone()
+            }
+            _ => answer.clone(),
+        }));
+        let mut dav = Webdav {
+            client: &mut client,
+            auth: Auth::Bearer("token"),
+        };
+        let url: Url = "https://dav.example.com/cal/".parse().unwrap();
+        dav.multiget_events(&url, &["e1.ics", "e2.ics", "e3.ics"])
+    }
+
+    /// A row the server refused is read alone: a member it did not answer
+    /// as gone is never left out, so a complete round never retires it.
+    #[test]
+    fn a_multiget_row_refused_is_read_alone() {
+        let event = FakeResponse {
+            content_type: "text/calendar",
+            body: b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:e2\r\n\
+                SUMMARY:Two\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+                .to_vec(),
+            ..FakeResponse::empty(200)
+        };
+
+        let events = multiget_refusing_one(event).unwrap();
+
+        let ids: Vec<&str> = events.iter().map(|event| event.id.as_str()).collect();
+        assert_eq!(ids, ["e1.ics", "e2.ics"], "the 404 alone is gone");
+        assert!(events[1].ical.contains("SUMMARY:Two"));
+    }
+
+    /// A row still unreadable alone fails the read, which fails the round.
+    #[test]
+    fn a_multiget_row_unreadable_alone_fails_the_read() {
+        let refused = multiget_refusing_one(FakeResponse::empty(403));
+
+        assert!(refused.is_err(), "the member would be retired");
     }
 }

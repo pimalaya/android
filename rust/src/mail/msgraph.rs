@@ -54,7 +54,7 @@ use io_msgraph::v1::{
             send_mail::MsgraphMailSendMime,
         },
     },
-    send::{MSGRAPH_API_BASE, MsgraphNoResponse, MsgraphSend},
+    send::{MSGRAPH_API_BASE, MsgraphNoResponse, MsgraphSend, MsgraphSendError},
 };
 
 use io_pimdir::summary::{
@@ -71,11 +71,11 @@ use crate::{
         msgraph::{Msgraph, graph_url, parse_graph_url, relative},
         throttle::WAIT_BUDGET,
     },
-    error::{BridgeError, converged},
+    error::{BridgeError, converged, coroutine_error},
     mail::{
-        Mailbox,
+        Mailbox, SendFailure,
         listing::{Floor, GRAPH_PAGE, Listing, MailPage, MailRequest, Named, Scope, flags, utc},
-        source_path,
+        path_label, path_segment, source_path,
     },
 };
 
@@ -118,7 +118,8 @@ impl<H: Host> Msgraph<'_, H> {
         Ok(())
     }
 
-    /// The mail folders as `(id, mailbox)`, each named by its `/`-joined path.
+    /// The mail folders as `(id, mailbox)`, each named by its `/`-joined path
+    /// of names, each name escaped ([`path_segment`]) so two never meet.
     ///
     /// Ancestors' names first, as IMAP names a hierarchy. Graph v1.0 tells no
     /// role: each is asked for by its well-known name, recognised by id. Only
@@ -149,7 +150,7 @@ impl<H: Host> Msgraph<'_, H> {
         let mut pending: Vec<(String, MsgraphMailFolder)> = self
             .folder_pages(&auth, first)?
             .into_iter()
-            .map(|folder| (folder.display_name.clone(), folder))
+            .map(|folder| (path_segment(&folder.display_name), folder))
             .collect();
 
         let mut mailboxes = Vec::new();
@@ -159,7 +160,10 @@ impl<H: Host> Msgraph<'_, H> {
                     .map_err(|err| err.to_string())?;
                 let first = self.run(coroutine)?;
                 for child in self.folder_pages(&auth, first)? {
-                    pending.push((format!("{path}/{}", child.display_name), child));
+                    pending.push((
+                        format!("{path}/{}", path_segment(&child.display_name)),
+                        child,
+                    ));
                 }
             }
 
@@ -170,6 +174,7 @@ impl<H: Host> Msgraph<'_, H> {
             mailboxes.push((
                 folder.id,
                 Mailbox {
+                    label: path_label(&path),
                     name: path,
                     role: role.into(),
                 },
@@ -330,12 +335,31 @@ impl<H: Host> Msgraph<'_, H> {
 
     /// Sends one RFC 5322 message, Graph filing the copy in `Sent Items`
     /// itself.
-    pub fn send_message(&mut self, raw: &[u8]) -> Result<(), BridgeError> {
+    ///
+    /// A failure past the request written whole with no status read back
+    /// may have sent it ([`SendFailure::taken`]): only a request never
+    /// built did not.
+    pub fn send_message(&mut self, raw: &[u8]) -> Result<(), SendFailure> {
         let auth = HttpAuthBearer::new(self.token);
-        let coroutine =
-            MsgraphMailSendMime::new(&auth, "me", raw).map_err(|err| err.to_string())?;
-        self.run(coroutine)?;
-        Ok(())
+        let coroutine = MsgraphMailSendMime::new(&auth, "me", raw)
+            .map_err(|err| SendFailure::unsent(err.to_string()))?;
+        match self.try_run(coroutine) {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(err)) => Err(SendFailure {
+                taken: !matches!(
+                    err,
+                    MsgraphSendError::ParseUrl(_)
+                        | MsgraphSendError::SerializeRequest(_)
+                        | MsgraphSendError::InvalidRequest(_)
+                        | MsgraphSendError::Api(_)
+                ),
+                error: coroutine_error(&err),
+            }),
+            Err(error) => Err(SendFailure {
+                taken: self.client.sent(),
+                error,
+            }),
+        }
     }
 }
 
@@ -456,11 +480,7 @@ impl<H: Host> Msgraph<'_, H> {
                 self.delta_page(folder, None, scope)
             }
             Listing::Round { cursor: None, .. } => {
-                let ceiling = Ceiling {
-                    until: scope.until.clone(),
-                    ..Default::default()
-                };
-                self.band_page(folder, scope, ceiling)
+                self.band_page(folder, scope, Ceiling::default())
             }
             Listing::Round {
                 cursor: Some(cursor),
@@ -484,6 +504,10 @@ impl<H: Host> Msgraph<'_, H> {
 
     /// One page of a band listed by `/messages`, newest `sentDateTime` first,
     /// below the ceiling, the next resuming below the oldest it reached.
+    ///
+    /// The first page has none, the scope's floor alone: a message is
+    /// submitted after its `Date`, so a ceiling on `sentDateTime` would miss
+    /// one the band holds by its `Date`.
     ///
     /// No checkpoint: a band round keeps the source's, and a first chunk
     /// lands before any delta link exists. Every page is narrowed (SYNC

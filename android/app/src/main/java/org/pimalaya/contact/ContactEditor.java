@@ -313,9 +313,17 @@ public final class ContactEditor {
         return labels;
     }
 
-    /** Stages a copied card into the target addressbook. */
-    void createCopy(BookEntry target, AccountEntry account, String id, String vcard) {
-        parts.contacts().save(target.book.url(), new Card(id, null, null, vcard));
+    /**
+     * Stages a copied card into the target addressbook, copied from the
+     * placements {@code from} names ({@link PimdirContacts#copy}).
+     */
+    void createCopy(
+            BookEntry target,
+            AccountEntry account,
+            String id,
+            String vcard,
+            Map<String, String> from) {
+        parts.contacts().copy(target.book.url(), new Card(id, null, null, vcard), from);
     }
 
     /** The survivor chooser over any replica list, then the merge. */
@@ -502,7 +510,7 @@ public final class ContactEditor {
             return ContactClient.indexCard(vcard);
         } catch (Exception error) {
             Log.w("pimalaya", "card index failed", error);
-            return new CardIndex("", List.of(), "", "", "", "", "", null, "");
+            return new CardIndex("", List.of(), "", "", "", "", "", "", null, "");
         }
     }
 }

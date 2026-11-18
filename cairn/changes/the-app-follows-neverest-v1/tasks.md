@@ -1,0 +1,190 @@
+---
+cairn: tasks
+change: the-app-follows-neverest-v1
+---
+
+# Tasks
+
+Line numbers are those of android a59655c, neverest 1ebd57d and io-pimdir v0.16.0 (2026-11-18): re-read before editing. "Port from" names the neverest code and log that fixed the same thing; read the log first, it says what was found live and why. "Test first" is a test that must be seen failing on the current code before the fix. Paths without a repository name are in this repository; android/app/src/main/java/org/pimalaya/ is written `java/`.
+
+## 0. Setup, once per session
+
+- [x] Read AGENTS.md, this change's proposal.md, cairn/spec/offline-store.md, cairn/spec/mail.md and the spec file each task names.
+- [x] Spec for the vector tests (the published crate ships none): `mkdir -p $SCRATCH/io-pimdir-v0.16.0 && git -C /home/soywod/code/pimalaya/io-pimdir archive v0.16.0 spec | tar -x -C $SCRATCH/io-pimdir-v0.16.0`, then `export PIMALAYA_IO_PIMDIR_SPEC=$SCRATCH/io-pimdir-v0.16.0/spec` ($SCRATCH being the session's scratchpad; rust/src/offline.rs:615-660 reads it).
+- [ ] The gates, from the repository root, recorded with their counts in each phase's log:
+  - `nix develop --command sh -c 'cd rust && cargo fmt --check'`
+  - `nix develop --command sh -c 'cd rust && cargo clippy --all-targets --locked -- -D warnings'`
+  - `nix develop --command sh -c 'cd rust && cargo test --locked'` (baseline 2026-11-16: 686 passed, 1 ignored)
+  - `nix develop --command gradle -p android :app:testDebugUnitTest :app:assembleDebug --console=plain` (baseline 2026-11-16: 1,022 tests, 5 skipped, none failing)
+  - when a JNI-called signature changes, also `:app:assembleRelease` (R8 keep rules, android/client/consumer-rules.pro)
+  - `cairn/verify.sh`
+- [x] Run the gates once before any edit and note the counts: a red baseline is reported to the owner, not fixed silently. (2026-11-18: run after the bump only; the 2026-11-16 baseline stood in)
+
+## B. io-pimdir 0.16.0
+
+Analysis 2026-11-18, verified by an off-tree build: 686 passed, 1 ignored at 0.16.0. The format did not move (io-pimdir src/sql.rs:26 `storage-draft-13`, src/sync.rs:72 `sync-draft-13`, src/sql/search.rs:23-27 `FORMAT_DRAFT` 13; the vendored spec/ tree is the same object at v0.15.1 and v0.16.0). No canonical statement text changed, so no Java fork is re-read; no `PimdirWriteOp` shape changed, so rust/src/offline/wire.rs is untouched. The search cursor (`PimdirSearchOptions::after`) is in the `client` feature, which the app does not take (rust/Cargo.toml:38 takes `search` alone).
+
+- [x] B1. rust/Cargo.toml:21 (dev-dependency) and :38: `0.15.1` to `0.16.0`; then `nix develop --command sh -c 'cd rust && cargo update -p io-pimdir --precise 0.16.0'`; Cargo.lock must move io-pimdir alone.
+- [x] B2. Gates. Expected: cargo 686 passed, 1 ignored. Gradle: SyncVectorsTest is expected to fail because case 58 now passes (the fix "a listing at the base revision replacing the summary and sort key of a locally edited contact or event", io-pimdir src/sync.rs:1179-1181): delete android/app/src/test/resources/org/pimalaya/pimdir/sync-vectors.txt:31 (`fails 58-a-local-file-edit-is-pushed`) only if the test says 58 passes; any other vector moving is investigated and reported, never relisted to go green.
+- [x] B3. `index_meta.extractor` becomes `pimalaya-android 1, io-pimdir 2` through rust/src/search/shape.rs:39-41 (io-pimdir src/search/extract.rs:62): the phone rebuilds index.db once at first start (cairn/spec/offline-store.md:825). Check rust/src/search/tests.rs:794 still holds; CHANGELOG line under Changed: the search index is rebuilt once after the update.
+- [x] B4. cairn/spec/offline-store.md:1029: "At io-pimdir 0.14, 167 cases: 125 pass, 11 fail, 31 are unbound" restated with the pin and the counts the run gave (126, 10, 31 if only 58 moved).
+- [x] B5. Log cairn/log/YYYY-MM-DD-the-app-follows-io-pimdir-0-16.md on the model of neverest/cairn/log/2026-11-17-io-pimdir-0-16.md: per PIM line of io-pimdir's CHANGELOG [0.16.0], whether it reaches the app. The analysis' table, to restate after checking:
+  - free through the engine or the refresh: the VTIMEZONE and RRULE huge `INTERVAL` fixes, the HTML comment closed by three dashes, the summary of a locally edited contact or event kept at the base revision, the queued move into its own collection (the UI never stages one: java/mail/MessageView.java:606, java/mail/MailStager.java:115);
+  - not reached: rekey fixes (the bridge runs no rekey, sync-vectors.txt:35-39), rollback-journal stores (the store is WAL, java/pimdir/PimdirDb.java:375), the reader's half-read commit (the app's reads are one statement or one transaction, PimdirDb.java:591-622), every `pimdir` CLI fix;
+  - new API unused: `PimdirHub::immutable` (rust/src/offline/merge.rs:129 builds from `Default`), `PimdirMutateError::MoveInPlace` (crosses as `refused: "move-in-place"` through rust/src/offline/wire.rs:1475-1481, see L6), `PimdirLinkId::minted_from`.
+
+## I. Identity and bytes (one-way doors, before phase V)
+
+- [x] I1. Link ids of cards, entries and tasks (owner decision Q1 first). (2026-11-18: the engine takes the bridge's key verbatim and only mints `dup:`; the app now derives the key, see cairn/log/2026-11-18-identity-and-bytes-before-v1.md)
+  - Where: java/contact/ContactEngine.java:686 (`uid.isEmpty() ? handle : uid`), java/contact/PhoneRemote.java:331, java/calendar/CalendarEngine.java:292 (an entry's link id is `event.id()`, its resource name), the task paths (rust/src/calendar/gtasks.rs, todo.rs, and their Java callers), rust/src/contact/fields.rs:845 (the derivation that already computes a link id).
+  - First read what the engine does with the `linkId` Java hands it: whether io-pimdir assigns the key of STORAGE §9 (the `esc:` escape, the `hash:` fallback, the `dup:` mint) or takes the string verbatim. Write the finding in the log either way.
+  - If it is taken verbatim: derive the link id in Rust from the body as io-pimdir's summary does (expose `derived.link_id` over JNI) and use it on every path that names a card, entry or task; an entry keyed by its `UID` must still keep one item per resource where a server holds two resources under one UID (the `dup:` rule, STORAGE §9, and docs/pimalaya-android-plan.md's device-bug list).
+  - Test first: a card whose UID is `hash:0123` (must become `esc:hash:0123`), a card with an empty UID of spaces (must take `hash:`), two CalDAV resources holding one UID (two items, one minted `dup:`). Run the sync vectors after: a vector moving is a finding.
+  - Spec: carddav-sync.md and calendar.md state the key; offline-store.md's conformance statement.
+- [x] I2. A Graph mail folder's key escapes its own name. (2026-11-18: JMAP's mailbox path had the same flaw and is escaped the same way)
+  - Where: rust/src/mail/msgraph.rs:150 and :160 build `"{path}/{display_name}"` unescaped, so a top-level `A/B` and the child `B` of `A` are one collection key.
+  - Port from: neverest src/msgraph/client.rs:1549-1553 (`%` as `%25`, `/` as `%2F` in a folder's own name), log neverest/cairn/log/2026-11-17-graph-mail-folders-at-every-depth.md. The depth walk is already done (msgraph.rs:149-162).
+  - Test first: a scripted roster holding `A/B` at the top and `B` under `A`: two collections, two keys.
+  - Every reader of the key that splits on `/` (the drawer's tree, the move picker) checked and fixed in the same task.
+- [x] I3. A JMAP message is named from its header bytes. (2026-11-18: io-jmap 0.10's raw `headers` property, no library change)
+  - Where: rust/src/mail/jmap.rs:1062-1097 builds the summary from JMAP's parsed `messageId[0]`, `inReplyTo`, `sentAt`, `subject`, and runs `decode` on a subject JMAP already decoded. STORAGE Annex A.1 asks `derive_meta` over the header bytes, as rust/src/mail/imap.rs:1802 and rust/src/mail/gmail.rs:979 do.
+  - Fix: request the raw headers (`headers`, or `header:<Name>:asRaw:all` if io-jmap exposes it; check io-jmap 0.10's `Email/get` properties first), build the header block and call `derive_meta`. Drop the stray `decode` in the Graph fallback too (rust/src/mail/msgraph.rs:864) only if it double-decodes the same way (see L3).
+  - Test first: a scripted `Email/get` whose `Message-ID` header carries a comment (`<a@b> (comment)`) and whose `Date` is in a military zone: the link id and date must equal what `derive_meta` gives over the same bytes fetched as a body; and a subject that literally holds `=?utf-8?q?x?=` stays as served.
+  - Context: neverest has no JMAP source yet; its draft neverest/cairn/changes/jmap-sources names this gap from the app's side.
+- [x] I4. A DAV body is stored as the server sent it (owner decision Q2 first). (2026-11-18: io-webdav reads a multistatus as lossy UTF-8, so a body holding U+FFFD is read again by GET; see the log, Left)
+  - Where: rust/src/contact/carddav.rs:129 and :253, rust/src/calendar/caldav.rs:278 convert with `String::from_utf8_lossy`: a Latin-1 vCard 2.1 is stored with U+FFFD, and a phone edit writes that back to the server.
+  - First trace how a body crosses to Java and into the store (the `vcard`/`ical` string, `PimdirHash.of`, the blob write) and write the path in the log.
+  - Fix as decided: the served bytes cross unchanged (base64 on the JSON wire if needed, as other byte fields do) and are hashed and stored as such; the projection to the phone reads them lossily; an edit of a body that was not UTF-8 is refused before any push, logged, the phone row restored from the store.
+  - Test first: a scripted CardDAV answer holding a card with a 0xE9 byte: the stored blob's bytes and hash equal the served bytes.
+  - neverest stores the bytes (neverest/cairn/log/2026-11-15-a-conflict-body-is-printed-as-stored.md).
+
+## D. Data doors
+
+- [x] D1. An HTTP send that may have gone is parked uncertain, never sent again. (2026-11-18: told by the failure per backend, see cairn/log/2026-11-18-the-data-doors.md)
+  - Where: rust/src/mail/session.rs:1258-1270 (`Refused::http`, `uncertain`): with no status, a send counts as uncertain only when no answer byte came (`unanswered`, rust/src/client/throttle.rs:134). A 2xx whose body does not parse (io-gmail 0.9 `GmailSendError::ParseResponse`, src/v1/send.rs:76-104, carries no status) and a connection cut after the status line fall through as transient, so the row stays queued and the next drain sends it again. Same path for Graph `sendMail` and JMAP submission.
+  - Port from: neverest src/sync/submit.rs:685-693 (only `ParseUrl`, `SerializeRequest`, `InvalidRequest` are transient; any other failure without an API status may have been taken) and `graph_disposition`/`gmail_disposition` (:320-344), log neverest/cairn/log/2026-11-18-gmail-sends-by-itself.md.
+  - Fix: classify by error variant per backend, not by status alone: a request never built is transient, a request sent with no readable verdict is uncertain.
+  - Test first: Gmail answering 200 with a body that is not JSON: the row must park as uncertain, and a second drain must not call the server. Same for Graph answering 202 then cutting the connection.
+  - Keep the 403 policy as the owner decides (Q3).
+- [x] D2. A Google contact update keeps what the vCard cannot hold. (2026-11-18: the person is read before every update; an update with no base masks only the fields shown apart)
+  - Where: rust/src/contact/gpeople.rs:251-333 `update_card` sends the projection for every masked field and never calls `GpeoplePerson::merge_unprojected` (io-gpeople 0.8.1 src/v1/rest/people/vcard.rs:674); it overlays foreign `clientData` by hand (:284, :296-310). Editing a field erases a second organization, an HTML biography, sub-fields.
+  - Port from: neverest src/gpeople/client.rs:358, log neverest/cairn/log/2026-11-13-neverest-follows-the-io-releases.md (GPEOPLE-02).
+  - Fix: read the person (the update already reads it for the etag guard), then `person.merge_unprojected(&read, &fields)` before `GpeopleContactUpdate`; drop the hand overlay once the merge covers `clientData`. Keep the three-way `merged_fields` guard (:568), which neverest lacks.
+  - Test first: a scripted person with two organizations and an HTML biography, the phone editing the phone number: the PATCH body must still carry both organizations and the biography.
+- [x] D3. A new series is created whole on Graph and Google. (2026-11-18: an override of no instance and `THISANDFUTURE` refused on updates too)
+  - Where: rust/src/calendar/msgraph.rs:145-180 `create_event` posts `MsgraphEvent::create_from_ical`, which reads no exceptions; rust/src/calendar/gcal.rs:396-416 `create_entry` keeps EXDATEs in `recurrence` but drops overrides. The push is answered accepted, so the phone shows occurrences the server never got until a later edit. Reachable by an upload create carrying a series with exceptions (java/calendar/CalendarEngine.java:345-376, a cross-account supersession, or an exception made before the first sync).
+  - Port from: neverest src/msgraph/client/calendar.rs:294-330 `add_event` and src/gcal/client.rs, log neverest/cairn/log/2026-11-15-a-series-is-pushed-whole.md; for attendees, neverest/cairn/log/2026-11-17-a-meeting-series-is-announced-once-whole.md (write the master without attendees, Google `sendUpdates=none`, then the occurrences, then patch the attendees in, so invitees get one mail).
+  - Fix: after the create, run the update path's occurrence writes (`write_occurrences` and `occurrence_changes`, msgraph.rs and gcal.rs around :482-640); if an occurrence fails, delete the master and answer the push rejected. An override that matches no instance (gcal.rs:598-606, msgraph.rs:465-476, today logged and answered `Ok`) and `RANGE=THISANDFUTURE` are refused (`refused`), as neverest does.
+  - Test first: a scripted Graph and a scripted Google create of a weekly series with one EXDATE and one moved occurrence: the server must receive the master, the cancellation and the moved instance; an override with no matching instance must answer refused.
+- [x] D4. A multiget row the server did not answer as gone keeps its member. (2026-11-18: read alone, failing the fetch if still unreadable)
+  - Where: rust/src/contact/carddav.rs:190-197 and rust/src/calendar/caldav.rs:105-112 drop every unreadable row; java/pimdir/PimdirEngine.java:274-284 `named()` then leaves the member out of the page, so in a complete round a 403 or 5xx row retires the member on the phone.
+  - Port from: neverest `fetch_bodies` (src/dav/client.rs; 404 and 410 are gone, any other row is read alone by GET and fails the round if still unreadable), log neverest/cairn/log/2026-11-15-a-multiget-row-answered-missing-is-gone.md.
+  - Test first: a complete round whose multiget answers one member 403: the member must stay on the phone (the round failing or the member read alone), never retired.
+  - The io-webdav row skip behind it (io-webdav sync_collection.rs:288-293) goes to phase X.
+- [x] D5. An IMAP batch error that leaves the answer on the socket resets the session. (2026-11-18: reopened signed in at once, the batch read one message at a time)
+  - Where: rust/src/mail/imap.rs:1202-1214: a batch error other than NO or BAD (`LiteralTooLong`, `UidMissing`, `LineTooLong`, `MissingTagged`) returns `Refusal::Failed` with the rest of the answer unread; nothing calls `Client::reset` under rust/src/mail/, and java/client/MailClient.java:378-397 reopens only after a transport loss, so the next command reads the previous one's lines.
+  - Port from: neverest src/imap/backend.rs:686 `recover`, log neverest/cairn/log/2026-11-13-neverest-follows-the-io-releases.md (IMAPB-S1).
+  - Fix: on such an error reset the IMAP origin (`self.client.reset(&url)`) so the next verb reopens; for `UidMissing` fall back to per-message fetches as its doc asks.
+  - Test first: a scripted server answering a FETCH batch with a literal past the bound followed by a valid tagged OK, then a second command: the second command's answer must not be the first's leftovers.
+- [x] D6. A copy made in the app of a card whose stored body is not UTF-8 is refused like its edit (owner decision Q2; from phase I's Left). (2026-11-18)
+  - Where: java/contact/ContactWriter.java `addToBook` staged the editor's text, U+FFFD where the bytes were, as a new card in the other book; java/pimdir/Stager.java `mutateResolve` refused only an edit.
+  - Test first: a Latin-1 CardDAV card ticked into another book from the editor: nothing staged there.
+
+## S. Stalls and mis-syncs
+
+- [x] S1. QRESYNC is used only when the server enabled it. (2026-11-18)
+  - Where: rust/src/mail/imap.rs:397-414 sends ENABLE and drops its answer; `supports_qresync` (:421) reads the advertised capability, so a server answering ENABLE with a bare OK (iCloud) gets a QRESYNC SELECT on every delta (:461-464, :949) and its `HIGHESTMODSEQ` moves with nothing listed: new mail, flags and expunges never reach the phone after the first round.
+  - Port from: neverest src/imap/client.rs:124-136, log neverest/cairn/log/2026-11-15-qresync-is-what-the-server-enabled.md (found live on iCloud).
+  - Fix: keep QRESYNC only when the `ENABLED` answer names it (case-insensitive); else forget the capability as the refused-ENABLE branch already does.
+  - Test first: a scripted server advertising QRESYNC and answering `ENABLE` with `OK` and no `* ENABLED`: the next listing must not send `SELECT ... (QRESYNC ...)`.
+- [x] S2. A Graph or JMAP band lists from its floor. (2026-11-18)
+  - Where: rust/src/mail/msgraph.rs:459-463 starts a band at `Ceiling { until: scope.until }` and `Band::filter` (:384-397) adds `sentDateTime lt until`; rust/src/mail/jmap.rs:152-154 bounds `before` by `receivedAt` plus two days. A message whose `Date` falls in the band but whose provider date lies past the old floor is listed by neither round: missing on the phone after a widening and in a first band. Also the live campaign's open Android line: "the Graph band, floor and step still key on sentDateTime" (.github/cairn/changes/live-testing-2026-11-15/reports/summary.md).
+  - Port from: neverest `floor_of` (src/client.rs:96) and log neverest/cairn/log/2026-11-15-a-band-lists-from-its-floor.md. Gmail is already right (rust/src/mail/gmail.rs:512, `after:` only).
+  - Fix: a band's first page carries the floor only, no ceiling; paging inside the band may keep its ceiling.
+  - Test first: Graph, a message with `sentDateTime` 90 hours back and `Date` inside the widened band, the earlier round having stopped at 50 hours: listed after the widening. Same shape for JMAP with `receivedAt` three days after `Date`.
+- [x] S3. Gmail SENT and DRAFT are never modified. (2026-11-18: a copy out of either adds the target label alone, which names neither, and is carried out)
+  - Where: rust/src/mail/gmail.rs:238-246 (`relocation` Modify and Untrash with an add), :841 `copy_message`, :849-859 `detach_message` (used by the account-wide removal when a SENT message is held elsewhere, cairn/spec/mail.md:143). Gmail answers 400 "Invalid label" to any `messages.modify` naming SENT or DRAFT; since draft-13 that is held as refused every sync, the message moved on the phone alone. Deleting into the trash (`messages.trash`, :235, :818) is fine.
+  - Port from: neverest src/gmail/client.rs:104 and :1266, log neverest/cairn/log/2026-11-17-drafts-and-sent-leave-for-the-trash.md (found live).
+  - Fix: a move or copy into or out of SENT or DRAFT is refused before any request (`refused` true, a reason naming Gmail); a removal from SENT or DRAFT goes through `messages.trash`.
+  - Test first: a staged move of a SENT message to a user label: no request reaches the scripted server and the change is refused with its reason; a removal from SENT calls `trash`.
+- [x] S4. Contact and calendar pushes answer `Refused` for an item refused as it stands. (2026-11-18: tasks ride the calendar engine; a People batch create or delete refused whole still fails the round)
+  - Where: java/contact/ContactEngine.java:1207-1210 rethrows anything but 412; java/calendar/CalendarEngine.java:553-584 maps 422 alone (and 403 or 409 on a create). One item refused with a 400 (People, Graph) or a 415 (CardDAV) fails that book's or calendar's whole push on every sync. Left open on purpose in cairn/log/2026-11-16-the-store-follows-pimdir-draft-13.md ("Calendars, contacts and tasks answer no Refused").
+  - Port from: neverest `refuses` per protocol (src/dav/client.rs:1075, src/gcal/client.rs:1021, src/gpeople/client.rs:446, src/msgraph/client.rs:1478) over `names_the_request` (src/error.rs:327), and src/sync/remote.rs:465-485; the app's own mail path (rust/src/error.rs:90-125 `refused`, `PimdirEngine.refusedResult`).
+  - Fix: set `BridgeError.refused` for these statuses on the contact, calendar and task coroutines in Rust, and have the two Java engines answer `PimdirEngine.refusedResult` for a refused failure, as `MailEngine` does; keep 404 as gone first and 412 as the stale guard.
+  - Test first: in the JVM tests (FakeCalendarProvider, and the contacts fakes), a server refusing one card of three with 400: the other two land, the refused one is recorded on its binding and reported, the next sync does not call the server for it.
+- [x] S5. A floating entry pushed to Google or Graph is anchored in the phone's zone. (2026-11-18: the zone crosses as a new `anchor` argument of `Native.createEvent` and `Native.updateEvent`, through `EventTarget.zone`)
+  - Where: no anchoring in rust/src/calendar/gcal.rs nor rust/src/calendar/msgraph.rs; io-msgraph refuses a floating start (`NoZonedStart`) and io-gcal fails the projection, neither with a status, so `pushOne` rethrows and the calendar's pass fails every sync. Reachable by an upload of a floating entry from a CalDAV or JMAP account into a Google or Graph calendar (phone-made entries are zoned, java/calendar/EventView.java:365-371).
+  - Port from: neverest src/calendar.rs:225-300 (`has_floating`, `anchor_floating`, `anchor_until`) and src/zone.rs:18, logs neverest/cairn/log/2026-11-15-a-floating-time-is-anchored.md, 2026-11-15-a-floating-time-reads-in-the-users-zone.md, 2026-11-17-a-floating-series-bounds-its-rule-in-utc.md.
+  - Fix: before `from_ical`, anchor every floating DATE-TIME in the phone's zone with the VTIMEZONE Java's `Zones.vtimezone` gives, and rewrite a floating `UNTIL` in UTC.
+  - Test first: a floating weekly series with `UNTIL=20261231T100000` pushed to a scripted Graph and Google: accepted, start zoned in the phone's zone, UNTIL in UTC.
+- [x] S6. A DAV drain is bounded and a cut listing is not complete. (2026-11-18)
+  - Where: rust/src/client/webdav.rs:63-113: a truncated page without a token sets `token = None` and restarts the listing, forever (a 507 row in the PROPFIND fallback, io-webdav sync_collection.rs:292, or a truncated REPORT without a token), and `delta.changed` piles up duplicates.
+  - Port from: neverest src/dav/client.rs:61-63 (`MAX_SYNC_ROUNDS`) and :515-563, log neverest/cairn/log/2026-11-17-a-cut-listing-is-reported.md.
+  - Fix: bound the rounds; a truncation with no new token stops; the round returns as a delta (incomplete), never as complete, so nothing is retired by absence.
+  - Test first: a scripted server answering every REPORT truncated with no token: the call returns within the bound, and the engine retires nothing.
+- [x] S7. A Google delete of an entry already gone is done. (2026-11-18: events only; task deletes keep Java's 404)
+  - Where: rust/src/calendar/gcal.rs:463-474 reads before deleting; a 410 goes through `isGone`, which is 404 alone (java/pimdir/PimdirEngine.java:375), so the pass fails; a cancelled tombstone answers 412 and `absent()` (java/calendar/CalendarEngine.java:536) sees an entry, so the removal stays rejected. Instances already take 404, 410 and cancelled (gcal.rs:610-620).
+  - Port from: neverest/cairn/log/2026-11-17-the-rest-of-nev-12.md.
+  - Fix: 410 and a cancelled master are gone (in Rust, for every Google and Graph delete, not by widening Java's `isGone` alone).
+  - Test first: a scripted Google answering the read 410, and one answering a cancelled master: the removal settles, the pass succeeds.
+- [x] S8. An SMTP session is not reused after a failed submission. (2026-11-18: premise confirmed, the test failed with `Read timed out` on the second send, so the code changed)
+  - Where: rust/src/mail/smtp.rs:167 returns from `submit` after a refusal with no QUIT nor reset; submissions share the session's transport (java/client/MailClient.java:232), so the next send's `SmtpGreetingGet` (smtp.rs:90) probably waits for a greeting on a connection past RSET, times out, fails as transient and stops the drain, against cairn/spec/mail.md:304 ("One refusal among several").
+  - UNSURE: confirm with a test first. If the test passes on the current code, record it in the log and close the task without a change.
+  - Port from: neverest/cairn/log/2026-11-13-neverest-follows-the-io-releases.md (the RSET and 421 part).
+  - Test first: two queued messages over one scripted SMTP server, the first refused at `RCPT` 550: the second is sent.
+- [x] S9. SMTP sending-limit codes keep the message queued. (2026-11-18)
+  - Where: rust/src/mail/smtp.rs:260-290 parks any permanent 5yz for good, so a daily sending limit (Gmail-style 5.4.5, Microsoft 5.7.232 and the like) loses the queue position.
+  - Port from: neverest src/sync/submit.rs:279-310 (since 2026-11-08).
+  - Test first: a scripted `550 5.4.5 Daily user sending limit exceeded`: the row stays queued and is retried later.
+
+## L. Low
+
+- [ ] L1. A stop cuts a throttle wait: rust/src/client.rs:103-104 `thread::sleep` (bounded by `WAIT_BUDGET` 30 s and `QUOTA_WAIT_BUDGET` 75 s, rust/src/client/throttle.rs:52, :58) becomes a wait the job's stop interrupts. Port from neverest/cairn/log/2026-11-17-a-stop-and-a-resolution-judged-alone.md.
+- [ ] L2. Graph contact folders listed below the top level: rust/src/contact/msgraph.rs:62-100 lists the top level alone; neverest lists two levels (src/msgraph/client/contacts.rs:84). Follow the mail walk (rust/src/mail/msgraph.rs:149-162) with the same key escaping as I2.
+- [ ] L3. The stray `decode` of an already decoded Graph subject (rust/src/mail/msgraph.rs:864, the fallback for rows listing no header fields): removed with a test of a subject holding a literal `=?`.
+- [ ] L4. The unknown-flags write: java/pimdir/PimdirItems.java:190 sets `flags_known = 0` when the flags are null (rust/pimdir/queries/app/set_flags_known.sql), where io-pimdir's hub says an unknown set never erases a known one. Check whether the engine ever hands unknown flags over a row holding known ones (a vector, or io-pimdir src/hub.rs); fix and test only if it does, else note it in the log.
+- [ ] L5. Optional: cursor paging in the app's search fork (rust/src/search/find.rs:145-211, rust/src/search/compile.rs:114-147, rust/src/ffi/search.rs:207-237, java/.../PimdirIndexDb.java:269), the defect io-pimdir 0.16 fixed upstream (PIM-5: a hit arriving between two pages repeats or hides another). Only if the owner asks for it in this change.
+- [ ] L6. Optional: java/offline/OfflineClient.java:80-89 maps `move-in-place` like `body-replaced` if a staging path can ever reach it (none does today, see B5).
+- [ ] L7. State Graph's ±5-year series window in cairn/spec/calendar.md (owner decision Q5).
+- [ ] L8. Host not ASCII: as decided (Q4); if refused, at the onboarding's server fields, with the message neverest prints (neverest/cairn/log/2026-11-17-anonymous-dav-and-ascii-hosts.md).
+- [ ] L9. From phase D's Left: a task moved to another list (java/task/TaskWrites.java `move`) and a contact merge still carry the text of a body that is not UTF-8; refuse both as D6 refuses a copy (Stager `requireText`), each with a test seen failing first.
+- [ ] L10. From phase D's Left: D5 resets the session after a batched body fetch alone; check every other IMAP command whose answer can be left part read (LIST, SEARCH, header FETCH, STORE, COPY, APPEND, EXAMINE in rust/src/mail/imap.rs) and route each through the same reopen, with a scripted test per command family.
+
+## G. For the owner (never run by an agent without that day's grant)
+
+- [ ] G1. Device check of phases B to S on the OnePlus 5 and an API 26 emulator: install with `nix develop --command gradle -p android :app:installDebug --console=plain`; a draft-13 store opens (no reinstall screen at B, the format unchanged), index.db is rebuilt once; then per account: iCloud IMAP receives a new mail after the first round (S1), a Gmail message moved out of Sent is refused with its reason (S3), a Google contact with two organizations edited keeps both (D2), a series with an exception copied into a Google and a Graph calendar shows the exception on the web (D3). Also live on Graph: a series whose occurrence write failed was deleted again (D3), so its retry resends the same `transactionId` (rust/src/calendar/msgraph.rs `create_body`, the digest of the body); check whether Graph then answers the deleted event, and if so derive the id from the body and the attempt.
+- [ ] G2. The e2e suite on the test accounts (cairn/changes/e2e-suite): `nix develop --command gradle -p android :app:e2eTest -Pe2e.targets=google,microsoft,fastmail --console=plain`.
+
+## C. Commits, then the open pull requests (owner, 2026-11-18)
+
+- [ ] C1. Phases B to L stay uncommitted until the owner and the agent commit them together at the end, signed by the owner's git config; nothing is rebased or merged before that.
+- [ ] C2. Then PR #1 (kkgosu, `fix/caldav-capability-fallback`: a CalDAV collection's `supported-report-set` read before a first round, the PROPFIND fallback when `sync-collection` is not advertised; Mail.ru): taken on top of the commits, reconciled with I4 and S6 (rust/src/client/webdav.rs, rust/src/calendar/caldav.rs, rust/src/contact/carddav.rs), its five Rust tests run here since the contributor could not.
+- [ ] C3. Then PR #2 (kkgosu, `fix/account-settings-return-and-listview`): its first commit (Sign in again reopening after Back, with `SignInAgainTest`) apart from its second (account settings on `ListView`, a UX change checked on a device on its own); a small conflict with I2 in java/setup/OnboardingFlow.java.
+
+## X. Shared code for the libraries' pass (recorded, not done here)
+
+Each line is logic the app and neverest both carry, which belongs in a protocol crate (primitives flow down, never sideways; no aggregator). Hand this list to the session that settles the libraries; when a helper is released, the app and neverest drop their copies in their own changes.
+
+- io-http: "a status names the request" (neverest src/error.rs:327; rust/src/error.rs:123); "a request sent may have been taken" (neverest src/sync/submit.rs:320-344, :685-693; rust/src/mail/session.rs:1252-1270, rust/src/client/throttle.rs:134).
+- io-imap: `NO` refusing a change as it stands, CANNOT, PARSE, TOOBIG, NOPERM, OVERQUOTA as quota (neverest src/imap/backend.rs:965-1000; rust/src/mail/imap.rs:1691-1702); whether a batch error leaves the session usable (neverest src/imap/backend.rs:686; rust/src/mail/imap.rs:1202-1214, :1296-1305); QRESYNC usable only if `ENABLED` names it (neverest src/imap/client.rs:124-136; S1).
+- io-gmail: a rate or quota refusal (rust/src/error.rs:100-106; neverest src/throttle.rs:366, src/gmail/client.rs:1493); the metadata header block, whose two copies already differ (every occurrence: rust/src/mail/gmail.rs:143, :965-979; first only: neverest src/gmail/batch.rs:44, src/gmail/client.rs:1795); SENT and DRAFT refused by `GmailMessageModify::new` (neverest src/gmail/client.rs:104, :1266; S3).
+- io-msgraph: quota (`ErrorQuotaExceeded`, 507) (rust/src/error.rs:93-99; neverest src/msgraph/client.rs:1478-1497); the header block from `internetMessageHeaders`, first per name (rust/src/mail/msgraph.rs:811-855; neverest src/msgraph/client.rs:1635-1680); an ids-only folder listing, today by `$skip` (rust/src/mail/msgraph.rs:570-589; neverest src/msgraph/client/mail.rs:456); the folder tree walk and key escaping (rust/src/mail/msgraph.rs:126-180; neverest src/msgraph/client.rs:1549-1553); series windows and page dedupe (neverest src/msgraph/client/calendar.rs:628, :655; rust/src/calendar/msgraph.rs:673, :702); create then check the stash (neverest src/msgraph/client/calendar.rs:303-321, contacts.rs:270-277; rust/src/calendar/msgraph.rs:146-174, rust/src/calendar/todo.rs:206-213) with the app's `transactionId` (rust/src/calendar/msgraph.rs:525-537), which neverest lacks.
+- io-gcal and io-msgraph: series written through instances, which both crates already offer (`GcalEventSeries`, `GcalEvent::replaces`, `instance_window`; `MsgraphEventSeries`, `recurrence_id_of`) and neither app uses (neverest src/calendar.rs:31-224, src/gcal/client.rs:793-819, :1062, src/msgraph/client/calendar.rs:294-330, :412, :506; rust/src/calendar/occurrence.rs:50-130, gcal.rs:482-640, msgraph.rs:360-497); a `from_ical` taking an anchoring zone (neverest src/calendar.rs:225-300; S5).
+- io-gpeople: an update over the current person with the three-way field guard (rust/src/contact/gpeople.rs:568 `merged_fields`; neverest src/gpeople/client.rs:358).
+- io-webdav: a bounded `sync-collection` drain answering incomplete (rust/src/client/webdav.rs:57-114; neverest src/dav/client.rs:61-63, :515-563); a non-2xx member row named rather than skipped (io-webdav sync_collection.rs:288-293).
+- io-smtp: reply disposition and sending-limit codes (neverest src/sync/submit.rs:279-310; rust/src/mail/smtp.rs:260-290).
+- ical-rs `IcalMerge`: settling DTSTAMP and SEQUENCE (neverest src/conflict/merge.rs:223-365; rust/src/calendar/conflict.rs:44, :1063).
+- io-pimdir: the date-scope margin (neverest src/client.rs:96 `floor_of`; rust/src/mail/listing.rs:43, :123-137).
+
+For neverest's side, the app already does what neverest lacks: an IMAP LIST, SEARCH or EXAMINE with a skipped line fails the listing (rust/src/mail/imap.rs:432, :1594) and a skipped QRESYNC SELECT line keeps the checkpoint (:1005-1012); a Gmail copy is one label add (rust/src/mail/gmail.rs:841); the Message-ID Gmail substitutes on `messages.send` is read back (rust/src/mail/session.rs:1121-1145); a COPY or APPEND is skipped when the target holds the Message-ID (rust/src/mail/imap.rs:1447-1480, :1534-1539); `people:batchGet` (rust/src/contact/gpeople.rs:192-229); a Google insert answered 409 takes the live event by `iCalUID` (rust/src/calendar/gcal.rs:396-425); Graph `transactionId`. Pass it to the neverest owner as information; it is not this change's work.
+
+## V. pimdir v1 (blocked until pimdir tags storage-v1, sync-v1, search-v1 and io-pimdir releases the crate following them)
+
+- [ ] V-draft-14 (reported 2026-11-18 by the session holding pimdir; not tagged, not released): pimdir 466dda6 is draft-14 and io-pimdir master d7cfe5e follows it: the refusal exceptions (D34), a tombstone over a conflict, a queued move into its own collection parks, a refused offered create bound with its refusal, the sync write ordering `UpsertPlacement` before `RefusePlacement`, the version order of STORAGE §4.2. Draft-14 is not the v1 format (owner ruling of 2026-11-18, relayed by the session holding pimdir): io-pimdir's a-page-lands-in-few-statements adds a pending stamp to STORAGE §4.5 and §17 (a format change waiting on the owner's Microsoft device run) that lands or is dropped before v1, and draft-14 gains a SEARCH §7 instance bound before its tags. If io-pimdir releases it before v1, the app follows it as a draft move (the 2026-11-16 draft-13 log is the model: draft names, `FORMAT_DRAFT`, forks re-read, a store of draft-13 refused); check that java/pimdir/PimdirStorage.java records a refusal after the batch's upserts (it does at draft-13, per that log) and records one on an offered create's new binding; the version ordering is V3's.
+- [ ] V0. Phases I and D landed (their link ids, keys and bytes are what v1 stores keep).
+- [ ] V1. rust/Cargo.toml: io-pimdir to the release following v1; `cargo update -p io-pimdir`; read its CHANGELOG and diff as phase B did (statement texts the app forks: re-read each one that moved and re-fork it, its digest test in rust/src/offline/shape/tests.rs naming the new digest).
+- [ ] V2. The draft names in tests move to the v1 names: rust/src/ffi/offline.rs:669, rust/src/offline/store.rs:465, rust/src/offline/shape.rs:24-27 (the conformance statement, `storage-v1 owner (own statement text), sync-v1 engine`), rust/src/offline/shape/tests.rs:29, rust/src/search/tests.rs:780, java/pimdir/PimdirDb.java:30, and the JVM tests MailIndexTest.java:178-191, PimdirDbTest.java:460, PimdirStorageTest.java:1249.
+- [ ] V3. rust/src/search/held.rs:20, :86-91, :156 parse `search-draft-N` alone: order versions as SEARCH.md:46 says (drafts by number, every draft below every release, releases by their major), so a `search-draft-13` index is rebuilt and a `search-v1` one is used; a test for each of `search-draft-13`, `search-v1`, `search-v2`.
+- [ ] V4. A draft store opens on the reinstall screen (cairn/spec/offline-store.md "A store of another draft is not opened", restated for a released store: STORAGE §4.2 "A released program refuses every draft store"). Read STORAGE §4.2 and §6 at the release: from v1 an owner opens any version up to its own and migrates it; v1 being the first version there is nothing to migrate, but a store naming a later version is refused, which the reinstall screen must not offer to delete.
+- [ ] V5. The sync vectors at the release: the runner's format and the ledger sync-vectors.txt restated; offline-store.md:1029 counts.
+- [ ] V6. Gates, fold every phase's delta, log, CHANGELOG (the store is rebuilt once more: a reinstall for testers on Play internal testing), archive this change, tick production-release's "One release once everything is ready" store half.

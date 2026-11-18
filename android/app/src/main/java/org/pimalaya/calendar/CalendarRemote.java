@@ -482,8 +482,20 @@ final class CalendarRemote implements PhoneSpoke {
                 base.isEmpty() ? PhoneEvent.EMPTY : CalendarClient.projectEvent(base, now());
         CalendarMapping.Phone phone = phone(target, handle);
 
-        boolean revert = !target.writable || CalendarMapping.reverts(view, live, phone);
-        PhoneEvent merged = target.writable ? CalendarMapping.merge(view, live, phone) : null;
+        // NOTE: an entry stored as its server sent it, bytes that are not
+        // UTF-8, reads here as text with U+FFFD: an edit made over it would
+        // write those to the server, so it is refused and the phone's rows
+        // put back from the store (owner decision 2026-11-18).
+        String[] served = servedBase(collection, handle);
+        boolean refused =
+                served != null && target.writable && CalendarMapping.merge(view, live, phone) != null;
+        if (refused) {
+            Log.w("pimalaya", "phone edit on " + handle + " refused: the entry is not UTF-8");
+        }
+        boolean revert =
+                refused || !target.writable || CalendarMapping.reverts(view, live, phone);
+        PhoneEvent merged =
+                target.writable && !refused ? CalendarMapping.merge(view, live, phone) : null;
         String body = merged == null ? base : CalendarClient.applyEvent(base, edit(merged, target));
         if (merged != null) {
             Log.d("pimalaya", "phone edit on " + handle);
@@ -497,13 +509,24 @@ final class CalendarRemote implements PhoneSpoke {
         String revision =
                 stamped ? token : DIRTY + CalendarMapping.fingerprint(live);
 
+        // NOTE: as a server listing carries it (CalendarSummaries), keyed as
+        // STORAGE §9 assigns: a bound entry keeps the key the store holds
+        // (PimdirEngine.keepBoundNames), a new one takes its UID.
+        Derived derived = CalendarSummaries.of(body);
         JSONObject item = new JSONObject();
         item.put("handle", handle);
-        item.put("linkId", handle);
-        item.put("hash", token);
-        item.put("body", body);
-        // NOTE: as a server listing carries it (CalendarSummaries).
-        Derived derived = CalendarSummaries.of(body);
+        item.put("linkId", CalendarSummaries.keyOf(derived, handle));
+        if (served == null) {
+            item.put("hash", token);
+            item.put("body", body);
+        } else {
+            // NOTE: unedited, so the bytes the store holds, not their text.
+            byte[] bytes = java.util.Base64.getDecoder().decode(served[1]);
+            derived = CalendarSummaries.of(bytes);
+            item.put("linkId", CalendarSummaries.keyOf(derived, handle));
+            item.put("hash", served[0]);
+            item.put("bodyBase64", served[1]);
+        }
         item.put("sortKey", derived == null ? "" : derived.sortKey());
         if (derived != null && derived.summary() != null) {
             item.put("summary", derived.summary());
@@ -951,6 +974,25 @@ final class CalendarRemote implements PhoneSpoke {
             return token;
         }
         return DIRTY + CalendarMapping.fingerprint(rows(target, handle, false));
+    }
+
+    /**
+     * The phone's base as the store holds it, {@code [hash, base64]}, where
+     * its bytes are not UTF-8 (an entry kept as its server sent it); null
+     * otherwise, the base's text then being its bytes.
+     */
+    private String[] servedBase(String collection, String handle) throws JSONException {
+        JSONObject row = offline.loadRow(collection, handle);
+        if (row == null) {
+            return null;
+        }
+        boolean based = !row.isNull("baseVcard") && !row.optString("baseVcard", "").isEmpty();
+        String object = row.optString(based ? "baseObject" : "object", null);
+        boolean lossy = row.optBoolean(based ? "baseLossy" : "lossy");
+        if (!lossy || object == null) {
+            return null;
+        }
+        return new String[] {object, offline.base64Of(object)};
     }
 
     /**

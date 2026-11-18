@@ -236,7 +236,8 @@ public class CalendarClient {
      *
      * <p>Guarded: an unguarded PUT silently overwrites another client's edit.
      * The account's {@link Account#address} makes Google and JMAP announce a
-     * meeting it organizes to the attendees.
+     * meeting it organizes to the attendees; the target's zone is the one
+     * Google and Graph read a floating time in.
      */
     public String updateEvent(
             Transport transport, Account account, EventTarget target, String ical) {
@@ -248,7 +249,8 @@ public class CalendarClient {
                                         target.calendarUrl(),
                                         target.id(),
                                         ical,
-                                        target.etag() == null ? "" : target.etag())))
+                                        target.etag() == null ? "" : target.etag(),
+                                        target.zone() == null ? "" : target.zone())))
                 .etag();
     }
 
@@ -289,7 +291,8 @@ public class CalendarClient {
                                 account.toJson().toString(),
                                 target.calendarUrl(),
                                 target.id(),
-                                ical));
+                                ical,
+                                target.zone() == null ? "" : target.zone()));
         try {
             return new EventRef(
                     created.getString("id"),

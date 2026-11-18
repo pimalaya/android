@@ -19,12 +19,17 @@ A collection sync SHALL run the RFC 6578 `sync-collection` REPORT, and SHALL enu
 - THEN the collection is enumerated with `PROPFIND` and the round reports itself complete
 
 ### Requirement: A DAV listing that is not whole is refused
-A CardDAV or CalDAV listing, delta or discovery answer that is not one whole `multistatus` document (a page of another kind, a document cut short, an empty body) SHALL fail its request, as io-webdav 0.8 fails it, and SHALL NOT be read as a shorter listing, whose missing members would read as deleted. A card listing naming a card without its data (a 403 or 404 row, io-webdav's `unreadable`) SHALL fail too; a multiget's member answered without its data SHALL be left out and logged, as one the server did not answer.
+A CardDAV or CalDAV listing, delta or discovery answer that is not one whole `multistatus` document (a page of another kind, a document cut short, an empty body) SHALL fail its request, as io-webdav 0.8 fails it, and SHALL NOT be read as a shorter listing, whose missing members would read as deleted. A card listing naming a card without its data (a 403 or 404 row, io-webdav's `unreadable`) SHALL fail too; a multiget row answered without its data SHALL be logged and, unless it is a 404 or a 410 (the card gone, left out), read alone by a `GET`; one still unreadable alone (a 403, a 5xx) SHALL fail the fetch, and with it the round, rather than be left out, which a complete round would read as removed (neverest's rule). A calendar multiget SHALL read its rows the same way.
 
 #### Scenario: A listing cut short
 - GIVEN a CardDAV server whose listing of two cards ends before its closing tag
 - WHEN the book is listed
 - THEN the listing fails, and no card is read as gone
+
+#### Scenario: A multiget row refused
+- GIVEN a complete CardDAV round whose multiget answers one member 403
+- WHEN the card is read alone and answers, or answers 403 again
+- THEN the card is stored, or the round fails; it is never retired
 
 ### Requirement: A Graph book reads its changed contacts 20 to a batch
 A Graph addressbook pass SHALL take a contact's body from the complete round's listing when it carries one, and SHALL read every other body it needs 20 requests to a `$batch`, each request the one a single contact read sends, a request the batch could not serve being sent again on its own. A contact Graph no longer holds when it is read SHALL be left out, and the rest of the book stored. Each read SHALL log how many contacts it was asked for, how many the listing gave, how many it read in how many batches and its network time.
@@ -105,7 +110,12 @@ An add whose body differs from every copy the account holds SHALL NOT be sent as
 - THEN nothing overwrites Google's copy, the edit stays on the phone, and "Not sent yet" names it
 
 ### Requirement: A contact update never writes over a remote change
-A Google contact update refused for a stale or missing etag SHALL re-read the person and send only the fields the phone changed and the server did not, under the fresh etag; a field both sides changed differently SHALL NOT be written, the update being refused as a conflict. An update refused with no change listed after it SHALL become a conflict of its binding, whose body the next hydrate reads, merged three ways or left for the conflict form. Only CardDAV SHALL retry an update unguarded. JMAP and Microsoft Graph updates are not guarded yet (change guarded-contact-updates).
+A Google contact update refused for a stale or missing etag SHALL re-read the person and send only the fields the phone changed and the server did not, under the fresh etag; a field both sides changed differently SHALL NOT be written, the update being refused as a conflict. An update refused with no change listed after it SHALL become a conflict of its binding, whose body the next hydrate reads, merged three ways or left for the conflict form. Every Google update SHALL be the vCard's projection merged over the person read right before it (io-gpeople's `GpeoplePerson::merge_unprojected`), the etag guarding the race between them: People replaces a masked field whole, so what the vCard cannot hold (a second organization and an organization's location, an HTML biography, a foreign `clientData` entry, sub-fields) SHALL be sent back as held. An update with no base SHALL mask only the fields its vCard shows apart from the person read, never every field. Only CardDAV SHALL retry an update unguarded. JMAP and Microsoft Graph updates are not guarded yet (change guarded-contact-updates).
+
+#### Scenario: A Google contact with two organizations
+- GIVEN a Google contact with two organizations, the first with a location, and an HTML biography, which the vCard shows as one organization without its location and no biography
+- WHEN the phone changes its phone number and the first organization's title
+- THEN People holds both organizations, the first with its location and the new title, the biography, and the new number
 
 ### Requirement: An edit reaches every copy of the contact
 The editor's save of a card held in several books of one account SHALL be staged on every book copy whose body equals the edited copy's, and SHALL leave alone a copy holding an unsent change of its own.
@@ -117,3 +127,35 @@ Unticking the book that holds the only copy of a change the server has not got S
 - GIVEN a contact whose label copy holds an unsent rename while Google changed its phone number
 - WHEN the user unticks the label and keeps the change
 - THEN the server ends with the rename and Google's phone number
+
+### Requirement: A card is keyed by its UID as STORAGE §9 assigns
+A card listed or fetched from any backend, or read off the phone, SHALL be filed under the key pimdir STORAGE §9 assigns from its `UID` (offline-store "An item's link id follows STORAGE §9"): its `UID`, `esc:` before one beginning with a reserved prefix, the `hash:` fallback over its bytes for a blank or missing one; a card created in the app SHALL be staged under the same key, derived from the body it saves. A create SHALL be filed on a CardDAV server as its stated `UID` and `.vcf`, and one keyed by a derived key under a fresh name.
+
+#### Scenario: A blank UID
+- GIVEN a CardDAV card stating `UID:` followed by spaces
+- WHEN the book is listed
+- THEN the card is filed under `hash:` and sixteen hexadecimal digits, never under its resource name
+
+### Requirement: A card that is not UTF-8 is kept as served
+A card whose bytes are not UTF-8 (a Latin-1 vCard 2.1) SHALL be stored as its server sent them (offline-store "A DAV body is stored as served"), shown on the phone read lossily, and never written back as text: an edit of it in the app is refused, one in a contacts app is put back from the store, and the push of such a body is answered refused. A copy of it made in the app (the editor ticking it into another book) SHALL be refused as its edit is, nothing staged in the other book.
+
+#### Scenario: A Latin-1 card ticked into another book
+- GIVEN a CardDAV card stored as Latin-1 bytes
+- WHEN the editor ticks it into another book of the account and saves
+- THEN the save is refused and the other book holds nothing of it
+
+### Requirement: A contact push refused as it stands is held
+A contact push the server refuses as it stands SHALL be answered refused with the server's reason, held by the engine on its binding and reported every sync, as a mail push is (offline-store, "A change refused as it stands is held"), and the book's other changes SHALL be pushed. The bridge SHALL read the refusal off the answer: a CardDAV status naming the request (400 to 499 but 401, 407, 408, 409, 412, 423, 425 and 429) whose body names no exceeded quota, a People answer of such a status naming no rate limit nor quota, a Graph one naming neither `ErrorQuotaExceeded` nor a rate, inside a `$batch` as alone, and a JMAP `ContactCard/set` error naming the change (`forbidden`, `invalidProperties`, `invalidPatch`, `blobNotFound`, `tooLarge`, `singleton`), never `notFound`, `overQuota` nor `rateLimit`. A card gone (404) SHALL stay gone first, a removal converging on it, and a 412 SHALL stay the stale guard, retried unguarded when the listing proves the card unchanged and else rejected. A People batch create or delete refused whole still fails the round: no one card can be told from the others.
+
+#### Scenario: One card of three refused
+- GIVEN three cards edited on the phone in a CardDAV book, the server answering one update 415
+- WHEN the book syncs
+- THEN the other two land, the refused one is recorded on its binding and reported, and the next sync asks the server nothing for it
+
+### Requirement: A DAV listing is bounded
+A `sync-collection` drain SHALL follow the token of each truncated page (a `507` row, RFC 6578 section 3.6), 32 rounds at most, and SHALL stop on a truncated page naming no new token or on its last round. The listing so cut SHALL answer incomplete, its token the last one known, so the engine retires no member it did not list; the next sync lists again from that token.
+
+#### Scenario: A server cutting every answer short
+- GIVEN a CardDAV server answering every `sync-collection` truncated with no token
+- WHEN an initial sync runs
+- THEN one REPORT is sent, the round answers incomplete, and no card is retired

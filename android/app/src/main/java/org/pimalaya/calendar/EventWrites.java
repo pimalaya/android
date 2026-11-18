@@ -94,7 +94,7 @@ final class EventWrites {
                         if (split.series() != null) {
                             engine.mutateAdd(
                                     collection.id,
-                                    uid + ".ics",
+                                    CalendarSummaries.keyOf(split.series(), uid),
                                     withAlarms(split.series(), save.alarms()),
                                     Flags.none(),
                                     null,

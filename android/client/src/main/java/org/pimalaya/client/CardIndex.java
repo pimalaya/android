@@ -13,6 +13,9 @@ import org.json.JSONObject;
  * @param emails every non-empty email address, in document order
  * @param hash the normalized content hash, 16 hex digits
  * @param info the list row's fallback line, maybe empty
+ * @param linkId the key the store files the card under (STORAGE §9): its
+ *     UID, escaped when it begins with a reserved prefix, else the {@code
+ *     hash:} fallback
  * @param name the display name to show, maybe empty
  * @param phone the first phone number, empty when the card has none
  * @param sortKey the key the store sorts the card under
@@ -25,6 +28,7 @@ public record CardIndex(
         List<String> emails,
         String hash,
         String info,
+        String linkId,
         String name,
         String phone,
         String sortKey,
@@ -36,6 +40,7 @@ public record CardIndex(
                 List.copyOf(Json.strings(reply.optJSONArray("emails"))),
                 reply.optString("hash"),
                 reply.optString("info"),
+                reply.optString("linkId"),
                 reply.optString("name"),
                 reply.optString("phone"),
                 reply.optString("sortKey"),

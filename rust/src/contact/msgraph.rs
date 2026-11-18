@@ -45,7 +45,7 @@ use crate::{
         Addressbook, Card, CardDelta,
         push::{PushChange, PushOutcome, rejected, required},
     },
-    error::{BridgeError, coroutine_error},
+    error::{BridgeError, coroutine_error, graph_refuses},
     offline::default_role,
 };
 
@@ -320,17 +320,19 @@ impl<H: Host> Msgraph<'_, H> {
                         ..Default::default()
                     });
                 } else {
-                    let message = reply
-                        .body
-                        .as_ref()
-                        .and_then(|body| body.get("error"))
-                        .and_then(|error| error.get("message"))
-                        .and_then(|message| message.as_str())
-                        .unwrap_or_default()
-                        .to_string();
+                    let error = reply.body.as_ref().and_then(|body| body.get("error"));
+                    let field = |name: &str| {
+                        error
+                            .and_then(|error| error.get(name))
+                            .and_then(|value| value.as_str())
+                            .unwrap_or_default()
+                            .to_string()
+                    };
+                    let (code, message) = (field("code"), field("message"));
                     outcomes.push(rejected(
                         change.reference.clone(),
                         format!("HTTP {} {message}", reply.status),
+                        graph_refuses(reply.status, &code, &message),
                     ));
                 }
             }
@@ -384,6 +386,7 @@ impl<H: Host> Msgraph<'_, H> {
                         id: row.contact.id,
                         etag: row.contact.change_key,
                         vcard: String::new(),
+                        vcard_base64: None,
                         books: Vec::new(),
                     });
                 }
@@ -436,6 +439,7 @@ fn graph_card(contact: MsgraphContact) -> Card {
         uri: contact.id,
         etag: contact.change_key,
         vcard,
+        vcard_base64: None,
         books: Vec::new(),
     }
 }
@@ -898,5 +902,78 @@ mod tests {
         assert_eq!(book.id, "");
         assert_eq!(book.role, "default");
         assert!(book.writable);
+    }
+
+    /// A change Graph refuses as it stands inside a `$batch` is answered
+    /// refused, one throttled or failing on Graph's side is not: the round
+    /// goes on either way.
+    #[test]
+    fn a_batched_change_refused_as_it_stands_is_told_refused() {
+        let mut client = Client::new(FakeServer::new(|request: &FakeRequest| {
+            let requests: Vec<MsgraphBatchRequest> =
+                serde_json::from_value(request.json::<Value>()["requests"].take()).unwrap();
+            let responses = requests
+                .iter()
+                .map(|request| {
+                    let (status, body) = match request.id.as_str() {
+                        "0" => (201, json!({"id": "n0", "changeKey": "k0"})),
+                        "1" => (
+                            400,
+                            json!({"error": {"code": "ErrorInvalidProperty", "message": "bad"}}),
+                        ),
+                        "2" => (
+                            429,
+                            json!({"error": {"code": "TooManyRequests", "message": "slow"}}),
+                        ),
+                        _ => (
+                            503,
+                            json!({"error": {"code": "ServiceUnavailable", "message": "down"}}),
+                        ),
+                    };
+                    MsgraphBatchResponse {
+                        id: request.id.clone(),
+                        status,
+                        body: Some(body),
+                        ..Default::default()
+                    }
+                })
+                .collect();
+            FakeResponse::json(200, &MsgraphBatchResponses { responses })
+        }));
+        let vcard = "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Jane\r\nEND:VCARD\r\n";
+        let changes: Vec<PushChange> = ["a", "b", "c", "d"]
+            .iter()
+            .map(|reference| {
+                serde_json::from_value(json!({"ref": reference, "op": "create", "vcard": vcard}))
+                    .unwrap()
+            })
+            .collect();
+
+        let outcomes = Msgraph {
+            client: &mut client,
+            token: "token",
+        }
+        .push_cards("", &changes)
+        .unwrap();
+
+        let told: Vec<(&str, bool, bool)> = outcomes
+            .iter()
+            .map(|outcome| {
+                (
+                    outcome.reference.as_str(),
+                    outcome.accepted,
+                    outcome.refused,
+                )
+            })
+            .collect();
+        assert_eq!(
+            told,
+            [
+                ("a", true, false),
+                ("b", false, true),
+                ("c", false, false),
+                ("d", false, false)
+            ]
+        );
     }
 }
