@@ -50,6 +50,23 @@ public class EndpointsTest {
     }
 
     @Test
+    public void aTypedHostThatIsNotAsciiIsNamedForItsPunycodeForm() {
+        // NOTE: java.net.URI reads no host there, so the form refused these
+        // as unencrypted servers, which they are not.
+        assertNull(Endpoints.manualUrl(PimDomain.MAIL, "bücher.de"));
+        assertNull(Endpoints.manualUrl(PimDomain.CONTACTS, "https://dav.bücher.de/"));
+        assertNull(Endpoints.submitUrl("smtp.bücher.de:587"));
+
+        assertEquals("bücher.de", Endpoints.unicodeHost("bücher.de"));
+        assertEquals("bücher.de", Endpoints.unicodeHost("imaps://bücher.de:993"));
+        assertEquals("dav.bücher.de", Endpoints.unicodeHost(" https://u@dav.bücher.de/dav/ "));
+        assertEquals("smtp.bücher.de", Endpoints.unicodeHost("smtp.bücher.de:587"));
+        assertNull(Endpoints.unicodeHost("xn--bcher-kva.de"));
+        assertNull(Endpoints.unicodeHost("https://dav.example.org/bücher/"));
+        assertNull(Endpoints.unicodeHost("imaps://[2001:db8::1]:993"));
+    }
+
+    @Test
     public void onlyEncryptedEndpointsAreSecure() {
         assertTrue(Endpoints.secure("https://dav.example.org/"));
         assertTrue(Endpoints.secure("imaps://mail.example.org:993"));

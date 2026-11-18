@@ -77,7 +77,28 @@ A `sync-collection` drain SHALL stop after a bounded number of rounds or on a tr
 ### Requirement: A sending limit keeps the message queued (mail; S9)
 An SMTP refusal naming a sending limit SHALL leave the message queued.
 
+### Requirement: Every Graph contact folder is a book (carddav-sync; L2)
+A Graph account's books SHALL be every contact folder at every depth, each keyed by its folder's id.
+
+### Requirement: A typed host that is not ASCII asks for its Punycode form (onboarding; L8)
+A typed server whose host is not ASCII SHALL be refused on its card, naming the host and asking for its Punycode form. (Owner decision Q4; folded into "Setup accepts encrypted servers only".)
+
 ## MODIFIED Requirements
+
+### Requirement: An HTTP sync rides out throttling (mail; L1)
+A throttling wait SHALL be cut short when the app stops the work (the background job told to stop, every thread's waits; the app closing, the interrupted thread's), the throttled answer failing the request at once.
+
+### Requirement: A row Graph lists no header field for keeps its subject (mail; L3)
+The `subject` of a Graph row listing no header field SHALL be taken as Graph serves it, never decoded again.
+
+### Requirement: Expansion is bounded whatever the rule (calendar; L7)
+Graph's five-year window for a series' exceptions SHALL be stated, with what an exception outside it becomes. (Owner decision Q5.)
+
+### Requirement: A copy of a body that is not UTF-8 is refused (carddav-sync, tasks; L9)
+A merge reading a card that is not UTF-8, and a to-do that is not UTF-8 filed into another list, SHALL be refused as a copy is, nothing staged.
+
+### Requirement: An IMAP session out of step is opened again (mail; L10)
+Every IMAP command failing with its answer part unread, or its connection failing under it, SHALL leave the session out of step, the next command opening the connection again, signed in.
 
 ### Requirement: The sync vectors run through the app's load and write (offline-store; B4, V5)
 The counts line SHALL name the io-pimdir the app pins and the counts its run gave (at io-pimdir 0.16: expected 126 pass, 10 fail, 31 unbound, case 58 passing).

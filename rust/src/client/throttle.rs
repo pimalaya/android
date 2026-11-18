@@ -276,7 +276,11 @@ impl<H: Host> Client<H> {
                 retries + 1,
                 delay.as_millis()
             );
-            self.host.sleep(delay);
+            if let Err(err) = self.host.sleep(delay) {
+                log::debug!("{} wait cut short ({err}), giving up", short(url));
+                self.begin_follow(url, &refusal.bytes);
+                return Ok(refusal.bytes);
+            }
             self.waited += delay;
             retries += 1;
 
@@ -290,14 +294,18 @@ impl<H: Host> Client<H> {
     /// Waits out the pacing of a Gmail request of `units` under `key`.
     ///
     /// Its throttled answers then hold that account's pacing; answers the
-    /// wait ([`pace_gmail`]).
-    pub fn pace_gmail(&mut self, key: &str, units: u32) -> Duration {
+    /// wait ([`pace_gmail`]), or fails when the app stops the call during
+    /// it, the request it paced never sent ([`Self::sent`]).
+    pub fn pace_gmail(&mut self, key: &str, units: u32) -> Result<Duration, BridgeError> {
         self.gmail_pace = Some(key.to_string());
         let wait = pace_gmail(key, units, self.urgent);
-        if !wait.is_zero() {
-            self.host.sleep(wait);
+        if !wait.is_zero()
+            && let Err(err) = self.host.sleep(wait)
+        {
+            self.exchange = Exchange::default();
+            return Err(err);
         }
-        wait
+        Ok(wait)
     }
 }
 
@@ -1223,6 +1231,8 @@ mod tests {
         begun: u32,
         settled: u32,
         resets: u32,
+        /// Whether the app stops the call at its first wait.
+        stops: bool,
     }
 
     impl Scripted {
@@ -1238,6 +1248,7 @@ mod tests {
                 begun: 0,
                 settled: 0,
                 resets: 0,
+                stops: false,
             }
         }
     }
@@ -1277,9 +1288,13 @@ mod tests {
             Err("Unscripted".into())
         }
 
-        fn sleep(&mut self, delay: Duration) {
+        fn sleep(&mut self, delay: Duration) -> Result<(), BridgeError> {
+            if self.stops {
+                return Err("Stopped while waiting".into());
+            }
             self.slept.push(delay);
             self.now += delay;
+            Ok(())
         }
 
         fn now(&self) -> Timestamp {
@@ -1669,6 +1684,20 @@ mod tests {
         assert_eq!(get.host.writes, [GRAPH_GET, GRAPH_GET]);
     }
 
+    /// A stop during a throttled wait hands the refusal back at once.
+    #[test]
+    fn a_stop_cuts_a_throttled_wait_short() {
+        let refused = answer("429 Too Many Requests", b"{}");
+        let served = answer("200 OK", b"{}");
+        let mut client = Client::new(Scripted::new(&[&refused, &served], "2026-10-11T08:00:00Z"));
+        client.host.stops = true;
+
+        client.http_write(GRAPH, GRAPH_GET).unwrap();
+        assert_eq!(client.http_read(GRAPH).unwrap(), refused);
+        assert_eq!(client.host.writes, [GRAPH_GET], "not sent again");
+        assert_eq!(client.waited, Duration::ZERO);
+    }
+
     /// A 429 refuses before any work: a POST waits and goes again.
     #[test]
     fn a_post_refused_by_a_429_is_sent_again() {
@@ -1748,6 +1777,24 @@ mod tests {
         client.http_write(GRAPH, GRAPH_GET).unwrap();
         assert_eq!(client.http_read(GRAPH).unwrap(), refused);
         assert_eq!(client.host.settled, 1);
+    }
+
+    /// A stop during a Gmail pacing wait fails before the request, which
+    /// is not told sent even after an answered one.
+    #[test]
+    fn a_stop_cuts_a_pacing_wait_short_unsent() {
+        let key = "test-pacing-stopped";
+        let served = answer("200 OK", b"{}");
+        let mut client = Client::new(Scripted::new(&[&served], "2026-10-11T08:00:00Z"));
+        client.http_write(URL, REQUEST).unwrap();
+        client.http_read(URL).unwrap();
+        assert!(client.sent());
+
+        client.pace_gmail(key, GMAIL_UNITS_PER_MINUTE).unwrap();
+        client.host.stops = true;
+        assert!(client.pace_gmail(key, GMAIL_UNITS_PER_MINUTE).is_err());
+        assert!(!client.sent(), "the paced request never went");
+        assert_eq!(client.host.writes, [REQUEST]);
     }
 
     #[test]

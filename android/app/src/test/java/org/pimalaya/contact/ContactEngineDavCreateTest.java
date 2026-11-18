@@ -407,6 +407,65 @@ public class ContactEngineDavCreateTest {
     }
 
     /**
+     * A merge of a card kept as served, not UTF-8, with another: the
+     * survivor would be written from its text, U+FFFD where the bytes were,
+     * so the merge is refused as an edit is, nothing staged on either card.
+     */
+    @Test
+    public void aMergeOfACardThatIsNotUtf8IsRefused() throws Exception {
+        byte[] served =
+                ("BEGIN:VCARD\r\nVERSION:2.1\r\nUID:latin\r\nFN:René\r\n"
+                                + "N:;René;;;\r\nTEL:1\r\nEND:VCARD\r\n")
+                        .getBytes(StandardCharsets.ISO_8859_1);
+        Dav dav = new Dav(false, true);
+        dav.cards.put("c1.vcf", new String[] {"e1", new String(served, StandardCharsets.UTF_8)});
+        dav.served.put("c1.vcf", served);
+        dav.cards.put("c2.vcf", new String[] {"e2", listed("utf8", "René Dupont")});
+        sync(dav);
+
+        StubHost host = Robolectric.buildActivity(StubHost.class).create().get();
+        host.setContentView(R.layout.panel_contact);
+        List<AccountEntry> accounts =
+                new ArrayList<>(
+                        List.of(
+                                AccountEntry.empty(EMAIL)
+                                        .with(
+                                                PimDomain.CONTACTS,
+                                                BASE,
+                                                null,
+                                                AccountCredential.password(EMAIL, "secret"))));
+        ContactPool pool = new ContactPool(store, contacts(), accounts);
+        Clients clients =
+                new Clients(
+                        new AccountClient(), dav, new CalendarClient(), new MailClient(),
+                        new OfflineClient());
+        ContactEditor editor =
+                new ContactEditor(
+                        host,
+                        new ContactParts(pimdir, store, contacts(), pool, clients, accounts),
+                        new ContactForm(host),
+                        () -> {});
+        Entry latin = null;
+        Entry utf8 = null;
+        for (Entry entry : pool.loadEntries()) {
+            if (entry.id.equals("latin")) {
+                latin = entry;
+            } else if (entry.id.equals("utf8")) {
+                utf8 = entry;
+            }
+        }
+        assertTrue(editor.openMerged(List.of(latin, utf8)));
+        editor.edit().mergeSurvivor = utf8;
+        editor.save();
+        sync(dav);
+
+        assertEquals(List.of(), dav.updates);
+        assertEquals(List.of(), dav.deleted);
+        assertEquals("e1", dav.cards.get("c1.vcf")[0]);
+        assertEquals("e2", dav.cards.get("c2.vcf")[0]);
+    }
+
+    /**
      * An update the server refuses as it stands (a 415 naming the request, as
      * the bridge reads it) is that card's: the book's other edits land, the
      * refusal is recorded on its binding, and the next pass holds it rather

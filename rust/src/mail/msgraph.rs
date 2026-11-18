@@ -59,7 +59,7 @@ use io_msgraph::v1::{
 
 use io_pimdir::summary::{
     PimdirAddress, PimdirSummary,
-    mail::{PimdirMailSummary, decode, derive_meta, message_id},
+    mail::{PimdirMailSummary, derive_meta, message_id},
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -849,8 +849,9 @@ const SUMMARY_FIELDS: [&str; 9] = [
 /// A row listing its header fields is named off them, each from its first
 /// entry, by the derivation a body is read with (pimdir STORAGE Annex
 /// A.1). A row listing none is named from `internetMessageId`, read as a
-/// `Message-ID` field is, and from what Graph decodes: the date is
-/// `sentDateTime`, never the reception. Either way the attachment mark is
+/// `Message-ID` field is, and from what Graph decodes, the subject taken
+/// as Graph serves it (never decoded again) and the date `sentDateTime`,
+/// never the reception. Either way the attachment mark is
 /// Graph's own `hasAttachments` and the size the MAPI one
 /// [`MESSAGE_EXPAND`] asks for, the only property it expands.
 fn graph_summary(message: &MsgraphMessage) -> PimdirMailSummary {
@@ -884,7 +885,11 @@ fn graph_summary(message: &MsgraphMessage) -> PimdirMailSummary {
     PimdirMailSummary {
         message_id: message.internet_message_id.as_deref().and_then(message_id),
         in_reply_to: Vec::new(),
-        subject: message.subject.as_deref().map(decode).unwrap_or_default(),
+        subject: message
+            .subject
+            .as_deref()
+            .map(|subject| subject.trim_matches([' ', '\t']).to_string())
+            .unwrap_or_default(),
         sender: first.as_ref().map(|address| address.address.clone()),
         sender_name: first.and_then(|address| address.name),
         date: message.sent_date_time.as_deref().and_then(utc),
@@ -1249,7 +1254,10 @@ impl<H: Host> Msgraph<'_, H> {
             if !again.is_empty() {
                 let delay = Duration::from_secs(wait).min(WAIT_BUDGET);
                 log::debug!("graph batch: {} throttled, waiting {delay:?}", again.len());
-                self.client.host.sleep(delay);
+                if let Err(err) = self.client.host.sleep(delay) {
+                    log::debug!("graph batch: wait cut short ({err})");
+                    return Ok(GraphSources { fetched, gone });
+                }
                 batches.push_front(again);
             }
         }

@@ -39,21 +39,21 @@ use io_imap::{
             ImapMessageFetchStreamBatch, ImapMessageFetchStreamBatchError,
             ImapMessageFetchStreamBatchOptions, ImapMessageFetchStreamBatchYield,
         },
-        greeting::{ImapGreetingGet, ImapGreetingGetOptions},
-        list::ImapMailboxList,
-        search::{ImapMessageSearch, ImapMessageSearchOptions},
+        greeting::{ImapGreetingGet, ImapGreetingGetError, ImapGreetingGetOptions},
+        list::{ImapMailboxList, ImapMailboxListError},
+        search::{ImapMessageSearch, ImapMessageSearchError, ImapMessageSearchOptions},
         select::{ImapMailboxSelect, ImapMailboxSelectError, ImapMailboxSelectOptions},
         store::{ImapMessageStoreError, ImapMessageStoreOptions, ImapMessageStoreSilent},
     },
     rfc4315::expunge_uid::{ImapMessageExpungeUid, ImapMessageExpungeUidError},
-    rfc5161::enable::ImapExtensionEnable,
-    rfc5256::sort::{ImapMessageSort, ImapMessageSortOptions},
+    rfc5161::enable::{ImapExtensionEnable, ImapExtensionEnableError},
+    rfc5256::sort::{ImapMessageSort, ImapMessageSortError, ImapMessageSortOptions},
     rfc6851::r#move::{ImapMessageMove, ImapMessageMoveError, ImapMessageMoveOptions},
     sasl::{
-        auth_plain::{ImapAuthPlain, ImapAuthPlainOptions},
-        auth_xoauth2::{ImapAuthXoauth2, ImapAuthXoauth2Options},
+        auth_plain::{ImapAuthPlain, ImapAuthPlainError, ImapAuthPlainOptions},
+        auth_xoauth2::{ImapAuthXoauth2, ImapAuthXoauth2Error, ImapAuthXoauth2Options},
     },
-    send::{ImapOutput, ImapStatusError},
+    send::{ImapOutput, ImapSendError, ImapStatusError},
     types::{
         IntoStatic,
         command::SelectParameter,
@@ -328,14 +328,16 @@ impl<'a, H: Host> ImapSession<'a, H> {
         let alone = self.state.alone;
         *self.state = ImapState::new(&url);
         self.state.alone = alone;
-        self.state.out_of_step = true;
 
         let Some(auth) = self.auth else {
+            self.state.out_of_step = true;
             return Err("The IMAP connection left an answer unread, it opens again".into());
         };
-        self.connect(&auth)?;
-        self.state.out_of_step = false;
-        Ok(())
+        let connected = self.connect(&auth);
+        if connected.is_err() {
+            self.state.out_of_step = true;
+        }
+        connected
     }
 
     /// Drives a coroutine to completion, servicing every read and write
@@ -343,7 +345,7 @@ impl<'a, H: Host> ImapSession<'a, H> {
     fn run<C, T, E>(&mut self, coroutine: C) -> Result<T, BridgeError>
     where
         C: ImapCoroutine<Yield = ImapYield, Return = Result<T, E>>,
-        E: core::fmt::Display,
+        E: core::fmt::Display + AnswerFailure,
     {
         self.attempt(coroutine)?
             .map_err(|err| err.to_string().into())
@@ -351,25 +353,45 @@ impl<'a, H: Host> ImapSession<'a, H> {
 
     /// [`Self::run`], the server's answer kept apart from the wire's
     /// failure, so a refusal can be told from a dead connection.
+    ///
+    /// A connection an earlier command left out of step opens again
+    /// first; this one leaves it so when it fails before its answer was
+    /// read to its end ([`AnswerFailure::left_unread`]) or the wire fails.
     fn attempt<C, T, E>(&mut self, mut coroutine: C) -> Result<Result<T, E>, BridgeError>
     where
         C: ImapCoroutine<Yield = ImapYield, Return = Result<T, E>>,
+        E: AnswerFailure,
     {
+        if self.state.out_of_step {
+            self.reopen()?;
+        }
         let mut arg: Option<Vec<u8>> = None;
 
         loop {
-            match coroutine.resume(&mut self.state.fragmentizer, arg.as_deref()) {
-                ImapCoroutineState::Complete(result) => return Ok(result),
+            let wire = match coroutine.resume(&mut self.state.fragmentizer, arg.as_deref()) {
+                ImapCoroutineState::Complete(result) => {
+                    if result.as_ref().is_err_and(AnswerFailure::left_unread) {
+                        self.state.out_of_step = true;
+                    }
+                    return Ok(result);
+                }
                 ImapCoroutineState::Yielded(ImapYield::WantsTag) => {
                     arg = Some(self.state.tag());
+                    Ok(())
                 }
                 ImapCoroutineState::Yielded(ImapYield::WantsRead) => {
-                    arg = Some(self.client.read(&self.state.url)?);
+                    self.client.read(&self.state.url).map(|bytes| {
+                        arg = Some(bytes);
+                    })
                 }
                 ImapCoroutineState::Yielded(ImapYield::WantsWrite(bytes)) => {
-                    self.client.write(&self.state.url, &bytes)?;
                     arg = None;
+                    self.client.write(&self.state.url, &bytes)
                 }
+            };
+            if let Err(err) = wire {
+                self.state.out_of_step = true;
+                return Err(err);
             }
         }
     }
@@ -379,7 +401,7 @@ impl<'a, H: Host> ImapSession<'a, H> {
     fn write<C, T, E>(&mut self, coroutine: C) -> Result<T, BridgeError>
     where
         C: ImapCoroutine<Yield = ImapYield, Return = Result<T, E>>,
-        E: core::fmt::Display + WriteFailure,
+        E: core::fmt::Display + WriteFailure + AnswerFailure,
     {
         self.attempt(coroutine)?.map_err(|err| BridgeError {
             message: err.to_string(),
@@ -1782,6 +1804,90 @@ fn refuses_as_it_stands(status: &ImapStatusError) -> bool {
 }
 
 /// The failure of a write's command, read for the `NO` it answered.
+trait AnswerFailure {
+    /// Whether the command failed before its answer was read to its end:
+    /// anything but a tagged `NO` or `BAD` or an `OK` that named nothing.
+    ///
+    /// The rest of the answer would be read as the next command's, or the
+    /// connection is gone (a `BYE`, an end of stream): it opens again.
+    fn left_unread(&self) -> bool;
+}
+
+/// Whether a send failed after its command went out: a missing or invalid
+/// tag fails before anything is written.
+fn send_left_unread(err: &ImapSendError) -> bool {
+    !matches!(
+        err,
+        ImapSendError::MissingTag | ImapSendError::InvalidTag(_)
+    )
+}
+
+macro_rules! answer_failure {
+    ($($error:ty),*) => {
+        $(impl AnswerFailure for $error {
+            fn left_unread(&self) -> bool {
+                match self {
+                    Self::No(_) | Self::Bad(_) => false,
+                    Self::Send(err) => send_left_unread(err),
+                    _ => true,
+                }
+            }
+        })*
+    };
+}
+
+answer_failure!(
+    ImapAuthPlainError,
+    ImapExtensionEnableError,
+    ImapMailboxExamineError,
+    ImapMailboxListError,
+    ImapMailboxSelectError,
+    ImapMessageAppendError,
+    ImapMessageCopyError,
+    ImapMessageExpungeUidError,
+    ImapMessageMoveError,
+    ImapMessageSearchError,
+    ImapMessageStoreError
+);
+
+impl AnswerFailure for ImapAuthXoauth2Error {
+    fn left_unread(&self) -> bool {
+        match self {
+            Self::No(_) | Self::NoWithError { .. } | Self::Bad(_) => false,
+            Self::Send(err) => send_left_unread(err),
+            _ => true,
+        }
+    }
+}
+
+impl AnswerFailure for ImapGreetingGetError {
+    fn left_unread(&self) -> bool {
+        true
+    }
+}
+
+impl AnswerFailure for ImapMessageFetchError {
+    fn left_unread(&self) -> bool {
+        match self {
+            Self::No(_) | Self::Bad(_) | Self::MissingData => false,
+            Self::Send(err) => send_left_unread(err),
+            _ => true,
+        }
+    }
+}
+
+impl AnswerFailure for ImapMessageSortError {
+    fn left_unread(&self) -> bool {
+        match self {
+            Self::No(_) | Self::Bad(_) | Self::MissingData | Self::InvalidSequenceSet => false,
+            Self::Send(err) => send_left_unread(err),
+            Self::Search(err) => err.left_unread(),
+            Self::Fetch(err) => err.left_unread(),
+            _ => true,
+        }
+    }
+}
+
 trait WriteFailure {
     /// The `NO` completion the server answered, none for another failure.
     fn no(&self) -> Option<&ImapStatusError>;

@@ -1319,6 +1319,22 @@ fn the_summary_reads_the_select() {
     assert_eq!(summary.attachment, Some(true));
 }
 
+/// Graph's `subject` is decoded already: a row listing no header fields
+/// keeps a subject that literally holds an encoded word as Graph serves it.
+#[test]
+fn a_subject_graph_decoded_is_not_decoded_again() {
+    let message = MsgraphMessage {
+        id: "m1".into(),
+        subject: Some("Write =?utf-8?q?x?= to encode".into()),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        graph_summary(&message).subject,
+        "Write =?utf-8?q?x?= to encode"
+    );
+}
+
 /// pimdir's mail fixtures whose raw reading a decoded one may miss
 /// (vectors/summaries.json).
 const FIXTURES: [&str; 10] = [

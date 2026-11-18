@@ -255,12 +255,17 @@ The app SHALL persist a grant that goes through the browser only sealed under th
 - THEN they are wiped
 
 ### Requirement: Setup accepts encrypted servers only
-The connection flow SHALL keep a discovered HTTP endpoint only when it is https, SHALL resolve DAV SRV records secure-only, and SHALL fetch an autoconfig named by a `mailconf=` TXT record only over https. A typed mail server SHALL be `imaps` (a bare host gets port 993), a typed DAV URL `https`, a typed submission server `smtps` or `smtp`; anything else SHALL be refused on its card, nothing sent.
+The connection flow SHALL keep a discovered HTTP endpoint only when it is https, SHALL resolve DAV SRV records secure-only, and SHALL fetch an autoconfig named by a `mailconf=` TXT record only over https. A typed mail server SHALL be `imaps` (a bare host gets port 993), a typed DAV URL `https`, a typed submission server `smtps` or `smtp`; anything else SHALL be refused on its card, nothing sent. A typed server whose host is not ASCII SHALL be refused on its card, naming the host and asking for its Punycode form (`xn--…`), as the family's other programs ask (owner decision of 2026-11-18): the app carries no IDNA conversion of its own, and such a host otherwise read as no host at all, refused as an unencrypted server.
 
 #### Scenario: A typed plain IMAP server
 - GIVEN the advanced setup with mail entered by hand as `imap://mail.example.org:143`
 - WHEN Connect is pressed
 - THEN the card says only encrypted servers are accepted, and no password is sent
+
+#### Scenario: A typed host that is not ASCII
+- GIVEN the advanced setup with mail entered by hand as `bücher.de`
+- WHEN Connect is pressed
+- THEN the card says `bücher.de` is not ASCII and asks for its Punycode form, and no password is sent
 
 ### Requirement: The user sees where a password goes
 A sign-in card asking for a password or token SHALL name, before it is sent, each endpoint it signs in to by scheme and host, and SHALL flag in the error colour an endpoint whose host is outside the address's domain.

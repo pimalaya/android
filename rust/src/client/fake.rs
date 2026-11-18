@@ -288,9 +288,10 @@ impl<F: FnMut(&FakeRequest) -> FakeResponse> Host for FakeServer<F> {
         }
     }
 
-    fn sleep(&mut self, delay: Duration) {
+    fn sleep(&mut self, delay: Duration) -> Result<(), BridgeError> {
         self.slept.push(delay);
         self.now += delay;
+        Ok(())
     }
 
     fn now(&self) -> Timestamp {

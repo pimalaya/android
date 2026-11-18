@@ -707,7 +707,7 @@ impl<H: Host> Gmail<'_, H> {
 
         while let Some(front) = queue.front() {
             if !pause.is_zero() {
-                self.client.host.sleep(pause);
+                self.client.host.sleep(pause)?;
                 pause = Duration::ZERO;
             }
             if size(front) > ALONE_BYTES {
@@ -978,7 +978,7 @@ impl<H: Host> Gmail<'_, H> {
     where
         C: GmailCoroutine<Yield = GmailYield, Return = Result<GmailSendOutput<T>, GmailSendError>>,
     {
-        let paced = self.client.pace_gmail(self.token, units);
+        let paced = self.client.pace_gmail(self.token, units)?;
         let started = Instant::now();
         let mut arg: Option<Vec<u8>> = None;
 

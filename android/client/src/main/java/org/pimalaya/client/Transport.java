@@ -40,6 +40,12 @@ public final class Transport implements AutoCloseable {
         }
     }
 
+    /** What every throttled wait waits on, so a stop wakes them all. */
+    private static final Object WAITS = new Object();
+
+    /** Whether the app stopped its work: no throttled wait runs. */
+    private static boolean waitsStopped;
+
     private final Map<String, Connection> connections = new HashMap<>();
     private final byte[] buffer = new byte[16 * 1024];
     private int losses;
@@ -123,6 +129,49 @@ public final class Transport implements AutoCloseable {
     /** Drops the URL's connection, the next use opening another. */
     public void reset(String url) {
         drop(originOf(uri(url)));
+    }
+
+    /**
+     * Waits {@code millis} for a throttled server: false when the app stops
+     * its work during the wait, by {@link #stopWaits} or by interrupting the
+     * calling thread, the interrupt kept for its caller.
+     */
+    public boolean pause(long millis) {
+        long end = System.nanoTime() + millis * 1_000_000L;
+        synchronized (WAITS) {
+            while (!waitsStopped) {
+                // NOTE: rounded up, so the wait never ends early.
+                long left = (end - System.nanoTime() + 999_999L) / 1_000_000L;
+                if (left <= 0) {
+                    return true;
+                }
+                try {
+                    WAITS.wait(left);
+                } catch (InterruptedException stopped) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Cuts every throttled wait short, on every thread, until {@link
+     * #allowWaits}: the background job told to stop by the system.
+     */
+    public static void stopWaits() {
+        synchronized (WAITS) {
+            waitsStopped = true;
+            WAITS.notifyAll();
+        }
+    }
+
+    /** Lets throttled waits run again, once the stopped work ended. */
+    public static void allowWaits() {
+        synchronized (WAITS) {
+            waitsStopped = false;
+        }
     }
 
     /**

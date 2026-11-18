@@ -38,7 +38,9 @@ import org.pimalaya.pimdir.PimdirDb;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -101,6 +103,8 @@ public class TaskSyncTest {
         /** The sync token each round answers, null for none. */
         String token;
         int revisions;
+        /** The bytes an entry is served as, where they are not its text's. */
+        final Map<String, byte[]> served = new HashMap<>();
 
         Map<String, String[]> of(String url) {
             return calendars.computeIfAbsent(url, any -> new LinkedHashMap<>());
@@ -127,7 +131,16 @@ public class TaskSyncTest {
             List<Event> read = new ArrayList<>();
             for (String id : ids) {
                 String[] entry = of(calendarUrl).get(id);
-                if (entry != null) {
+                byte[] bytes = served.get(id);
+                if (entry != null && bytes != null) {
+                    // NOTE: as the bridge hands a body that is not UTF-8.
+                    read.add(
+                            new Event(
+                                    id,
+                                    entry[0],
+                                    new String(bytes, StandardCharsets.UTF_8),
+                                    Base64.getEncoder().encodeToString(bytes)));
+                } else if (entry != null) {
                     read.add(new Event(id, entry[0], entry[1]));
                 }
             }
@@ -642,6 +655,37 @@ public class TaskSyncTest {
         engine.sync(calendar("Work").id);
 
         assertTrue("held until the add is pushed", dav.of(WORK).containsKey("gate.ics"));
+    }
+
+    /**
+     * A to-do kept as its server sent it, bytes that are not UTF-8, is not
+     * moved to another list: the move would file its text, U+FFFD where the
+     * bytes were, in the other list (owner decision 2026-11-18).
+     */
+    @Test
+    public void aToDoThatIsNotUtf8IsNotMovedToAnotherList() throws Exception {
+        list(
+                new Calendar("work", "Work", WORK, "", null, "", true),
+                new Calendar("home", "Home", HOME, "", null, "", true));
+        String text = todo("gate", "DESCRIPTION:Café\r\n");
+        dav.of(WORK).put("gate.ics", new String[] {"e0", text});
+        dav.served.put("gate.ics", text.getBytes(StandardCharsets.ISO_8859_1));
+        engine.sync(calendar("Work").id);
+        engine.sync(calendar("Home").id);
+        TaskStore.Stored read = store.load(context).get(0);
+
+        assertThrows(
+                PimalayaException.class,
+                () -> writes.moveTo(
+                        read, calendar("Home"), TaskEdit.at(TaskWrites.now()).withList(Task.NEXT)));
+        engine.sync(calendar("Home").id);
+        engine.sync(calendar("Work").id);
+
+        assertEquals(List.of(), dav.creates);
+        assertEquals(List.of(), dav.moves);
+        assertTrue(dav.of(HOME).isEmpty());
+        assertEquals("e0", dav.of(WORK).get("gate.ics")[0]);
+        assertEquals("Work", store.load(context).get(0).calendar.name);
     }
 
     /** A calendar listed again keeps the sync state its last round left. */

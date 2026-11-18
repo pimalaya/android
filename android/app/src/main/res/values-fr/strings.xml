@@ -461,6 +461,7 @@
     <string name="custom_server">Serveur</string>
     <string name="custom_port">Port</string>
     <string name="server_insecure">Seuls les serveurs chiffrés sont acceptés : imaps:// pour le courrier, https:// pour les contacts et les agendas, smtps:// ou smtp:// pour l\'envoi.</string>
+    <string name="server_not_ascii">%1$s n\'est pas en ASCII : saisissez sa forme Punycode (xn--…), telle que l\'écrit tout convertisseur IDNA.</string>
     <string name="token_refused">Jeton refusé</string>
     <string name="oauth_title">Votre client OAuth</string>
     <string name="oauth_message">Le serveur n\'enregistre pas les applications de lui-même. Saisissez le client que vous y avez enregistré.</string>

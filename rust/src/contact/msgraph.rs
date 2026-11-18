@@ -8,14 +8,18 @@
 //! A request the batch could not serve goes again alone, where the
 //! transport rides out throttling; a contact gone since is left out.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use io_http::rfc6750::bearer::HttpAuthBearer;
 use io_msgraph::{
     coroutine::*,
     v1::{
         rest::users::{
-            contact_folders::list::{MsgraphContactFoldersList, MsgraphContactFoldersListResponse},
+            contact_folders::{
+                MsgraphContactFolder,
+                child_folders::MsgraphContactChildFoldersList,
+                list::{MsgraphContactFoldersList, MsgraphContactFoldersListResponse},
+            },
             contacts::{
                 MsgraphContact,
                 create::MsgraphContactCreate,
@@ -56,20 +60,37 @@ const GRAPH_BATCH_CHUNK: usize = 20;
 /// Graph contact folder and contact verbs.
 impl<H: Host> Msgraph<'_, H> {
     /// Lists the contact folders as addressbooks, the default Contacts
-    /// folder first ([`graph_default_book`]).
+    /// folder first ([`graph_default_book`]), then every folder at every
+    /// depth, each level after the one above it.
     ///
-    /// URLs are left empty for the caller, which alone knows the account.
+    /// A book is keyed by its folder's id, never by its name. URLs are left
+    /// empty for the caller, which alone knows the account.
     pub fn list_addressbooks(&mut self) -> Result<Vec<Addressbook>, BridgeError> {
         let auth = HttpAuthBearer::new(self.token);
 
         let mut books = vec![graph_default_book()];
+        let mut parents: VecDeque<Option<String>> = VecDeque::from([None]);
 
-        let coroutine = MsgraphContactFoldersList::new(&auth, "me", &Default::default())
-            .map_err(|err| err.to_string())?;
-        let mut page = self.run(coroutine)?;
+        while let Some(parent) = parents.pop_front() {
+            let params = Default::default();
+            let page = match &parent {
+                None => {
+                    let coroutine = MsgraphContactFoldersList::new(&auth, "me", &params)
+                        .map_err(|err| err.to_string())?;
+                    self.run(coroutine)?
+                }
+                Some(id) => {
+                    let coroutine = MsgraphContactChildFoldersList::new(&auth, "me", id, &params)
+                        .map_err(|err| err.to_string())?;
+                    self.run(coroutine)?
+                }
+            };
 
-        loop {
-            for folder in page.value {
+            for folder in self.contact_folder_pages(&auth, page)? {
+                if folder.id.is_empty() {
+                    continue;
+                }
+                parents.push_back(Some(folder.id.clone()));
                 books.push(Addressbook {
                     name: if folder.display_name.is_empty() {
                         folder.id.clone()
@@ -84,19 +105,33 @@ impl<H: Host> Msgraph<'_, H> {
                     writable: true,
                 });
             }
+        }
 
+        Ok(books)
+    }
+
+    /// Every folder of a contact folder listing, following its next links.
+    fn contact_folder_pages(
+        &mut self,
+        auth: &HttpAuthBearer,
+        mut page: MsgraphContactFoldersListResponse,
+    ) -> Result<Vec<MsgraphContactFolder>, BridgeError> {
+        let mut folders = Vec::new();
+
+        loop {
+            folders.extend(page.value);
             match page.next_link {
                 Some(next) => {
                     let url = parse_graph_url(&next)?;
                     page = self.run(MsgraphSend::<MsgraphContactFoldersListResponse>::get(
-                        &auth, url,
+                        auth, url,
                     ))?;
                 }
                 None => break,
             }
         }
 
-        Ok(books)
+        Ok(folders)
     }
 
     /// Lists the contacts of the folder, an empty id naming the default
@@ -902,6 +937,59 @@ mod tests {
         assert_eq!(book.id, "");
         assert_eq!(book.role, "default");
         assert!(book.writable);
+    }
+
+    /// A folder below the top level is a book of its own, at any depth,
+    /// its pages followed.
+    #[test]
+    fn a_contact_folder_below_the_top_level_is_listed() {
+        let folder = |id: &str, name: &str| json!({"id": id, "displayName": name});
+        let mut client = Client::new(FakeServer::new(|request: &FakeRequest| {
+            let skip = request.param("$skip");
+            let page = match (request.path.as_str(), skip) {
+                ("/v1.0/me/contactFolders", None) => json!({"value": [folder("F", "Family")]}),
+                ("/v1.0/me/contactFolders/F/childFolders", None) => json!({
+                    "value": [folder("K", "Kids")],
+                    "@odata.nextLink":
+                        "https://graph.microsoft.com/v1.0/me/contactFolders/F/childFolders?$skip=1",
+                }),
+                ("/v1.0/me/contactFolders/F/childFolders", Some("1")) => {
+                    json!({"value": [folder("C", "Cousins")]})
+                }
+                ("/v1.0/me/contactFolders/K/childFolders", None) => {
+                    json!({"value": [folder("S", "School")]})
+                }
+                (
+                    "/v1.0/me/contactFolders/C/childFolders"
+                    | "/v1.0/me/contactFolders/S/childFolders",
+                    None,
+                ) => json!({"value": []}),
+                other => panic!("unexpected request {other:?}"),
+            };
+            FakeResponse::json(200, &page)
+        }));
+
+        let books = Msgraph {
+            client: &mut client,
+            token: "token",
+        }
+        .list_addressbooks()
+        .unwrap();
+
+        let listed: Vec<(&str, &str)> = books
+            .iter()
+            .map(|book| (book.id.as_str(), book.name.as_str()))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("", "Contacts"),
+                ("F", "Family"),
+                ("K", "Kids"),
+                ("C", "Cousins"),
+                ("S", "School"),
+            ]
+        );
     }
 
     /// A change Graph refuses as it stands inside a `$batch` is answered

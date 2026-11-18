@@ -114,6 +114,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a background sync told to stop by the system still waiting up to a minute on a server that asked it to slow down: the wait now ends at once, and the request is tried again on the next sync.
+- Fixed the contact folders inside other folders of a Microsoft 365 account never showing: every folder, at any depth, is now an addressbook of its own.
+- Fixed a Microsoft 365 subject that literally contains an encoded word (`=?utf-8?q?...?=`) being shown decoded when Microsoft lists no header for it: it now shows as written.
+- Fixed a server typed during setup with a host that is not ASCII (such as `bücher.de`) being refused as unencrypted: the card now says the host is not ASCII and asks for its Punycode form (`xn--...`).
+- Fixed a task or a contact kept as the server sent it, not UTF-8 text, being moved to another list or merged into another contact with its accented letters turned into replacement marks: the move or the merge is now refused, as an edit already was.
+- Fixed an IMAP command after one whose answer could not be read to its end, or whose connection dropped, reading the wrong answer or going out unsigned: the connection is now opened again and signed in before the next command.
 - Fixed new mail, flags and deletions never reaching the phone after the first sync on iCloud and any IMAP server that advertises QRESYNC without enabling it: such a mailbox is now listed in full each time.
 - Fixed a Microsoft 365 or JMAP message dated inside a newly widened download window but sent or received later going missing from the phone: the older mail is now listed from the window's start alone.
 - Fixed moving a message out of Gmail's Sent or Drafts, or copying one into them, being sent to Gmail and refused on every sync: it is now refused at once with a reason, and deleting from Sent or Drafts moves the message to Gmail's trash.

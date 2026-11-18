@@ -13,6 +13,7 @@ import java.util.List;
 import org.pimalaya.account.SecureStore;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Transport;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.PimdirDb;
@@ -41,6 +42,8 @@ public class BackgroundJob extends JobService {
                             } catch (Exception error) {
                                 Log.w("pimalaya", "background check failed", error);
                             } finally {
+                                // NOTE: the stop cut this run's waits alone.
+                                Transport.allowWaits();
                                 jobFinished(params, false);
                             }
                         },
@@ -52,6 +55,10 @@ public class BackgroundJob extends JobService {
     @Override
     public boolean onStopJob(JobParameters params) {
         stopped = true;
+        // NOTE: every thread of the run, pool workers included, gives up a
+        // throttled server's wait at once; nothing is interrupted, so no
+        // write in progress is cut.
+        Transport.stopWaits();
         return false;
     }
 

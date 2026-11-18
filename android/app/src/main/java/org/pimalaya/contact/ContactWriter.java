@@ -142,10 +142,17 @@ final class ContactWriter {
                         editor.edit().resolves);
     }
 
-    /** The merge save: the model onto the survivor, deletes for the others. */
+    /**
+     * The merge save: the model onto the survivor, deletes for the others;
+     * refused, nothing staged, when a card it read is kept as served, not
+     * UTF-8, the model carrying its text.
+     */
     private void saveMerge(ContactFields model) throws JSONException {
         Entry survivor = editor.edit().mergeSurvivor;
         editor.edit().mergeSurvivor = null;
+        for (Entry entry : editor.edit().replicas) {
+            parts.contacts().requireText(entry.book.url(), entry.id);
+        }
 
         String vcard = ContactClient.applyCard(survivor.card().vcard(), model);
         if (!editor.cardIndex(vcard).hash().equals(survivor.hash())) {

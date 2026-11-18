@@ -333,18 +333,26 @@ public final class PimdirContacts {
      * @param from the link id it is held under, by the book it is copied from
      */
     public void copy(String target, Card card, Map<String, String> from) {
+        for (Map.Entry<String, String> source : from.entrySet()) {
+            requireText(source.getKey(), source.getValue());
+        }
+        save(target, card);
+    }
+
+    /**
+     * Refuses a write carrying the text of the card {@code collection} holds
+     * under {@code linkId} when its body is kept as served, not UTF-8 ({@link
+     * org.pimalaya.pimdir.Stager#requireText}): a copy of it, or a merge
+     * reading it. A card the collection does not hold carries nothing.
+     */
+    public void requireText(String collection, String linkId) {
         try {
-            for (Map.Entry<String, String> source : from.entrySet()) {
-                String collection = source.getKey();
-                if (held(collection, source.getValue())) {
-                    stager.requireText(
-                            collection, stager.offline.handleFor(collection, source.getValue()));
-                }
+            if (held(collection, linkId)) {
+                stager.requireText(collection, stager.offline.handleFor(collection, linkId));
             }
         } catch (JSONException error) {
             throw new IllegalStateException(error);
         }
-        save(target, card);
     }
 
     /**

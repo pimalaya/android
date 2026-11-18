@@ -170,7 +170,9 @@ public final class TaskWrites {
      * pending create, so a create the server refuses leaves the capture on
      * it. The {@code UID} and the link id stay, the link id being the name
      * the target's server is asked to file it by. Refused as {@link #edit}
-     * is when a sync replaced the body it was read as.
+     * is when a sync replaced the body it was read as, and refused when its
+     * body is kept as served, not UTF-8 ({@link
+     * org.pimalaya.pimdir.Stager#requireText}).
      */
     public void moveTo(TaskStore.Stored stored, EventStore.StoredCalendar target, TaskEdit edit)
             throws JSONException {
@@ -210,6 +212,9 @@ public final class TaskWrites {
                     // NOTE: an add and a remove name no body they were made
                     // over, so the move checks its own, in its transaction.
                     stager.requireHeld(collection, linkId, read.object);
+                    // NOTE: a body kept as served, not UTF-8, would be filed
+                    // in the target as its text, U+FFFD where its bytes were.
+                    stager.requireText(collection, stager.offline.handleFor(collection, linkId));
                     stager.mutateAdd(target.id, linkId, written, Flags.none(), null, "");
                     // NOTE: before the remove, both items then being rows: a
                     // source never pushed is withdrawn rather than marked,

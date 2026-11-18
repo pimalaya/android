@@ -3,6 +3,8 @@
 //! The JNI [`Host`]: every upcall the bridge makes to the app, its Java
 //! `Transport` for socket I/O and its `OfflineDriver` for the store.
 
+use std::{thread, time::Duration};
+
 use jni::{
     Env, JValue, JValueOwned,
     errors::Error,
@@ -190,6 +192,35 @@ impl Host for JniHost<'_, '_> {
         reply
             .try_to_string(self.env)
             .map_err(|err| err.to_string().into())
+    }
+
+    /// Waits on the Java side, where the app's stop cuts the wait short: the
+    /// background job's stop, or an interrupt of the calling thread.
+    fn sleep(&mut self, delay: Duration) -> Result<(), BridgeError> {
+        let Ok(transport) = self.transport() else {
+            thread::sleep(delay);
+            return Ok(());
+        };
+        let millis = i64::try_from(delay.as_millis()).unwrap_or(i64::MAX);
+        let waited = self
+            .env
+            .call_method(
+                transport,
+                jni_str!("pause"),
+                jni_sig!("(J)Z"),
+                &[JValue::Long(millis)],
+            )
+            .and_then(|value| value.z());
+        match waited {
+            Ok(true) => Ok(()),
+            Ok(false) => Err("Stopped while waiting on the server".into()),
+            Err(err) => {
+                let failed = clear_and_fail(self.env, "transport pause", err);
+                log::warn!("{failed}");
+                thread::sleep(delay);
+                Ok(())
+            }
+        }
     }
 }
 

@@ -98,6 +98,20 @@ pub struct Scripted {
     noisy: Vec<&'static str>,
     /// What `UID STORE` answers, `TAG` standing for the command's tag.
     store: &'static str,
+    /// The commands, by prefix, whose answer opens with a line no client
+    /// can decode, the rest of it following; each once.
+    broken: Vec<&'static str>,
+    /// The command, by prefix, after whose answer the connection dies
+    /// unread: the client drops it, and the next write lands on a new one,
+    /// greeted and not signed in.
+    dies_after: Option<&'static str>,
+    /// Whether the next read fails, the connection lost.
+    dead: bool,
+    /// Whether the connection signed in: one opened again has not.
+    signed_in: bool,
+    /// The tag and size of an `APPEND` literal on its way, and how many of
+    /// its octets came.
+    literal: Option<(String, usize, usize)>,
     pending: VecDeque<u8>,
     pub commands: Vec<String>,
     /// Every UID whose header fields were fetched, in order.
@@ -129,10 +143,25 @@ impl Scripted {
             garbled: Vec::new(),
             noisy: Vec::new(),
             store: "TAG OK stored\r\n",
+            broken: Vec::new(),
+            dies_after: None,
+            dead: false,
+            signed_in: true,
+            literal: None,
             pending: VecDeque::new(),
             commands: Vec::new(),
             headers_read: Vec::new(),
         }
+    }
+
+    /// A new connection: greeted, nothing on its way, not signed in.
+    fn greet(&mut self) {
+        self.authenticating = None;
+        self.literal = None;
+        self.signed_in = false;
+        self.pending.clear();
+        self.pending
+            .extend(b"* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] ready\r\n");
     }
 
     pub fn sent(&self, prefix: &str) -> usize {
@@ -175,6 +204,7 @@ impl Scripted {
 
     fn answer(&mut self, line: &str) -> String {
         if let Some(tag) = self.authenticating.take() {
+            self.signed_in = true;
             return format!("{tag} OK [CAPABILITY {}] signed in\r\n", self.capabilities);
         }
         let (_, command) = line.trim_end().split_once(' ').unwrap();
@@ -182,7 +212,18 @@ impl Scripted {
             true => unreadable(99, 99),
             false => String::new(),
         };
-        noise + &self.served(line)
+        let lead = match self
+            .broken
+            .iter()
+            .position(|broken| command.starts_with(broken))
+        {
+            Some(at) => {
+                self.broken.remove(at);
+                String::from("garbage\r\n")
+            }
+            None => String::new(),
+        };
+        lead + &noise + &self.served(line)
     }
 
     fn served(&mut self, line: &str) -> String {
@@ -192,6 +233,20 @@ impl Scripted {
         if command.starts_with("AUTHENTICATE PLAIN") {
             self.authenticating = Some(tag.to_string());
             return String::from("+ \r\n");
+        }
+        if !self.signed_in {
+            return format!("{tag} NO not signed in\r\n");
+        }
+        if command.starts_with("UID COPY ") {
+            return format!("{tag} OK copied\r\n");
+        }
+        if let Some(append) = command.strip_prefix("APPEND ") {
+            let size = append
+                .rsplit_once('{')
+                .and_then(|(_, size)| size.trim_end_matches('}').parse().ok())
+                .unwrap();
+            self.literal = Some((tag.to_string(), size, 0));
+            return String::from("+ go ahead\r\n");
         }
         if command.starts_with("ENABLE ") {
             return self.enable.replace("TAG", tag);
@@ -329,12 +384,33 @@ impl Scripted {
 
 impl Host for Scripted {
     fn read(&mut self, _url: &str) -> Result<Vec<u8>, BridgeError> {
+        if self.dead {
+            self.dead = false;
+            return Err("Transport read failed: SocketException: Connection reset".into());
+        }
         let take = self.chunk.min(self.pending.len());
         Ok(self.pending.drain(..take).collect())
     }
 
     fn write(&mut self, _url: &str, bytes: &[u8]) -> Result<(), BridgeError> {
+        if let Some((tag, size, came)) = self.literal.as_mut() {
+            *came += bytes.len();
+            if *came >= *size + 2 {
+                let done = format!("{tag} OK appended\r\n");
+                self.literal = None;
+                self.pending.extend(done.into_bytes());
+            }
+            return Ok(());
+        }
         let reply = self.answer(&String::from_utf8_lossy(bytes));
+        if self
+            .dies_after
+            .is_some_and(|prefix| self.commands.last().unwrap().starts_with(prefix))
+        {
+            self.dies_after = None;
+            self.dead = true;
+            return Ok(());
+        }
         self.pending.extend(reply.into_bytes());
         Ok(())
     }
@@ -347,10 +423,8 @@ impl Host for Scripted {
 
     fn reset(&mut self, _url: &str) {
         self.resets += 1;
-        self.authenticating = None;
-        self.pending.clear();
-        self.pending
-            .extend(b"* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] ready\r\n");
+        self.dead = false;
+        self.greet();
     }
 
     fn starttls(&mut self, _url: &str) -> Result<(), BridgeError> {
@@ -1540,4 +1614,89 @@ fn a_write_refused_as_it_stands_is_told_from_one_that_may_land() {
     ImapSession::bind(&mut client, &mut state)
         .store_flag("INBOX", "2", "\\Seen", true)
         .unwrap();
+}
+
+/// A session signed in already over `client`, signing in again with a
+/// password when its connection opens again.
+fn signed<'a>(
+    client: &'a mut Client<Scripted>,
+    state: &'a mut ImapState,
+) -> ImapSession<'a, Scripted> {
+    let auth = Auth::Basic {
+        login: "jane",
+        password: "secret",
+    };
+    ImapSession::signed(client, state, auth).unwrap()
+}
+
+/// A LIST whose answer could not be read to its end leaves the rest on
+/// the connection, which opens again before the next command, so the
+/// roster after it is read whole and alone.
+#[test]
+fn a_list_left_part_unread_opens_the_connection_again() {
+    let mut client = Client::new(Scripted::new(daily(3)));
+    client.host.broken = vec!["LIST"];
+    let mut state = state(Vec::new());
+
+    assert!(list_mailboxes(&mut signed(&mut client, &mut state)).is_err());
+    let roster = list_mailboxes(&mut signed(&mut client, &mut state)).unwrap();
+
+    let names: Vec<&str> = roster.iter().map(|entry| entry.name.as_str()).collect();
+    assert_eq!((names, client.host.resets), (vec!["INBOX", "Archive"], 1));
+}
+
+/// A listing failing on its EXAMINE, its SEARCH or its header FETCH with
+/// the answer part unread: the round after it runs on a connection opened
+/// again, signed in.
+#[test]
+fn a_listing_left_part_unread_opens_the_connection_again() {
+    let whole: MailRequest = from_str(r#"{"listing":{"kind":"round"}}"#).unwrap();
+    let commands = ["EXAMINE", "UID SEARCH", "UID FETCH"];
+    let mut read = Vec::new();
+    for command in commands {
+        let mut client = Client::new(Scripted::new(daily(3)));
+        client.host.broken = vec![command];
+        let mut state = state(Vec::new());
+
+        let first = signed(&mut client, &mut state).list_page("INBOX", &whole);
+        assert!(first.is_err(), "{command}");
+        let page = signed(&mut client, &mut state)
+            .list_page("INBOX", &whole)
+            .map(|page| page.items.len())
+            .map_err(|err| err.message);
+        read.push((command, page, client.host.resets));
+    }
+
+    let opened = commands.map(|command| (command, Ok(3), 1));
+    assert_eq!(read, opened);
+}
+
+/// A STORE, a COPY or an APPEND whose connection died before its answer:
+/// the next write runs on a connection opened again and signed in, where
+/// it went out on a new one nobody signed in on.
+#[test]
+fn a_write_whose_connection_died_opens_it_again() {
+    let message = b"Subject: sent\r\n\r\nbody\r\n".to_vec();
+    let commands = ["UID STORE", "UID COPY", "APPEND"];
+    let mut written = Vec::new();
+    for command in commands {
+        let mut client = Client::new(Scripted::new(daily(3)));
+        client.host.dies_after = Some(command);
+        let mut state = state(Vec::new());
+
+        let mut write = |client: &mut Client<Scripted>| {
+            let mut session = signed(client, &mut state);
+            match command {
+                "UID STORE" => session.store_flag("INBOX", "2", "\\Seen", true),
+                "UID COPY" => session.copy("INBOX", "2", "Archive"),
+                _ => session.append("Archive", message.clone(), &[]),
+            }
+        };
+        assert!(write(&mut client).is_err(), "{command}");
+        let again = write(&mut client).map_err(|err| err.message);
+        written.push((command, again, client.host.sent("AUTHENTICATE")));
+    }
+
+    let opened = commands.map(|command| (command, Ok(()), 1));
+    assert_eq!(written, opened);
 }

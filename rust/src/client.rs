@@ -99,9 +99,10 @@ pub trait Host {
     /// One request to the app's `OfflineDriver`, JSON in, JSON out.
     fn serve(&mut self, request: &str) -> Result<String, BridgeError>;
 
-    /// Waits `delay`.
-    fn sleep(&mut self, delay: Duration) {
+    /// Waits `delay`, failing when the app stops the call during the wait.
+    fn sleep(&mut self, delay: Duration) -> Result<(), BridgeError> {
         thread::sleep(delay);
+        Ok(())
     }
 
     /// The time now, for `Retry-After` dates and waits to the next minute.

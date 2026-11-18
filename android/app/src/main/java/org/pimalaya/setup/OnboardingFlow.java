@@ -2305,6 +2305,10 @@ public final class OnboardingFlow {
             if (card.server.text().isEmpty()) {
                 return host.getString(R.string.server_required);
             }
+            String unicode = Endpoints.unicodeHost(card.server.text());
+            if (unicode != null) {
+                return host.getString(R.string.server_not_ascii, unicode);
+            }
             String url = card.sending ? customSubmitUrl(card) : customUrl(card);
             if (url == null) {
                 return host.getString(R.string.server_insecure);

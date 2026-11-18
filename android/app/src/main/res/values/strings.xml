@@ -199,6 +199,7 @@
     <string name="custom_server">Server</string>
     <string name="custom_port">Port</string>
     <string name="server_insecure">Only encrypted servers are accepted: imaps:// for mail, https:// for contacts and calendars, smtps:// or smtp:// for sending.</string>
+    <string name="server_not_ascii">%1$s is not ASCII: type it in its Punycode form (xn--…), as any IDNA converter writes it.</string>
     <string name="token_refused">Token not accepted</string>
     <string name="oauth_title">Your OAuth client</string>
     <string name="oauth_message">The server does not register apps on its own. Enter the client you registered there.</string>

@@ -48,6 +48,39 @@ public final class Endpoints {
         return host(url) != null ? url : null;
     }
 
+    /**
+     * The host a server field names when it is not ASCII, else null.
+     *
+     * <p>Such a host is refused, to be typed in its Punycode form ({@code
+     * xn--}), as the family's other programs ask: an imaps or smtps one would
+     * reach no server. A bare host, a host and port, or a URL with userinfo.
+     */
+    public static String unicodeHost(String entered) {
+        String rest = entered.trim();
+        int scheme = rest.indexOf("://");
+        if (scheme >= 0) {
+            rest = rest.substring(scheme + 3);
+        }
+        int end = rest.length();
+        for (char stop : new char[] {'/', '?', '#'}) {
+            int at = rest.indexOf(stop);
+            if (at >= 0 && at < end) {
+                end = at;
+            }
+        }
+        String host = rest.substring(rest.lastIndexOf('@', end) + 1, end);
+        int port = host.lastIndexOf(':');
+        if (port >= 0 && !host.endsWith("]")) {
+            host = host.substring(0, port);
+        }
+        for (int at = 0; at < host.length(); at++) {
+            if (host.charAt(at) > 0x7f) {
+                return host;
+            }
+        }
+        return null;
+    }
+
     /** A typed submission server as its endpoint; null unless smtps or smtp. */
     public static String submitUrl(String entered) {
         String url = AccountClient.submitUrl(entered.trim());

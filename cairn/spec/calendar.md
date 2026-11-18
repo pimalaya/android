@@ -203,12 +203,17 @@ A calendar pass SHALL log, page by page, how many entries a listing named and th
 - THEN the log names how many ran on how many connections, the wall time and the network time summed
 
 ### Requirement: Expansion is bounded whatever the rule
-An expansion SHALL walk at most 200 000 occurrences of a series, placed or not, and stop after 2 s for the whole object; a this-and-following split SHALL count at most 200 000 occurrences of a `COUNT`. A Graph series SHALL be read for exceptions within five years either side of today, bounded or not.
+An expansion SHALL walk at most 200 000 occurrences of a series, placed or not, and stop after 2 s for the whole object; a this-and-following split SHALL count at most 200 000 occurrences of a `COUNT`. A Graph series SHALL be read for exceptions within five years either side of today, bounded or not, in windows of at most five years each (Graph answers 400 past that), and a series that ended more than five years ago SHALL read none: a 1604 birthday (Outlook's yearless year) or a 1601-to-9000 invitation would otherwise cost thousands of requests. An exception or a cancelled occurrence dated outside that window SHALL NOT be read: the entry shows the rule's occurrence there. The bound is kept as decided by the owner on 2026-11-18.
 
 #### Scenario: A secondly series from 1970
 - GIVEN an event `RRULE:FREQ=SECONDLY` starting in 1970
 - WHEN the agenda shows January 2026
 - THEN it answers within the bound, placing nothing
+
+#### Scenario: A Graph exception seven years ahead
+- GIVEN a Graph weekly series with no end, one occurrence seven years ahead moved by an hour
+- WHEN the calendar is synced
+- THEN its exceptions are read from five years back to five years ahead, and the occurrence seven years ahead shows at the rule's time
 
 ### Requirement: The phone's calendars take bounded data
 The phone mirror SHALL list a secondly or minutely series instance by instance rather than hand its rule to the provider, and SHALL carry at most 5 reminders an event, 1024 characters of title and of location and 16 384 of description, cut between characters, the store keeping the whole text.

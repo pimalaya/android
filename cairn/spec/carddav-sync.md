@@ -31,6 +31,14 @@ A CardDAV or CalDAV listing, delta or discovery answer that is not one whole `mu
 - WHEN the card is read alone and answers, or answers 403 again
 - THEN the card is stored, or the round fails; it is never retired
 
+### Requirement: Every Graph contact folder is a book
+A Graph account's books SHALL be the default Contacts folder, then every contact folder at every depth, each level listed after the one above it (`childFolders` of each folder, its pages followed), each book keyed by its folder's id and named by its display name.
+
+#### Scenario: A folder inside a folder
+- GIVEN a Graph contact folder Family holding a folder Kids
+- WHEN the account's books are listed
+- THEN Family and Kids are two books
+
 ### Requirement: A Graph book reads its changed contacts 20 to a batch
 A Graph addressbook pass SHALL take a contact's body from the complete round's listing when it carries one, and SHALL read every other body it needs 20 requests to a `$batch`, each request the one a single contact read sends, a request the batch could not serve being sent again on its own. A contact Graph no longer holds when it is read SHALL be left out, and the rest of the book stored. Each read SHALL log how many contacts it was asked for, how many the listing gave, how many it read in how many batches and its network time.
 
@@ -137,12 +145,17 @@ A card listed or fetched from any backend, or read off the phone, SHALL be filed
 - THEN the card is filed under `hash:` and sixteen hexadecimal digits, never under its resource name
 
 ### Requirement: A card that is not UTF-8 is kept as served
-A card whose bytes are not UTF-8 (a Latin-1 vCard 2.1) SHALL be stored as its server sent them (offline-store "A DAV body is stored as served"), shown on the phone read lossily, and never written back as text: an edit of it in the app is refused, one in a contacts app is put back from the store, and the push of such a body is answered refused. A copy of it made in the app (the editor ticking it into another book) SHALL be refused as its edit is, nothing staged in the other book.
+A card whose bytes are not UTF-8 (a Latin-1 vCard 2.1) SHALL be stored as its server sent them (offline-store "A DAV body is stored as served"), shown on the phone read lossily, and never written back as text: an edit of it in the app is refused, one in a contacts app is put back from the store, and the push of such a body is answered refused. A copy of it made in the app (the editor ticking it into another book) SHALL be refused as its edit is, nothing staged in the other book. A merge reading it (the merge form over cards one of which is such a card) SHALL be refused too, nothing staged on the survivor nor on the cards it would remove: the survivor would be written from its text.
 
 #### Scenario: A Latin-1 card ticked into another book
 - GIVEN a CardDAV card stored as Latin-1 bytes
 - WHEN the editor ticks it into another book of the account and saves
 - THEN the save is refused and the other book holds nothing of it
+
+#### Scenario: A Latin-1 card merged with another
+- GIVEN a CardDAV card stored as Latin-1 bytes and a UTF-8 card
+- WHEN they are merged through the form into the UTF-8 one
+- THEN the save is refused, and neither card is updated nor removed
 
 ### Requirement: A contact push refused as it stands is held
 A contact push the server refuses as it stands SHALL be answered refused with the server's reason, held by the engine on its binding and reported every sync, as a mail push is (offline-store, "A change refused as it stands is held"), and the book's other changes SHALL be pushed. The bridge SHALL read the refusal off the answer: a CardDAV status naming the request (400 to 499 but 401, 407, 408, 409, 412, 423, 425 and 429) whose body names no exceeded quota, a People answer of such a status naming no rate limit nor quota, a Graph one naming neither `ErrorQuotaExceeded` nor a rate, inside a `$batch` as alone, and a JMAP `ContactCard/set` error naming the change (`forbidden`, `invalidProperties`, `invalidPatch`, `blobNotFound`, `tooLarge`, `singleton`), never `notFound`, `overQuota` nor `rateLimit`. A card gone (404) SHALL stay gone first, a removal converging on it, and a 412 SHALL stay the stale guard, retried unguarded when the listing proves the card unchanged and else rejected. A People batch create or delete refused whole still fails the round: no one card can be told from the others.

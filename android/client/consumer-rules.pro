@@ -3,12 +3,13 @@
 # Native.listAddressbooks is matched by its fully-qualified name from Rust.
 -keep class org.pimalaya.client.Native { *; }
 
-# Transport.read / write / starttls / begin / settle / reset are called only
-# from native code, so R8 sees them as unused without this rule. The member
-# specs must match the Java signatures exactly: a stale spec matches nothing,
-# R8 strips the real methods, and every release-build network call dies at
-# runtime with a JNI "method not found" (or, for begin / settle / reset, the
-# connection eviction silently stops working).
+# Transport.read / write / starttls / begin / settle / reset / pause are
+# called only from native code, so R8 sees them as unused without this rule.
+# The member specs must match the Java signatures exactly: a stale spec
+# matches nothing, R8 strips the real methods, and every release-build network
+# call dies at runtime with a JNI "method not found" (or, for begin / settle /
+# reset, the connection eviction silently stops working; for pause, a
+# throttled wait falls back to one no stop cuts).
 -keep class org.pimalaya.client.Transport {
     byte[] read(java.lang.String);
     void write(java.lang.String, byte[]);
@@ -16,6 +17,7 @@
     boolean begin(java.lang.String);
     void settle(java.lang.String);
     void reset(java.lang.String);
+    boolean pause(long);
 }
 
 # OfflineDriver.serve is upcalled by the native offline engine on every
