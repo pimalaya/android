@@ -22,6 +22,7 @@ use crate::{
     ffi::{ErrorReply, error_json, host::JniHost, read_string},
     search::{
         compile::Sort,
+        coverage::{self, MailScope},
         find::{self, Answer, Hit, Refusal},
         held,
         lists::{self, CardFacts},
@@ -286,6 +287,39 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirIndexAgenda<'local>
         let mut sql = HostSql(JniHost::offline(env, &index));
         let agenda = lists::agenda(&mut sql, &start, &end, &source);
         Ok(env.new_string(reply(agenda))?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.pimdirIndexMailHits`: every hit of `query` in date order,
+/// relative dates read at `now` (Unix seconds), with what the answer could
+/// not see per account over the mailboxes of `scope` (SEARCH §8.2), rolled
+/// up for the mail list, inside the caller's transaction. `scope` is
+/// `{"source", "collections": [{"id", "reach"?, "bound"?}]}`; the answer
+/// `{"hits": [{"account"?, "seq"}], "coverage": {"complete", "short",
+/// "worst"?, "since"?, "bounded", "filling", "unread", "unindexed",
+/// "behind", "accounts": [{"account"?, "complete", "short", "since"?,
+/// "filling", "bounded", "unread", "unindexed"}]}}`, or `{"refused"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_pimdirIndexMailHits<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    index: JObject<'local>,
+    query: JString<'local>,
+    scope: JString<'local>,
+    now: jlong,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let query = read_string(env, &query);
+        let scope = read_string(env, &scope);
+        let found = serde_json::from_str::<MailScope>(&scope)
+            .map_err(|err| BridgeError::from(format!("Unreadable mail scope: {err}")))
+            .and_then(|scope| {
+                let mut sql = HostSql(JniHost::offline(env, &index));
+                coverage::mail(&mut sql, &query, &scope, now)
+            })
+            .map(Answered::from);
+        Ok(env.new_string(reply(found))?.into())
     })
     .resolve::<ErrorReply>()
 }

@@ -16,10 +16,13 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.SearchCoverage;
 import org.pimalaya.pimdir.ItemFixtures;
+import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirIndexDb;
 import org.pimalaya.pimdir.PimdirItems;
+import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
@@ -144,6 +147,54 @@ public class MailIndexTest {
 
         JSONObject limit = index.hits("x ".repeat(600), "date");
         assertEquals("limit-exceeded", limit.getJSONObject("refused").getString("code"));
+    }
+
+    /** A round over {@code collection} from {@code since}, opened and closed. */
+    private void listed(String collection, String since) throws Exception {
+        JSONObject scope = new JSONObject().put("since", since);
+        new PimdirStorage(pimdir)
+                .applyWrites(
+                        new JSONArray()
+                                .put(new JSONObject()
+                                        .put("op", "openRound")
+                                        .put("collection", collection)
+                                        .put("scope", scope))
+                                .put(new JSONObject()
+                                        .put("op", "closeRound")
+                                        .put("collection", collection)
+                                        .put("coverage", scope)));
+    }
+
+    @Test
+    public void aSearchSaysWhatItCouldNotSee() throws Exception {
+        message("a", "Weekly", "the roadmap for the quarter");
+        message("b", "Roadmap draft", null);
+        PimdirIndexDb index = pimdir.startIndex();
+        index.refresh();
+
+        assertNull("nothing searched", search("").coverage());
+        SearchCoverage never = search("roadmap").coverage();
+        assertNotNull(never);
+        assertFalse(never.complete());
+        assertTrue("an inbox the server never listed", never.filling());
+        assertNull("no floor, never the text null", never.since());
+
+        String inbox = store.collectionOf(ONE, "INBOX");
+        listed(inbox, "2026-01-01T00:00:00Z");
+        index.refresh();
+        SearchCoverage floor = search("roadmap").coverage();
+        assertFalse(floor.complete());
+        assertFalse(floor.filling());
+        assertEquals(1, floor.shortAccounts());
+        assertEquals(PimdirAccount.accountIdOf(inbox), floor.worst());
+        assertEquals("2026-01-01T00:00:00Z", floor.since());
+        assertFalse(floor.bounded());
+        assertEquals("the draft held bodiless", 1, floor.unread());
+        assertEquals(1, floor.accounts().size());
+
+        SearchCoverage structured = search("from:sender@example.org date:2026-01-02..").coverage();
+        assertTrue(
+                "no body read, a range above the floor: " + structured, structured.complete());
     }
 
     /** One value of index.db's index_meta, read off the file. */

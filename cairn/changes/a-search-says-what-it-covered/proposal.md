@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: a-search-says-what-it-covered
-status: draft
+status: active
 created: 2026-10-18
 ---
 
@@ -20,7 +20,15 @@ Borrowed from an external engine: a three-axis search coverage (local content, t
 - The value and its roll-up come from io-pimdir (cairn/changes/search-feature, section "Coverage, three axes") through the bridge, so the phone and himalaya say the same thing; until then the app computes the temporal axis from the coverage rows it already reads for the floor.
 - The remote axis (a server search, IMAP `SEARCH`, JMAP `Email/query`, Graph `$search`, offered from that line) is left to a later change.
 
-## Open questions
+## Decided (owner, 2026-11-19)
 
-- Whether the line names one date for all accounts or the worst account by name.
-- Body search: the app searches subject and sender only, so the local axis (bodies not held) has nothing to report yet.
+- The coverage is io-pimdir 0.17.0's `PimdirSearchCoverage` (temporal, local and remote axes, `merge`, `is_complete`), read through the bridge; the app computes no axis of its own.
+- The line names the worst account: *Mail before 1 March on Work is not on the phone yet*; when several shown accounts fall short, *On 2 accounts*, with the oldest date. A Gmail or JMAP account, never filled, is the usual case.
+- First cut covers the temporal and the local axes: matched messages whose body is not on the phone are said (*12 messages searched by subject only*). The remote axis (a server search from the line) stays a later change.
+
+## Rulings on the bridge work (owner, 2026-11-19)
+
+- Two inputs beside io-pimdir's coverage are kept: a Gmail or JMAP account passes its frontier (`MailWindow.since`) as one more coverage scope, since its account-wide rounds claim the whole bound; a mailbox with no row from the server source reads as still filling, not as full. Both are arguably gaps of pimdir SEARCH §8, worth raising upstream.
+- Lag: the line says *Search is catching up on N new messages* only when `unindexed` in scope is above 0; `behind` alone, which counts the whole store, shows nothing.
+- Bodies not on the phone: *N messages searched by subject and sender only* / *N messages cherchés par objet et expéditeur seulement*.
+- A floor at the account's own bound says *not kept on the phone*, not *not on the phone yet*.

@@ -872,6 +872,13 @@ final class Native {
     static native String pimdirIndexHits(
             PimdirIndex.Steps index, String query, String order, long now);
 
+    /**
+     * Every hit of a mail search with its coverage per account: {@code {hits,
+     * coverage}} or {@code {refused}}.
+     */
+    static native String pimdirIndexMailHits(
+            PimdirIndex.Steps index, String query, String scope, long now);
+
     /** One page of a query's hits described: {@code {hits, more}} or {@code {refused}}. */
     static native String pimdirIndexSearch(
             PimdirIndex.Steps index,

@@ -21,7 +21,10 @@ use io_pimdir::{
         PimdirStatus,
     },
     reference::{PimdirEndpoint, PimdirReferenceOrigin, PimdirReferenceRole},
-    search::query::PimdirQuery,
+    search::{
+        coverage::{PimdirSearchTemporal, PimdirSearchUnread},
+        query::PimdirQuery,
+    },
     summary::{
         self, PimdirAddress, PimdirSummary, file::PimdirFileSummary, mail::PimdirMailSummary,
     },
@@ -32,6 +35,7 @@ use crate::{
     offline::shape as store_shape,
     search::{
         compile::{Compiled, Sort},
+        coverage,
         find::{self, Answer, Hit},
         floor::{FLOOR, Floor},
         held::{self, Held},
@@ -51,7 +55,7 @@ fn json(path: &Path) -> Json {
 }
 
 /// An index.db beside a store at `dir`, the store attached, on the floor.
-fn index(dir: &Path) -> Floor {
+pub(crate) fn index(dir: &Path) -> Floor {
     let mut floor = Floor::open(&dir.join("index.db"));
     let store = dir.join("pimdir.db");
     floor.exec(&format!(
@@ -72,7 +76,7 @@ fn served(name: &str) -> String {
 
 /// Builds the index if empty and folds the whole feed, a run a
 /// transaction, at `now`; answers the runs.
-fn refreshed(floor: &mut Floor, dir: &Path, now: i64, batch: usize) -> usize {
+pub(crate) fn refreshed(floor: &mut Floor, dir: &Path, now: i64, batch: usize) -> usize {
     refreshed_in(floor, dir, now, batch, "UTC")
 }
 
@@ -252,7 +256,7 @@ fn every_index_fork_names_the_canonical_text_it_rewrites() {
 }
 
 /// One placement, the owner's write of what a source listed.
-fn placement(
+pub(crate) fn placement(
     collection: &str,
     handle: &str,
     link_id: &str,
@@ -469,7 +473,7 @@ fn build(spec: &Path, dir: &Path) {
 }
 
 /// An RFC 3339 instant in UTC as Unix seconds.
-fn unix(instant: &str) -> i64 {
+pub(crate) fn unix(instant: &str) -> i64 {
     jiff::Timestamp::strptime("%Y-%m-%dT%H:%M:%SZ", instant)
         .or_else(|_| instant.parse::<jiff::Timestamp>())
         .unwrap()
@@ -544,7 +548,77 @@ fn answers(floor: &mut Floor, now: i64, case: &Json) -> Option<String> {
                 && got.len() == want.len()
         }
     };
-    (!same).then(|| format!("{query:?}: {got:?}, not {want:?}"))
+    if !same {
+        return Some(format!("{query:?}: {got:?}, not {want:?}"));
+    }
+    covers(floor, now, query, case)
+}
+
+/// What a case's coverage answers on the shape (SEARCH §8.2), against what
+/// it states: the bodies out of sight, whether it is complete, the
+/// temporal axis, the horizon left and the series cut; `None` when they
+/// agree. The index is refreshed whole, so it lags by nothing.
+fn covers(floor: &mut Floor, now: i64, query: &str, case: &Json) -> Option<String> {
+    let parsed = PimdirQuery::parse(query).unwrap();
+    let got = match coverage::coverage(floor, &parsed, now) {
+        Ok(got) => got,
+        Err(err) => return Some(format!("{query:?}: coverage {err}")),
+    };
+    let mut faults = Vec::new();
+    if let Some(stated) = case.get("coverage") {
+        let want: BTreeMap<String, PimdirSearchUnread> = stated
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(kind, counts)| {
+                let count = |key: &str| counts[key].as_u64().unwrap();
+                let counts = PimdirSearchUnread {
+                    bodiless: count("bodiless"),
+                    missing: count("missing"),
+                    unparseable: count("unparseable"),
+                    encrypted: count("encrypted"),
+                };
+                (kind.clone(), counts)
+            })
+            .collect();
+        if got.local.kinds != want {
+            faults.push(format!("coverage {:?}, not {want:?}", got.local.kinds));
+        }
+    }
+    if got.local.unindexed != 0 || got.local.behind != 0 {
+        faults.push(format!(
+            "unindexed {} and behind {}",
+            got.local.unindexed, got.local.behind
+        ));
+    }
+    if let Some(complete) = case["complete"].as_bool()
+        && got.is_complete() != complete
+    {
+        faults.push(format!("complete {}, not {complete}", got.is_complete()));
+    }
+    if let Some(temporal) = case.get("temporal") {
+        let want = match temporal.as_str() {
+            Some("full") => PimdirSearchTemporal::Full,
+            _ => PimdirSearchTemporal::Bounded {
+                since: temporal["since"].as_str().map(Into::into),
+                until: temporal["until"].as_str().map(Into::into),
+                filling: temporal["filling"].as_bool().unwrap(),
+            },
+        };
+        if got.temporal != want {
+            faults.push(format!("temporal {:?}, not {want:?}", got.temporal));
+        }
+    }
+    let horizon_left = case["horizon_left"].as_bool().unwrap_or(false);
+    if got.horizon_left != horizon_left {
+        faults.push(format!("horizon_left {}", got.horizon_left));
+    }
+    if let Some(cut) = case["cut"].as_u64()
+        && got.cut != cut
+    {
+        faults.push(format!("cut {}, not {cut}", got.cut));
+    }
+    (!faults.is_empty()).then(|| format!("{query:?}: {}", faults.join(", ")))
 }
 
 /// Every case of io-pimdir's vendored queries.json the shape binds answers

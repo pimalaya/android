@@ -10,6 +10,7 @@
 //! ([`compile`], [`find`]).
 
 pub mod compile;
+pub mod coverage;
 pub mod find;
 pub mod held;
 pub mod lists;

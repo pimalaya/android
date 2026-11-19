@@ -213,7 +213,7 @@ fn run(
 
 /// The zone a query's days are read in (SEARCH §8.1): the one the index
 /// reads floating times in, read only for a query holding a date term.
-fn zone(sql: &mut impl IndexSql, parsed: &PimdirQuery) -> Result<TimeZone, BridgeError> {
+pub(crate) fn zone(sql: &mut impl IndexSql, parsed: &PimdirQuery) -> Result<TimeZone, BridgeError> {
     let dated = parsed
         .terms()
         .iter()

@@ -82,6 +82,16 @@ public final class PimdirIndex {
     }
 
     /**
+     * Every hit of a mail search in date order, with what it could not see
+     * per account over the mailboxes of {@code scope} ({@code {source,
+     * collections: [{id, reach?, bound?}]}}), rolled up: {@code {hits,
+     * coverage}} ({@link SearchCoverage}), or {@code {refused}}.
+     */
+    public static JSONObject mailHits(Steps index, String query, String scope, long now) {
+        return Replies.object(Native.pimdirIndexMailHits(index, query, scope, now));
+    }
+
+    /**
      * What the index recorded of every card's body (SEARCH §6): {@code
      * {cards: [{collection, seq, has?, categories?}]}}, {@code has} naming
      * {@code TEL}, {@code ADR}, {@code BDAY} and {@code PHOTO} as the body

@@ -250,6 +250,16 @@ public final class PimdirIndexDb implements PimdirIndex.Steps {
     }
 
     /**
+     * Every hit of a mail search in date order with its coverage per
+     * account over {@code scope}'s mailboxes: {@code {hits, coverage}},
+     * {@code {refused}}, or null for an index refused.
+     */
+    public JSONObject mailHits(String query, String scope) {
+        long now = System.currentTimeMillis() / 1000;
+        return run(handle -> PimdirIndex.mailHits(this, query, scope, now));
+    }
+
+    /**
      * What the index recorded of every card's body (SEARCH §6): {@code
      * {cards}}, or null for an index refused.
      */

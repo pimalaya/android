@@ -13,6 +13,7 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimdirSql;
+import org.pimalaya.client.SearchCoverage;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirAccount;
@@ -596,6 +597,20 @@ public final class MailStore {
 
         private final java.util.Set<String> held;
 
+        /**
+         * The mail roster by collection id as the query read it, what its
+         * pages name their rows' accounts by; null for a query built without
+         * one, whose every page reads it.
+         */
+        private Map<String, PimdirCollections.Stored> roster;
+
+        /**
+         * What the search could not see over the mailboxes shown, per account
+         * and rolled up (pimdir SEARCH 8.2); null when nothing is searched or
+         * the index answers nothing.
+         */
+        private SearchCoverage coverage;
+
         /** A query over {@code collections}, chips null when off. */
         public Query(List<String> collections, Integer seen, Integer attachment, String pattern,
                 List<String[]> hidden) {
@@ -640,6 +655,28 @@ public final class MailStore {
             this.hidden = query.hidden;
             this.hiding = query.hiding;
             this.held = query.held;
+            this.roster = query.roster;
+            this.coverage = query.coverage;
+        }
+
+        /** The query reading its pages' rows by {@code roster}. */
+        private Query with(Map<String, PimdirCollections.Stored> roster) {
+            this.roster = roster;
+            return this;
+        }
+
+        /** The query carrying what its search could not see. */
+        private Query covering(SearchCoverage coverage) {
+            this.coverage = coverage;
+            return this;
+        }
+
+        /**
+         * What the search could not see, null when nothing is searched or the
+         * index answers nothing.
+         */
+        public SearchCoverage coverage() {
+            return coverage;
         }
 
         /** Whether the query lets a collection through. */
@@ -655,7 +692,9 @@ public final class MailStore {
                     kept.add(collection);
                 }
             }
-            return new Query(kept, seen, attachment, pattern, hits, refusal, List.of()).since(since);
+            return new Query(kept, seen, attachment, pattern, hits, refusal, List.of())
+                    .with(roster)
+                    .since(since);
         }
 
         /** The canonical statement's values, with a page's cursor and size. */
@@ -698,7 +737,8 @@ public final class MailStore {
             boolean attachmentsOnly,
             String words) {
         List<String> ids = new ArrayList<>();
-        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
+        Map<String, PimdirCollections.Stored> roster = mailboxes();
+        for (PimdirCollections.Stored stored : roster.values()) {
             if (accepts.test(stored.accountEmail, stored.id)) {
                 ids.add(stored.id);
             }
@@ -717,7 +757,7 @@ public final class MailStore {
         }
         String trimmed = words == null ? "" : words.trim();
         if (trimmed.isEmpty()) {
-            return new Query(ids, seen, attachmentsOnly ? 1 : null, null, hidden);
+            return new Query(ids, seen, attachmentsOnly ? 1 : null, null, hidden).with(roster);
         }
         // NOTE: the index answers the words as a query of SEARCH §8, bodies
         // included; the sender and subject match stays beside it, so a word
@@ -725,10 +765,11 @@ public final class MailStore {
         // still finds what it found before.
         List<Long> hits = null;
         String refusal = null;
+        SearchCoverage coverage = null;
         PimdirIndexDb index = store.index();
         JSONObject answer = null;
         try {
-            answer = index == null ? null : index.hits(trimmed, "date");
+            answer = index == null ? null : index.mailHits(trimmed, searchScope(ids));
         } catch (RuntimeException failed) {
             Log.w("pimalaya", "search index unanswered", failed);
         }
@@ -740,6 +781,7 @@ public final class MailStore {
             for (int at = 0; found != null && at < found.length(); at++) {
                 hits.add(found.optJSONObject(at).optLong("seq"));
             }
+            coverage = SearchCoverage.from(answer.optJSONObject("coverage"));
         }
         return new Query(
                 ids,
@@ -748,7 +790,36 @@ public final class MailStore {
                 PimdirDb.likePattern(trimmed),
                 hits,
                 refusal,
-                hidden);
+                hidden)
+                .with(roster)
+                .covering(coverage);
+    }
+
+    /**
+     * What a search covers, as the bridge reads it ({@code
+     * PimdirIndex.mailHits}): the server's rounds, and per mailbox where its
+     * account's steps reached when they bring it (Gmail, JMAP), whose rounds
+     * cover the whole bound, and the bound, below which nothing is kept.
+     */
+    private String searchScope(List<String> ids) {
+        JSONArray collections = new JSONArray();
+        try {
+            for (String id : ids) {
+                String account = PimdirAccount.accountIdOf(id);
+                JSONObject collection = new JSONObject().put("id", id);
+                if (MailPolicy.accountWide(context, account)) {
+                    collection.putOpt("reach", MailWindow.since(context, account, id));
+                }
+                collection.putOpt("bound", MailScope.sinceOf(context, account, id));
+                collections.put(collection);
+            }
+            return new JSONObject()
+                    .put("source", PimdirStorage.SERVER)
+                    .put("collections", collections)
+                    .toString();
+        } catch (JSONException impossible) {
+            throw new IllegalStateException(impossible);
+        }
     }
 
     /**
@@ -924,7 +995,7 @@ public final class MailStore {
         } else {
             bound = skipping(listed(query), offset, limit);
         }
-        return rows(bound, limit);
+        return rows(query, bound, limit);
     }
 
     /**
@@ -945,7 +1016,7 @@ public final class MailStore {
             values.put("after_collection", "");
         }
         PimdirSql.Bound read = hiding(PimdirSql.bind(statement, values), query, skip + limit);
-        return rows(skipping(read, skip, limit), limit);
+        return rows(query, skipping(read, skip, limit), limit);
     }
 
     /** A read narrowed to {@code limit} rows past the first {@code skip}. */
@@ -955,9 +1026,10 @@ public final class MailStore {
     }
 
     /** The rows of a page read as a list shows them. */
-    private List<StoredMessage> rows(PimdirSql.Bound bound, int limit) {
+    private List<StoredMessage> rows(Query query, PimdirSql.Bound bound, int limit) {
         List<StoredMessage> messages = new ArrayList<>(limit);
-        Map<String, PimdirCollections.Stored> mailboxes = mailboxes();
+        Map<String, PimdirCollections.Stored> mailboxes =
+                query.roster != null ? query.roster : mailboxes();
         try (Cursor cursor = PimdirDb.query(items.readable(), bound)) {
             while (cursor.moveToNext()) {
                 StoredMessage message = row(cursor, mailboxes);
@@ -1536,6 +1608,7 @@ public final class MailStore {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
+            Touched touched = new Touched();
             for (PimdirCollections.Stored stored : collections.listAll(PimdirSummary.MAIL)) {
                 // NOTE: a mailbox kept whole is past its account's bound.
                 if (!stored.accountEmail.equals(accountEmail)
@@ -1545,11 +1618,13 @@ public final class MailStore {
                 Map<String, Object> values = new HashMap<>();
                 values.put("collection", stored.id);
                 values.put("before", before);
+                // NOTE: the cascade drops pins no statement returns, so the
+                // bodies its candidates pin are read before it, and their
+                // counts restated before the collector reads them.
+                touched.read(db, "MAIL_PINS_DATED_BEFORE", values);
                 collected += PimdirDb.changed(db, PimdirSql.bind("EVICT_BEFORE", values));
             }
-            // NOTE: the cascade drops pins no statement returns, so the
-            // counts are recomputed before the collector reads them.
-            PimdirDb.exec(db, "RECOMPUTE_REFCOUNTS", Map.of());
+            touched.recount(db);
             items.collectGarbage(db);
             db.setTransactionSuccessful();
         } finally {
@@ -1583,9 +1658,11 @@ public final class MailStore {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
+            Touched touched = new Touched();
+            touched.read(db, "MAIL_PINS_SORTED_BEFORE", values);
             PimdirDb.changed(db, PimdirSql.bind("RELEASE_BASES_BEFORE", values));
             released = PimdirDb.changed(db, PimdirSql.bind("RELEASE_BEFORE", values));
-            PimdirDb.exec(db, "RECOMPUTE_REFCOUNTS", Map.of());
+            touched.recount(db);
             items.collectGarbage(db);
             db.setTransactionSuccessful();
         } finally {
@@ -1593,6 +1670,56 @@ public final class MailStore {
         }
         items.unlinkCollected();
         return released;
+    }
+
+    /**
+     * The bodies a collector's writes may let go of, read before them, so only
+     * their counts are restated after (STORAGE §14's settling by changes)
+     * rather than every object's: {@code recompute_refcounts} costs the whole
+     * store, these the bodies the writes reached.
+     *
+     * <p>Past {@link #MAX} bodies the set is dropped and every count is
+     * recomputed instead, so a first narrowing over a large store holds no
+     * list of its whole mail on the heap.
+     */
+    static final class Touched {
+        /** The most bodies one collection recounts by name. */
+        static final int MAX = 50_000;
+
+        private final java.util.Set<String> hashes = new java.util.LinkedHashSet<>();
+
+        private boolean whole;
+
+        /** Adds the bodies {@code name} answers under {@code values}. */
+        void read(SQLiteDatabase db, String name, Map<String, Object> values) {
+            if (whole) {
+                return;
+            }
+            int limit = MAX + 1 - hashes.size();
+            Map<String, Object> limited = new HashMap<>(values);
+            limited.put("limit", limit);
+            int read = 0;
+            try (Cursor cursor = PimdirDb.query(db, PimdirSql.bind(name, limited))) {
+                while (cursor.moveToNext()) {
+                    hashes.add(cursor.getString(0));
+                    read++;
+                }
+            }
+            // NOTE: a read cut at its limit may have left bodies unread.
+            if (read >= limit || hashes.size() > MAX) {
+                whole = true;
+                hashes.clear();
+            }
+        }
+
+        /** Restates the counts of the bodies read, or every count past MAX. */
+        void recount(SQLiteDatabase db) {
+            if (whole) {
+                PimdirDb.exec(db, "RECOMPUTE_REFCOUNTS", Map.of());
+            } else if (!hashes.isEmpty()) {
+                PimdirDb.exec(db, "RECOUNT_OBJECTS", PimdirSql.values("hashes", hashes));
+            }
+        }
     }
 
     /**
