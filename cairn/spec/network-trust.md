@@ -34,6 +34,14 @@ An HTTP request carrying a credential SHALL follow at most five redirects, SHALL
 - WHEN the request follows
 - THEN it fails after five redirects
 
+### Requirement: A server's answer is read up to a bound
+An HTTP answer the bridge reads whole (a JSON reply, a multistatus, a card, an event or a message) SHALL be refused once its body passes the HTTP library's bound, 256 MiB (io-http `HTTP_DEFAULT_MAX_BODY_LEN`), the call failing and nothing past the bound held.
+
+#### Scenario: A server answering without end
+- GIVEN a CardDAV server answering a REPORT with a body of 1 GiB
+- WHEN the book syncs
+- THEN the read stops at 256 MiB and the pass fails on that book, the app's memory never holding the rest
+
 ### Requirement: A server-named href stays on the server
 A principal or home set a DAV server names SHALL be used only on the origin that named it, or over https on a sibling host under the same site, a generic second level (`co.uk`) being no site.
 
