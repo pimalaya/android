@@ -13,6 +13,7 @@ import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.client.Addressbook;
+import org.pimalaya.client.BodyReplaced;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.CardsMerge;
@@ -255,6 +256,43 @@ public final class ContactEditor {
     }
 
     /**
+     * Opens the merge of a save a sync made stale with what the sync left,
+     * their collisions as choices, in the form conflicts open in.
+     *
+     * <p>Nothing was written: the form's save is an ordinary edit made over
+     * the body the merge was made onto ({@link EditSession#over}), merged
+     * again should another sync replace it meanwhile.
+     */
+    void openStale(PimdirContacts.StaleCollision collision) {
+        Entry replica = null;
+        for (Entry entry : edit.replicas) {
+            if (entry.book.url().equals(collision.collection())
+                    && entry.id.equals(collision.linkId())) {
+                replica = entry;
+                break;
+            }
+        }
+        if (replica == null) {
+            host.toast(host.getString(R.string.save_failed));
+            return;
+        }
+
+        ConflictForm resolution = collision.form();
+        edit = new EditSession();
+        edit.book = replica.book;
+        edit.accountEmail = replica.accountEmail;
+        edit.card = replica.card();
+        edit.replicas = new ArrayList<>(java.util.Collections.singletonList(replica));
+        edit.title = replica.displayName();
+        edit.vcard = resolution.vcard();
+        edit.over = collision.object();
+        edit.overBody = collision.body();
+
+        form.load(resolution.model(), resolution.alternatives(), resolution.changed());
+        host.show(Panels.CONTACT);
+    }
+
+    /**
      * Starts a new contact in the default book of the account in view.
      *
      * <p>Asks only when there is none ({@link DefaultCollection}). With no
@@ -368,8 +406,16 @@ public final class ContactEditor {
     private void mergeDirect(List<Entry> replicas, Entry survivor) {
         list.exitSelection();
 
-        for (Entry entry : ContactMerge.doomed(replicas, survivor, parts.pool()::replicaRef)) {
-            parts.contacts().stageDelete(entry.book.url(), entry.id);
+        // NOTE: each removal made over the body it was read as, all or none.
+        try {
+            parts.contacts().mergeOver(
+                    survivor,
+                    null,
+                    ContactMerge.doomed(replicas, survivor, parts.pool()::replicaRef));
+        } catch (BodyReplaced replaced) {
+            host.toast(host.getString(R.string.changed_meanwhile));
+            reloadList.run();
+            return;
         }
 
         host.toast(host.getString(R.string.merge_done));

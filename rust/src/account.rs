@@ -113,6 +113,13 @@ impl Backend {
         }
     }
 
+    /// True when a card update is guarded by the round that pushes it (JMAP:
+    /// the cards changed since the state its listing read, read in that
+    /// round), so a lone change is pushed as a round too.
+    pub fn card_round_guards(self) -> bool {
+        matches!(self, Self::Jmap)
+    }
+
     /// True when mailboxes are labels over an All Mail holding every
     /// message (Gmail).
     pub fn has_all_mail(self) -> bool {
@@ -264,6 +271,8 @@ pub struct AccountInfo {
     pub card_fetch: CardFetch,
     /// See [`Backend::card_push`].
     pub card_push: CardPush,
+    /// See [`Backend::card_round_guards`].
+    pub card_round_guards: bool,
     /// See [`Backend::has_all_mail`].
     pub has_all_mail: bool,
     /// The host the base URL reaches, the providers' APIs by their name;
@@ -298,6 +307,7 @@ impl AccountInfo {
             appends_mail: backend.appends_mail(),
             card_fetch: backend.card_fetch(),
             card_push: backend.card_push(),
+            card_round_guards: backend.card_round_guards(),
             has_all_mail: backend.has_all_mail(),
             host,
             keeps_answered: backend.keeps_answered(),
@@ -507,17 +517,17 @@ mod tests {
             // url, level, caps, appends, fetch, push, all mail, host
             // answered, deleted, step, names, protocol, reads back, sessions, submits
             ("google://jane@gmail.com", true, false, false, BatchGet, Batch, true, "googleapis.com",
-                false, false, AccountStep, false, Protocol::Google, false, 2, true),
+                false, false, AccountStep, false, Protocol::Google, false, 2, true, false),
             ("msgraph://jane@outlook.com", false, false, false, JsonBatch, Round, false, "graph.microsoft.com",
-                false, false, Store, false, Protocol::Graph, false, 4, true),
+                false, false, Store, false, Protocol::Graph, false, 4, true, false),
             ("jmap://api.fastmail.com/jmap/session", true, true, false, Changes, Round, false, "api.fastmail.com",
-                true, false, Store, false, Protocol::Jmap, false, 4, true),
+                true, false, Store, false, Protocol::Jmap, false, 4, true, true),
             ("imaps://imap.example.org:993", false, false, true, Multiget, Parallel, false, "imap.example.org",
-                true, true, Store, true, Protocol::Standard, true, 3, false),
+                true, true, Store, true, Protocol::Standard, true, 3, false, false),
             ("https://dav.example.org/", false, false, true, Multiget, Parallel, false, "dav.example.org",
-                true, true, Store, true, Protocol::Standard, true, 3, false),
+                true, true, Store, true, Protocol::Standard, true, 3, false, false),
             ("local://on-this-device", false, false, true, Multiget, Parallel, false, "on-this-device",
-                true, true, Store, false, Protocol::Local, false, 3, false),
+                true, true, Store, false, Protocol::Local, false, 3, false, false),
         ];
 
         for row in table {
@@ -537,6 +547,7 @@ mod tests {
                 reads_back_revision: row.13,
                 sessions: row.14,
                 submits_over_session: row.15,
+                card_round_guards: row.16,
             };
             assert_eq!(AccountInfo::of(row.0), expected, "{}", row.0);
         }

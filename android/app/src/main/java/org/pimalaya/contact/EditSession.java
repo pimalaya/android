@@ -48,4 +48,14 @@ public final class EditSession {
      * the conflicts it settles (SYNC §7); null outside a conflict.
      */
     public java.util.List<String> resolves;
+
+    /**
+     * The store's hash of the body a save a sync made stale was merged onto,
+     * its collisions left to the form: the form's save is made over it. Null
+     * outside such a merge.
+     */
+    String over;
+
+    /** The body {@link #over} names. */
+    String overBody;
 }

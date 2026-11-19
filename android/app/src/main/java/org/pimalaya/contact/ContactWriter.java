@@ -1,6 +1,7 @@
 package org.pimalaya.contact;
 
 import android.app.AlertDialog;
+import android.util.Log;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -11,6 +12,7 @@ import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.BodyReplaced;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.ContactClient;
@@ -63,6 +65,7 @@ final class ContactWriter {
                     reloadList.run();
                     host.showBack(Panels.CONTACTS);
                 };
+        Runnable next = done;
         try {
             ContactFields model = editor.form().collect();
 
@@ -78,14 +81,16 @@ final class ContactWriter {
                 parts.contacts().save(editor.edit().book.url(), new Card(id, null, null, vcard));
             } else if (editor.edit().resolvingConflict) {
                 saveConflictResolution(model);
+            } else if (editor.edit().over != null) {
+                next = asking(saveOver(model), done);
             } else if (editor.edit().mergeSurvivor != null) {
                 saveMerge(model);
             } else {
-                saveFanOut(model);
+                next = asking(saveFanOut(model), done);
             }
 
             if (editor.edit().card != null && editor.edit().pendingBookState != null) {
-                applyBookState(ContactClient.applyCard(editor.edit().card.vcard(), model), done);
+                applyBookState(ContactClient.applyCard(editor.edit().card.vcard(), model), next);
                 return;
             }
         } catch (Exception error) {
@@ -93,7 +98,15 @@ final class ContactWriter {
             return;
         }
 
-        done.run();
+        next.run();
+    }
+
+    /**
+     * What follows a save: the form on the collision of a save a sync made
+     * stale, else {@code done}.
+     */
+    private Runnable asking(PimdirContacts.StaleCollision collision, Runnable done) {
+        return collision == null ? done : () -> editor.openStale(collision);
     }
 
     /**
@@ -101,9 +114,12 @@ final class ContactWriter {
      *
      * <p>An ordinary edit each: a conflicted replica refuses it, staging
      * nothing, its conflict settled by the conflict form alone (SYNC §7).
+     * Each is made over the body the editor read: one a sync replaced since
+     * merges onto what the sync left ({@link PimdirContacts#editOver}), the
+     * first collision returned for the form, nothing written to its book.
      */
-    private void saveFanOut(ContactFields model) throws JSONException {
-        ContactStager engine = new ContactStager(parts.pimdir(), parts.clients());
+    private PimdirContacts.StaleCollision saveFanOut(ContactFields model) {
+        PimdirContacts.StaleCollision collision = null;
         Map<String, String> first = new HashMap<>();
 
         for (Entry entry : editor.edit().replicas) {
@@ -117,11 +133,30 @@ final class ContactWriter {
             if (editor.cardIndex(vcard).hash().equals(entry.hash())) {
                 continue;
             }
-            engine.edit(
-                    entry.book.url(),
-                    PimdirStorage.rowHandle(entry.card().uri(), entry.id),
-                    vcard);
+            PimdirContacts.StaleCollision asked =
+                    parts.contacts().editOver(
+                            entry.book.url(), entry.id, entry.object(), entry.card().vcard(), vcard);
+            if (collision == null) {
+                collision = asked;
+            }
         }
+        return collision;
+    }
+
+    /**
+     * The save of a stale save's merge: the picks onto the merge, made over
+     * the body it was merged onto, merged again should a sync have replaced
+     * that one too.
+     */
+    private PimdirContacts.StaleCollision saveOver(ContactFields model) {
+        Entry replica = editor.edit().replicas.get(0);
+        String vcard = ContactClient.applyCard(editor.edit().vcard, model);
+        return parts.contacts().editOver(
+                replica.book.url(),
+                replica.id,
+                editor.edit().over,
+                editor.edit().overBody,
+                vcard);
     }
 
     /**
@@ -145,9 +180,11 @@ final class ContactWriter {
     /**
      * The merge save: the model onto the survivor, deletes for the others;
      * refused, nothing staged, when a card it read is kept as served, not
-     * UTF-8, the model carrying its text.
+     * UTF-8, the model carrying its text, or once a sync replaced a card it
+     * read ({@link PimdirContacts#mergeOver}): the person merges again from
+     * the list as the sync left it.
      */
-    private void saveMerge(ContactFields model) throws JSONException {
+    private void saveMerge(ContactFields model) {
         Entry survivor = editor.edit().mergeSurvivor;
         editor.edit().mergeSurvivor = null;
         for (Entry entry : editor.edit().replicas) {
@@ -155,26 +192,22 @@ final class ContactWriter {
         }
 
         String vcard = ContactClient.applyCard(survivor.card().vcard(), model);
-        if (!editor.cardIndex(vcard).hash().equals(survivor.hash())) {
-            new ContactStager(parts.pimdir(), parts.clients())
-                    .edit(
-                            survivor.book.url(),
-                            PimdirStorage.rowHandle(survivor.card().uri(), survivor.id),
-                            vcard);
+        List<Entry> doomed = new ArrayList<>();
+        for (Entry entry :
+                ContactMerge.doomed(editor.edit().replicas, survivor, parts.pool()::replicaRef)) {
+            if (parts.accountFor(entry.accountEmail) != null) {
+                doomed.add(entry);
+            }
         }
-
-        String survivorRef = parts.pool().replicaRef(survivor);
-        java.util.Set<String> removed = new java.util.HashSet<>();
-        for (Entry entry : editor.edit().replicas) {
-            String ref = parts.pool().replicaRef(entry);
-            if (ref.equals(survivorRef) || !removed.add(ref)) {
-                continue;
-            }
-            AccountEntry owner = parts.accountFor(entry.accountEmail);
-            if (owner == null) {
-                continue;
-            }
-            parts.contacts().stageDelete(entry.book.url(), entry.id);
+        try {
+            parts.contacts().mergeOver(
+                    survivor,
+                    editor.cardIndex(vcard).hash().equals(survivor.hash()) ? null : vcard,
+                    doomed);
+        } catch (BodyReplaced replaced) {
+            Log.i("pimalaya", "contact merge made stale: " + survivor.id);
+            host.toast(host.getString(R.string.changed_meanwhile));
+            return;
         }
 
         host.toast(host.getString(R.string.merge_done));

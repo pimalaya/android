@@ -30,6 +30,13 @@ pub struct PushChange {
     /// Book ids a books op removes the card from.
     #[serde(default)]
     pub remove: Vec<String>,
+    /// The account state the listing read the card at, guarding a JMAP
+    /// update: a card changed on the server since is not written over.
+    pub since: Option<String>,
+    /// The revision the card was last read at, guarding a Graph update (its
+    /// changeKey): a contact changed on the server since is not written
+    /// over.
+    pub if_match: Option<String>,
 }
 
 /// One change's outcome of a batched push round.

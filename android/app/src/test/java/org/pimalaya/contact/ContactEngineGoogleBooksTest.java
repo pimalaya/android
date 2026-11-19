@@ -871,4 +871,37 @@ public class ContactEngineGoogleBooksTest {
         assertSettled();
         assertEquals(Map.of(), held());
     }
+
+    @Test
+    public void aRefusedMoveIsHeldRefusedNotSentAgain() throws Exception {
+        rename(CONTACTS, JANE, "Jane Edit");
+        move(CONTACTS, SEED, JANE);
+        people.refuseAll = true;
+        pass(CONTACTS, L1, SEED);
+        assertEquals(List.of("updateCard c1 refused"), people.calls);
+        people.calls.clear();
+        pass(CONTACTS, L1, SEED);
+
+        // NOTE: refused as any push is: held, nothing tried again by itself.
+        assertEquals(List.of(), people.calls);
+        assertEquals(vcard(JANE, "Jane"), people.bodies.get("c1"));
+        assertEquals(vcard(JANE, "Jane Edit"), stored(SEED, JANE));
+        assertTrue("the source's removal still held", stored(CONTACTS, JANE) != null);
+    }
+
+    @Test
+    public void anAddCarriedByABookWhoseSyncIsOffIsReported() throws Exception {
+        tick(CONTACTS, SEED, JANE);
+        rename(CONTACTS, JANE, "Jane Edit");
+        rename(SEED, JANE, "Jane Edit");
+        store.setBookState(CONTACTS, true, false, false);
+        pass(SEED);
+
+        // NOTE: Contacts would send the edit the label waits for, but its sync
+        // is off: the label's add waits, and says so.
+        assertEquals(List.of(), people.calls);
+        assertEquals(
+                List.of(new UnsentContacts.Row(JANE, "Jane Edit", SEED, null)),
+                UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+    }
 }

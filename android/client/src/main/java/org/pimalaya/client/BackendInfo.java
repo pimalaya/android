@@ -15,6 +15,8 @@ import org.json.JSONObject;
  * @param appendsMail whether mail with no origin uploads (IMAP APPEND)
  * @param cardFetch how changed cards are read in bulk
  * @param cardPush how a round of card changes is pushed
+ * @param cardRoundGuards whether a card update is guarded by the round that
+ *     pushes it, so a lone change is pushed as a round too
  * @param hasAllMail whether mailboxes are labels over an All Mail holding
  *     every message
  * @param host the host the base URL reaches, an API by its name; the URL
@@ -38,6 +40,7 @@ public record BackendInfo(
         boolean appendsMail,
         CardFetch cardFetch,
         CardPush cardPush,
+        boolean cardRoundGuards,
         boolean hasAllMail,
         String host,
         boolean keepsAnswered,
@@ -55,6 +58,7 @@ public record BackendInfo(
                 reply.optBoolean("appendsMail"),
                 CardFetch.of(reply.optString("cardFetch")),
                 CardPush.of(reply.optString("cardPush")),
+                reply.optBoolean("cardRoundGuards"),
                 reply.optBoolean("hasAllMail"),
                 Json.string(reply, "host"),
                 reply.optBoolean("keepsAnswered"),

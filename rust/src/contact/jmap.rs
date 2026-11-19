@@ -8,31 +8,41 @@
 //! the components as RFC 9555 allows: the app never mints a display name.
 //!
 //! No per-card ETag: the one surfaced is a hash of the card's JSON, which
-//! only drives the store's "unchanged, skip" path. Updates carry no
-//! If-Match and are last-write-wins.
+//! only drives the store's "unchanged, skip" path. An update is guarded by
+//! the account state its listing read instead: the cards changed since are
+//! read first (`ContactCard/changes`) and not written over, the set naming
+//! the state those changes end at (`ifInState`)
+//! ([`Jmap::push_cards`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use io_jmap::{
-    rfc8620::{changes::*, session::JmapSession},
+    rfc8620::{
+        JMAP_CORE_CAPABILITY,
+        changes::*,
+        error::JmapMethodError,
+        session::JmapSession,
+        set::{JmapSet, JmapSetError, JmapSetOptions},
+    },
     rfc9610::{
         JMAP_CONTACTS_CAPABILITY,
         address_book::{JmapAddressBook, get::*},
         contact_card::{JmapContactCard, changes::*, get::*, query::*, set::*},
     },
 };
+use secrecy::SecretString;
 use serde_json::Value;
 
 use crate::{
     client::{
         Host,
-        jmap::{Jmap, JmapCalls, etag, jmap_collection_path, page_size, paged},
+        jmap::{Jmap, JmapCalls, etag, jmap_collection_path, page_size, paged, sessions},
     },
     contact::{
         Addressbook, Card, CardDelta,
         push::{PushChange, PushOutcome, rejected, required},
     },
-    error::BridgeError,
+    error::{BridgeError, coroutine_error},
     offline::default_role,
 };
 
@@ -141,42 +151,68 @@ impl<H: Host> Jmap<'_, H> {
         calls.card_delta(since_state, limit)
     }
 
-    /// Updates the ContactCard `id` by the patch of
-    /// [`JmapContactCard::update_from_vcard`], with no If-Match guard:
-    /// last-write-wins.
-    pub fn update_card(
+    /// Runs one `ContactCard/set` as `opts` says, its `ifInState` included,
+    /// which io-jmap's ContactCard verb does not carry; [`None`] when the
+    /// server refuses it whole for a state the account moved past
+    /// (`stateMismatch`).
+    fn card_set(
         &mut self,
-        id: &str,
-        vcard: &str,
-        base_vcard: Option<&str>,
-    ) -> Result<Card, BridgeError> {
-        let patch =
-            JmapContactCard::update_from_vcard(vcard, base_vcard).map_err(|err| err.to_string())?;
-        let auth = self.auth.authorization();
-        let session = self.session()?;
-        let api_url = session.api_url.clone();
+        session: &JmapSession,
+        auth: &SecretString,
+        opts: JmapSetOptions<JmapContactCard, JmapContactCardPatch>,
+    ) -> Result<Option<JmapContactCardSetOutput>, BridgeError> {
+        let account_id = session
+            .account_for(JMAP_CONTACTS_CAPABILITY)
+            .map_err(|err| err.to_string())?
+            .to_string();
+        let capabilities = vec![
+            JMAP_CORE_CAPABILITY.to_string(),
+            JMAP_CONTACTS_CAPABILITY.to_string(),
+        ];
+        let api_url = &session.api_url;
+        let coroutine = JmapSet::<JmapContactCard>::new(
+            account_id,
+            auth,
+            api_url,
+            "ContactCard/set",
+            capabilities,
+            opts,
+        )
+        .map_err(|err| err.to_string())?;
 
-        let update = BTreeMap::from([(id.to_string(), patch)]);
-        let args = JmapContactCardSetArgs {
-            update: Some(update),
-            ..Default::default()
+        let out = match self.try_run(api_url, coroutine)? {
+            Ok(out) => out,
+            Err(JmapSetError::Method(JmapMethodError::StateMismatch { .. })) => return Ok(None),
+            Err(err) => {
+                sessions().forget(api_url);
+                return Err(coroutine_error(&err));
+            }
         };
-        let coroutine =
-            JmapContactCardSet::new(&session, &auth, args).map_err(|err| err.to_string())?;
-        let out = self.run(&api_url, coroutine)?;
+        let item_errors = |errors: BTreeMap<String, Value>| {
+            errors
+                .into_iter()
+                .map(|(key, error)| {
+                    let error = serde_json::from_value(error).unwrap_or(
+                        JmapContactCardSetItemError::Other {
+                            type_name: String::new(),
+                            description: None,
+                        },
+                    );
+                    (key, error)
+                })
+                .collect()
+        };
 
-        if let Some(err) = out.not_updated.into_values().next() {
-            return Err(format!("The server refused the contact change: {err}").into());
-        }
-
-        Ok(Card {
-            id: id.to_string(),
-            uri: id.to_string(),
-            etag: None,
-            vcard: vcard.to_string(),
-            vcard_base64: None,
-            books: Vec::new(),
-        })
+        Ok(Some(JmapContactCardSetOutput {
+            new_state: out.new_state,
+            created: out.created,
+            updated: out.updated,
+            destroyed: out.destroyed,
+            not_created: item_errors(out.not_created),
+            not_updated: item_errors(out.not_updated),
+            not_destroyed: item_errors(out.not_destroyed),
+            keep_alive: out.keep_alive,
+        }))
     }
 
     /// Destroys the ContactCard `id`.
@@ -241,6 +277,17 @@ impl<H: Host> Jmap<'_, H> {
     ///
     /// Each change gets its outcome: a rejected object does not fail its
     /// round, and a destroy the server no longer finds has converged.
+    ///
+    /// An update is guarded by the account state its listing read
+    /// ([`PushChange::since`]): the cards changed since are read first
+    /// ([`JmapCalls::changed_since`]), and one among them is not written
+    /// over but answered rejected, left pending for the next listing to
+    /// merge (pimdir SYNC §5). So is one naming no state, or a state the
+    /// server can no longer compute changes from. The set then names the
+    /// state the changes ended at (`ifInState`): a card written between the
+    /// two refuses it whole (`stateMismatch`), every change of the chunk
+    /// answered rejected, pending for the next pass. Never the listing's
+    /// state, which would refuse whatever changed since on the account.
     pub fn push_cards(
         &mut self,
         book_id: &str,
@@ -248,7 +295,6 @@ impl<H: Host> Jmap<'_, H> {
     ) -> Result<Vec<PushOutcome>, BridgeError> {
         let auth = self.auth.authorization();
         let session = self.session()?;
-        let api_url = session.api_url.clone();
 
         let mut outcomes = Vec::with_capacity(changes.len());
         for chunk in changes.chunks(JMAP_SET_CHUNK) {
@@ -258,6 +304,7 @@ impl<H: Host> Jmap<'_, H> {
             let mut update_refs = BTreeMap::new();
             let mut destroy = Vec::new();
             let mut destroy_refs = BTreeMap::new();
+            let mut guards: BTreeMap<&str, Vec<String>> = BTreeMap::new();
 
             for (index, change) in chunk.iter().enumerate() {
                 match change.op.as_str() {
@@ -277,6 +324,12 @@ impl<H: Host> Jmap<'_, H> {
                     "update" => {
                         let id = required(&change.id, "update", "id")?;
                         let vcard = required(&change.vcard, "update", "vcard")?;
+                        let Some(since) = change.since.as_deref() else {
+                            let error = format!("No listing state guards the update of {id}");
+                            outcomes.push(rejected(change.reference.clone(), error, false));
+                            continue;
+                        };
+                        guards.entry(since).or_default().push(id.to_string());
                         let patch =
                             JmapContactCard::update_from_vcard(vcard, change.base_vcard.as_deref())
                                 .map_err(|err| err.to_string())?;
@@ -304,14 +357,50 @@ impl<H: Host> Jmap<'_, H> {
                 }
             }
 
-            let args = JmapContactCardSetArgs {
+            let mut fresh = None;
+            let mut guarded = false;
+            for (since, ids) in guards {
+                let changed = self.calls()?.changed_since(since)?;
+                for id in ids {
+                    if let Some((changed, _)) = &changed
+                        && !changed.contains(&id)
+                    {
+                        guarded = true;
+                        continue;
+                    }
+                    update.remove(&id);
+                    if let Some(reference) = update_refs.remove(&id) {
+                        let error = format!("Contact {id} changed on the server since {since}");
+                        outcomes.push(rejected(reference, error, false));
+                    }
+                }
+                if let Some((_, state)) = changed {
+                    fresh = Some(state);
+                }
+            }
+            if create.is_empty() && update.is_empty() && destroy.is_empty() {
+                continue;
+            }
+
+            let if_in_state = fresh.filter(|_| guarded);
+            let opts = JmapSetOptions {
+                if_in_state: if_in_state.clone(),
                 create: (!create.is_empty()).then_some(create),
                 update: (!update.is_empty()).then_some(update),
                 destroy: (!destroy.is_empty()).then_some(destroy),
             };
-            let coroutine =
-                JmapContactCardSet::new(&session, &auth, args).map_err(|err| err.to_string())?;
-            let out = self.run(&api_url, coroutine)?;
+            let Some(out) = self.card_set(&session, &auth, opts)? else {
+                let state = if_in_state.unwrap_or_default();
+                let refs = create_refs
+                    .into_values()
+                    .chain(update_refs.into_values())
+                    .chain(destroy_refs.into_values());
+                for reference in refs {
+                    let error = format!("The contacts changed on the server since {state}");
+                    outcomes.push(rejected(reference, error, false));
+                }
+                continue;
+            };
 
             for (key, reference) in create_refs {
                 if let Some(err) = out.not_created.get(&key) {
@@ -407,6 +496,30 @@ impl<H: Host> JmapCalls<'_, '_, H> {
             JmapContactCardChanges::new(&self.session, &self.auth, state.to_string(), opts)
                 .map_err(|err| err.to_string())?;
         self.jmap.run_changes(&self.session.api_url, coroutine)
+    }
+
+    /// The cards created, updated or destroyed since `state`, every page of
+    /// `/changes` read, and the state they end at; [`None`] when the server
+    /// can no longer compute changes from it.
+    fn changed_since(
+        &mut self,
+        state: &str,
+    ) -> Result<Option<(BTreeSet<String>, String)>, BridgeError> {
+        let mut cursor = state.to_string();
+        let mut changed = BTreeSet::new();
+
+        loop {
+            let Some(out) = self.card_changes(&cursor)? else {
+                return Ok(None);
+            };
+            changed.extend(out.created);
+            changed.extend(out.updated);
+            changed.extend(out.destroyed);
+            cursor = out.new_state;
+            if !out.has_more_changes {
+                return Ok(Some((changed, cursor)));
+            }
+        }
     }
 
     /// Lists the account's cards a page of `limit` at a time ([`paged`]),
@@ -825,5 +938,234 @@ mod tests {
             told,
             [("a", true, false), ("b", false, true), ("c", false, false)]
         );
+    }
+
+    /// A JMAP account whose cards the server edits behind the listing.
+    struct FakeAccount {
+        /// The account's cards by id.
+        cards: BTreeMap<String, Value>,
+        /// The ids each state's `/changes` names, updated since it.
+        edited: BTreeMap<String, Vec<String>>,
+        /// The ids every `ContactCard/set` asked to update, in order.
+        updated: Vec<String>,
+        /// The method calls each request carried, in order.
+        methods: Vec<Vec<String>>,
+        /// The state the account is at when a set lands, which its
+        /// `ifInState` must name.
+        state: String,
+        /// The `ifInState` every `ContactCard/set` named, in order.
+        if_in_state: Vec<Option<String>>,
+    }
+
+    impl FakeAccount {
+        fn answer(&mut self, request: &FakeRequest, session: &JmapSession) -> FakeResponse {
+            if request.method == "GET" {
+                return FakeResponse::json(200, session);
+            }
+            let calls: Vec<(String, Value, String)> =
+                serde_json::from_value(request.json::<Value>()["methodCalls"].take()).unwrap();
+            self.methods
+                .push(calls.iter().map(|(name, _, _)| name.clone()).collect());
+
+            let mut responses = Vec::new();
+            for (name, args, id) in calls {
+                let result = match name.as_str() {
+                    "ContactCard/changes" => {
+                        let since = args["sinceState"].as_str().unwrap();
+                        match self.edited.get(since) {
+                            None => {
+                                let error = json!({"type": "cannotCalculateChanges"});
+                                responses.push(json!(["error", error, id]));
+                                continue;
+                            }
+                            Some(updated) => json!({
+                                "accountId": "a1",
+                                "oldState": since,
+                                "newState": "s9",
+                                "hasMoreChanges": false,
+                                "created": [],
+                                "updated": updated,
+                                "destroyed": [],
+                            }),
+                        }
+                    }
+                    "ContactCard/set" => {
+                        let guard = args["ifInState"].as_str().map(str::to_string);
+                        self.if_in_state.push(guard.clone());
+                        if guard.is_some_and(|guard| guard != self.state) {
+                            let error = json!({"type": "stateMismatch"});
+                            responses.push(json!(["error", error, id]));
+                            continue;
+                        }
+                        let update = args["update"].as_object().cloned().unwrap_or_default();
+                        let mut updated = serde_json::Map::new();
+                        for (card, patch) in update {
+                            self.updated.push(card.clone());
+                            for (path, value) in patch.as_object().unwrap() {
+                                let mut target = self.cards.get_mut(&card).unwrap();
+                                let mut segments: Vec<&str> = path.split('/').collect();
+                                let last = segments.pop().unwrap();
+                                for segment in segments {
+                                    target = target
+                                        .as_object_mut()
+                                        .unwrap()
+                                        .entry(segment)
+                                        .or_insert_with(|| json!({}));
+                                }
+                                target
+                                    .as_object_mut()
+                                    .unwrap()
+                                    .insert(last.to_string(), value.clone());
+                            }
+                            updated.insert(card, Value::Null);
+                        }
+                        json!({
+                            "accountId": "a1",
+                            "oldState": "s9",
+                            "newState": "s10",
+                            "updated": updated,
+                        })
+                    }
+                    other => panic!("unexpected method {other}"),
+                };
+                responses.push(json!([name, result, id]));
+            }
+
+            let body = json!({"methodResponses": responses, "sessionState": "s0"});
+            FakeResponse::json(200, &body)
+        }
+    }
+
+    /// A vCard of the card `uid` named `name`.
+    fn vcard(uid: &str, name: &str) -> String {
+        format!("BEGIN:VCARD\r\nVERSION:4.0\r\nUID:{uid}\r\nFN:{name}\r\nEND:VCARD\r\n")
+    }
+
+    /// Pushes `changes` to `account` under the bearer `token`, a session cache
+    /// key of the test's own, answering the outcomes by reference.
+    fn push(
+        account: &mut FakeAccount,
+        token: &'static str,
+        changes: Value,
+    ) -> BTreeMap<String, (bool, bool)> {
+        let session = jmap_session(
+            json!({ "urn:ietf:params:jmap:core": {}, "urn:ietf:params:jmap:contacts": {} }),
+            json!({ "urn:ietf:params:jmap:contacts": "a1" }),
+        );
+        let mut client = Client::new(FakeServer::new(|request: &FakeRequest| {
+            account.answer(request, &session)
+        }));
+        let changes: Vec<PushChange> = serde_json::from_value(changes).unwrap();
+
+        Jmap {
+            client: &mut client,
+            session_url: Url::parse("https://api.example.com/jmap/session").unwrap(),
+            auth: Auth::Bearer(token),
+        }
+        .push_cards("b1", &changes)
+        .unwrap()
+        .into_iter()
+        .map(|outcome| (outcome.reference, (outcome.accepted, outcome.refused)))
+        .collect()
+    }
+
+    /// Jane and Joe as the listing at `s1` read them, Jane renamed on the
+    /// server since.
+    fn edited_behind_the_listing() -> FakeAccount {
+        let card = |id: &str, name: &str| {
+            json!({
+                "id": id,
+                "addressBookIds": { "b1": true },
+                "@type": "Card",
+                "version": "1.0",
+                "uid": id,
+                "name": { "full": name },
+            })
+        };
+        FakeAccount {
+            cards: BTreeMap::from([
+                ("k1".to_string(), card("k1", "Jane Server")),
+                ("k2".to_string(), card("k2", "Joe")),
+            ]),
+            edited: BTreeMap::from([("s1".to_string(), vec!["k1".to_string()])]),
+            updated: Vec::new(),
+            methods: Vec::new(),
+            state: "s9".to_string(),
+            if_in_state: Vec::new(),
+        }
+    }
+
+    /// An update from the phone, read at the listing `since`.
+    fn update(reference: &str, id: &str, base: &str, name: &str, since: Option<&str>) -> Value {
+        json!({
+            "ref": reference,
+            "op": "update",
+            "id": id,
+            "vcard": vcard(id, name),
+            "baseVcard": vcard(id, base),
+            "since": since,
+        })
+    }
+
+    /// A card the server edited between the listing and the push is not
+    /// written over: left pending for the next listing to merge, the other
+    /// card of the round written.
+    #[test]
+    fn a_card_edited_on_the_server_since_the_listing_is_not_written_over() {
+        let mut account = edited_behind_the_listing();
+        let changes = json!([
+            update("jane", "k1", "Jane", "Jane Phone", Some("s1")),
+            update("joe", "k2", "Joe", "Joe Phone", Some("s1")),
+        ]);
+
+        let outcomes = push(&mut account, "token-guard-edited", changes);
+
+        assert_eq!(account.updated, ["k2"], "Jane's server edit kept");
+        assert_eq!(account.cards["k1"]["name"]["full"], "Jane Server");
+        assert_eq!(
+            account.methods,
+            [vec!["ContactCard/changes"], vec!["ContactCard/set"]],
+            "the changes since the listing read before the set"
+        );
+        assert_eq!(outcomes["jane"], (false, false), "rejected, not refused");
+        assert_eq!(outcomes["joe"], (true, false));
+        assert_eq!(
+            account.if_in_state,
+            [Some("s9".to_string())],
+            "the set guarded by the state the changes ended at"
+        );
+    }
+
+    /// A card written on the server between the changes read and the set
+    /// moves the account past the state the set names: the set is refused
+    /// whole (`stateMismatch`), its update left pending, not refused.
+    #[test]
+    fn an_update_the_account_moved_past_before_the_set_is_not_written() {
+        let mut account = edited_behind_the_listing();
+        account.state = "s10".to_string();
+        let changes = json!([update("joe", "k2", "Joe", "Joe Phone", Some("s1"))]);
+
+        let outcomes = push(&mut account, "token-guard-moved", changes);
+
+        assert!(account.updated.is_empty(), "Joe never written");
+        assert_eq!(outcomes["joe"], (false, false), "rejected, not refused");
+    }
+
+    /// An update naming no listing state, or one the server can no longer
+    /// compute changes from, is not written: nothing proves the card
+    /// unchanged since.
+    #[test]
+    fn an_update_nothing_proves_unchanged_is_not_written() {
+        let mut account = edited_behind_the_listing();
+        let changes = json!([
+            update("joe", "k2", "Joe", "Joe Phone", None),
+            update("jane", "k1", "Jane Server", "Jane Phone", Some("s0")),
+        ]);
+
+        let outcomes = push(&mut account, "token-guard-unproved", changes);
+
+        assert!(account.updated.is_empty());
+        assert_eq!(outcomes["joe"], (false, false));
+        assert_eq!(outcomes["jane"], (false, false));
     }
 }

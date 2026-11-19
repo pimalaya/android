@@ -223,7 +223,12 @@ impl<H: Host> Msgraph<'_, H> {
         Ok(cards)
     }
 
-    /// Updates the contact `id`, last-write-wins (no If-Match guard).
+    /// Updates the contact `id` read at the changeKey `if_match`.
+    ///
+    /// Graph contacts take no If-Match (docs/providers.md), so the contact
+    /// is read first: one the server holds at another changeKey, or a
+    /// changeKey unknown, is a conflict (412) and is not written over, left
+    /// for the next listing to merge.
     ///
     /// The PATCH is trimmed to the fields changed since the base; without
     /// one, the create-shaped body cannot clear fields but carries none of
@@ -233,7 +238,13 @@ impl<H: Host> Msgraph<'_, H> {
         id: &str,
         vcard: &str,
         base_vcard: Option<&str>,
+        if_match: Option<&str>,
     ) -> Result<Card, BridgeError> {
+        let held = self.read_card(id)?;
+        if if_match.is_none() || held.etag.as_deref() != if_match {
+            return Err(changed_since_read(id));
+        }
+
         let contact = match base_vcard {
             Some(base) => MsgraphContact::update_from_vcard(vcard, base)?,
             None => MsgraphContact::create_from_vcard(vcard)?,
@@ -251,6 +262,42 @@ impl<H: Host> Msgraph<'_, H> {
         Ok(graph_card(updated))
     }
 
+    /// The updates of `chunk` kept from being written, by index, with why:
+    /// one naming no changeKey, or whose contact the server holds at another
+    /// changeKey than it was read at, as [`Self::update_card`] guards. The
+    /// contacts are read 20 to a `$batch`; one gone is left to its PATCH.
+    fn stale_updates(
+        &mut self,
+        chunk: &[PushChange],
+    ) -> Result<BTreeMap<usize, String>, BridgeError> {
+        let mut updates = Vec::new();
+        for (index, change) in chunk.iter().enumerate() {
+            if change.op == "update" {
+                updates.push((index, required(&change.id, "update", "id")?));
+            }
+        }
+        let mut stale = BTreeMap::new();
+        if updates.is_empty() {
+            return Ok(stale);
+        }
+
+        let ids: Vec<&str> = updates.iter().map(|(_, id)| *id).collect();
+        let held: BTreeMap<String, Option<String>> = self
+            .read_cards(&ids)?
+            .into_iter()
+            .map(|card| (card.id, card.etag))
+            .collect();
+        for (index, id) in updates {
+            let read = chunk[index].if_match.as_deref();
+            if let Some(key) = held.get(id)
+                && (read.is_none() || key.as_deref() != read)
+            {
+                stale.insert(index, changed_since_read(id).message);
+            }
+        }
+        Ok(stale)
+    }
+
     /// Deletes the Graph contact `id`.
     pub fn delete_card(&mut self, id: &str) -> Result<(), BridgeError> {
         let auth = HttpAuthBearer::new(self.token);
@@ -266,6 +313,11 @@ impl<H: Host> Msgraph<'_, H> {
     ///
     /// Each inner status is one change's outcome: a rejected change does
     /// not fail its round, and a 404 on a destroy has converged.
+    ///
+    /// An update is guarded by the changeKey it was read at, the contacts
+    /// read first ([`Self::stale_updates`]): one changed on the server since
+    /// is not written over but answered rejected, left pending for the next
+    /// listing to merge (pimdir SYNC §5).
     pub fn push_cards(
         &mut self,
         folder: &str,
@@ -280,8 +332,13 @@ impl<H: Host> Msgraph<'_, H> {
 
         let mut outcomes = Vec::with_capacity(changes.len());
         for chunk in changes.chunks(GRAPH_BATCH_CHUNK) {
+            let stale = self.stale_updates(chunk)?;
             let mut requests = Vec::with_capacity(chunk.len());
             for (index, change) in chunk.iter().enumerate() {
+                if let Some(error) = stale.get(&index) {
+                    outcomes.push(rejected(change.reference.clone(), error.clone(), false));
+                    continue;
+                }
                 let request = match change.op.as_str() {
                     "create" => {
                         let vcard = required(&change.vcard, "create", "vcard")?;
@@ -322,6 +379,9 @@ impl<H: Host> Msgraph<'_, H> {
                 };
                 requests.push(request);
             }
+            if requests.is_empty() {
+                continue;
+            }
 
             let url = parse_graph_url(&format!("{MSGRAPH_API_BASE}$batch"))?;
             let batch = GraphBatch { requests };
@@ -336,6 +396,9 @@ impl<H: Host> Msgraph<'_, H> {
                 .collect();
 
             for (index, change) in chunk.iter().enumerate() {
+                if stale.contains_key(&index) {
+                    continue;
+                }
                 let Some(reply) = replies.remove(&index.to_string()) else {
                     return Err(format!("Graph batch response is missing request {index}").into());
                 };
@@ -465,6 +528,16 @@ impl<H: Host> Msgraph<'_, H> {
     }
 }
 
+/// The conflict of an update of `id` whose contact the server changed since
+/// it was read: a precondition failed (412), as a stale If-Match is.
+fn changed_since_read(id: &str) -> BridgeError {
+    BridgeError {
+        message: format!("Graph contact {id} changed on the server since it was read"),
+        status: Some(412),
+        ..Default::default()
+    }
+}
+
 /// An io-msgraph contact as a [`Card`]: the Graph id as id and uri, the
 /// changeKey as ETag.
 fn graph_card(contact: MsgraphContact) -> Card {
@@ -578,12 +651,13 @@ mod tests {
     use serde_json::{Value, json};
 
     use crate::{
+        account::{Account, Backend},
         client::{
-            Client,
+            Auth, Client,
             fake::{FakeRequest, FakeResponse, FakeServer},
             msgraph::relative,
         },
-        contact::msgraph::*,
+        contact::{CardUpdate, Contacts, msgraph::*},
     };
 
     /// A Graph contacts folder.
@@ -1063,5 +1137,159 @@ mod tests {
                 ("d", false, false)
             ]
         );
+    }
+
+    /// A Graph folder whose contacts the server edits behind the listing:
+    /// reads answer the contact at its changeKey now, writes are recorded.
+    struct FakeEdited {
+        /// Contacts by id, at the changeKey the server holds now.
+        contacts: BTreeMap<String, Value>,
+        /// The ids every PATCH addressed, in order.
+        patched: Vec<String>,
+    }
+
+    impl FakeEdited {
+        /// Jane `k1` edited on the server since the listing read `ck-k1-0`,
+        /// Joe `k2` left alone.
+        fn new() -> Self {
+            let at = |id: &str, key: &str| {
+                let mut contact = contact(id);
+                contact["changeKey"] = json!(key);
+                contact
+            };
+            Self {
+                contacts: BTreeMap::from([
+                    ("k1".to_string(), at("k1", "ck-k1-1")),
+                    ("k2".to_string(), at("k2", "ck-k2-0")),
+                ]),
+                patched: Vec::new(),
+            }
+        }
+
+        fn answer(&mut self, request: &FakeRequest) -> FakeResponse {
+            if request.path == "/v1.0/$batch" {
+                let requests: Vec<MsgraphBatchRequest> =
+                    serde_json::from_value(request.json::<Value>()["requests"].take()).unwrap();
+                let responses = requests
+                    .iter()
+                    .map(|inner| {
+                        let id = inner
+                            .url
+                            .trim_start_matches("/me/contacts/")
+                            .split('?')
+                            .next()
+                            .unwrap()
+                            .to_string();
+                        let (status, body) = self.one(&inner.method, &id);
+                        MsgraphBatchResponse {
+                            id: inner.id.clone(),
+                            status,
+                            body: Some(body),
+                            ..Default::default()
+                        }
+                    })
+                    .collect();
+                return FakeResponse::json(200, &MsgraphBatchResponses { responses });
+            }
+            let id = request
+                .path
+                .trim_start_matches("/v1.0/me/contacts/")
+                .to_string();
+            let (status, body) = self.one(&request.method, &id);
+            FakeResponse::json(status, &body)
+        }
+
+        fn one(&mut self, method: &str, id: &str) -> (u16, Value) {
+            if method == "PATCH" {
+                self.patched.push(id.to_string());
+            }
+            match self.contacts.get(id) {
+                Some(contact) => (200, contact.clone()),
+                None => (404, json!({"error": {"code": "ErrorItemNotFound"}})),
+            }
+        }
+    }
+
+    /// A vCard of the contact named `name`.
+    fn vcard(name: &str) -> String {
+        format!("BEGIN:VCARD\r\nVERSION:4.0\r\nFN:{name}\r\nN:{name};;;;\r\nEND:VCARD\r\n")
+    }
+
+    /// A contact the server edited between the listing and the push is not
+    /// written over: left pending for the next listing to merge, the other
+    /// contact of the round written.
+    #[test]
+    fn a_contact_edited_on_the_server_since_the_listing_is_not_written_over() {
+        let mut graph = FakeEdited::new();
+        let update = |reference: &str, id: &str, key: &str| {
+            json!({
+                "ref": reference,
+                "op": "update",
+                "id": id,
+                "vcard": vcard("Jane Phone"),
+                "baseVcard": vcard("Jane"),
+                "ifMatch": key,
+            })
+        };
+        let changes: Vec<PushChange> = serde_json::from_value(json!([
+            update("jane", "k1", "ck-k1-0"),
+            update("joe", "k2", "ck-k2-0"),
+        ]))
+        .unwrap();
+
+        let mut client = Client::new(FakeServer::new(|request| graph.answer(request)));
+        let outcomes = Msgraph {
+            client: &mut client,
+            token: "token",
+        }
+        .push_cards("", &changes)
+        .unwrap();
+
+        assert_eq!(graph.patched, ["k2"], "Jane's server edit kept");
+        let told: BTreeMap<&str, (bool, bool)> = outcomes
+            .iter()
+            .map(|outcome| {
+                (
+                    outcome.reference.as_str(),
+                    (outcome.accepted, outcome.refused),
+                )
+            })
+            .collect();
+        assert_eq!(told["jane"], (false, false), "rejected, not refused");
+        assert_eq!(told["joe"], (true, false));
+    }
+
+    /// A lone update over a changeKey the server moved past is a conflict
+    /// (412), never sent.
+    #[test]
+    fn a_lone_update_over_a_moved_change_key_is_never_sent() {
+        let mut graph = FakeEdited::new();
+        let account = Account {
+            base_url: "msgraph://jane@example.com",
+            backend: Backend::Graph,
+            auth: Auth::Bearer("token"),
+            zone: "",
+        };
+        let vcard = vcard("Jane Phone");
+        let base = self::vcard("Jane");
+        let card = CardUpdate {
+            id: "k1",
+            uri: "k1",
+            vcard: &vcard,
+            base_vcard: Some(&base),
+            etag: Some("ck-k1-0"),
+        };
+
+        let mut client = Client::new(FakeServer::new(|request| graph.answer(request)));
+        let Err(err) = (Contacts {
+            client: &mut client,
+            account: &account,
+        })
+        .update_card("msgraph://jane@example.com/contacts", &card) else {
+            panic!("the update was written over the server edit");
+        };
+
+        assert_eq!(err.status, Some(412));
+        assert!(graph.patched.is_empty(), "Jane's server edit kept");
     }
 }

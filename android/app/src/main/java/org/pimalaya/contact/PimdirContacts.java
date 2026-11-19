@@ -7,6 +7,7 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.client.BodyReplaced;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.Clients;
@@ -497,6 +498,111 @@ public final class PimdirContacts {
                 save(book.getKey(), new Card(linkId, null, null, book.getValue()));
             }
             return null;
+        } catch (JSONException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    /**
+     * An edit a sync made stale whose merge with what the sync left asks the
+     * person: nothing was written.
+     *
+     * @param collection the book holding the card
+     * @param linkId the card's link id
+     * @param form the three-way merge, its collisions as alternatives
+     * @param body the body the store holds now, which the merge was made over
+     * @param object the store's hash of that body, which its save names
+     */
+    public record StaleCollision(
+            String collection, String linkId, ConflictForm form, String body, String object) {}
+
+    /**
+     * Stages an edit of the card {@code linkId} made over the body the editor
+     * read ({@code read}, the store's hash {@code object}), by the handle it
+     * holds now; null once staged, else the collision, nothing written.
+     *
+     * <p>The engine refuses it once a sync replaced that body ({@link
+     * BodyReplaced}, SYNC §7): it is then merged three ways, from the body
+     * read, onto the one the store holds now, a clean merge staged over that
+     * body and a property both set apart returned for the person to choose,
+     * as a calendar save made stale is (offline-store spec). An ordinary
+     * edit: a conflict refuses it all the same.
+     */
+    public StaleCollision editOver(
+            String collection, String linkId, String object, String read, String vcard) {
+        try {
+            String handle = stager.offline.handleFor(collection, linkId);
+            try {
+                editOver(collection, handle, vcard, object);
+                return null;
+            } catch (BodyReplaced replaced) {
+                Log.i("pimalaya", "contact save made stale: " + linkId);
+                JSONObject row = stager.offline.loadRow(collection, handle);
+                if (row == null || row.optBoolean("deleted") || !row.has("object")) {
+                    throw replaced;
+                }
+                String fresh = row.getString("vcard");
+                String held = row.getString("object");
+                ConflictForm form = ContactClient.mergeConflictForm(read, vcard, fresh);
+                if (!form.resolved()) {
+                    return new StaleCollision(collection, linkId, form, fresh, held);
+                }
+                editOver(collection, handle, form.vcard(), held);
+                return null;
+            }
+        } catch (JSONException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    /** Stages an ordinary edit made over the body {@code object} names. */
+    private void editOver(String collection, String handle, String vcard, String object)
+            throws JSONException {
+        CardIndex index = indexOf(vcard);
+        stager.mutateEdit(
+                collection, handle, vcard, index.summary(), index.sortKey(), object);
+    }
+
+    /**
+     * Stages the removal of the card {@code linkId} by the handle it holds
+     * now, refused ({@link BodyReplaced}), staging nothing, once a sync
+     * replaced {@code object}, the body it was decided over.
+     */
+    void stageDeleteOver(String collection, String linkId, String object) {
+        if (!held(collection, linkId)) {
+            return;
+        }
+        try {
+            stager.mutateRemove(
+                    collection, stager.offline.handleFor(collection, linkId), object, null);
+        } catch (JSONException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    /**
+     * Stages a merge of duplicates as one transaction: the survivor's edit,
+     * none when {@code vcard} is null, and the removal of each doomed card,
+     * every write made over the body it was read as. Refused whole ({@link
+     * BodyReplaced}), staging nothing, once a sync replaced any of them: the
+     * merge would carry or drop what it never read.
+     */
+    void mergeOver(Entry survivor, String vcard, List<Entry> doomed) {
+        try {
+            stager.offline.atomically(
+                    () -> {
+                        if (vcard != null) {
+                            String collection = survivor.book.url();
+                            editOver(
+                                    collection,
+                                    stager.offline.handleFor(collection, survivor.id),
+                                    vcard,
+                                    survivor.object());
+                        }
+                        for (Entry entry : doomed) {
+                            stageDeleteOver(entry.book.url(), entry.id, entry.object());
+                        }
+                    });
         } catch (JSONException error) {
             throw new IllegalStateException(error);
         }

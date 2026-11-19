@@ -61,12 +61,18 @@ public final class UnsentContacts {
         PimdirStorage offline = new PimdirStorage(pimdir);
         PimdirContacts contacts = new PimdirContacts(pimdir);
         List<Row> rows = new ArrayList<>();
+        Set<String> synced = new java.util.HashSet<>();
+        for (BookEntry entry : new CardStore(context, pimdir).loadAllAddressbooks()) {
+            if (entry.subscribed && entry.remoteSynced) {
+                synced.add(entry.book.url());
+            }
+        }
         try {
             for (PimdirCollections.Stored book :
                     new PimdirCollections(pimdir, context).listAll(PimdirSummary.CONTACT)) {
                 Set<String> moving = offline.supersedingCreates(book.id);
                 for (String[] pending : offline.pendingCreates(book.id)) {
-                    if (held(offline, book.id, pending[0], pending[1], moving)) {
+                    if (held(offline, book.id, pending[0], pending[1], moving, synced)) {
                         JSONObject row = live(offline, book.id, pending[0]);
                         if (row != null) {
                             rows.add(new Row(pending[0], nameOf(row), book.id, null));
@@ -154,14 +160,16 @@ public final class UnsentContacts {
     /**
      * Whether the push of a pending create is held back: planned by the
      * bridge from the facts its push would carry (ContactEngine), its edit
-     * carried by no other book.
+     * carried by no other book that syncs with its server: one whose sync is
+     * off never sends the edit, so the create would wait unsaid.
      */
     private static boolean held(
             PimdirStorage offline,
             String collection,
             String linkId,
             String object,
-            Set<String> moving)
+            Set<String> moving,
+            Set<String> synced)
             throws JSONException {
         PushPlan plan =
                 OfflineClient.pushPlan(
@@ -173,7 +181,15 @@ public final class UnsentContacts {
                                 false,
                                 offline.cardElsewhere(collection, linkId).getBoolean("bound"),
                                 moving.contains(linkId)));
-        return plan.action() == PushAction.HOLD && !offline.cardCarried(collection, linkId);
+        if (plan.action() != PushAction.HOLD) {
+            return false;
+        }
+        for (String carrier : offline.cardCarriers(collection, linkId)) {
+            if (synced.contains(carrier)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** The placement's row while it is still live there, else null. */

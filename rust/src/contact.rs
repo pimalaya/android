@@ -403,8 +403,9 @@ impl<H: Host> Contacts<'_, H> {
     /// Updates the card in the addressbook collection, with its new ETag.
     ///
     /// The base vCard trims patches to the changed fields (CardDAV PUTs
-    /// the full vCard). The ETag guards CardDAV and Google; Graph and JMAP
-    /// carry no guard (last-write-wins).
+    /// the full vCard). The ETag guards CardDAV and Google, and Graph by its
+    /// changeKey read first. A JMAP update is only pushed in a round
+    /// ([`Self::push_cards`]), guarded by the state its listing read.
     pub fn update_card(
         &mut self,
         addressbook_url: &str,
@@ -435,16 +436,11 @@ impl<H: Host> Contacts<'_, H> {
                 client: self.client,
                 token: account.auth.secret(),
             }
-            .update_card(&key, card.vcard, card.base_vcard),
-            Backend::Jmap => {
-                let session_url = account::jmap_session_url(account.base_url)?;
-                Jmap {
-                    client: self.client,
-                    session_url,
-                    auth: account.auth,
-                }
-                .update_card(&key, card.vcard, card.base_vcard)
-            }
+            .update_card(&key, card.vcard, card.base_vcard, card.etag),
+            Backend::Jmap => Err(format!(
+                "JMAP contact {key} is updated in a round guarded by its listing's state"
+            )
+            .into()),
             Backend::Google => Gpeople {
                 client: self.client,
                 token: account.auth.secret(),

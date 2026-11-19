@@ -901,15 +901,19 @@ public final class PimdirStorage {
         return cardOriginOf(engineCollection, linkId, object) != null;
     }
 
-    /** Whether another book stages a pending create's body as its edit. */
-    public boolean cardCarried(String engineCollection, String linkId) {
+    /** The other books that stage a pending create's body as their edit. */
+    public List<String> cardCarriers(String engineCollection, String linkId) {
+        List<String> carriers = new ArrayList<>();
         try (Cursor cursor =
                 PimdirDb.query(
                         store.getReadableDatabase(),
                         "CARD_CARRIED",
                         cardWide(engineCollection, linkId))) {
-            return cursor.moveToFirst();
+            while (cursor.moveToNext()) {
+                carriers.add(cursor.getString(0));
+            }
         }
+        return carriers;
     }
 
     /** The link ids of the pending creates superseding a bound member. */

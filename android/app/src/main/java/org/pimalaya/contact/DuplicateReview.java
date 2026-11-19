@@ -12,7 +12,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.pimalaya.R;
-import org.pimalaya.client.Card;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.DuplicateGroup;
 import org.pimalaya.client.DuplicateMember;
@@ -192,8 +191,14 @@ final class DuplicateReview {
         return ContactClient.duplicateGroup(refs);
     }
 
-    /** Links the cards into one contact by staging the same UID on all. */
-    private void link(List<Entry> members) {
+    /**
+     * Links the cards into one contact by staging the same UID on all.
+     *
+     * <p>Each made over the body the review read: one a sync replaced since
+     * merges onto what the sync left ({@link PimdirContacts#editOver}), and a
+     * collision is left unlinked and said, nothing written to it.
+     */
+    void link(List<Entry> members) {
         String uid = "";
         for (Entry entry : members) {
             if (!entry.uid.isEmpty()) {
@@ -207,14 +212,20 @@ final class DuplicateReview {
 
         try {
             Set<String> staged = new HashSet<>();
+            boolean collided = false;
             for (Entry entry : members) {
                 if (!staged.add(parts.pool().replicaRef(entry)) || uid.equals(entry.uid)) {
                     continue;
                 }
-                String vcard = ContactClient.setCardUid(entry.card().vcard(), uid);
-                parts.contacts().save(
-                        entry.book.url(),
-                        new Card(entry.id, entry.card().uri(), entry.card().etag(), vcard));
+                String read = entry.card().vcard();
+                String vcard = ContactClient.setCardUid(read, uid);
+                collided |=
+                        parts.contacts().editOver(
+                                        entry.book.url(), entry.id, entry.object(), read, vcard)
+                                != null;
+            }
+            if (collided) {
+                host.toast(host.getString(R.string.changed_meanwhile));
             }
         } catch (Exception error) {
             host.showError(error, R.string.save_failed);

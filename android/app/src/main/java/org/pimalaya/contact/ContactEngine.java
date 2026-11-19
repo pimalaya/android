@@ -124,6 +124,13 @@ public final class ContactEngine extends PimdirEngine {
     private final Map<String, Boolean> listedComplete = new HashMap<>();
 
     /**
+     * Each collection's last enumerate state (its delta token), what a JMAP
+     * update is guarded by: a card changed on the server since is not written
+     * over.
+     */
+    private final Map<String, String> listedStates = new HashMap<>();
+
+    /**
      * What a sync did to the cards: distinct cards per axis, phone and server.
      *
      * <p>A card counts once however many passes touched it: in appeared, out
@@ -519,6 +526,7 @@ public final class ContactEngine extends PimdirEngine {
         }
         listedEtags.put(url, etags);
         listedComplete.put(url, complete);
+        listedStates.put(url, token);
 
         JSONObject reply = new JSONObject();
         reply.put("items", items);
@@ -725,7 +733,8 @@ public final class ContactEngine extends PimdirEngine {
 
         JSONArray results;
         try {
-            if (changes.length() < 2) {
+            // NOTE: a round guards its updates (JMAP), so even one goes as one.
+            if (changes.length() < 2 && !account.info().cardRoundGuards()) {
                 results = pushEach(url, changes);
             } else {
                 switch (account.info().cardPush()) {
@@ -1003,7 +1012,9 @@ public final class ContactEngine extends PimdirEngine {
                                 row.getString("vcard"),
                                 row.isNull("baseVcard") ? null : row.getString("baseVcard"),
                                 List.of(),
-                                List.of());
+                                List.of(),
+                                listedStates.get(url),
+                                change.isNull("ifMatch") ? null : change.getString("ifMatch"));
                 indexByRef.put(handle, index);
                 updates.put(handle, row.getString("id"));
                 batch.add(item);
@@ -1485,7 +1496,11 @@ public final class ContactEngine extends PimdirEngine {
         return result(change.getString("handle"), true, id, null);
     }
 
-    /** Delivers a move as a guarded update of its member, then a patch. */
+    /**
+     * Delivers a move as a guarded update of its member, then a patch; a
+     * conflict (412) answers the move refused, held until the user retries
+     * or drops it.
+     */
     private JSONObject pushMove(
             Transport transport,
             String url,
@@ -1521,8 +1536,11 @@ public final class ContactEngine extends PimdirEngine {
             if (!isPreconditionFailure(failure)) {
                 throw failure;
             }
-            Log.w("pimalaya", "move held for " + handle + ": " + failure.getMessage());
-            return result(handle, false, null, null);
+            // NOTE: refused as any push the server refuses is: held under
+            // its refusal and reported, never tried again by itself (pimdir
+            // SYNC §4), the source's removal held with it (STORAGE §15.3).
+            Log.w("pimalaya", "move refused for " + handle + ": " + failure.getMessage());
+            return refusedResult(handle, failure.getMessage());
         }
         clients.contact().updateCardBooks(
                 transport,

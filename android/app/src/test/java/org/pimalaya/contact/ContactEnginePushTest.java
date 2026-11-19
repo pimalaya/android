@@ -315,8 +315,11 @@ public class ContactEnginePushTest {
         return new PushChange(ref, PushOp.CREATE, null, vcard, null, List.of(), List.of());
     }
 
-    private static PushChange update(String ref, String id, String vcard, String base) {
-        return new PushChange(ref, PushOp.UPDATE, id, vcard, base, List.of(), List.of());
+    /** An update the round guards by the listing's state and its revision. */
+    private static PushChange update(
+            String ref, String id, String vcard, String base, String ifMatch) {
+        return new PushChange(
+                ref, PushOp.UPDATE, id, vcard, base, List.of(), List.of(), "t1", ifMatch);
     }
 
     private static PushChange destroy(String ref, String id) {
@@ -348,33 +351,26 @@ public class ContactEnginePushTest {
                         List.of(
                                 create("n1", vcard("n1", "New one")),
                                 books("a", "a", List.of("b1"), List.of()),
-                                update("b", "b", vcard("b", "B edited"), vcard("b", "B")),
+                                update("b", "b", vcard("b", "B edited"), vcard("b", "B"), "e-b"),
                                 destroy("c", "c"),
                                 books("d", "d", List.of(), List.of("b1")),
-                                update("n2", "n2", vcard("n2", "New two"), null))),
+                                update("n2", "n2", vcard("n2", "New two"), null, null))),
                 server.batches);
 
+        // NOTE: a JMAP round guards its updates, so a lone change is a round
+        // of one, answered as in the round.
         server.calls.clear();
         List<String> singles = singles(book);
         assertSameResults(
-                "[{\"handle\":\"n1\",\"accepted\":true,\"assigned\":\"srv-n1\","
-                        + "\"revision\":\"e-new\"}]",
+                "[{\"handle\":\"n1\",\"accepted\":true,\"assigned\":\"srv-n1\"}]",
                 singles.get(0));
         assertSameResults(
                 "[{\"handle\":\"a\",\"accepted\":true,\"assigned\":\"a\"}]", singles.get(1));
         assertSameResults(
-                "[{\"handle\":\"b\",\"accepted\":true,\"revision\":\"e-upd\"}]", singles.get(2));
-        assertSameResults("[{\"handle\":\"c\",\"accepted\":true}]", singles.get(3));
+                "[{\"handle\":\"b\",\"accepted\":true,\"revision\":\"k-b\"}]", singles.get(2));
+        assertSameResults("[{\"handle\":\"c\",\"accepted\":false}]", singles.get(3));
         assertSameResults("[{\"handle\":\"d\",\"accepted\":true}]", singles.get(4));
-        assertEquals(
-                List.of(
-                        "createCard " + book + " n1 " + quoted("n1", "New one"),
-                        "updateCardBooks a +[b1] -[]",
-                        "updateCard " + book + " uid-b b e-b " + quoted("b", "B edited") + " "
-                                + quoted("b", "B"),
-                        "deleteCard " + book + " uid-c c e-c",
-                        "updateCardBooks d +[] -[b1]"),
-                server.calls);
+        assertEquals(java.util.Collections.nCopies(5, "pushCards " + book), server.calls);
     }
 
     /**
@@ -418,10 +414,10 @@ public class ContactEnginePushTest {
                         List.of(
                                 create("n1", vcard("n1", "New one")),
                                 create("a", vcard("a", "A")),
-                                update("b", "b", vcard("b", "B edited"), vcard("b", "B")),
+                                update("b", "b", vcard("b", "B edited"), vcard("b", "B"), "e-b"),
                                 destroy("c", "c"),
                                 destroy("d", "d"),
-                                update("n2", "n2", vcard("n2", "New two"), null))),
+                                update("n2", "n2", vcard("n2", "New two"), null, null))),
                 server.batches);
 
         server.calls.clear();

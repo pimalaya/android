@@ -19,6 +19,12 @@ import org.json.JSONObject;
  *     fields the edit changed
  * @param add the book ids a books op adds the card to
  * @param remove the book ids a books op removes the card from
+ * @param since the account state the listing read the card at, guarding an
+ *     update where the backend checks it (JMAP): a card changed since is not
+ *     written over
+ * @param ifMatch the revision the card was last read at, guarding an update
+ *     where the backend checks it (Graph, its changeKey): a contact changed
+ *     since is not written over
  */
 public record PushChange(
         String ref,
@@ -27,7 +33,21 @@ public record PushChange(
         String vcard,
         String baseVcard,
         List<String> add,
-        List<String> remove) {
+        List<String> remove,
+        String since,
+        String ifMatch) {
+    /** A change no listing state guards: every op but a guarded update. */
+    public PushChange(
+            String ref,
+            PushOp op,
+            String id,
+            String vcard,
+            String baseVcard,
+            List<String> add,
+            List<String> remove) {
+        this(ref, op, id, vcard, baseVcard, add, remove, null, null);
+    }
+
     JSONObject toJson() {
         try {
             JSONObject change = new JSONObject();
@@ -36,6 +56,8 @@ public record PushChange(
             change.put("id", id);
             change.put("vcard", vcard);
             change.put("baseVcard", baseVcard);
+            change.put("since", since);
+            change.put("ifMatch", ifMatch);
             if (!add.isEmpty()) {
                 change.put("add", new JSONArray(add));
             }
