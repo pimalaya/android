@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: merge-reads-the-hub-verdict
-status: draft
+status: landed
 created: 2026-11-19
 ---
 
