@@ -7,43 +7,37 @@ on:
     tags:
       - v*
 
+permissions:
+  contents: read
+
 jobs:
+  # Builds the APKs and the bundle unsigned: no signing secret reaches cargo,
+  # its build scripts or the Gradle plugins.
   apk:
     runs-on: ubuntu-24.04
     env:
       # The devshell moves Gradle's home into the repository (flake.nix);
       # setup-gradle caches the one this names, so both agree.
       GRADLE_USER_HOME: ${{ github.workspace }}/android/.gradle-home
-      # android/app/build.gradle.kts reads PIMALAYA_*, the key alias
-      # defaulting to pimalaya.
-      PIMALAYA_KEYSTORE_PASSWORD: ${{ secrets.PIMALAYA_KEYSTORE_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v31
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
         with:
           extra_nix_config: experimental-features = nix-command flakes
-      - uses: cachix/cachix-action@v17
+      # NOTE: the one job holding the push token: tests.yml and audit.yml
+      # pull with a read-only one.
+      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
         with:
           name: soywod
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           extraPullNames: nix-community
       # NOTE: the runner's own cargo computes the key, so the flake lock
       # joins it: a toolchain bump in the devshell starts a fresh cache.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: rust -> target
           key: ${{ hashFiles('flake.lock') }}
-      - uses: gradle/actions/setup-gradle@v6
-      # Decode the keystore only when the secret is present; otherwise the
-      # build proceeds and emits an unsigned APK.
-      - name: Decode signing keystore
-        env:
-          KEYSTORE_BASE64: ${{ secrets.PIMALAYA_KEYSTORE_BASE64 }}
-        run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/pimalaya.jks"
-            echo "PIMALAYA_KEYSTORE=$RUNNER_TEMP/pimalaya.jks" >> "$GITHUB_ENV"
-          fi
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
       # The APKs for direct installs, the bundle for Google Play, which
       # serves each phone its own ABI from it. Two runs: a bundle build
       # turns the ABI splits off (android/app/build.gradle.kts).
@@ -52,7 +46,7 @@ jobs:
       - name: Assemble release bundle
         run: nix develop --command bash -c 'cd android && gradle :app:bundleRelease'
       # Rename each split (and the universal) to its published name; the
-      # *.apk glob absorbs the -unsigned suffix when no keystore is set.
+      # *.apk glob absorbs AGP's -unsigned suffix.
       - name: Collect the APKs and the bundle
         run: |
           out=android/app/build/outputs/apk/release
@@ -61,36 +55,97 @@ jobs:
             cp "$out/app-$abi-release"*.apk "pimalaya-$abi.apk"
           done
           cp android/app/build/outputs/bundle/release/app-release.aab pimalaya.aab
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pimalaya
           path: pimalaya.apk
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pimalaya-aab
           path: pimalaya.aab
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pimalaya-arm64-v8a
           path: pimalaya-arm64-v8a.apk
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pimalaya-armeabi-v7a
           path: pimalaya-armeabi-v7a.apk
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pimalaya-x86_64
           path: pimalaya-x86_64.apk
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pimalaya-x86
           path: pimalaya-x86.apk
-      - uses: softprops/action-gh-release@v2
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+
+  # Signs the build's output and publishes it, on v* tags only. The
+  # `release` environment holds the keystore secrets and its protection
+  # rules gate the job; the secrets reach the one signing step.
+  sign:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    needs: apk
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+        with:
+          extra_nix_config: experimental-features = nix-command flakes
+      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: soywod
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN_READ }}
+          skipPush: true
+          extraPullNames: nix-community
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: pimalaya*
+          merge-multiple: true
+          path: unsigned
+      # The devshell's build-tools (apksigner, zipalign) and JDK (jarsigner),
+      # resolved before any secret is in the environment.
+      - name: Locate the signing tools
+        run: |
+          nix develop --command bash -c '
+            echo "BUILD_TOOLS=$(echo "$ANDROID_HOME"/build-tools/*)"
+            echo "SIGNING_JAVA_HOME=$JAVA_HOME"
+          ' >> "$GITHUB_ENV"
+      # APKs through apksigner (v2 and v3 schemes, the input checked
+      # aligned), the bundle through jarsigner, which Play asks of an upload
+      # key. The keystore lives for this step alone.
+      - name: Sign the APKs and the bundle
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PIMALAYA_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.PIMALAYA_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: pimalaya
+        run: |
+          export PATH="$SIGNING_JAVA_HOME/bin:$PATH"
+          keystore="$RUNNER_TEMP/pimalaya.jks"
+          trap 'rm -f "$keystore"' EXIT
+          base64 -d <<< "$KEYSTORE_BASE64" > "$keystore"
+          mkdir signed
+          for apk in unsigned/*.apk; do
+            "$BUILD_TOOLS/zipalign" -c -P 16 4 "$apk"
+            "$BUILD_TOOLS/apksigner" sign --ks "$keystore" \
+              --ks-pass env:KEYSTORE_PASSWORD --ks-key-alias "$KEY_ALIAS" \
+              --out "signed/${apk#unsigned/}" "$apk"
+            "$BUILD_TOOLS/apksigner" verify "signed/${apk#unsigned/}"
+          done
+          jarsigner -keystore "$keystore" -storepass:env KEYSTORE_PASSWORD \
+            -signedjar signed/pimalaya.aab unsigned/pimalaya.aab "$KEY_ALIAS"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signed-pimalaya-aab
+          path: signed/pimalaya.aab
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
-            pimalaya.apk
-            pimalaya-arm64-v8a.apk
-            pimalaya-armeabi-v7a.apk
-            pimalaya-x86_64.apk
-            pimalaya-x86.apk
+            signed/pimalaya.apk
+            signed/pimalaya-arm64-v8a.apk
+            signed/pimalaya-armeabi-v7a.apk
+            signed/pimalaya-x86_64.apk
+            signed/pimalaya-x86.apk

@@ -2,12 +2,10 @@ plugins {
     id("com.android.application")
 }
 
-// Release signing is driven entirely by the environment so no keystore or
-// password ever lands in the repo (CI decodes a base64 secret to a file).
-// When PIMALAYA_KEYSTORE is unset (local debug, forks without secrets) the
-// release APK is simply left unsigned. PIMALAYA_KEYSTORE_PASSWORD unlocks
-// it, PIMALAYA_KEYSTORE_ALIAS names the key (pimalaya when unset).
-val releaseKeystore = System.getenv("PIMALAYA_KEYSTORE")?.let { file(it) }
+// No signing config: release builds come out unsigned, and the key signs them
+// afterwards with apksigner (APKs) and jarsigner (the bundle), as the sign job
+// of .github/workflows/releases.yml does, so no secret reaches cargo, its build
+// scripts or the Gradle plugins.
 
 // Google's OAuth client per build type, each named by the part before
 // .apps.googleusercontent.com: release builds (every channel) sign in through
@@ -71,20 +69,6 @@ android {
         buildConfig = true
     }
 
-    signingConfigs {
-        if (releaseKeystore != null) {
-            create("release") {
-                // PKCS12 (the default keystore format) forces the key
-                // password to equal the store password, so one suffices.
-                val password = System.getenv("PIMALAYA_KEYSTORE_PASSWORD")
-                storeFile = releaseKeystore
-                storePassword = password
-                keyAlias = System.getenv("PIMALAYA_KEYSTORE_ALIAS") ?: "pimalaya"
-                keyPassword = password
-            }
-        }
-    }
-
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
@@ -100,7 +84,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            signingConfig = signingConfigs.findByName("release")
         }
     }
 

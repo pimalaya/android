@@ -1,5 +1,22 @@
+# Read by `cargo deny check` from rust/ (.github/workflows/audit.yml).
+
+[graph]
+# An advisory behind an optional feature is reported too.
+all-features = true
+
+[advisories]
+yanked = "deny"
+ignore = [
+  { id = "RUSTSEC-2026-0543", reason = "chrono is imposed by imap-types' public NaiveDate; the switch away is in progress upstream, imap-codec issue 752" },
+]
+
+[bans]
+multiple-versions = "warn"
+
 [sources]
-allow-org.github = ["pimalaya"]
+# crates.io only: no git source, no other registry.
+allow-git = []
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 unknown-git = "deny"
 unknown-registry = "deny"
 

@@ -36,7 +36,7 @@ TLS and TCP live in Java on purpose: the `.so` stays a small set of state machin
 nix develop --command gradle -p android assembleRelease
 ```
 
-`gradle` first cross-compiles the Rust bridge for the four ABIs (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`) via cargo-ndk into client/src/main/jniLibs, then assembles the APKs. The release build emits one APK per ABI plus a universal one under android/app/build/outputs/apk/release/, signed when `PIMALAYA_KEYSTORE` and `PIMALAYA_KEYSTORE_PASSWORD` are set and unsigned otherwise. For a quick install on your own device, `assembleDebug` produces a ready-to-sideload android/app/build/outputs/apk/debug/app-debug.apk.
+`gradle` first cross-compiles the Rust bridge for the four ABIs (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`) via cargo-ndk into client/src/main/jniLibs, then assembles the APKs. The release build emits one APK per ABI plus a universal one under android/app/build/outputs/apk/release/, always unsigned: the build never sees a key. The sign job of .github/workflows/releases.yml signs them on `v*` tags with `apksigner` (and the bundle with `jarsigner`); a local signed build signs the same way, for instance `apksigner sign --ks <keystore> --ks-key-alias pimalaya --out pimalaya.apk app-universal-release-unsigned.apk`. For a quick install on your own device, `assembleDebug` produces a ready-to-sideload android/app/build/outputs/apk/debug/app-debug.apk.
 
 To iterate on the Rust bridge alone: `nix develop --command bash -c 'cd rust && cargo build'`.
 
