@@ -463,12 +463,17 @@ The store SHALL keep, per collection and source, the round under way (its scope,
 - THEN the message stays, and only a round over the whole scope or a delta can find it gone
 
 ### Requirement: A load carries each message's date
-A store load SHALL carry each mail placement's `Date`, `Subject` and sender beside its state, which the bridge SHALL hand the engine as a summary holding those alone and SHALL NOT write back: a write handing it back unchanged SHALL carry no summary, leaving the stored row alone. The engine reads the date to tell a placement in a round's scope from one outside it (SYNC section 5), and the three to tell a listed member reusing a create's `Message-ID` from the create it lands (SYNC section 6).
+A store load SHALL carry each mail placement's `Date`, `Subject` and sender, and the size, attachment mark and invitation its body told, beside its state, which the bridge SHALL hand the engine as a summary holding those alone, and each file placement's summary row whole; a write handing a loaded summary back unchanged SHALL carry no summary, leaving the stored row alone. The engine reads the date to tell a placement in a round's scope from one outside it (SYNC section 5), the three to tell a listed member reusing a create's `Message-ID` from the create it lands, and the rest to keep what a held body told over what a listing states (SYNC section 6, Annex A.1, A.7).
 
 #### Scenario: A sent copy listed by the server
 - GIVEN a message sent from the app, its copy staged in Sent
 - WHEN Sent's listing brings the copy the provider filed
 - THEN the staged copy lands on it and is not pushed a second time
+
+#### Scenario: A listing stating another size
+- GIVEN a message whose body the store holds, its size read from it
+- WHEN the server lists it with a size of its own
+- THEN the stored size and attachment mark stay the body's
 
 ### Requirement: A local action is visible before any sync
 Every action a user takes on an item (create, edit, flag, delete, send) SHALL be staged as a pimdir mutation, never as a direct row write, and SHALL show in every list it concerns at once, a relocation's target included. The bridge SHALL carry pimdir's `Move` and `Copy` beside `Add`, `Edit`, `SetFlags` and `Remove`, and the sync SHALL carry each staged change out as staged (pimdir SYNC section 4): a `Remove` naming a destination as a server move, one naming none as a server delete, an `Add` with an origin as a server-side copy and one without as an append, never one turned into another. A `Move` or a `Copy` of an item whose body the store does not hold SHALL be refused, staging nothing, unless the source staging it syncs the target, holding a binding or a checkpoint there (`collection_sources`, pimdir SYNC section 7), which the bridge states as `syncsTarget`. A connector that cannot carry one out, a relocation into another account's collection or any calendar relocation, SHALL reject it. A staged removal SHALL be listed nowhere. A row SHALL carry no mark of whether its change was pushed yet.
@@ -776,6 +781,19 @@ The store SHALL merge a source's upsert of a mutable kind into the shared item b
 - WHEN the server's listing brings its own edit of the card
 - THEN the card keeps the phone's body, records the server's and reads as conflicted, and nothing is pushed over either
 
+### Requirement: A body no item keeps is kept retained
+A body a collection's conflict policy did not adopt (SYNC §9: the item's own body `prefer-incoming` replaced, the upsert's `prefer-existing` refused, the diverging body a fill settled, or a local edit a pull dropped), and the body a retained row of a mutable kind held when an upsert carrying none revived it (STORAGE §11.1), SHALL be kept as a retained item keyed by the identity minted over the upsert's handle (`dup:<link>#<handle>`, minted again over a held key), with a public id of its own, the item's flags, deleted and retained by the upsert's source, its summary the held row, the upsert's or the one its body derives, and the write SHALL report it in `Written.overruled`. The revived row SHALL hold no body, at the level its upsert states, for the upgrade to fetch. The verdict is read off the facts io-pimdir's hub reads (`PimdirHub::reconcile_content`), which keeps its own record to the crate.
+
+#### Scenario: A file restored on its server
+- GIVEN a file the store retains with its body after its server deleted it
+- WHEN the server lists it again at a new revision, with no body
+- THEN the file revives holding none, at meta, its old body kept as a retained item of its own, and nothing is pushed
+
+#### Scenario: A collection preferring the incoming body
+- GIVEN a card collection whose policy something else set to prefer-incoming, the card changed on two sources
+- WHEN the second change lands
+- THEN the card takes it, and the body it replaced is kept as a retained item and reported overruled
+
 ### Requirement: A round finding most of a collection gone asks first
 A round whose listing names no member while the store binds some, or finds more than half of at least 20 bound members absent (SYNC §5, §8), SHALL park rather than remove them, and the app SHALL say so once the pass ends, naming each collection and how many of its items the server no longer lists, offering to remove them too or to keep them. Removing them SHALL run the next sync of those collections accepting the absences; keeping them SHALL leave the round parked, decided again by the next pass.
 
@@ -876,12 +894,17 @@ The app SHALL open every database it owns, the pimdir store and the index includ
 - THEN both are created, and every statement runs, on the platform SQLite
 
 ### Requirement: The store's writer syncs every commit
-The store's writing connection SHALL run with `synchronous = FULL` (STORAGE §4.1) once write-ahead logging is on, whatever the platform's default under logging, SHALL set `trusted_schema` off where the platform's SQLite has it (3.31 and later), and the store SHALL log the SQLite version it runs on as it opens.
+The store's writing connection SHALL run with `synchronous = FULL` (STORAGE §4.1) once write-ahead logging is on, whatever the platform's default under logging, read back on the writer, run again outside a transaction when it reads below, and the store refused when it still does (the owner's ruling of 2026-11-19), the app checking it as it checks a store of another draft, before any entry point uses the store, and standing aside on the refused-store screen worded for it (`store-sync`: the phone, not the store, and reinstalling does not help), SHALL set `trusted_schema` off where the platform's SQLite has it (3.31 and later), and the store SHALL log the SQLite version it runs on as it opens.
 
 #### Scenario: A build whose default is NORMAL
 - GIVEN a device whose platform syncs write-ahead logs NORMAL by default
 - WHEN the app opens its store
 - THEN the writer syncs at every commit, and the log names the SQLite version
+
+#### Scenario: A SQLite that does not apply the pragma
+- GIVEN a device whose writer still reads below FULL after the pragma, run twice
+- WHEN the app opens its store
+- THEN the app shows the refused-store screen saying the phone cannot keep its data safely, never crashing, and the store is never written below FULL
 
 ### Requirement: An incompatible store blocks start-up
 The app SHALL refuse to start on a store of another draft or another schema, or one it cannot open, saying the store's version is not compatible and the app must be reinstalled without keeping its data, and SHALL neither read nor write it.
@@ -1036,7 +1059,7 @@ The attachments the reader lists, and the store records stand-ins from, SHALL be
 - THEN the part is listed as first.csv and opens to what its base64 decodes to
 
 ### Requirement: The sync vectors run through the app's load and write
-The app SHALL run every case of the sync vectors of the io-pimdir it pins (pimdir SYNC §11) in a host test, on a store of its own over Android 8.0's SQLite: the case's rows seeded by the standard's own statements and plain SQL, never through the write under test; its run driven by io-pimdir's engine through the coroutines the bridge's sync, upgrade and mutate exports build, every load, lookup, verification and write served by the app's storage half and the remote scripted from the case on the wire a connector answers; its pushes, events, failure, park and rows compared as §11 says. Under format 7 a binding's `refusal` and `refused_key` are seeded and compared, and a `Refused` outcome is fed back with its reason. A case the app does not pass SHALL be listed beside the test with its reason, as `fails` when the app runs it and departs from it, as `unbound` when the bridge states no such verb, option or mutation or the case binds another kind of owner, and the test SHALL fail when a listed case passes, an unlisted one fails, a case listed unbound binds, an unlisted one cannot be bound, or a listed one is not among the vectors. At io-pimdir 0.17, 171 cases: 130 pass, 10 fail, 31 are unbound. While a case is listed `fails`, the app's `sync-draft-14 engine` statement stands short of SYNC §12 by it.
+The app SHALL run every case of the sync vectors of the io-pimdir it pins (pimdir SYNC §11) in a host test, on a store of its own over Android 8.0's SQLite: the case's rows seeded by the standard's own statements and plain SQL, never through the write under test; its run driven by io-pimdir's engine through the coroutines the bridge's sync, upgrade and mutate exports build, every load, lookup, verification and write served by the app's storage half and the remote scripted from the case on the wire a connector answers; its pushes, events, failure, park and rows compared as §11 says. Under format 7 a binding's `refusal` and `refused_key` are seeded and compared, and a `Refused` outcome is fed back with its reason. A case the app does not pass SHALL be listed beside the test with its reason, as `fails` when the app runs it and departs from it, as `unbound` when the bridge states no such verb, option or mutation or the case binds another kind of owner, and the test SHALL fail when a listed case passes, an unlisted one fails, a case listed unbound binds, an unlisted one cannot be bound, or a listed one is not among the vectors. At io-pimdir 0.17, 171 cases: 140 pass, none fails, 31 are unbound. While a case is listed `fails`, the app's `sync-draft-14 engine` statement stands short of SYNC §12 by it.
 
 #### Scenario: A rule the Java write lacks
 - GIVEN a vector whose expected rows the Java write does not leave

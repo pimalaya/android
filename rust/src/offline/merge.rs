@@ -8,9 +8,9 @@
 //! them, and what the hub settled read back (the body the item keeps, its
 //! conflict, the binding's `shared_object`).
 //!
-//! Only whether the upsert recorded a divergence (`Written.conflicted`)
-//! is read off the three facts here: io-pimdir keeps the hub's record of
-//! it to the crate.
+//! Whether the upsert recorded a divergence (`Written.conflicted`) and the
+//! body a policy did not adopt (`Written.overruled`) are read off the three
+//! facts here: io-pimdir keeps the hub's record of both to the crate.
 
 use std::collections::BTreeMap;
 
@@ -105,6 +105,21 @@ pub struct MergedJson {
     /// The item kept its own body over the upsert's, so its summary and
     /// sort key stay.
     pub kept_shared: bool,
+    /// The body a policy did not adopt, for the owner to keep as a
+    /// retained item (SYNC §9, STORAGE §11).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lost: Option<LostJson>,
+}
+
+/// A body a policy did not adopt, and which one it was: `shared`, the
+/// item's own; `incoming`, the upsert's; `diverging`, the one the item's
+/// conflict recorded, which a fill settles.
+#[derive(Debug, Eq, PartialEq, Serialize)]
+pub struct LostJson {
+    /// The body.
+    pub object: String,
+    /// Which one it was.
+    pub side: &'static str,
 }
 
 /// Absorbs one upsert into the item it names by io-pimdir's hub.
@@ -145,6 +160,15 @@ pub fn merge(input: MergeJson) -> MergedJson {
     let diverged = before
         .as_ref()
         .is_some_and(|item| diverges(item, &source, &placement, policy));
+    let settled = input.settling
+        && placement.object.is_some()
+        && before.as_ref().is_some_and(|item| item.conflicted);
+    let lost = match settled {
+        true => None,
+        false => before
+            .as_ref()
+            .and_then(|item| lost(item, &source, &placement, policy)),
+    };
 
     let mut ops = Vec::with_capacity(3);
     if input.overruling {
@@ -179,6 +203,77 @@ pub fn merge(input: MergeJson) -> MergedJson {
         // hub made of the upsert records none whatever the facts read.
         diverged: diverged && after.conflicted,
         kept_shared: before.is_some() && after.object != incoming,
+        lost,
+    }
+}
+
+/// The body absorbing `placement` into `item` leaves no item holding, by
+/// `policy`, read before the upsert applies as io-pimdir's hub reads it
+/// (`PimdirHub::reconcile_content`): a fill settling an item conflict
+/// loses the body it does not adopt, a divergence of two read bodies the
+/// one the policy does not, and a pull over a body its base never held the
+/// local edit it drops, whatever the policy.
+fn lost(
+    item: &PimdirHubItem,
+    source: &PimdirSourceId,
+    placement: &PimdirPlacement,
+    policy: PimdirHubConflict,
+) -> Option<LostJson> {
+    if placement.status == PimdirStatus::Tombstone {
+        return None;
+    }
+    let binding = item.sources.get(source);
+    let prev_base = binding.and_then(|b| b.base.as_ref());
+    let prev = prev_base.and_then(|b| b.object.clone());
+    let agreed = binding
+        .and_then(|b| b.shared_object.clone())
+        .or_else(|| prev.clone());
+    let shared = item.object.clone();
+    let incoming = placement.object.clone();
+
+    let mutable = item
+        .sources
+        .values()
+        .filter_map(|b| b.base.as_ref())
+        .chain(placement.base.as_ref())
+        .any(|base| base.revision.is_some());
+    if !mutable {
+        return None;
+    }
+    let resolving = binding.is_some_and(|binding| binding.conflicted)
+        && placement.status != PimdirStatus::Conflict;
+    let source_edited = incoming != prev || resolving;
+    let hub_moved = shared != agreed;
+    let body_changed = incoming != shared;
+    let side = |object: Option<PimdirHash>, side| {
+        object.map(|object| LostJson {
+            object: object.0,
+            side,
+        })
+    };
+
+    if incoming.is_some() && shared.is_none() && prev.is_none() {
+        let diverging = item.conflict_object.clone().filter(|_| item.conflicted);
+        return match (diverging, policy) {
+            (None, _) | (Some(_), PimdirHubConflict::Manual) => None,
+            (Some(_), PimdirHubConflict::PreferIncoming) => side(incoming, "incoming"),
+            (Some(diverging), PimdirHubConflict::PreferExisting) => {
+                side(Some(diverging), "diverging")
+            }
+        };
+    }
+    if source_edited && hub_moved && body_changed {
+        let unread = incoming.is_none() || shared.is_none();
+        return match (unread, policy) {
+            (true, _) | (false, PimdirHubConflict::Manual) => None,
+            (false, PimdirHubConflict::PreferIncoming) => side(shared, "shared"),
+            (false, PimdirHubConflict::PreferExisting) => side(incoming, "incoming"),
+        };
+    }
+    let pulled = placement.base.as_ref().map(|b| &b.revision) != prev_base.map(|b| &b.revision);
+    match source_edited && body_changed && pulled && !resolving && shared != prev {
+        true => side(shared, "shared"),
+        false => None,
     }
 }
 
@@ -307,6 +402,7 @@ mod tests {
                 shared_object: Some("b1".into()),
                 diverged: true,
                 kept_shared: true,
+                lost: None,
             }
         );
     }

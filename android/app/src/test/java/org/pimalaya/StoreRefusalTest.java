@@ -6,11 +6,15 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import android.database.sqlite.SQLiteDatabase;
+import android.widget.TextView;
 import java.io.File;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.sqlite.ShadowHostSqliteConnection;
+import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.shadows.ShadowSQLiteConnection;
 
 /**
  * The start-up block: a store of another draft is neither read nor written
@@ -38,6 +42,37 @@ public class StoreRefusalTest {
             fail("a refused store opened");
         } catch (IllegalStateException refused) {
             // NOTE: no entry point opens it.
+        }
+    }
+
+    /**
+     * A phone whose SQLite never syncs the writer at every commit (STORAGE
+     * §4.1) stands the app aside on the refusal screen, which says so,
+     * rather than crashing at the first write.
+     */
+    @Test
+    public void aWriterNeverSyncingAtFullBlocksTheStoreReadably() {
+        ShadowSQLiteConnection.setDefaultSyncMode("NORMAL");
+        ShadowHostSqliteConnection.ignoreSynchronousFull(Integer.MAX_VALUE);
+        App app = (App) RuntimeEnvironment.getApplication();
+        try {
+            assertTrue(app.storeRefused());
+            assertEquals(App.STORE_SYNC, app.refusal().optString("refused"));
+            try {
+                app.pimdir();
+                fail("a refused store opened");
+            } catch (IllegalStateException refused) {
+                assertTrue(refused.getMessage(), refused.getMessage().contains("store-sync"));
+            }
+
+            StoreRefusedActivity screen =
+                    Robolectric.buildActivity(StoreRefusedActivity.class).setup().get();
+            TextView title = screen.findViewById(R.id.store_refused_title);
+            assertEquals(
+                    app.getString(R.string.store_sync_refused_title),
+                    title.getText().toString());
+        } finally {
+            ShadowHostSqliteConnection.ignoreSynchronousFull(0);
         }
     }
 

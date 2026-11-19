@@ -116,12 +116,23 @@ pub struct PlacementJson {
     /// A message's sender's address (Annex A.1), on the same terms.
     #[serde(default, skip_serializing)]
     sender: Option<String>,
+    /// What a message's held body told (Annex A.1): its size, on a load
+    /// carrying no summary, which a listing never restates over a held
+    /// body (SYNC §6); read only.
+    #[serde(default, skip_serializing)]
+    size: Option<u64>,
+    /// Whether that body has an attachment, on the same terms.
+    #[serde(default, skip_serializing)]
+    attachment: Option<bool>,
+    /// The UID that body invites to, on the same terms.
+    #[serde(default, skip_serializing)]
+    invitation: Option<String>,
 }
 
 impl From<PlacementJson> for PimdirPlacement {
     fn from(wire: PlacementJson) -> Self {
-        // NOTE: a summary of the date, subject and sender alone, which the
-        // driver never writes back (`Dated`).
+        // NOTE: a summary of the date, subject and sender and what the body
+        // told alone, which the driver never writes back (`Dated`).
         let date = wire.date.filter(|date| !date.is_empty());
         let summary = match (wire.summary, date, wire.subject) {
             (Some(summary), _, _) => Some(summary.into()),
@@ -130,6 +141,9 @@ impl From<PlacementJson> for PimdirPlacement {
                 date,
                 subject: subject.unwrap_or_default(),
                 sender: wire.sender,
+                size: wire.size,
+                attachment: wire.attachment,
+                invitation: wire.invitation,
                 ..Default::default()
             })),
         };
@@ -173,6 +187,9 @@ impl From<&PimdirPlacement> for PlacementJson {
             date: None,
             subject: None,
             sender: None,
+            size: None,
+            attachment: None,
+            invitation: None,
         }
     }
 }

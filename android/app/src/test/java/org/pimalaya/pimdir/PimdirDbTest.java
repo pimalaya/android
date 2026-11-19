@@ -438,6 +438,42 @@ public class PimdirDbTest {
         }
     }
 
+    /**
+     * A writer the compiled pragma left below FULL is read back and set
+     * again, run outside a transaction (STORAGE §4.1).
+     */
+    @Test
+    public void aWriterLeftBelowFullIsSetAgain() {
+        store.close();
+        ShadowSQLiteConnection.setDefaultSyncMode("NORMAL");
+        ShadowHostSqliteConnection.ignoreSynchronousFull(1);
+        store = new PimdirDb(RuntimeEnvironment.getApplication());
+        db = store.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            assertEquals("FULL", 2, pragma("PRAGMA synchronous"));
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /** A writer that never syncs at FULL is refused, never opened below it. */
+    @Test
+    public void aWriterThatNeverSyncsAtFullIsRefused() {
+        store.close();
+        ShadowSQLiteConnection.setDefaultSyncMode("NORMAL");
+        ShadowHostSqliteConnection.ignoreSynchronousFull(Integer.MAX_VALUE);
+        store = new PimdirDb(RuntimeEnvironment.getApplication());
+        try {
+            store.getWritableDatabase();
+            throw new AssertionError("opened below FULL");
+        } catch (IllegalStateException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains("below FULL"));
+        } finally {
+            ShadowHostSqliteConnection.ignoreSynchronousFull(0);
+        }
+    }
+
     private long pragma(String sql) {
         try (Cursor cursor = db.rawQuery(sql, null)) {
             assertTrue(cursor.moveToFirst());

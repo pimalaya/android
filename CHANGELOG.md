@@ -219,6 +219,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Fixed one mail account's sync and background download reaching into another account's mailboxes when several are connected: each account now syncs and downloads its own mailboxes alone.
 - Fixed a custom OAuth client signing in through a `http://127.0.0.1` redirect failing on servers that require the RFC 8707 resource, such as Fastmail: the resource is now asked for as on the app's own redirect.
 - Fixed CalDAV and CardDAV collections kept outside their account's home, as Google lists every calendar, being named after their last path segment: every Google CalDAV calendar was named `events` and addressed as the primary calendar. A delete on a server answering 412 for an entry already gone now also counts as done.
+- Fixed a message listed again by its server losing the size and attachment mark its stored body told, the server's own figure taking their place.
+- Fixed a file restored on its server keeping the body it held before its deletion as if it were a local edit, which the next sync pushed over the server's version: it now waits for the server's body, the old one kept in Deleted items.
+- Fixed a body a collection's conflict policy did not keep being dropped, in a store whose policy was set to prefer one side: it is now kept in Deleted items.
+- Fixed a copy of a message whose original was already deleted on the phone being left unsent: it is now copied on the server from the original, which waits for its deletion to go.
+- Fixed the store opening on a phone whose SQLite did not apply its sync at every commit: the setting is now read back and set again, and if the phone still refuses it the app opens on a screen saying the phone cannot keep its data safely, rather than writing without it.
 
 ### Security
 

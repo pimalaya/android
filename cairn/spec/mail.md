@@ -1013,7 +1013,7 @@ A Graph account SHALL read bodies through `$batch` calls of up to 20 `$value` GE
 ### Requirement: A link id names a message across mailboxes only where the account lists them as one
 A message's link id SHALL be its handle. Only on an account listed account-wide (Gmail, JMAP), whose id names one message across its mailboxes, SHALL a body be linked from another mailbox under the same link id, and only from the same account (pimdir STORAGE §14). On IMAP a link id is a UID, naming a message in its own mailbox alone, and on Graph a folder's copy alone: no body SHALL be linked there, every body being fetched. Once per such account, every body its mailboxes hold under a link id another collection holds with the same body SHALL be released back to its summary, both sides, unless the message still needs it (a conflict, a pending create, a local edit), so the body step reads it again.
 
-A pending create's origin, the binding its push copies from (pimdir SYNC §3), SHALL be one of the same account holding the body the create carries, when it carries one, and, for mail, the create's `Message-ID`: an IMAP copy SHALL come from the mailbox holding that message, whatever other mailbox reuses its UID.
+A pending create's origin, the binding its push copies from (pimdir SYNC §3), SHALL be one of the same account, as the roster records it, and kind holding the body the create carries, when it carries one, and, for mail, the create's `Message-ID`, a holder whose removal is staged counting and a live one taken first (origin_for_link): an IMAP copy SHALL come from the mailbox holding that message, whatever other mailbox reuses its UID.
 
 #### Scenario: Two IMAP mailboxes holding the same UIDs
 - GIVEN an IMAP account whose inbox and archive both hold UIDs 1 to 120

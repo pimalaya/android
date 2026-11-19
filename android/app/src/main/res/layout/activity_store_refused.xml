@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The screen standing for the app when its store is of another draft
-     or damaged (StoreRefusedActivity): it says the app must be
-     reinstalled, and nothing else is offered. -->
+<!-- The screen standing for the app when its store is of another draft,
+     damaged, or one the phone cannot save safely (StoreRefusedActivity):
+     it says why, and nothing else is offered. -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -17,10 +17,12 @@
         android:paddingBottom="24dp">
 
         <TextView
+            android:id="@+id/store_refused_title"
             style="@style/PageTitle"
             android:text="@string/store_refused_title" />
 
         <TextView
+            android:id="@+id/store_refused_message"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"

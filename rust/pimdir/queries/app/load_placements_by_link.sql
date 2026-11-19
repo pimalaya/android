@@ -20,11 +20,13 @@ SELECT i.link_id,
                                 WHERE g.item = b.item AND g.source = b.source), '')) END AS base_flags,
        b.base_object, b.base_revision, b.base_present, b.conflicted, b.conflict_revision,
        b.conflict_object, i.deleted, i.conflicted, c.kind, s.date, s.subject, s.sender,
-       i.conflict_object AS item_conflict_object
+       i.conflict_object AS item_conflict_object, s.size, s.attachment, s.invitation,
+       fs.name, fs.media_type, fs.size AS file_size, fs.part
 FROM items i
 JOIN collections c ON c.id = i.collection
 LEFT JOIN bindings b ON b.item = i.id
                     AND b.source = :source
 LEFT JOIN mail_summary s ON s.item = i.id
+LEFT JOIN file_summary fs ON fs.item = i.id
 WHERE i.collection = :collection AND i.retained_at IS NULL
   AND i.link_id IN (SELECT value FROM temp.param WHERE slot = 'links');

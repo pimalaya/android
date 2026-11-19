@@ -87,11 +87,28 @@ public class ShadowHostSqliteConnection {
         return modes;
     }
 
+    /** How setting the sync level to FULL reads. */
+    private static final java.util.regex.Pattern SYNCHRONOUS_FULL =
+            java.util.regex.Pattern.compile(
+                    "(?is).*\\bPRAGMA\\s+(?:\\w+\\.)?synchronous\\s*=\\s*'?FULL'?.*");
+
+    /** How many more statements setting FULL are prepared as none. */
+    private static int fullIgnored;
+
+    /**
+     * Prepares the next {@code times} statements setting the sync level to
+     * FULL as a statement doing nothing: a SQLite that applies none of them.
+     */
+    public static synchronized void ignoreSynchronousFull(int times) {
+        fullIgnored = times;
+    }
+
     @Resetter
     public static synchronized void reset() {
         OPEN.clear();
         BESIDE.clear();
         JOURNAL_MODES.clear();
+        fullIgnored = 0;
     }
 
     private static int sqliteFlags(int openFlags) {
@@ -175,6 +192,12 @@ public class ShadowHostSqliteConnection {
                             path == null ? "" : path,
                             mode.group(1).toUpperCase(java.util.Locale.ROOT)
                         });
+            }
+        }
+        synchronized (ShadowHostSqliteConnection.class) {
+            if (fullIgnored > 0 && SYNCHRONOUS_FULL.matcher(sql).matches()) {
+                fullIgnored -= 1;
+                return HostSqlite.nativePrepareStatement(connection, "SELECT 1 WHERE 0");
             }
         }
         return HostSqlite.nativePrepareStatement(connection, sql);

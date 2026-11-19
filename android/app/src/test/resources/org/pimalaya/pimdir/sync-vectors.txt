@@ -7,28 +7,6 @@
 # `unbound` that binds, an unlisted one that cannot be bound and a listed
 # one the vectors do not hold each fail the suite. The `fails` lines only go.
 
-# The write keeps no body a collection's policy did not adopt (SYNC §9):
-# no retained item, no Overruled. The app sets no policy but manual.
-fails 85-prefer-incoming-keeps-the-body-it-replaced: no retained item for the body the policy replaced, no Overruled
-fails 86-prefer-existing-keeps-the-body-it-refused: no retained item for the body the policy refused, no Overruled
-fails 90-a-fetched-conflict-body-meets-prefer-incoming: no retained item for the body the policy replaced, no Overruled
-fails 91-a-fetched-conflict-body-meets-prefer-existing: no retained item for the body the policy refused, no Overruled
-fails 104-a-second-policy-loser-is-minted-again: no retained item for the body the policy did not adopt, no Overruled
-fails 114-a-fill-settles-a-prefer-incoming-divergence: no retained item for the body the policy replaced, no Overruled
-fails 115-a-fill-settles-a-prefer-existing-divergence: no retained item for the body the policy refused, no Overruled
-
-# The write lacks the rule of STORAGE §11.1 for a retained row a listing
-# revives at meta: it keeps the retained body as the item's.
-fails 108-a-file-revived-at-meta-sets-its-retained-body-aside: the revived row keeps the retained body at full, no item set aside, no Overruled
-
-# The load names a create's origin by a statement of the app's own, which
-# leaves out a member under a tombstone and reads the account off the id.
-fails 49-a-create-beside-a-held-copy-copies-from-its-origin: the create loads with no origin, so no add is pushed
-
-# The load carries no summary but a message's date, subject and sender, so
-# what a held body told (SYNC §6) is restated from the listing.
-fails 52-a-held-body-keeps-its-size: the held message's size and attachment mark are written null
-
 unbound 07-a-meta-upgrade-revisits-an-unheld-claim: the bridge upgrades to the full tier alone
 unbound 08-read-only-reverts-a-delete: the bridge always pushes
 unbound 10-rekey-carries-state-by-link-id: the bridge runs no rekey

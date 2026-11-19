@@ -4,6 +4,8 @@
     <string name="store_refused_title">Réinstallez l\'application</string>
     <string name="store_refused_message">Cette version de l\'application ne peut pas ouvrir les données qu\'une version précédente a enregistrées sur ce téléphone. Rien n\'y a été lu ni modifié. Désinstallez l\'application sans conserver ses données, puis réinstallez-la : elle repart d\'un nouveau stockage, et vos comptes se resynchronisent depuis leurs serveurs. Ce qui n\'était pas encore synchronisé, comme un message encore dans la boîte d\'envoi, est perdu avec l\'ancien stockage.</string>
     <string name="store_refused_code">Raison : %1$s (%2$s)</string>
+    <string name="store_sync_refused_title">Ce téléphone ne peut pas garder les données en sûreté</string>
+    <string name="store_sync_refused_message">L\'application enregistre chaque modification sur le stockage de ce téléphone immédiatement, pour qu\'un plantage ou une coupure de courant n\'en perde aucune, et le stockage de ce téléphone a refusé de fonctionner ainsi. L\'application n\'ouvre pas ses données plutôt que de risquer d\'en perdre. Rien n\'a été lu ni modifié. Réinstaller l\'application n\'y change rien : signalez le modèle de ce téléphone et la raison ci-dessous.</string>
     <string name="new_account">Nouveau compte</string>
     <string name="cancel_auth">Annuler</string>
     <string name="welcome_title">Vos e-mails, contacts et agendas, hors ligne.</string>

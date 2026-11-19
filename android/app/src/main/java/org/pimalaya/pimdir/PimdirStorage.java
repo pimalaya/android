@@ -638,6 +638,32 @@ public final class PimdirStorage {
             if (!cursor.isNull(18)) {
                 placement.put("sender", cursor.getString(18));
             }
+            // NOTE: and what its body told, which a listing never restates
+            // over a held body (SYNC §6, Annex A.1).
+            if (!cursor.isNull(20)) {
+                placement.put("size", cursor.getLong(20));
+            }
+            if (!cursor.isNull(21)) {
+                placement.put("attachment", cursor.getInt(21) == 1);
+            }
+            if (!cursor.isNull(22)) {
+                placement.put("invitation", cursor.getString(22));
+            }
+        }
+        // NOTE: a file's summary whole, its size the held body's (Annex A.7).
+        if (!cursor.isNull(23)) {
+            JSONObject file = new JSONObject();
+            file.put("name", cursor.getString(23));
+            if (!cursor.isNull(24)) {
+                file.put("media_type", cursor.getString(24));
+            }
+            if (!cursor.isNull(25)) {
+                file.put("size", cursor.getLong(25));
+            }
+            if (!cursor.isNull(26)) {
+                file.put("part", cursor.getString(26));
+            }
+            placement.put("summary", new JSONObject().put("file", file));
         }
         if (!cursor.isNull(11)) {
             placement.put("conflictRevision", cursor.getString(11));
@@ -779,7 +805,7 @@ public final class PimdirStorage {
      */
     private JSONObject originOf(String collection, String linkId, String object)
             throws JSONException {
-        Map<String, Object> values = accountWide(collection, linkId);
+        Map<String, Object> values = cardWide(collection, linkId);
         values.put("object", object);
         return holder("BOUND_ELSEWHERE", values);
     }
@@ -1011,8 +1037,8 @@ public final class PimdirStorage {
     }
 
     /**
-     * A card's lookup bindings: its collection, link id and source, the
-     * account read from the roster by the statement itself.
+     * A lookup's bindings by the roster: its collection, link id and source,
+     * the account read from the roster by the statement itself.
      */
     private static Map<String, Object> cardWide(String collection, String linkId) {
         return PimdirSql.values(
@@ -1419,9 +1445,50 @@ public final class PimdirStorage {
             }
             String key = keepOverruled(db, collection, linkId, handle, source, lost, item[3],
                     item[4]);
+            PimdirSummary.write(db, collection, key, derivedSummary(db, collection, lost), true);
             JSONObject effect = effect(engine, handle, "overruled");
             effect.put("linkId", key);
             effects.put(effect);
+        }
+    }
+
+    /**
+     * Keeps {@code object}, a body an upsert of {@code handle} left the item
+     * not holding, as a retained item with the item's flags (SYNC §9,
+     * STORAGE §11, §11.1) and reports it overruled. Its summary is the one
+     * {@code summaryOf} holds, else {@code summary}, else the body's own.
+     */
+    private void setAside(SQLiteDatabase db, String engine, String collection, String linkId,
+            String handle, String source, String object, String sortKey, String summaryOf,
+            JSONObject summary, JSONArray effects) throws JSONException {
+        String flags = one(db, "ITEM_FLAGS", PimdirItems.key(collection, linkId));
+        String key =
+                keepOverruled(db, collection, linkId, handle, source, object, sortKey, flags);
+        if (summaryOf != null) {
+            PimdirDb.exec(
+                    db,
+                    "COPY_SUMMARY",
+                    PimdirSql.values(
+                            "from_collection", collection,
+                            "from_link_id", summaryOf,
+                            "to_collection", collection,
+                            "to_link_id", key));
+        } else {
+            PimdirSummary.write(db, collection, key,
+                    summary != null ? summary : derivedSummary(db, collection, object), true);
+        }
+        effects.put(effect(engine, handle, "overruled").put("linkId", key));
+    }
+
+    /** What io-pimdir derives of a stored body's summary, or null. */
+    private JSONObject derivedSummary(SQLiteDatabase db, String collection, String object) {
+        String kind = one(db, "LOAD_KIND", PimdirSql.values("collection", collection));
+        try {
+            byte[] body = kind == null ? null : blobs.get(object);
+            return body == null ? null : PimdirSql.derive(kind, body).summary();
+        } catch (IOException unreadable) {
+            Log.w("pimalaya", "unreadable body " + object + ": " + unreadable.getMessage());
+            return null;
         }
     }
 
@@ -1624,6 +1691,17 @@ public final class PimdirStorage {
         String previousObject = held == null || held.isEmpty() ? null : held;
         String previousConflict = item == null ? null : item[2];
         String incoming = object;
+        JSONObject incomingSummary = summary;
+        String incomingSort = sortKey;
+
+        // NOTE: a retained row of a mutable kind revived by an upsert holding
+        // no body revives holding none, at meta, for the upgrade to fetch
+        // (STORAGE §11.1): its body, which the member's revision may have
+        // replaced, is set aside, never left as the item's, where it would
+        // read as a local edit pushed over a body nobody read.
+        String aside = !mail && item != null && "1".equals(item[5]) && incoming == null
+                ? previousObject
+                : null;
 
         // NOTE: a message's body never changes under its link id, so an
         // upsert carrying none below the level the row holds is one the
@@ -1651,6 +1729,7 @@ public final class PimdirStorage {
         // body, recording the incoming one and standing conflicted, and the
         // upsert reported in Written.conflicted. A message is one identity,
         // one body, and never diverges.
+        JSONObject lost = null;
         boolean conflicted = item != null && "1".equals(item[1]);
         String conflictObject = previousConflict;
         String shared;
@@ -1660,7 +1739,8 @@ public final class PimdirStorage {
                     : exists ? sharedObjectOf(db, collection, linkId, source) : null;
         } else {
             String key = engineCollection + "\n" + handle;
-            JSONObject merged = merge(db, collection, source, linkId, placement, item,
+            JSONObject merged = merge(db, collection, source, linkId, placement,
+                    aside == null ? item : null,
                     overruling != null && overruling.contains(key),
                     settling != null && settling.contains(key));
             object = merged.optString("object", null);
@@ -1674,6 +1754,7 @@ public final class PimdirStorage {
                 sortKey = "";
                 level = object == null ? 1 : Math.max(level, Integer.parseInt(item[3]));
             }
+            lost = merged.optJSONObject("lost");
             if (merged.optBoolean("diverged")) {
                 effects.put(effect(engineCollection, handle, "conflicted"));
             }
@@ -1716,6 +1797,22 @@ public final class PimdirStorage {
             conflict.put("conflict_object", conflictObject);
             PimdirDb.exec(db, "SET_ITEM_CONFLICT", conflict);
             adjustRefcount(db, previousConflict, conflictObject);
+        }
+
+        // NOTE: a body set aside or a policy did not adopt is kept as a
+        // retained item (SYNC §9, STORAGE §11), before the item's summary
+        // is written over the one it may take along.
+        if (aside != null) {
+            setAside(db, engineCollection, collection, linkId, handle, source, aside,
+                    incomingSort.isEmpty() ? item[4] : incomingSort, linkId, null, effects);
+        } else if (lost != null) {
+            String side = lost.getString("side");
+            setAside(db, engineCollection, collection, linkId, handle, source,
+                    lost.getString("object"),
+                    "incoming".equals(side) ? incomingSort : item[4],
+                    "shared".equals(side) ? linkId : null,
+                    "incoming".equals(side) ? incomingSummary : null,
+                    effects);
         }
 
         // NOTE: a write without summary keeps the stored row (flag pushes,
@@ -2790,8 +2887,9 @@ public final class PimdirStorage {
     }
 
     /**
-     * One item's body (empty for none), conflict flag, diverging body and
-     * level, in that order; null when the collection holds no such item.
+     * One item's body (empty for none), conflict flag, diverging body, level,
+     * sort key and whether it is retained, in that order; null when the
+     * collection holds no such item.
      */
     private static String[] heldItem(SQLiteDatabase db, String collection, String linkId) {
         try (Cursor cursor =
@@ -2803,7 +2901,9 @@ public final class PimdirStorage {
                 cursor.getString(0),
                 cursor.getString(1),
                 cursor.isNull(2) ? null : cursor.getString(2),
-                cursor.getString(3)
+                cursor.getString(3),
+                cursor.getString(4),
+                cursor.getString(5)
             };
         }
     }

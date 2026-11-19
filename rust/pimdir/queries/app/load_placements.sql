@@ -1,6 +1,7 @@
 -- A collection's live and tombstoned items, each with the source's binding
 -- and what the engine reads of a message's summary (its date, subject and
--- sender): the rows a load projects placements from (SYNC §3, §5, §6),
+-- sender, and the size, mark and invitation its body told) and a file's
+-- whole summary: the rows a load projects placements from (SYNC §3, §5, §6),
 -- and the item's diverging body, what an edit meets beside its binding's
 -- conflict (SYNC §7). Retained rows are left out (STORAGE §11). Flags as
 -- one text, on load_items' terms (§4.4).
@@ -24,10 +25,12 @@ SELECT i.link_id,
                                 WHERE g.item = b.item AND g.source = b.source), '')) END AS base_flags,
        b.base_object, b.base_revision, b.base_present, b.conflicted, b.conflict_revision,
        b.conflict_object, i.deleted, i.conflicted, c.kind, s.date, s.subject, s.sender,
-       i.conflict_object AS item_conflict_object
+       i.conflict_object AS item_conflict_object, s.size, s.attachment, s.invitation,
+       fs.name, fs.media_type, fs.size AS file_size, fs.part
 FROM items i
 JOIN collections c ON c.id = i.collection
 LEFT JOIN bindings b ON b.item = i.id
                     AND b.source = :source
 LEFT JOIN mail_summary s ON s.item = i.id
+LEFT JOIN file_summary fs ON fs.item = i.id
 WHERE i.collection = :collection AND i.retained_at IS NULL;

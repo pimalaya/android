@@ -9,6 +9,7 @@ import android.util.Log;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executors;
+import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.calendar.CalendarPhonePass;
@@ -84,12 +85,41 @@ public final class App extends Application
         if (!refusalChecked) {
             refusal = PimdirDb.refusal(this);
             refusalChecked = true;
+            if (refusal == null) {
+                refusal = syncRefusal();
+            }
             if (refusal != null) {
                 Log.e("pimalaya", "pimdir store refused, the app must be reinstalled: " + refusal);
             }
         }
         return refusal;
     }
+
+    /**
+     * Opens the store's writer once, answering {@code store-sync} when the
+     * device's SQLite does not sync it at every commit (STORAGE §4.1), which
+     * the open refuses; null when it opens.
+     */
+    private JSONObject syncRefusal() {
+        PimdirDb probe = new PimdirDb(this);
+        try {
+            probe.getWritableDatabase();
+            return null;
+        } catch (PimdirDb.SyncRefused refused) {
+            try {
+                return new JSONObject()
+                        .put("refused", STORE_SYNC)
+                        .put("detail", String.valueOf(refused.getMessage()));
+            } catch (JSONException impossible) {
+                throw new IllegalStateException(impossible);
+            }
+        } finally {
+            probe.close();
+        }
+    }
+
+    /** The refusal of a store whose writer the device does not sync. */
+    static final String STORE_SYNC = "store-sync";
 
     /** Whether the store is one this app does not open: reinstall. */
     boolean storeRefused() {

@@ -32,7 +32,7 @@ use io_pimdir::{
         PimdirEnumerate, PimdirFetchedBody, PimdirFetchedItem, PimdirListing, PimdirPushOutcome,
         PimdirPushResult, PimdirTier,
     },
-    summary::{PimdirSummary, mail::PimdirMailSummary},
+    summary::PimdirSummary,
     sync::{PimdirPushRights, PimdirSync, PimdirSyncOptions},
     upgrade::{PimdirUpgrade, PimdirUpgradeOptions},
 };
@@ -186,32 +186,26 @@ fn sync_options(content: bool) -> PimdirSyncOptions {
     }
 }
 
-/// Partial summaries a load made up, by collection and handle or link id.
+/// The summaries a load carried, by collection and handle or link id.
 ///
-/// A load carries a mail placement's `Date`, `Subject` and sender alone,
-/// all the engine reads: the date for a round's scope (SYNC §5), the three
-/// to tell a listed member reusing a `Message-ID` from the pending create
-/// it would land (SYNC §6). A write handing one back unchanged, under its
-/// handle, link id or origin, goes out with none to keep the stored row.
+/// A load carries a mail placement's `Date`, `Subject` and sender and what
+/// its body told alone, all the engine reads: the date for a round's scope
+/// (SYNC §5), the three to tell a listed member reusing a `Message-ID` from
+/// the pending create it would land, the rest kept over a listing (SYNC
+/// §6); and a file's summary whole. A write handing one back unchanged,
+/// under its handle, link id or origin, goes out with none to keep the
+/// stored row.
 #[derive(Default)]
 struct Dated(BTreeMap<(String, String), PimdirSummary>);
 
 impl Dated {
-    /// Records the partial summaries a load reply carried.
+    /// Records the summaries a load reply carried.
     fn record(&mut self, arg: &PimdirArg) {
         let PimdirArg::Load(loaded) = arg else {
             return;
         };
         for placement in &loaded.placements {
-            if let Some(summary @ PimdirSummary::Mail(mail)) = &placement.summary
-                && *mail
-                    == (PimdirMailSummary {
-                        date: mail.date.clone(),
-                        subject: mail.subject.clone(),
-                        sender: mail.sender.clone(),
-                        ..Default::default()
-                    })
-            {
+            if let Some(summary) = &placement.summary {
                 let collection = placement.collection.as_str().to_string();
                 if let Some(link) = &placement.link_id {
                     let key = (collection.clone(), link_key(link.as_str()));
@@ -223,7 +217,7 @@ impl Dated {
         }
     }
 
-    /// The yield with every partial summary it would write back taken out.
+    /// The yield with every loaded summary it would write back taken out.
     fn strip(&self, yielded: PimdirYield) -> PimdirYield {
         let PimdirYield::WantsWrite(ops) = yielded else {
             return yielded;
@@ -241,7 +235,9 @@ impl Dated {
                     if let Some(link) = &placement.link_id {
                         keys.push((collection, link_key(link.as_str())));
                     }
-                    if let Some(origin) = &placement.origin {
+                    if let Some(origin) = &placement.origin
+                        && matches!(placement.summary, Some(PimdirSummary::Mail(_)))
+                    {
                         keys.push((
                             origin.collection.as_str().to_string(),
                             origin.handle.as_str().to_string(),

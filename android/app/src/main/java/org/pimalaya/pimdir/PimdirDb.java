@@ -379,7 +379,17 @@ public final class PimdirDb extends SQLiteOpenHelper {
         // transaction and applies it as it compiles the pragma, which the
         // platform does on the writer for any statement but a SELECT
         // (SQLiteProgram): compiled, never run, so no reader opens for it.
-        db.compileStatement(PimdirSql.bind("SYNCHRONOUS_FULL", Map.of()).sql).close();
+        // Read back, and run outside a transaction on a SQLite that did not
+        // apply it so: a writer syncing less is refused.
+        String full = PimdirSql.bind("SYNCHRONOUS_FULL", Map.of()).sql;
+        db.compileStatement(full).close();
+        if (synchronous(db) < 2) {
+            db.execSQL(full);
+            long level = synchronous(db);
+            if (level < 2) {
+                throw new SyncRefused(level);
+            }
+        }
         // NOTE: the erasure STORAGE §11.5 asks, and a schema read as one
         // from elsewhere (§18), on the writer: a transaction holds it, where
         // a read-only statement alone would run on a reader. trusted_schema
@@ -398,6 +408,27 @@ public final class PimdirDb extends SQLiteOpenHelper {
             db.endTransaction();
         }
         Log.i("pimalaya", "store on sqlite " + version);
+    }
+
+    /**
+     * The store refused because its writer does not sync at every commit
+     * (STORAGE §4.1), a fact of the device rather than of the store: the app
+     * says so ({@code store-sync}) rather than writing below it.
+     */
+    public static final class SyncRefused extends IllegalStateException {
+        SyncRefused(long level) {
+            super("The pimdir store's writer syncs at level " + level + ", below FULL");
+        }
+    }
+
+    /** The writer's sync level, read in a transaction, which runs there. */
+    private static long synchronous(SQLiteDatabase db) {
+        db.beginTransaction();
+        try (Cursor cursor = query(db, "SYNCHRONOUS", Map.of())) {
+            return cursor.moveToFirst() ? cursor.getLong(0) : 0;
+        } finally {
+            db.endTransaction();
+        }
     }
 
     /** The SQLite version the platform runs, {@code 3.18.2} on Android 8.0. */
