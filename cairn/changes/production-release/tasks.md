@@ -34,46 +34,47 @@ Restated against the code on 2026-11-06. Gone since the 2026-10-09 review: the I
 - [ ] Device check of the changes with work left besides: fill-from-two-queues, mail-load-more, mail-load-more-graph, mail-load-more-imap, mail-load-more-jmap, one-onboarding-path, phone-calendar-mirror, sync-strip-in-app-bar (assembleDebug never run), crash-and-surface-hardening (OAuth loopback listener)
 - [ ] Live checks on the Google test account (google-sync: history labelIds, batch host, iCalUID listing, People token and deletions, the device measure)
 - [ ] Each checked change folded into the spec, logged and archived
+- [x] Device-checked by the owner and on the device on 2026-11-19 (master d643ecd, then 880cbb6): guarded-contact-updates on JMAP and Graph (both edits kept), a-message-is-filed-somewhere (every Gmail message in its labels and All Mail), the ical-rs 0.7.2 `UNTIL` of a JMAP series, the store opening after the A7 sync check, hide-in-recents, sign-in-again reopening after Back (PR #2) and keeping its position (PR #3); their folds owed with the rest
 - [ ] Archive the changes already done: body-loss-races, body-run-loop, drop-sync-mark, google-delete-loss, mailbox-refusal-skipped, oauth-pending-grant-encrypted, store-performance (fold and log first if missing), gtd-hardening (landed), ical-rs-0-6 (fold)
 - [ ] Archive bundled-sqlite as superseded: platform-sqlite (landed 2026-11-01) put the store on the platform's SQLite and dropped requery
 
 ## 3. Released libraries and supply chain
 
 - [x] io-http 0.6.0, ical-rs 0.7.0, io-imap 0.8.1, io-webdav 0.7.0, io-jmap 0.7.0, io-pim-discovery 0.11.0 released and pinned from crates.io (checked 2026-11-06)
-- [ ] The three git sources left in rust/Cargo.toml released and dropped at the final validation, kept as git pins until then (owner, 2026-11-07): io-pimdir (5c18a02 since 2026-11-08, the commit pimdir CI and the CLIs pin: storage-draft-09 with the search zone, after the v0.9.0 tag 42a2f26), io-msgraph past v0.7.0 for the To Do surface (01105a5), io-gtasks 0.1.0 first published; release-pinned-libs/tasks.md restated (it still names io-pimdir 0.8.0 and leaves the done releases open)
-- [ ] A body bound (`max_body_len`) on every HTTP call, none in rust/src as of 2026-11-06 (release-pinned-libs)
-- [ ] CI builds unsigned and signs on `v*` tags only, in a protected environment (release-supply-chain)
-- [ ] Actions pinned by SHA, least `permissions`, a read-only Cachix token outside releases (release-supply-chain)
-- [ ] Gradle verification metadata, a Gradle wrapper or F-Droid srclib (release-supply-chain)
-- [ ] `cargo deny` with yanked denied, no git sources, a weekly audit run; a release dry run on a fork (release-supply-chain)
+- [x] No git source left in rust/Cargo.toml: io-pimdir 0.18.0 (draft-14), io-msgraph, io-gtasks and every other library pinned from crates.io; `cargo deny` refuses any git source (2026-11-19, release-pinned-libs archived)
+- [-] A per-call body bound: not needed, io-http 0.8 refuses every buffered answer past 256 MiB by default (owner, 2026-11-19; release-pinned-libs, spec/network-trust.md)
+- [ ] CI builds unsigned and signs on `v*` tags only, in a protected environment: built 2026-11-19 (40cbe85, release-supply-chain); owed by the owner, the GitHub environment `release` with its protection rules and the keystore secrets moved into it
+- [ ] Actions pinned by SHA, least `permissions`, a read-only Cachix token outside releases: built 2026-11-19 (40cbe85); owed by the owner, the repository secret `CACHIX_AUTH_TOKEN_READ`
+- [x] Gradle verification metadata (40cbe85, completed for cold and restored CI caches in 170fec0 and d643ecd); the Gradle wrapper properties go with the F-Droid recipe (below)
+- [ ] `cargo deny` with yanked denied, no git sources, a weekly audit run: built 2026-11-19, green (RUSTSEC-2026-0543 ignored, chrono imposed by imap-types, its switch upstream in imap-codec issue 752); owed, a release dry run on a fork
 - [ ] Versioning: versionCode and versionName from the tag; distinct codes per ABI for the GitHub APKs and F-Droid, Play taking the one bundle .github/workflows/releases.yml already builds (android/app/build.gradle.kts)
 
 ## 4. Sign-in for real users
 
 - [x] Google: release builds on the "Pimalaya" project's client, debug builds on "Pimalaya Debug"'s, the redirect scheme following ([log](../../log/2026-11-07-google-client-per-build.md)). One client serves every release channel; per-signing-key clients only if Google's reviewer asks (oauth-verification)
 - [ ] Microsoft: the production Entra client in place of the testing one; publisher verification for tenants that require it (oauth-verification)
-- [ ] Re-sign-in: an account whose grant or password stopped working signs in again, keeping its outbox and staged edits. Built in sign-in-again (2026-11-07) on the onboarding's Review your domains page as the owner asked; owed, the device check and a personal Microsoft account read by its identity check
-- [ ] Fastmail: one consent for IMAP, JMAP and DAV (one-fastmail-consent)
+- [ ] Re-sign-in: an account whose grant or password stopped working signs in again, keeping its outbox and staged edits. Built in sign-in-again (2026-11-07); its reopening after Back (PR #2, b0303eb) and the settings position kept on return (PR #3, 880cbb6) checked on the device on 2026-11-19; owed, a personal Microsoft account read by its identity check
+- [x] Fastmail: one consent: a Fastmail account set up today runs mail, contacts and calendars on its one JMAP session (Fastmail serves `urn:ietf:params:jmap:calendars`), one grant and one consent, observed by the owner on 2026-11-19; the CalDAV shard resource fix stays owed for an account that picks CalDAV (one-fastmail-consent)
 
 ## 5. Security residuals
 
 - [x] Lock-screen notifications private, a public version saying only the count, a Settings switch showing sender and subject (audit-s1-residuals I1; [log](../../log/2026-11-07-locked-notifications-show-the-count.md))
 - [ ] Sync adapters not parallel, no URL in warnings (audit-s1-residuals L1, L3)
 - [ ] OAuth: issuer pairing (H3), `iss` required where advertised (M1), https-only endpoints in io-oauth (M2), RFC 8707 `resource` (L3), identity check after a grant (L4), error redirects before the state check (L5): one plan, oauth-hardening (2026-11-07)
-- [ ] Network: old TLS (L6), discovery redirects to local hosts (L2) and hrefs on another site (the public-suffix rule) warned about in one dialog rather than refused, as the owner asked on 2026-11-07; DoH and PACC trust documented (L8): one plan, network-warnings
+- [-] Network warnings (old TLS L6, discovery redirects L2, the public-suffix rule, L8 documented): postponed by the owner on 2026-11-19 (network-warnings)
 
 ## 6. What a user meets first
 
 - [ ] Drafts: a message being written is kept and reopened (later, by the owner's choice of 2026-11-07)
 - [ ] Attachments added in the composer, and kept on a forward (later, by the owner's choice of 2026-11-07)
 - [ ] Restoring a deleted message on every backend, not IMAP alone (DeletedItemsPage)
-- [ ] Gmail: a message under a label the store does not hold yet has its body read twice, the next pass's round over the new label filing it; not a loss (a-message-is-filed-somewhere, whose Graph and JMAP halves are dead code since 3d999f8, listed for deletion in fill-from-two-queues)
-- [ ] Store performance follow-ups: agenda prefilter, contacts rows from summaries, refcounts, large attachments streamed (store-performance-followups)
+- [ ] Gmail: a message under a label the store does not hold yet has its body read twice, the next pass's round over the new label filing it; not a loss. The label is now logged and counted rather than dropped, and the dead Graph and JMAP step paths are deleted (a-message-is-filed-somewhere, eeede3a, 2026-11-19); the double read remains
+- [ ] Store performance follow-ups: a query's roster, refcounts by touched bodies, owed keys in a table, the 2 GiB guard and the memory-mapped message read landed 2026-11-19 (a8b329b), contacts rows already from summaries; left, the agenda's no-index fallback (an io-pimdir statement) and a part streamed rather than decoded whole (store-performance-followups)
 - [ ] The filter panel's leftovers: mail Starred, Answered and Received date, the Files filter (one-filter-panel)
 
 ## 7. Store release
 
-- [ ] One release once everything is ready (owner, 2026-11-07): the store at storage-v1.0.0 (pimdir's owner fence decided, io-pimdir released at v1, the app following it) and the io-* libraries released at the final validation; Play internal testing until then
+- [ ] One release once everything is ready (owner, 2026-11-07): the store at storage-v1.0.0 (pimdir's owner fence decided, io-pimdir released at v1, the app following it) and the io-* libraries released at the final validation; Play internal testing until then. As of 2026-11-19 the app is on storage-draft-14 (io-pimdir 0.18.0)
 - [x] Play store listing: name, short description (80 characters), full description, 512x512 icon, 1024x500 feature graphic, category, contact email, privacy policy URL. Phone screenshots rendered from the design canvas on 2026-11-07, light and dark, 1080x1920 with a caption (Play refuses a side over twice the other, so the canvas's 390x844 frames sit on the wash); the README's full-height ones in screenshots/; filled (owner, 2026-11-08)
 - [x] Play pricing: the fixed price and a payments profile. Set at 5.99 (owner, 2026-11-08). Play never turns a free app paid, so App pricing is checked still open before any wider track
 - [x] Play EU trader declaration (it shows an address publicly), done (owner, 2026-11-08)
