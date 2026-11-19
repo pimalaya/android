@@ -17,11 +17,11 @@ jobs:
       - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
         with:
           extra_nix_config: experimental-features = nix-command flakes
-      # NOTE: a read-only token: only releases.yml pushes to the cache.
+      # NOTE: no token: the public cache pulls without one, and only
+      # releases.yml pushes to it.
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
         with:
           name: soywod
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN_READ }}
           skipPush: true
           extraPullNames: nix-community
       - run: nix develop --command bash -c 'cd rust && cargo deny check'
