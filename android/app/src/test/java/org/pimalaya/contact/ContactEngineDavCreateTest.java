@@ -58,6 +58,8 @@ public class ContactEngineDavCreateTest {
     private PimdirDb pimdir;
 
     /** A CardDAV book listed whole on every round, as Google lists it. */
+    // NOTE: synchronized, the CardDAV push running its updates on a pool
+    // (ContactEngine.pushAll).
     private static final class Dav extends ContactClient {
         /** The cards by resource name, as (ETag, body). */
         final Map<String, String[]> cards = new LinkedHashMap<>();
@@ -93,7 +95,7 @@ public class ContactEngineDavCreateTest {
         }
 
         @Override
-        public CardDelta syncCards(
+        public synchronized CardDelta syncCards(
                 Transport transport, Account account, String addressbookUrl, String syncToken) {
             List<Card> listed = new ArrayList<>();
             for (Map.Entry<String, String[]> card : cards.entrySet()) {
@@ -103,7 +105,7 @@ public class ContactEngineDavCreateTest {
         }
 
         @Override
-        public List<Card> multigetCards(
+        public synchronized List<Card> multigetCards(
                 Transport transport, Account account, String addressbookUrl, List<String> uris) {
             List<Card> read = new ArrayList<>();
             for (String uri : uris) {
@@ -127,7 +129,7 @@ public class ContactEngineDavCreateTest {
         }
 
         @Override
-        public Card createCard(
+        public synchronized Card createCard(
                 Transport transport, Account account, String addressbookUrl, NewCard created) {
             String id = created.id();
             String vcard = created.vcard();
@@ -138,7 +140,7 @@ public class ContactEngineDavCreateTest {
         }
 
         @Override
-        public Card updateCard(
+        public synchronized Card updateCard(
                 Transport transport, Account account, BookCard updated, String baseVcard) {
             Card card = updated.card();
             updates.add(card.uri());
@@ -156,7 +158,8 @@ public class ContactEngineDavCreateTest {
         }
 
         @Override
-        public void deleteCard(Transport transport, Account account, BookCard removed) {
+        public synchronized void deleteCard(
+                Transport transport, Account account, BookCard removed) {
             Card card = removed.card();
             if (cards.remove(card.uri()) == null) {
                 throw new PimalayaException("not found: " + card.uri(), 404);
