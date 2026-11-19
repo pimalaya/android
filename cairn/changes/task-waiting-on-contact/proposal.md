@@ -19,9 +19,9 @@ A Waiting For task names who it waits on in free text. The person is usually a c
 
 - `CONTACT` stays the name with `ALTREP="mailto:<address>"`, as pimdir GTD.md writes it and RFC 5545 3.8.4.2 allows. An address reads in every client, survives the contact being deleted or merged, and works across accounts; a vCard `UID` (`urn:uuid:`) in `ALTREP` would mean nothing outside the store and would change pimdir's convention.
 
-### In the store: an automatic reference
+### In the store: a join, no reference (owner, 2026-11-19)
 
-- pimdir gains a rule, beside `link_senders_of`, `link_mail_from` and `link_invitations_to` (cairn/changes/automatic-references): a task whose `CONTACT` carries a `mailto:` address references every contact holding that address, kind `waits on`. It runs after a task is written and after a card is written, as `link_invitations_to` does. The rule is pimdir's to state (its GTD.md and GUIDE); the app runs the statement.
+- No pimdir change. pimdir already files every task `CONTACT` address (its `mailto:` `ALTREP`, else its text) in `item_address` under role `contact`, canonical per STORAGE A.6, and a card's addresses in the same table. Two app statements (rust/pimdir/queries/app/) read the open tasks waiting on a card's addresses and the cards holding a task's `CONTACT` address. Nothing is stored, so nothing goes stale when a card is merged, edited or deleted, and no rule re-runs after a write. The stored `waits on` reference first planned (a pimdir rule, an io-pimdir release) is dropped.
 
 ### In the app
 
@@ -36,4 +36,4 @@ A Waiting For task names who it waits on in free text. The person is usually a c
 
 ## Open
 
-- The reference kind's name and wording, and whether a closed task keeps its reference listed.
+- The wording on the contact page, and whether a completed or cancelled task stays listed there (the statement reads open tasks only until decided).

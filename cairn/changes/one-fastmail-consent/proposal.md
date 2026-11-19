@@ -20,6 +20,12 @@ Decide how one grant can cover the domains of one issuer, then group them:
 
 Whichever holds live on Fastmail, `sameSignIn` groups options by issuer and the set of resources, and the token is presented per resource as the server requires. Google and Microsoft are untouched: provider rules send no resource, and Entra refuses one token for two APIs (A provider grant is the app's own).
 
+## Decided (owner, 2026-11-19)
+
+Two consents are accepted for now. One consent comes from JMAP calendars, not from several RFC 8707 resources on one grant: once JMAP calendars are writable (jmap-calendar-writes) and Fastmail serves `urn:ietf:params:jmap:calendars`, a Fastmail account runs every domain over its one JMAP session, one resource, one grant. The multi-resource live check is dropped.
+
+Still owed whatever the route: the calendar grant failed on 2026-11-04 with `invalid_target` because io-pim-discovery keeps the SRV shard (`dNNNNNN.caldav.fastmail.com`) over the canonical resource its RFC 9728 metadata names (docs/providers.md); while calendars go through CalDAV, that blocks them.
+
 ## Out of scope
 
 - The RFC 8707 resource on exchange and refresh for every generic grant (network-trust-hardening, Open, L3), which this may land with.

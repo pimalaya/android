@@ -7,9 +7,12 @@ change: one-fastmail-consent
 
 Java paths are relative to android/app/src/main/java/org/pimalaya/.
 
-- [ ] Live check on the Fastmail test account: whether one authorization with several `resource` parameters yields a token (or a refresh token) the IMAP, JMAP and DAV endpoints all accept, and how the token request must name them; record the answer in docs/providers.md
-- [ ] setup/SetupPlan.java `sameSignIn` (line 230), `audienceOf` (259), `resourceOf` (284) and account/Oauth.java `audience` (165): group by issuer and resource set per the check
-- [ ] OAuth flow: several resources on the authorization request; exchange and refresh per resource if the server needs one token each
-- [ ] Tests: SetupPlanTest (IMAP mail plus JMAP or DAV contacts and calendars on one issuer are one sign-in; Google and Microsoft unchanged), OauthTest
+Parked 2026-11-19 by the owner: two consents accepted until JMAP calendars work.
+
+- [-] Live check of several `resource` parameters on one grant: dropped, the route is JMAP calendars
+- [ ] CalDAV resource: the canonical one its RFC 9728 metadata names, never the SRV shard (io-pim-discovery or `SetupPlan.resourceOf`); failing test first; re-verify on device that the Fastmail calendar grant no longer fails with `invalid_target`
+- [ ] Waits on jmap-calendar-writes landing (device test, fold)
+- [ ] Live check (read-only) that Fastmail's JMAP session serves `urn:ietf:params:jmap:calendars`; record in docs/providers.md
+- [ ] setup/SetupPlan.java: for one issuer whose JMAP session serves every chosen domain, rank JMAP over CalDAV and CardDAV so the account is one grant; SetupPlanTest (Google and Microsoft unchanged)
 - [ ] e2e: a Fastmail OAuth setup asks one consent (device check owed)
-- [ ] delta.md once the rule is decided (spec/onboarding.md), fold, log, CHANGELOG
+- [ ] delta.md (spec/onboarding.md), fold, log, CHANGELOG

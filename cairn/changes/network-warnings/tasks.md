@@ -5,6 +5,8 @@ change: network-warnings
 
 # Tasks
 
+Postponed 2026-11-19 by the owner: nothing started.
+
 - [ ] Measure: a TLS 1.0-only and a TLS 1.1-only test server reached from Android 8, 10, 14 and 16 through Transport.java, with and without the versions enabled on the socket
 - [ ] The warning dialog designed on the canvas, light and dark, then built: what is weak, the server, Connect anyway or Cancel; the choice kept per server, shown in the Servers card
 - [ ] L6 TLS 1.0 and 1.1 raise the warning; a server negotiating weaker than accepted is not synced, its account card offering the dialog
