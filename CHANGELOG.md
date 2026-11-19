@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-19
+
 ### Added
 
 - Added checking CalDAV collection sync capabilities before a sync without a cursor: calendars that do not advertise collection sync, such as Mail.ru's, use a full PROPFIND listing instead of an unsupported sync REPORT. Real HTTP errors still fail the sync.
@@ -249,3 +251,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Kept debug records out of a release build's logs, and the addresses and links logged before.
 - Kept another app, or a link in a message, from cancelling a sign-in in progress: only the sign-in's own redirect, carrying its state, ends it. A sign-in left in the browser is forgotten after 15 minutes, and a custom client's sign-in shows its loader.
 - Hardened a custom client's local sign-in redirect: it waits on its own thread, ignores local connections that send nothing or something else, and accepts only `http://127.0.0.1`.
+
+[Unreleased]: https://github.com/pimalaya/android/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/pimalaya/android/releases/tag/v0.3.0
