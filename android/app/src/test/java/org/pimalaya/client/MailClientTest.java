@@ -698,23 +698,22 @@ public class MailClientTest {
     @Test
     public void aStepRequestIsWrittenAsTheBridgeReadsIt() throws Exception {
         assertSameJson(
-                "{\"count\":50,\"frontier\":null,\"bound\":null,\"anchors\":[]}",
-                new StepRequest("Clients", 50, null, null, List.of(), null).toJson().toString());
+                "{\"count\":50,\"frontier\":null,\"anchors\":[]}",
+                new StepRequest("Clients", 50, null, List.of(), null).toJson().toString());
         assertSameJson(
-                "{\"count\":50,\"frontier\":\"2099-01-01T00:00:00Z\",\"bound\":\"2026-06-30T22:00:00Z\","
+                "{\"count\":50,\"frontier\":\"2099-01-01T00:00:00Z\","
                         + "\"anchors\":[\"a2\",\"a1\"],\"mailboxes\":[\"INBOX\",\"Sent\"]}",
                 new StepRequest(
                                 null,
                                 50,
                                 "2099-01-01T00:00:00Z",
-                                "2026-06-30T22:00:00Z",
                                 List.of("a2", "a1"),
                                 List.of("INBOX", "Sent"))
                         .toJson()
                         .toString());
         assertSameJson(
-                "{\"count\":50,\"frontier\":null,\"bound\":null,\"anchors\":[],\"mailboxes\":[]}",
-                new StepRequest(null, 50, null, null, List.of(), List.of()).toJson().toString());
+                "{\"count\":50,\"frontier\":null,\"anchors\":[],\"mailboxes\":[]}",
+                new StepRequest(null, 50, null, List.of(), List.of()).toJson().toString());
     }
 
     @Test
@@ -725,7 +724,7 @@ public class MailClientTest {
                         + "\"handle\":\"e1\",\"linkId\":\"e1\",\"mailboxes\":[\"INBOX\",\"Clients\"],"
                         + "\"path\":\"/d/e1\",\"received\":1767690000000,\"size\":120,"
                         + "\"sortKey\":\"2026-01-06T08:30:00Z\",\"summary\":{\"subject\":\"Lunch\"}},"
-                        + "{\"flags\":[],\"handle\":\"e2\",\"linkId\":\"e2\",\"mailboxes\":[],"
+                        + "{\"flags\":[],\"handle\":\"e2\",\"linkId\":\"e2\",\"mailboxes\":[\"INBOX\"],"
                         + "\"path\":\"/d/e2\",\"received\":null,\"size\":0}]}";
         assertMirrors(NamedStep.class, jmap);
         assertMirrors(NamedStepItem.class, elements(field(jmap, "items")).get(0));
@@ -747,7 +746,7 @@ public class MailClientTest {
         assertSameJson("{\"subject\":\"Lunch\"}", first.summary().toString());
         NamedStepItem second = step.items().get(1);
         assertEquals(List.of(), second.flags());
-        assertEquals(List.of(), second.mailboxes());
+        assertEquals(List.of("INBOX"), second.mailboxes());
         assertEquals(null, second.received());
         assertEquals(0, second.size());
         assertEquals("absent reads empty, as optString did", "", second.sortKey());
@@ -761,37 +760,6 @@ public class MailClientTest {
         assertEquals(false, labelled.exhausted());
         assertEquals("981", labelled.historyId());
         assertEquals(List.of(), labelled.items());
-    }
-
-    @Test
-    public void aGraphStepReadsAsBefore() throws Exception {
-        String raw =
-                "{\"exhausted\":false,\"items\":[{\"handle\":\"AAM1\",\"mailboxes\":[\"Inbox\"],"
-                        + "\"path\":\"/d/AAM1\",\"received\":1767690000000,\"size\":2048,"
-                        + "\"sortKey\":\"2026-01-06T08:30:00Z\"},{\"handle\":\"AAM2\","
-                        + "\"mailboxes\":[null],\"received\":null,\"size\":null,"
-                        + "\"sortKey\":\"2026-01-05T08:30:00Z\"}]}";
-        assertMirrors(GraphStepReply.class, raw);
-        assertMirrors(GraphStepItem.class, elements(field(raw, "items")).get(0));
-        assertEquals(
-                new GraphStepReply(
-                        false,
-                        List.of(
-                                new GraphStepItem(
-                                        "AAM1",
-                                        List.of("Inbox"),
-                                        "/d/AAM1",
-                                        1767690000000L,
-                                        2048L,
-                                        "2026-01-06T08:30:00Z"),
-                                new GraphStepItem(
-                                        "AAM2",
-                                        Arrays.asList((String) null),
-                                        null,
-                                        null,
-                                        null,
-                                        "2026-01-05T08:30:00Z"))),
-                GraphStepReply.from(Replies.object(raw)));
     }
 
     /** A round's page as rs/mail/listing.rs writes it (its own test pins it). */

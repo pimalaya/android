@@ -1682,14 +1682,13 @@ fn every_read_naming_a_member_selects_its_header_fields() {
     assert!(misses.is_empty(), "{}\n{selects:?}", misses.join("\n"));
 }
 
-/// The step and the bodies' batches over a fake Graph account.
+/// The bodies' batches over a fake Graph account.
 ///
-/// The fake answers the account's or a folder's `/messages` on
-/// `sentDateTime`, `$batch` calls of `$value` or size GETs as scripted, a
-/// body read alone by a plain GET; the store behind answers `held`.
-mod step {
+/// The fake answers `$batch` calls of `$value` or size GETs as scripted, a
+/// body read alone by a plain GET.
+mod bodies {
     use std::{
-        collections::{BTreeMap, HashMap, HashSet},
+        collections::{BTreeMap, HashMap},
         fs,
         path::Path,
         time::Duration,
@@ -1697,10 +1696,7 @@ mod step {
 
     use io_msgraph::v1::rest::{
         batch::{MsgraphBatchRequest, MsgraphBatchResponse, MsgraphBatchResponses},
-        users::{
-            contacts::MsgraphSingleValueExtendedProperty,
-            messages::{MsgraphMessage, list::MsgraphMessagesListResponse},
-        },
+        users::{contacts::MsgraphSingleValueExtendedProperty, messages::MsgraphMessage},
     };
     use serde_json::{Value, json};
     use url::Url;
@@ -1708,24 +1704,18 @@ mod step {
     use crate::{
         client::{
             Client,
-            fake::{BoxedServer, FakeRequest, FakeResponse, FakeServer, holding},
+            fake::{BoxedServer, FakeRequest, FakeResponse, FakeServer},
             msgraph::Msgraph,
         },
         mail::{
             base64,
-            msgraph::{
-                ALONE_BYTES, Band, GraphFetched, Inner, MESSAGE_EXPAND, STEP_SELECT, StepAsk,
-                tests::{band, error, hours_back},
-            },
+            msgraph::{ALONE_BYTES, GraphFetched, Inner, MESSAGE_EXPAND, tests::error},
         },
     };
 
-    /// One message of the fake account.
+    /// One message of the fake account: the MAPI size Graph states for it.
     #[derive(Clone)]
     struct Message {
-        folder: String,
-        date: String,
-        received: String,
         size: Option<u64>,
     }
 
@@ -1733,10 +1723,6 @@ mod step {
     #[derive(Default)]
     struct FakeMail {
         messages: BTreeMap<String, Message>,
-        /// Whether the account's listing answers `InefficientFilter`.
-        inefficient: bool,
-        /// The listings asked for, folder (none for the account) and band.
-        listings: Vec<(Option<String>, Band)>,
         /// The ids of each `$batch`.
         batches: Vec<Vec<String>>,
         /// The ids read alone.
@@ -1748,35 +1734,11 @@ mod step {
         inner: HashMap<String, Vec<Inner>>,
         /// Whether a `$batch` fails as an expired token.
         expired: bool,
-        /// What the store holds, as a step asks it.
-        held: HashSet<String>,
     }
 
     impl FakeMail {
-        fn add(&mut self, id: &str, folder: &str, date: String, size: Option<u64>) {
-            self.messages.insert(
-                id.into(),
-                Message {
-                    folder: folder.into(),
-                    received: date.clone(),
-                    date,
-                    size,
-                },
-            );
-        }
-
-        /// `count` messages of `folder`, an hour apart from `from` hours
-        /// back, named `<prefix><index>`, 40 KB each.
-        fn fill(&mut self, prefix: &str, folder: &str, from: i64, count: usize) {
-            for index in 0..count {
-                let hours = from + index as i64;
-                self.add(
-                    &format!("{prefix}{index:03}"),
-                    folder,
-                    hours_back(hours),
-                    Some(40_000),
-                );
-            }
+        fn add(&mut self, id: &str, size: Option<u64>) {
+            self.messages.insert(id.into(), Message { size });
         }
 
         fn body(id: &str) -> Vec<u8> {
@@ -1785,13 +1747,10 @@ mod step {
     }
 
     impl FakeMail {
-        /// Runs `verb` over a Graph API this account is in, the store behind
-        /// the client holding [`Self::held`], the waits it took kept in
-        /// [`Self::pauses`].
+        /// Runs `verb` over a Graph API this account is in, the waits it took
+        /// kept in [`Self::pauses`].
         fn serve<T>(&mut self, verb: impl FnOnce(&mut Msgraph<'_, BoxedServer<'_>>) -> T) -> T {
-            let held = self.held.clone();
-            let mut server = FakeServer::boxed(|request| self.answer(request));
-            server.store = Some(holding(held));
+            let server = FakeServer::boxed(|request| self.answer(request));
             let mut client = Client::new(server);
             let out = verb(&mut Msgraph {
                 client: &mut client,
@@ -1803,74 +1762,15 @@ mod step {
             out
         }
 
-        /// Answers one Graph request: a listing, a `$batch`, or a body alone.
+        /// Answers one Graph request: a `$batch`, or a body alone.
         fn answer(&mut self, request: &FakeRequest) -> FakeResponse {
             assert_eq!(request.header("Authorization"), Some("Bearer token"));
             let segments: Vec<&str> = request.path.split('/').skip(1).collect();
             match (request.method.as_str(), segments.as_slice()) {
-                ("GET", ["v1.0", "me", "messages"]) => self.dated(None, request),
-                ("GET", ["v1.0", "me", "mailFolders", folder, "messages"]) => {
-                    self.dated(Some(folder), request)
-                }
                 ("GET", ["v1.0", "me", "messages", id, "$value"]) => self.source(id),
                 ("POST", ["v1.0", "$batch"]) => self.batch(request),
                 other => panic!("unexpected request {other:?}"),
             }
-        }
-
-        /// One page of the account's messages, or of one folder's, newest
-        /// `Date` first, within the band the `$filter` names, `$top` at most.
-        fn dated(&mut self, folder: Option<&str>, request: &FakeRequest) -> FakeResponse {
-            assert_eq!(request.param("$select"), Some(STEP_SELECT));
-            assert_eq!(request.param("$expand"), Some(MESSAGE_EXPAND));
-            assert_eq!(request.param("$orderby"), Some("sentDateTime desc"));
-            let band = band(request.param("$filter"));
-            let top: usize = request.param("$top").unwrap().parse().unwrap();
-            self.listings.push((folder.map(String::from), band.clone()));
-            if folder.is_none() && self.inefficient {
-                let body = json!({ "error": {
-                    "code": "InefficientFilter",
-                    "message": "The restriction or sort order is too complex",
-                } });
-                return FakeResponse::json(400, &body);
-            }
-
-            let mut matching: Vec<(&String, &Message)> = self
-                .messages
-                .iter()
-                .filter(|(_, message)| folder.is_none_or(|folder| message.folder == folder))
-                .filter(|(_, message)| {
-                    band.since
-                        .as_deref()
-                        .is_none_or(|since| message.date.as_str() >= since)
-                        && band
-                            .until
-                            .as_deref()
-                            .is_none_or(|until| match band.inclusive {
-                                true => message.date.as_str() <= until,
-                                false => message.date.as_str() < until,
-                            })
-                })
-                .collect();
-            matching.sort_by(|a, b| b.1.date.cmp(&a.1.date).then(a.0.cmp(b.0)));
-            let value = matching
-                .into_iter()
-                .take(top)
-                .map(|(id, message)| MsgraphMessage {
-                    id: id.clone(),
-                    sent_date_time: Some(message.date.clone()),
-                    received_date_time: Some(message.received.clone()),
-                    parent_folder_id: Some(message.folder.clone()),
-                    single_value_extended_properties: sized(message.size),
-                    ..Default::default()
-                })
-                .collect();
-            let page = MsgraphMessagesListResponse {
-                value,
-                next_link: None,
-                ..Default::default()
-            };
-            FakeResponse::json(200, &page)
         }
 
         /// One `$batch` of GETs: of `$value` bodies, each answered as
@@ -2007,195 +1907,10 @@ mod step {
         .collect()
     }
 
-    fn ask<'a>(folders: &'a [String], frontier: Option<&'a str>) -> StepAsk<'a> {
-        StepAsk {
-            folders,
-            alone: false,
-            frontier,
-            bound: None,
-            count: 50,
-        }
-    }
-
-    fn folders(names: &[&str]) -> Vec<String> {
-        names.iter().map(|name| name.to_string()).collect()
-    }
-
     fn ids(fetched: &[GraphFetched]) -> Vec<String> {
         let mut ids: Vec<String> = fetched.iter().map(|fetched| fetched.id.clone()).collect();
         ids.sort();
         ids
-    }
-
-    #[test]
-    fn one_listing_takes_fifty_across_folders_leaving_the_trash() {
-        let mut graph = FakeMail::default();
-        graph.fill("i", "inbox", 0, 40);
-        graph.fill("s", "sent", 100, 20);
-        // NOTE: the trash interleaved with the inbox, never stepped.
-        for index in 0..30 {
-            graph.add(
-                &format!("t{index:03}"),
-                "trash",
-                hours_back(index * 2),
-                Some(1),
-            );
-        }
-        let stepped_folders = folders(&["inbox", "sent"]);
-
-        let stepped = graph
-            .serve(|graph| graph.list_step(&ask(&stepped_folders, None)))
-            .unwrap();
-        assert_eq!(stepped.messages.len(), 50);
-        assert!(!stepped.exhausted);
-        assert!(
-            stepped
-                .messages
-                .iter()
-                .all(|message| message.folder != "trash")
-        );
-        assert_eq!(
-            stepped
-                .messages
-                .iter()
-                .filter(|m| m.folder == "sent")
-                .count(),
-            10,
-            "the inbox's 40, then the sent mail's newest 10"
-        );
-        assert!(
-            graph.listings.iter().all(|(folder, _)| folder.is_none()),
-            "the account's listing alone"
-        );
-        assert!(graph.listings.len() > 1, "a keyset past the trash");
-        let (_, last) = graph.listings.last().unwrap();
-        assert!(
-            last.inclusive,
-            "from the oldest Date reached, that second included"
-        );
-        assert_eq!(stepped.messages[0].size, Some(40_000));
-        assert!(stepped.messages[0].received.is_some());
-    }
-
-    #[test]
-    fn the_next_step_starts_at_the_frontier_dropping_what_is_held_there() {
-        let mut graph = FakeMail::default();
-        graph.fill("i", "inbox", 0, 120);
-        let inbox = folders(&["inbox"]);
-
-        let first = graph
-            .serve(|graph| graph.list_step(&ask(&inbox, None)))
-            .unwrap();
-        graph
-            .held
-            .extend(first.messages.iter().map(|message| message.id.clone()));
-        let frontier = first.messages.last().unwrap().date.clone();
-
-        let next = graph
-            .serve(|graph| graph.list_step(&ask(&inbox, Some(&frontier))))
-            .unwrap();
-        assert_eq!(next.messages.len(), 50);
-        assert!(
-            next.messages
-                .iter()
-                .all(|message| !graph.held.contains(&message.id))
-        );
-        assert_eq!(next.messages[0].id, "i050", "right below the first step");
-        let (_, band) = &graph.listings[graph.listings.len() - 1];
-        assert_eq!(band.until.as_deref(), Some(frontier.as_str()));
-        assert!(band.inclusive, "le the frontier");
-    }
-
-    #[test]
-    fn a_busy_second_comes_whole() {
-        let mut graph = FakeMail::default();
-        graph.fill("i", "inbox", 0, 49);
-        // NOTE: the 50th shares its Date with four older ones.
-        for index in 0..5 {
-            graph.add(&format!("b{index}"), "inbox", hours_back(49), Some(10));
-        }
-        graph.fill("o", "inbox", 60, 10);
-        let inbox = folders(&["inbox"]);
-
-        let stepped = graph
-            .serve(|graph| graph.list_step(&ask(&inbox, None)))
-            .unwrap();
-        assert_eq!(stepped.messages.len(), 54);
-        assert!(!stepped.exhausted);
-    }
-
-    #[test]
-    fn a_small_account_is_exhausted() {
-        let mut graph = FakeMail::default();
-        graph.fill("i", "inbox", 0, 30);
-        let inbox = folders(&["inbox"]);
-
-        let stepped = graph
-            .serve(|graph| graph.list_step(&ask(&inbox, None)))
-            .unwrap();
-        assert_eq!(stepped.messages.len(), 30);
-        assert!(stepped.exhausted);
-        assert_eq!(graph.listings.len(), 1);
-    }
-
-    #[test]
-    fn a_second_fuller_than_a_page_is_left_below() {
-        let mut graph = FakeMail::default();
-        // NOTE: a page is the count and its slack, 30 for 5.
-        for index in 0..40 {
-            graph.add(&format!("c{index:02}"), "inbox", hours_back(1), Some(10));
-        }
-        graph.fill("o", "inbox", 5, 10);
-        let inbox = folders(&["inbox"]);
-        let mut asked = ask(&inbox, None);
-        asked.count = 5;
-
-        let stepped = graph.serve(|graph| graph.list_step(&asked)).unwrap();
-        assert_eq!(stepped.messages.len(), 30, "the page's share of the second");
-        assert!(!stepped.exhausted);
-        assert!(graph.listings.len() <= 3, "no loop");
-    }
-
-    #[test]
-    fn an_inefficient_filter_merges_each_folders_listing() {
-        let mut graph = FakeMail::default();
-        graph.fill("i", "inbox", 0, 40);
-        graph.fill("s", "sent", 20, 40);
-        let both = folders(&["inbox", "sent"]);
-
-        let listed = graph
-            .serve(|graph| graph.list_step(&ask(&both, None)))
-            .unwrap();
-        graph.inefficient = true;
-        graph.listings.clear();
-        let merged = graph
-            .serve(|graph| graph.list_step(&ask(&both, None)))
-            .unwrap();
-
-        assert_eq!(merged.messages, listed.messages);
-        assert_eq!(merged.exhausted, listed.exhausted);
-        let folders: Vec<Option<String>> = graph
-            .listings
-            .iter()
-            .map(|(folder, _)| folder.clone())
-            .collect();
-        assert!(folders.contains(&Some("inbox".into())));
-        assert!(folders.contains(&Some("sent".into())));
-    }
-
-    #[test]
-    fn a_filtered_view_lists_its_folder() {
-        let mut graph = FakeMail::default();
-        graph.fill("i", "inbox", 0, 40);
-        graph.fill("p", "projets", 0, 10);
-        let projets = folders(&["projets"]);
-        let mut asked = ask(&projets, None);
-        asked.alone = true;
-
-        let stepped = graph.serve(|graph| graph.list_step(&asked)).unwrap();
-        assert_eq!(stepped.messages.len(), 10);
-        assert!(stepped.exhausted);
-        assert_eq!(graph.listings[0].0.as_deref(), Some("projets"));
     }
 
     #[test]
@@ -2205,16 +1920,16 @@ mod step {
         let mut wanted = Vec::new();
         for index in 0..50 {
             let id = format!("m{index:02}");
-            graph.add(&id, "inbox", hours_back(index), Some(40_000));
+            graph.add(&id, Some(40_000));
             wanted.push((id, Some(40_000)));
         }
-        graph.add("large", "inbox", hours_back(60), Some(3_000_000));
+        graph.add("large", Some(3_000_000));
         wanted.push(("large".into(), Some(3_000_000)));
-        graph.add("unsized", "inbox", hours_back(61), None);
+        graph.add("unsized", None);
         wanted.push(("unsized".into(), None));
         for index in 0..10 {
             let id = format!("h{index}");
-            graph.add(&id, "inbox", hours_back(70), Some(ALONE_BYTES - 1));
+            graph.add(&id, Some(ALONE_BYTES - 1));
             wanted.push((id, Some(ALONE_BYTES - 1)));
         }
 
@@ -2238,7 +1953,7 @@ mod step {
         let mut graph = FakeMail::default();
         let mut wanted = Vec::new();
         for id in ["a", "b", "c", "gone", "broken", "odd"] {
-            graph.add(id, "inbox", hours_back(1), Some(10));
+            graph.add(id, Some(10));
             wanted.push((id.to_string(), Some(10)));
         }
         graph.messages.remove("gone");
@@ -2273,7 +1988,7 @@ mod step {
     fn an_expired_token_fails_the_read() {
         let dir = tempfile::tempdir().unwrap();
         let mut graph = FakeMail::default();
-        graph.add("a", "inbox", hours_back(1), Some(10));
+        graph.add("a", Some(10));
         graph.expired = true;
 
         let read = graph

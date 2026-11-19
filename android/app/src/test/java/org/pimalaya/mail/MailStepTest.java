@@ -38,6 +38,7 @@ import org.pimalaya.pimdir.PimdirSummary;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowLog;
 
 import java.io.File;
 import java.io.IOException;
@@ -84,6 +85,9 @@ public class MailStepTest {
                         new Mailbox("TRASH", "trash")));
         accountId = new PimdirAccount(context).idOf(EMAIL);
         MailPolicy.markAccountWide(context, accountId, true);
+        // NOTE: a Gmail account keeps its All Mail, which every message the
+        // bridge steps names.
+        store.ensureAllMail(EMAIL);
         inbox = store.collectionOf(EMAIL, "INBOX");
         clients = store.collectionOf(EMAIL, "Clients");
         trash = store.collectionOf(EMAIL, "TRASH");
@@ -175,7 +179,7 @@ public class MailStepTest {
                                     List.of(Flags.Marker.SEEN.wire()),
                                     mail.id,
                                     mail.messageId,
-                                    mail.mailboxes,
+                                    filed(mail.mailboxes),
                                     file.getAbsolutePath(),
                                     mail.received.toEpochMilli(),
                                     mail.source().length,
@@ -188,6 +192,14 @@ public class MailStepTest {
             } catch (IOException failure) {
                 throw new AssertionError(failure);
             }
+        }
+
+        /** The mailboxes the bridge names a Gmail message in: All Mail first. */
+        private List<String> filed(List<String> labels) {
+            List<String> filed = new ArrayList<>();
+            filed.add(PimdirCollections.ALL_MAIL);
+            filed.addAll(labels);
+            return filed;
         }
 
         /** Which of a listed page the store holds, asked as the bridge asks. */
@@ -410,6 +422,27 @@ public class MailStepTest {
                 List.of("m2", "m1"),
                 MailWindow.anchors(context, accountId, null));
         assertEquals(2, held(clients));
+    }
+
+    @Test
+    public void aMailboxNameTheStoreDoesNotHoldIsReportedNotDropped() throws Exception {
+        Instant now = Instant.parse("2026-10-09T12:00:00Z");
+        Server server = new Server();
+        // NOTE: a label made since the store last read the account's
+        // mailboxes: the bridge names it, the store holds no collection.
+        server.next =
+                List.of(new Mail("m1", "2026-10-09T11:00:00Z", now, "INBOX", "Projets"));
+
+        MailStep.Outcome outcome =
+                new GmailStep().run(server.engine, new StepRun(EMAIL, mailboxes(), null, true));
+
+        assertEquals("filed where it resolves", 1, held(inbox));
+        assertEquals("All Mail, held by the store, is no unresolved name", 1, outcome.unresolved);
+        boolean reported = false;
+        for (ShadowLog.LogItem item : ShadowLog.getLogsForTag("pimalaya")) {
+            reported |= item.type == android.util.Log.WARN && item.msg.contains("Projets");
+        }
+        assertTrue("the unresolved name is logged", reported);
     }
 
     @Test

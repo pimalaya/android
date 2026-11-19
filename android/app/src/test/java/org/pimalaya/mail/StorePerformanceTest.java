@@ -586,7 +586,7 @@ public class StorePerformanceTest {
                         store.accountIdOf(EMAIL))
                 .stepRead(
                 List.of(inbox),
-                new StepRequest(null, 50, null, null, List.of(), null),
+                new StepRequest(null, 50, null, List.of(), null),
                 context.getCacheDir());
         JSONArray held = answered[0].getJSONArray("held");
         assertEquals("the step's mailboxes alone", 1, held.length());

@@ -679,7 +679,7 @@ public final class MailEngine extends PimdirEngine {
     private boolean sawHeld;
 
     /** The account's mailboxes as the store keeps them. */
-    private List<String> accountCollections() {
+    List<String> accountCollections() {
         String prefix = PimdirAccount.collectionId(accountId, "");
         List<String> collections = new ArrayList<>();
         for (MailStore.Edge edge : mail().edges()) {
@@ -1104,7 +1104,7 @@ public final class MailEngine extends PimdirEngine {
      * What a step over {@code only} (null for the account) asks the bridge.
      *
      * <p>About {@link MailStep#COUNT} unheld messages below the frontier,
-     * within the bound, after the JMAP {@link MailWindow#anchors}, over
+     * after the JMAP {@link MailWindow#anchors}, over
      * {@code mailboxes} (null for none); see {@link #stepRead}.
      */
     StepRequest stepRequest(String only, List<String> mailboxes) {
@@ -1116,19 +1116,17 @@ public final class MailEngine extends PimdirEngine {
                             ? MailWindow.since(context, accountId)
                             : MailWindow.since(context, accountId, only);
         }
-        String bound = MailScope.sinceOf(context, accountId);
         String mailbox = only == null ? null : mailboxOf(only);
         return new StepRequest(
                 mailbox,
                 MailStep.COUNT,
                 frontier,
-                bound,
                 MailWindow.anchors(context, accountId, mailbox),
                 mailboxes);
     }
 
     /**
-     * One Gmail or JMAP step read by the bridge, as {@code request} asks.
+     * One Gmail step read by the bridge, as {@code request} asks.
      *
      * <p>Each message read into a file of {@code dir}, {@link #counted}; the
      * bridge asks which of each page the store holds ({@link #held}).

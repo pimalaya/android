@@ -25,7 +25,7 @@ use std::{
 };
 
 use io_pimdir::intent::PimdirSubmit;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer, ser::SerializeSeq};
 use url::Url;
 
 use crate::{
@@ -37,9 +37,8 @@ use crate::{
         gmail::{Gmail, belongs},
         gmail_step::{self, GmailRun},
         imap::{self, ImapState},
-        jmap_step::{self, JmapRun, StepRequest},
+        jmap_step::{self, JmapRun},
         listing::{Floor, FloorReply, MailPage, MailRequest, Named, Scope},
-        msgraph::{GraphFetched, StepAsk},
         smtp,
     },
     offline::{summary::SummaryJson, wire::sorted},
@@ -243,22 +242,12 @@ impl MailSession {
     }
 }
 
-/// What a step is asked, each backend reading what it needs.
+/// What a Gmail step is asked.
 #[derive(Deserialize)]
 pub struct MailStepRequest {
-    /// How many messages the step brings, every backend; which of a listed
-    /// page the store holds is asked of it ([`Client::held`]).
+    /// How many messages the step brings; which of a listed page the store
+    /// holds is asked of it ([`Client::held`]).
     pub count: usize,
-    /// The instant (RFC 3339) the step starts below: Graph, and JMAP once
-    /// no anchor is left.
-    pub frontier: Option<String>,
-    /// The account's bound, Graph.
-    pub bound: Option<String>,
-    /// The anchors the last step answered, oldest first, JMAP.
-    pub anchors: Vec<String>,
-    /// The mailboxes stepped, by name: Graph and a JMAP account step.
-    #[serde(default)]
-    pub mailboxes: Vec<String>,
 }
 
 /// The step [`Mail::step`] takes.
@@ -281,34 +270,21 @@ pub struct MessageFetch<'a> {
     pub dir: &'a Path,
 }
 
-/// What one step brought, its shape the backend's ([`Mail::step`]).
+/// What one Gmail step brought ([`Mail::step`]).
 #[derive(Serialize)]
-#[serde(untagged, rename_all_fields = "camelCase")]
-pub enum MailStepReply {
-    /// A Gmail or JMAP step.
-    Named {
-        /// The anchors the next step starts from, JMAP only.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        anchors: Option<Vec<String>>,
-        /// Whether the step walked by reception rather than by `Date`.
-        by_reception: bool,
-        /// Whether the step reached the end of the account.
-        exhausted: bool,
-        /// The account's state read before the step (JMAP's `Email` state).
-        history_id: String,
-        /// The messages stepped.
-        items: Vec<NamedStepItem>,
-    },
-    /// A Graph step.
-    Graph {
-        /// Whether the step reached the end of the mailboxes.
-        exhausted: bool,
-        /// The messages stepped.
-        items: Vec<GraphStepItem>,
-    },
+#[serde(rename_all = "camelCase")]
+pub struct MailStepReply {
+    /// Whether the step walked by reception rather than by `Date`.
+    pub by_reception: bool,
+    /// Whether the step reached the end of the account.
+    pub exhausted: bool,
+    /// The account's history id read before the step.
+    pub history_id: String,
+    /// The messages stepped.
+    pub items: Vec<NamedStepItem>,
 }
 
-/// One message of a Gmail or JMAP step: named as a listed one is, with
+/// One message of a Gmail step: named as a listed one is, with
 /// the mailboxes it is a member of, by name, and its file.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -320,7 +296,7 @@ pub struct NamedStepItem {
     /// The identity hint its summary states ([`Named::link_id`]).
     pub link_id: String,
     /// The mailboxes it is a member of, by name.
-    pub mailboxes: Vec<String>,
+    pub mailboxes: Memberships,
     /// The file its body was written to.
     pub path: String,
     /// When it was received, in milliseconds since the epoch.
@@ -333,27 +309,6 @@ pub struct NamedStepItem {
     /// Its Annex A summary.
     #[serde(serialize_with = "sorted", skip_serializing_if = "Option::is_none")]
     pub summary: Option<SummaryJson>,
-}
-
-/// One message of a Graph step: the mailbox it was stepped in and, where
-/// its body was read, its file.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphStepItem {
-    /// Its Graph id.
-    pub handle: String,
-    /// The one mailbox it was stepped in, null for a folder the step does
-    /// not name.
-    pub mailboxes: Vec<Option<String>>,
-    /// The file its body was written to, absent for a held message.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
-    /// When it was received, in milliseconds since the epoch.
-    pub received: Option<i64>,
-    /// Its size in octets, the file's where its body was read.
-    pub size: Option<u64>,
-    /// Its sort key, the `sentDateTime` it was stepped by.
-    pub sort_key: String,
 }
 
 /// Some messages read whole into files ([`Mail::fetch_sources`]), and the
@@ -563,13 +518,14 @@ impl<H: Host> Mail<'_, '_, H> {
         }
     }
 
-    /// One step of the account; IMAP steps from the store.
+    /// One step of a Gmail account; every other account steps from the
+    /// store.
     pub fn step(&mut self, step: &MailStep) -> Result<MailStepReply, BridgeError> {
         match self.session.kind {
-            MailKind::Jmap(_) => self.jmap_step(step),
-            MailKind::Graph(_) => self.graph_step(step),
             MailKind::Gmail(_) => self.gmail_step(step),
-            MailKind::Imap(_) => Err("An IMAP account steps from the store".into()),
+            MailKind::Imap(_) | MailKind::Jmap(_) | MailKind::Graph(_) => {
+                Err("Only a Gmail account steps through the account".into())
+            }
         }
     }
 
@@ -598,167 +554,7 @@ impl<H: Host> Mail<'_, '_, H> {
             token: &token,
         }
         .step(label.as_deref(), step.request.count, step.dir)?;
-
-        let mut items = Vec::with_capacity(stepped.messages.len());
-        for fetched in stepped.messages {
-            let mailboxes = fetched
-                .labels
-                .iter()
-                .filter(|label| belongs(&fetched.labels, label))
-                .filter_map(|label| names.get(label).cloned())
-                .collect();
-            let named = Named::new(fetched.id.clone(), fetched.flags.clone(), fetched.summary);
-            items.push(NamedStepItem {
-                flags: named.flags,
-                handle: named.handle,
-                link_id: named.link_id,
-                mailboxes,
-                path: fetched.path.to_string_lossy().into_owned(),
-                received: fetched.received,
-                size: fetched.size,
-                sort_key: named.sort_key,
-                summary: named.summary,
-            });
-        }
-        Ok(MailStepReply::Named {
-            anchors: None,
-            by_reception: true,
-            exhausted: stepped.exhausted,
-            history_id: stepped.history_id,
-            items,
-        })
-    }
-
-    /// One step of a JMAP account ([`Jmap::step`]), each message with the
-    /// mailboxes its `mailboxIds` file it in, by name.
-    ///
-    /// The trash and the junk are left out of an account step, the roster
-    /// read afresh for the roles naming them.
-    fn jmap_step(&mut self, step: &MailStep) -> Result<MailStepReply, BridgeError> {
-        let request = step.request;
-        let listed = self.http_roster()?;
-        // NOTE: an account step naming its mailboxes (the filter's ticks)
-        // leaves every other out, bringing nothing none of them would file.
-        let excluded = listed
-            .iter()
-            .filter(|(_, listed)| {
-                listed.role == "trash"
-                    || listed.role == "junk"
-                    || (!request.mailboxes.is_empty() && !request.mailboxes.contains(&listed.name))
-            })
-            .map(|(id, _)| id.clone())
-            .collect();
-        let names: HashMap<String, String> = listed
-            .iter()
-            .map(|(id, listed)| (id.clone(), listed.name.clone()))
-            .collect();
-        self.session.listing().remember(listed);
-        let only = match step.mailbox.is_empty() {
-            true => None,
-            false => Some(self.mailbox_id(step.mailbox)?),
-        };
-
-        let url = self.session.jmap_url()?;
-        let asked = StepRequest {
-            mailbox: only.as_deref(),
-            excluded,
-            sent_at: false,
-            anchors: &request.anchors,
-            frontier: request.frontier.as_deref(),
-            count: request.count,
-        };
-        let stepped = Jmap {
-            client: self.client,
-            session_url: url,
-            auth: self.session.auth(),
-        }
-        .step(asked, step.dir)?;
-
-        let mut items = Vec::with_capacity(stepped.items.len());
-        for item in stepped.items {
-            let mailboxes = item
-                .mailboxes
-                .iter()
-                .filter_map(|id| names.get(id).cloned())
-                .collect();
-            items.push(NamedStepItem {
-                flags: item.named.flags,
-                handle: item.named.handle,
-                link_id: item.named.link_id,
-                mailboxes,
-                path: item.path.to_string_lossy().into_owned(),
-                received: item.received,
-                size: item.size,
-                sort_key: item.named.sort_key,
-                summary: item.named.summary,
-            });
-        }
-        Ok(MailStepReply::Named {
-            anchors: Some(stepped.anchors),
-            by_reception: stepped.by_reception,
-            exhausted: stepped.exhausted,
-            history_id: stepped.state,
-            items,
-        })
-    }
-
-    /// One step of a Graph account ([`Msgraph::step`]) below the frontier.
-    ///
-    /// Over the `mailboxes` named, or `mailbox` alone for a filtered view
-    /// (its own frontier then); a held message's body is never read again.
-    fn graph_step(&mut self, step: &MailStep) -> Result<MailStepReply, BridgeError> {
-        let request = step.request;
-        let names: Vec<String> = match step.mailbox.is_empty() {
-            true => request.mailboxes.clone(),
-            false => vec![step.mailbox.to_string()],
-        };
-        let mut folders = Vec::with_capacity(names.len());
-        let mut named = HashMap::with_capacity(names.len());
-        for name in &names {
-            let id = self.mailbox_id(name)?;
-            named.insert(id.clone(), name.clone());
-            folders.push(id);
-        }
-
-        let ask = StepAsk {
-            folders: &folders,
-            alone: !step.mailbox.is_empty(),
-            frontier: request.frontier.as_deref(),
-            bound: request.bound.as_deref(),
-            count: request.count,
-        };
-        let token = self.session.auth().secret().to_string();
-        let (stepped, fetched) = Msgraph {
-            client: self.client,
-            token: &token,
-        }
-        .step(&ask, step.dir)?;
-        let mut files: HashMap<String, GraphFetched> = fetched
-            .into_iter()
-            .map(|fetched| (fetched.id.clone(), fetched))
-            .collect();
-
-        let items = stepped
-            .messages
-            .into_iter()
-            .map(|message| {
-                let file = files.remove(&message.id);
-                GraphStepItem {
-                    mailboxes: vec![named.get(&message.folder).cloned()],
-                    path: file
-                        .as_ref()
-                        .map(|file| file.path.to_string_lossy().into_owned()),
-                    received: message.received,
-                    size: file.map_or(message.size, |file| Some(file.size as u64)),
-                    sort_key: message.date,
-                    handle: message.id,
-                }
-            })
-            .collect();
-        Ok(MailStepReply::Graph {
-            exhausted: stepped.exhausted,
-            items,
-        })
+        Ok(gmail_reply(stepped, &names))
     }
 
     /// Some messages read whole into files, and the ids gone.
@@ -1212,6 +1008,77 @@ impl<H: Host> Mail<'_, '_, H> {
     }
 }
 
+/// The name the store files Gmail's All Mail under: a hidden collection no
+/// roster lists, mirrored by the app's `PimdirCollections.ALL_MAIL`.
+pub const ALL_MAIL: &str = "\u{1}all";
+
+/// The mailboxes a stepped message is a member of, by name: never none.
+///
+/// A first mailbox and the rest, so a message filed nowhere is no value it
+/// can hold; it crosses JNI as one list.
+#[derive(Debug)]
+pub struct Memberships {
+    first: String,
+    rest: Vec<String>,
+}
+
+impl Memberships {
+    /// A Gmail message's: All Mail, which holds every message, then each
+    /// mailbox of `names` (the roster's, by label id) its `labels` make it
+    /// a member of ([`belongs`]).
+    ///
+    /// A label the roster does not hold (a category, a marker) files it
+    /// nowhere else.
+    pub fn gmail(labels: &[String], names: &HashMap<String, String>) -> Self {
+        Self {
+            first: ALL_MAIL.to_string(),
+            rest: labels
+                .iter()
+                .filter(|label| belongs(labels, label))
+                .filter_map(|label| names.get(label).cloned())
+                .collect(),
+        }
+    }
+}
+
+impl Serialize for Memberships {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut list = serializer.serialize_seq(Some(1 + self.rest.len()))?;
+        list.serialize_element(&self.first)?;
+        for name in &self.rest {
+            list.serialize_element(name)?;
+        }
+        list.end()
+    }
+}
+
+/// A Gmail step's reply, each message with its [`Memberships::gmail`],
+/// `names` naming the roster's mailboxes by label id.
+fn gmail_reply(stepped: gmail_step::Stepped, names: &HashMap<String, String>) -> MailStepReply {
+    let mut items = Vec::with_capacity(stepped.messages.len());
+    for fetched in stepped.messages {
+        let mailboxes = Memberships::gmail(&fetched.labels, names);
+        let named = Named::new(fetched.id.clone(), fetched.flags.clone(), fetched.summary);
+        items.push(NamedStepItem {
+            flags: named.flags,
+            handle: named.handle,
+            link_id: named.link_id,
+            mailboxes,
+            path: fetched.path.to_string_lossy().into_owned(),
+            received: fetched.received,
+            size: fetched.size,
+            sort_key: named.sort_key,
+            summary: named.summary,
+        });
+    }
+    MailStepReply {
+        by_reception: true,
+        exhausted: stepped.exhausted,
+        history_id: stepped.history_id,
+        items,
+    }
+}
+
 /// Whether Graph or Gmail refused a submission for good, by its status.
 fn refused_by_api(status: u16) -> bool {
     matches!(status, 400 | 403 | 404 | 413 | 422)
@@ -1275,14 +1142,15 @@ fn uncertain(status: Option<u16>, taken: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, path::PathBuf};
 
+    use io_pimdir::summary::mail::PimdirMailSummary;
     use serde_json::json;
 
     use crate::{
         client::fake::{FakeRequest, FakeResponse, FakeServer, jmap_session},
         mail::{
-            Mailbox,
+            Mailbox, gmail,
             imap::tests::{Scripted, daily, state as imap_state},
             session::*,
         },
@@ -1380,6 +1248,66 @@ mod tests {
         Message-ID: <m1@example.com>\r\n\
         \r\n\
         Hello\r\n";
+
+    /// A message's file written into `dir`, as a step writes it.
+    fn written(dir: &Path, id: &str) -> PathBuf {
+        let path = dir.join(id);
+        fs::write(&path, SENT).unwrap();
+        path
+    }
+
+    /// The mailboxes each item of `reply` is filed in, by handle.
+    fn filed(reply: &MailStepReply) -> Vec<(String, serde_json::Value)> {
+        let reply = serde_json::to_value(reply).unwrap();
+        reply["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| {
+                let handle = item["handle"].as_str().unwrap().to_string();
+                (handle, item["mailboxes"].clone())
+            })
+            .collect()
+    }
+
+    /// A Gmail message lands in All Mail whatever its labels: one under a
+    /// label the roster does not hold (a category, a label made since) is
+    /// filed there alone, never nowhere.
+    #[test]
+    fn a_gmail_message_under_an_unknown_label_is_filed_in_all_mail() {
+        let dir = tempfile::tempdir().unwrap();
+        let fetched = |id: &str, labels: &[&str]| gmail::Fetched {
+            id: id.into(),
+            path: written(dir.path(), id),
+            size: SENT.len(),
+            labels: labels.iter().map(|label| label.to_string()).collect(),
+            flags: Vec::new(),
+            received: None,
+            summary: PimdirMailSummary::default(),
+        };
+        let stepped = gmail_step::Stepped {
+            history_id: "h1".into(),
+            messages: vec![
+                fetched("m1", &["INBOX", "Label_1"]),
+                fetched("m2", &["Label_9", "UNREAD"]),
+            ],
+            exhausted: false,
+        };
+        let names = HashMap::from([
+            ("INBOX".to_string(), "INBOX".to_string()),
+            ("Label_1".to_string(), "Clients".to_string()),
+        ]);
+
+        let reply = gmail_reply(stepped, &names);
+
+        assert_eq!(
+            filed(&reply),
+            [
+                ("m1".into(), json!(["\u{1}all", "INBOX", "Clients"])),
+                ("m2".into(), json!(["\u{1}all"])),
+            ]
+        );
+    }
 
     /// Submits [`SENT`] through an HTTP session over `base_url`, signed in
     /// with `token`, to a server answering with `handler`; answers the

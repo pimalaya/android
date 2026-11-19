@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: a-message-is-filed-somewhere
-status: draft
+status: active
 created: 2026-10-18
 ---
 
@@ -11,20 +11,16 @@ created: 2026-10-18
 
 Borrowed from an external engine: a message's mailbox or label set is a type that cannot be empty, so "a message filed nowhere" is not a value code can hold.
 
-Here a step item carries `mailboxes` as a plain list across JNI (rust/src/mail/session.rs: `NamedStepItem::mailboxes: Vec<String>`, `GraphStepItem::mailboxes: Vec<Option<String>>`), and the Java side files it wherever the names resolve, re-verified on 2026-10-18:
+Re-verified on 2026-11-19. Only Gmail steps by account now (`MailStep.of`, `MailStepKind.ACCOUNT`); JMAP and Graph step from the store through `WidenStep` (`Backend::mail_step`, rust/src/account.rs). The Graph step path is dead, and so is the JMAP one (`jmap_step`, `JmapCalls::step`), reached only from tests: `GraphStepItem`, `MailStepReply::Graph` (rust/src/mail/session.rs), `MailClient.graphStep` and `GraphStepReply` are reached only from a test.
 
-- GraphStep.java (around line 68): an item whose list is empty, or whose first name is null (a folder the step does not name), is filed in no collection and nothing says so; its body file, when one was written, is still handed to `engine.fetched`.
-- GmailStep.java (around line 70): names that resolve to no collection are skipped one by one; the item still lands in the hidden All Mail, so it is never lost, but a label the roster does not know yet goes unreported.
+A Named step item carries `mailboxes` as a plain `Vec<String>` across JNI, and GmailStep.java (around line 70) files it wherever the names resolve to a collection, skipping the others one by one with nothing said; its body file is still handed to `engine.fetched`.
 
-An empty list is also the shape a bug in a backend's mapping would take (a role filter, a renamed folder), and it fails silently.
+- Gmail: the item always lands in the hidden All Mail, so it is never lost, but a label the roster does not know goes unreported.
+- JMAP: the bridge's account step could file an item nowhere (a mapping bug, a mailbox renamed mid-step), but no app flow reaches it.
 
 ## What
 
-- A `Memberships` type in the bridge, non-empty by construction (a first mailbox plus the rest), built once per item where the backend's own ids are mapped to names; an item that maps to none is not a step item but a reported skip, counted in the step's reply.
-- Gmail's account-wide step builds its memberships with All Mail always among them, which is today's rule written into the type.
-- Java reads a reply in which every item names at least one mailbox, and a mailbox name the engine cannot resolve to a collection is reported, not skipped.
-
-## Open questions
-
-- Whether a skip is an error of the step (stop it) or a count the sync strip shows.
-- Graph's single parent folder: a `Memberships` of one, or a type of its own.
+- Delete the dead Graph step path (Rust reply variant, the bridge's keyset walk and its tests, client classes, the test stub).
+- Delete the dead JMAP step path (`jmap_step` in rust/src/mail/session.rs, `Jmap::step`, `JmapCalls::step` and what only it reaches in rust/src/mail/jmap_step.rs and rust/src/mail/jmap.rs, their tests): the account step is Gmail-only, and its docs say so. The bridge's step request keeps `count` alone; Java's `StepRequest` drops the unused `bound`.
+- A `Memberships` type in the bridge, non-empty by construction (a first mailbox plus the rest), built once per item where Gmail labels are mapped to names, with All Mail always among them: today's rule written into the type, so a stepped message cannot be filed nowhere and needs no skip.
+- Java reports a mailbox name the engine cannot resolve to a collection the store holds (logged and counted), never skips it silently.

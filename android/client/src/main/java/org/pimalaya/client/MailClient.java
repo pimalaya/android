@@ -75,38 +75,29 @@ public class MailClient {
                                                 count))));
     }
 
-    /** One step of a Gmail or JMAP account's mail ({@link #stepped}). */
-    public NamedStep step(
-            MailSession session, StepRequest request, File dir, OfflineDriver store) {
-        return NamedStep.from(Replies.object(stepped(session, request, dir, store)));
-    }
-
-    /** One step of a Microsoft Graph account's mail ({@link #stepped}). */
-    public GraphStepReply graphStep(
-            MailSession session, StepRequest request, File dir, OfflineDriver store) {
-        return GraphStepReply.from(Replies.object(stepped(session, request, dir, store)));
-    }
-
     /**
-     * One step of an account's mail, read whole into files of {@code dir}.
+     * One step of a Gmail account's mail, read whole into files of
+     * {@code dir}.
      *
      * <p>The bridge asks {@code store} which listed messages it holds
-     * ({@link Native#mailStep}); the reply is raw, its shape the backend's.
+     * ({@link Native#mailStep}).
      */
-    private static String stepped(
+    public NamedStep step(
             MailSession session, StepRequest request, File dir, OfflineDriver store) {
         String mailbox = request.mailbox();
         String asked = request.toJson().toString();
-        return on(
-                session,
-                open ->
-                        Native.mailStep(
-                                open.transport(),
-                                open.handle(),
-                                mailbox == null ? "" : mailbox,
-                                asked,
-                                dir.getAbsolutePath(),
-                                store));
+        return NamedStep.from(
+                Replies.object(
+                        on(
+                                session,
+                                open ->
+                                        Native.mailStep(
+                                                open.transport(),
+                                                open.handle(),
+                                                mailbox == null ? "" : mailbox,
+                                                asked,
+                                                dir.getAbsolutePath(),
+                                                store))));
     }
 
     /**

@@ -6,14 +6,16 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * One message of a Gmail or JMAP step, named as a listed one, with its file.
+ * One message of a Gmail step, named as a listed one, with its file.
  *
- * <p>Mirrors rs/mail/session.rs {@code NamedStepItem} 311.
+ * <p>Mirrors rs/mail/session.rs {@code NamedStepItem}.
  *
  * @param flags its IMAP markers
  * @param handle its provider id
  * @param linkId the identity hint its summary states
- * @param mailboxes the mailboxes it is a member of, by name
+ * @param mailboxes the mailboxes it is a member of, by name, never none
+ *     (rs/mail/session.rs {@code Memberships}); a Gmail one always holds
+ *     All Mail ({@code PimdirCollections.ALL_MAIL})
  * @param path the file its body was written to
  * @param received reception time in epoch milliseconds; null when unknown
  * @param size the file's size in octets

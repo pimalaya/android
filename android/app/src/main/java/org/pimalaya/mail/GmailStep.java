@@ -1,5 +1,7 @@
 package org.pimalaya.mail;
 
+import android.util.Log;
+
 import org.pimalaya.client.Named;
 import org.pimalaya.client.NamedStep;
 import org.pimalaya.client.NamedStepItem;
@@ -8,16 +10,19 @@ import org.pimalaya.client.StepRequest;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
- * A Gmail (or JMAP) account's step ({@link MailStep}): the ids it lacks.
+ * A Gmail account's step ({@link MailStep}): the ids it lacks.
  *
  * <p>Newest received first (spam and trash out), read whole in batches, each
- * in every labelled mailbox: a set difference, so misdated imports do not
- * throw it off. JMAP queries after the {@link MailWindow#anchors}.
+ * in every labelled mailbox and All Mail: a set difference, so misdated
+ * imports do not throw it off.
  */
 final class GmailStep implements MailStep {
     @Override
@@ -26,8 +31,9 @@ final class GmailStep implements MailStep {
         String only = run.only();
         boolean first = run.first();
 
-        // NOTE: an account step names the mailboxes it takes, which a JMAP
-        // account's query keeps to (Gmail lists All Mail whatever).
+        // NOTE: the bridge reads the request's count alone, Gmail listing
+        // All Mail whatever; the names, frontier and anchors are what the
+        // JMAP step read before it went.
         List<String> names = null;
         if (only == null) {
             names = new ArrayList<>();
@@ -46,11 +52,15 @@ final class GmailStep implements MailStep {
             for (String collection : collections) {
                 members.put(collection, new ArrayList<>());
             }
-            // NOTE: every message lands in All Mail where the step holds by
-            // it, an archived one there alone, so the next step finds it
-            // held and does not read it again (PimdirCollections.ALL_MAIL).
+            // NOTE: a Gmail message names All Mail among its mailboxes, an
+            // archived one it alone, so a step holding by it finds it held
+            // next time and does not read it again
+            // (PimdirCollections.ALL_MAIL). A name the step does not take
+            // but the store holds is left be; one the store does not hold
+            // is reported, never dropped silently.
             String allMail = MailStore.allMailOf(engine.accountId());
-            List<Named> all = members.get(allMail);
+            Set<String> held = new HashSet<>(engine.accountCollections());
+            Set<String> unresolved = new TreeSet<>();
             Map<String, File> files = new HashMap<>();
             Map<String, Long> sizes = new HashMap<>();
             List<Brought> brought = new ArrayList<>();
@@ -64,15 +74,21 @@ final class GmailStep implements MailStep {
                 if (received != null && (reach == null || received < reach)) {
                     reach = received;
                 }
-                if (all != null) {
-                    all.add(MailEngine.named(item));
-                }
                 for (String mailbox : item.mailboxes()) {
-                    List<Named> into = members.get(engine.collectionOf(mailbox));
+                    String collection = engine.collectionOf(mailbox);
+                    List<Named> into = members.get(collection);
                     if (into != null) {
                         into.add(MailEngine.named(item));
+                    } else if (!held.contains(collection)) {
+                        unresolved.add(mailbox);
                     }
                 }
+            }
+            if (!unresolved.isEmpty()) {
+                Log.w(
+                        "pimalaya",
+                        "mail step: " + unresolved.size() + " mailboxes the store does not hold "
+                                + unresolved);
             }
 
             // NOTE: no step fills the trash or the junk: they open by a round.
@@ -118,7 +134,8 @@ final class GmailStep implements MailStep {
             return new Outcome(
                     MailWindow.frontier(brought, step.byReception()),
                     step.exhausted(),
-                    items.size());
+                    items.size(),
+                    unresolved.size());
         } finally {
             MailEngine.discard(dir);
         }

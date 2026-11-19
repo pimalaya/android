@@ -57,10 +57,7 @@ use crate::{
     mail::{
         Mailbox, SendFailure,
         compose::Composed,
-        jmap_step::{
-            JmapDelta, JmapRun, JmapStepped, Sources, Start, StepItem, StepQuery, StepRequest,
-            received,
-        },
+        jmap_step::{JmapDelta, JmapRun, Sources},
         listing::{
             Floor, Listing, MailPage, MailRequest, Named, RECEIVED_MARGIN_DAYS, Scope, flags, utc,
         },
@@ -439,56 +436,6 @@ impl<H: Host> Jmap<'_, H> {
             .collect())
     }
 
-    /// One step of the account ([`JmapCalls::step`]).
-    ///
-    /// Sorted by `sentAt` where the mail capability lists it among its
-    /// `emailQuerySortOptions`, by `receivedAt` otherwise.
-    pub fn step(
-        &mut self,
-        mut request: StepRequest<'_>,
-        dir: &Path,
-    ) -> Result<JmapStepped, BridgeError> {
-        let mut calls = self.calls()?;
-        let account = calls.session.primary_account_id_for(JMAP_MAIL_CAPABILITY);
-        request.sent_at = calls
-            .session
-            .mail_capability(&account)
-            .email_query_sort_options
-            .iter()
-            .any(|sort| sort == "sentAt");
-        let stepped = calls.step(&request, dir)?;
-
-        let mut items = Vec::with_capacity(stepped.brought.len());
-        for brought in stepped.brought {
-            let mailboxes = brought
-                .email
-                .mailbox_ids
-                .iter()
-                .flatten()
-                .filter(|(_, filed)| **filed)
-                .map(|(id, _)| id.clone())
-                .collect();
-            let received = received(&brought.email);
-            let Some(named) = named(brought.email, &Scope::default()) else {
-                continue;
-            };
-            items.push(StepItem {
-                named,
-                mailboxes,
-                path: brought.path,
-                size: brought.size,
-                received,
-            });
-        }
-        Ok(JmapStepped {
-            state: stepped.state,
-            items,
-            exhausted: stepped.exhausted,
-            anchors: stepped.anchors,
-            by_reception: stepped.by_reception,
-        })
-    }
-
     /// Some messages read whole into files of `dir` ([`JmapCalls::sources`]).
     ///
     /// Their blobs are named by one `Email/get` per `maxObjectsInGet` ids,
@@ -686,74 +633,8 @@ impl<H: Host> Jmap<'_, H> {
     }
 }
 
-/// The `Email` properties a step reads: the summary's, the reception, and
-/// the blob the source is downloaded from.
-const STEP_PROPERTIES: [JmapEmailProperty; 9] = [
-    JmapEmailProperty::Id,
-    JmapEmailProperty::MailboxIds,
-    JmapEmailProperty::Keywords,
-    JmapEmailProperty::Size,
-    JmapEmailProperty::Headers,
-    JmapEmailProperty::SentAt,
-    JmapEmailProperty::HasAttachment,
-    JmapEmailProperty::ReceivedAt,
-    JmapEmailProperty::BlobId,
-];
-
-/// JMAP step reads: what a step and a read of sources ask of the server.
+/// JMAP source reads: what a read of sources asks of the server.
 impl<H: Host> JmapCalls<'_, '_, H> {
-    /// The account's `Email` state, the checkpoint a step lands with.
-    pub fn email_state(&mut self) -> Result<String, BridgeError> {
-        let opts = JmapEmailGetOptions {
-            properties: Some(vec![JmapEmailProperty::Id]),
-            ..Default::default()
-        };
-        let coroutine = JmapEmailGet::new(&self.session, &self.auth, Vec::new(), opts)
-            .map_err(|err| err.to_string())?;
-        Ok(self.jmap.run(&self.session.api_url, coroutine)?.new_state)
-    }
-
-    /// One step query's emails, as the server sorted them; [`None`] when
-    /// its anchor is not in the results (`anchorNotFound`).
-    pub fn step_query(&mut self, query: &StepQuery) -> Result<Option<Vec<JmapEmail>>, BridgeError> {
-        let sort = match query.received {
-            true => JmapEmailComparator::received_at_desc(),
-            false => JmapEmailComparator::sent_at_desc(),
-        };
-        let (position, anchor) = match &query.start {
-            Start::Top => (None, None),
-            Start::After(id) => (None, Some(id.clone())),
-            Start::At(position) => (Some(*position), None),
-        };
-        let opts = JmapEmailQueryOptions {
-            filter: Some(JmapFilter::Condition(query.filter.clone())),
-            sort: Some(vec![sort]),
-            position,
-            anchor_offset: anchor.as_ref().map(|_| 1),
-            anchor,
-            limit: Some(query.limit),
-            calculate_total: false,
-            collapse_threads: false,
-            properties: Some(STEP_PROPERTIES.to_vec()),
-        };
-        let coroutine =
-            JmapEmailQuery::new(&self.session, &self.auth, opts).map_err(|err| err.to_string())?;
-        let api_url = self.session.api_url.clone();
-        match self.jmap.try_run(&api_url, coroutine)? {
-            Ok(out) => {
-                parsed(&out.unparsed, "Email/query")?;
-                Ok(Some(out.emails))
-            }
-            Err(JmapEmailQueryError::QueryMethod(JmapMethodError::AnchorNotFound { .. })) => {
-                Ok(None)
-            }
-            Err(err) => {
-                sessions().forget(&api_url);
-                Err(coroutine_error(&err))
-            }
-        }
-    }
-
     /// Some emails by id, with their `blobId`; one gone left out.
     pub fn email_blobs(&mut self, ids: Vec<String>) -> Result<Vec<JmapEmail>, BridgeError> {
         let opts = JmapEmailGetOptions {

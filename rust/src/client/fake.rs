@@ -8,8 +8,8 @@
 //! [`FakeServer::requests`]. Use `https` URLs: a credential never goes out
 //! over plain `http`.
 //!
-//! It also holds the fixtures the backend tests share: a store answering a
-//! mail step's `held` ([`holding`]) and a JMAP session ([`jmap_session`]).
+//! It also holds a fixture the backend tests share: a JMAP session
+//! ([`jmap_session`]).
 //!
 //! [`Client`]: crate::client::Client
 
@@ -212,22 +212,6 @@ impl<'a> BoxedServer<'a> {
     pub fn boxed(handler: impl FnMut(&FakeRequest) -> FakeResponse + 'a) -> Self {
         Self::new(Box::new(handler))
     }
-}
-
-/// A store answering [`Client::held`](crate::client::Client::held) from `held`.
-pub fn holding(held: HashSet<String>) -> FakeStore {
-    Box::new(move |request| {
-        let request: Value = serde_json::from_str(request).unwrap();
-        assert_eq!(request["op"], "held");
-        let handles: Vec<&str> = request["handles"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(Value::as_str)
-            .filter(|handle| held.contains(*handle))
-            .collect();
-        json!({ "held": handles }).to_string()
-    })
 }
 
 /// A JMAP session resource (RFC 8620 section 2) serving `capabilities`.

@@ -11,7 +11,7 @@
 //!
 //! Mail itself is listed by band: a first chunk, a widening and the fill
 //! list only the band they lack by `/messages` on `sentDateTime`, named by
-//! the summary `$select`. A step walks the account by keyset ([`StepAsk`]).
+//! the summary `$select`.
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -61,7 +61,6 @@ use io_pimdir::summary::{
     PimdirAddress, PimdirSummary,
     mail::{PimdirMailSummary, derive_meta, message_id},
 };
-use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -936,63 +935,11 @@ fn permanent_delete_url(id: &str) -> Result<Url, BridgeError> {
     ))
 }
 
-/// The `$select` of a step's listing: what places a message (its folder),
-/// what orders it and moves the frontier (its `Date`), and its reception,
-/// which tells an import from a timely message. The size rides along as
-/// [`MESSAGE_EXPAND`], for the bodies' batches.
-const STEP_SELECT: &str = "id,sentDateTime,receivedDateTime,parentFolderId";
-
-/// How many more messages than the step's count one listing asks for:
-/// the ids held at the frontier, and those out of scope.
-const STEP_SLACK: usize = 25;
-
 /// The most declared bytes one `$batch` of bodies asks for.
 pub const BATCH_BYTES: u64 = 4 * 1024 * 1024;
 
 /// A message declared larger than this is read alone, by a plain GET.
 pub const ALONE_BYTES: u64 = 1024 * 1024;
-
-/// What a step asks: how many messages, below which frontier and from
-/// which bound, in which folders, the store holding which.
-pub struct StepAsk<'a> {
-    /// The folders stepped, by id: the account's but the trash, the junk,
-    /// the mailboxes kept whole; the one folder a filtered view steps.
-    pub folders: &'a [String],
-    /// Whether the step lists that one folder alone.
-    pub alone: bool,
-    /// The account's frontier, [`None`] for the first step.
-    pub frontier: Option<&'a str>,
-    /// The account's bound, [`None`] for all mail.
-    pub bound: Option<&'a str>,
-    /// About how many messages to bring.
-    pub count: usize,
-}
-
-/// One message a step brought.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StepMessage {
-    /// Its Graph id.
-    pub id: String,
-    /// Its folder, by id.
-    pub folder: String,
-    /// Its `Date`, as the store sorts it.
-    pub date: String,
-    /// When it was received, in milliseconds since the epoch.
-    pub received: Option<i64>,
-    /// The MAPI size Graph states for it.
-    pub size: Option<u64>,
-    /// Whether the store binds it already: its body is not read again.
-    pub held: bool,
-}
-
-/// What a step brought, and whether nothing older is left.
-#[derive(Debug, Default)]
-pub struct Stepped {
-    /// The messages, newest `Date` first.
-    pub messages: Vec<StepMessage>,
-    /// Whether nothing older is left.
-    pub exhausted: bool,
-}
 
 /// What a read of some bodies brought ([`Msgraph::read_sources`]).
 #[derive(Debug, Default, Eq, PartialEq)]
@@ -1029,27 +976,8 @@ pub enum Inner {
     Failed(String),
 }
 
-/// Graph steps: the keyset walk of a step and the read of its bodies.
+/// Graph bodies: messages read whole into files.
 impl<H: Host> Msgraph<'_, H> {
-    /// One step of a Graph account ([`Self::list_step`]), its bodies not
-    /// held read into files of `dir` ([`Self::read_sources`]) with the sizes
-    /// its listing stated.
-    pub fn step(
-        &mut self,
-        ask: &StepAsk,
-        dir: &Path,
-    ) -> Result<(Stepped, Vec<GraphFetched>), BridgeError> {
-        let stepped = self.list_step(ask)?;
-        let wanted: Vec<(String, Option<u64>)> = stepped
-            .messages
-            .iter()
-            .filter(|message| !message.held)
-            .map(|message| (message.id.clone(), message.size))
-            .collect();
-        let fetched = self.read_sources(&wanted, dir)?.fetched;
-        Ok((stepped, fetched))
-    }
-
     /// Some messages read whole into files of `dir`: their sizes first,
     /// 20 to a `$batch`, then their bodies batched by them
     /// ([`Self::read_sources`]).
@@ -1067,128 +995,6 @@ impl<H: Host> Msgraph<'_, H> {
             .map(|id| (id.clone(), sizes.get(id).copied()))
             .collect();
         self.read_sources(&wanted, dir)
-    }
-
-    /// One step of a Graph account (docs B.13), newest `Date` first.
-    ///
-    /// `count` below the frontier, with ties ([`with_ties`]), less those held
-    /// there or out of the stepped folders. A keyset, never `nextLink`: a full
-    /// page resumes at its oldest `Date`, that second included, ids seen out.
-    fn list_step(&mut self, ask: &StepAsk) -> Result<Stepped, BridgeError> {
-        if ask.alone {
-            let folder = ask.folders.first().map(String::as_str);
-            return self.walk(folder, ask);
-        }
-
-        match self.walk(None, ask) {
-            // NOTE: on `InefficientFilter` or a 504, each folder is walked.
-            Err(err) if inefficient(&err) => {
-                log::debug!("graph step lists each folder: {err}");
-            }
-            walked => return walked,
-        }
-
-        let mut merged = Vec::new();
-        let mut exhausted = true;
-        for folder in ask.folders {
-            let walked = self.walk(Some(folder), ask)?;
-            exhausted &= walked.exhausted;
-            merged.extend(walked.messages);
-        }
-        merged.sort_by(|a, b| b.date.cmp(&a.date));
-        let kept = with_ties(&merged, ask.count);
-        exhausted &= kept == merged.len();
-        merged.truncate(kept);
-        Ok(Stepped {
-            messages: merged,
-            exhausted,
-        })
-    }
-
-    /// The keyset walk of one listing, the account's or a folder's.
-    fn walk(&mut self, folder: Option<&str>, ask: &StepAsk) -> Result<Stepped, BridgeError> {
-        let top = (ask.count + STEP_SLACK).min(GRAPH_PAGE as usize) as u32;
-        let mut band = Band {
-            since: ask.bound.map(String::from),
-            until: ask.frontier.map(String::from),
-            inclusive: true,
-        };
-        let mut seen = HashSet::new();
-        let mut messages = Vec::new();
-        let mut cut: Option<String> = None;
-
-        loop {
-            let page = self.dated(folder, &band, top)?;
-            let ids: Vec<String> = page.iter().map(|message| message.id.clone()).collect();
-            let held = self.client.held(&ids)?;
-            let full = page.len() >= top as usize;
-            let mut fresh = 0;
-            let mut oldest: Option<String> = None;
-            for message in page {
-                if !seen.insert(message.id.clone()) {
-                    continue;
-                }
-                fresh += 1;
-                let Some(date) = message.sent_date_time.as_deref().and_then(utc) else {
-                    continue;
-                };
-                if cut.as_deref().is_some_and(|cut| date.as_str() < cut) {
-                    return Ok(Stepped {
-                        messages,
-                        exhausted: false,
-                    });
-                }
-                oldest = Some(date.clone());
-
-                let Some(parent) = placed(&message, folder, ask) else {
-                    continue;
-                };
-                let held = held.contains(&message.id);
-                if held && ask.frontier == Some(date.as_str()) {
-                    continue;
-                }
-                messages.push(StepMessage {
-                    received: message
-                        .received_date_time
-                        .as_deref()
-                        .and_then(|raw| raw.parse::<Timestamp>().ok())
-                        .map(|received| received.as_millisecond()),
-                    size: message
-                        .single_value_extended_properties
-                        .first()
-                        .and_then(|size| size.value.trim().parse().ok()),
-                    id: message.id,
-                    folder: parent,
-                    date: date.clone(),
-                    held,
-                });
-                if messages.len() == ask.count {
-                    cut = Some(date);
-                }
-            }
-
-            if !full {
-                return Ok(Stepped {
-                    messages,
-                    exhausted: true,
-                });
-            }
-            match oldest {
-                Some(oldest) if fresh > 0 => {
-                    band.until = Some(oldest);
-                    band.inclusive = true;
-                }
-                // NOTE: a whole page of one second seen already: on below it.
-                _ if band.inclusive && band.until.is_some() => band.inclusive = false,
-                // NOTE: undated messages alone, which no keyset goes below.
-                _ => {
-                    return Ok(Stepped {
-                        messages,
-                        exhausted: true,
-                    });
-                }
-            }
-        }
     }
 
     /// Reads some messages whole into files of `dir`, by `$batch` calls.
@@ -1290,29 +1096,6 @@ impl<H: Host> Msgraph<'_, H> {
         Ok(self.run(coroutine)?.responses)
     }
 
-    /// One page of the account's messages, or of one folder's, newest
-    /// `Date` first, within `band`, `top` at most, with [`STEP_SELECT`].
-    fn dated(
-        &mut self,
-        folder: Option<&str>,
-        band: &Band,
-        top: u32,
-    ) -> Result<Vec<MsgraphMessage>, BridgeError> {
-        let filter = band.filter();
-        let params = MsgraphMessagesListParams {
-            top: Some(top),
-            select: Some(STEP_SELECT),
-            expand: Some(MESSAGE_EXPAND),
-            filter: filter.as_deref(),
-            orderby: Some("sentDateTime desc"),
-            ..Default::default()
-        };
-        let auth = HttpAuthBearer::new(self.token);
-        let coroutine = MsgraphMessagesList::new(&auth, "me", folder, &params)
-            .map_err(|err| err.to_string())?;
-        Ok(self.run(coroutine)?.value)
-    }
-
     /// One `$batch` of `$value` GETs, each answer by its id.
     fn batch_sources(&mut self, ids: &[String]) -> Result<Vec<(String, Inner)>, BridgeError> {
         let urls = ids
@@ -1369,38 +1152,6 @@ impl<H: Host> Msgraph<'_, H> {
         }
         Ok(sizes)
     }
-}
-
-/// Whether a listing failed the way the per-folder fallback answers: a
-/// filter Graph finds too costly over the whole mailbox, or a timeout.
-fn inefficient(err: &BridgeError) -> bool {
-    err.status == Some(504) || err.message.contains("InefficientFilter")
-}
-
-/// How many of some messages, newest first, a step keeps: `count`, and
-/// every one after sharing the last one's `Date`.
-fn with_ties(newest_first: &[StepMessage], count: usize) -> usize {
-    let Some(last) = count.checked_sub(1).and_then(|at| newest_first.get(at)) else {
-        return newest_first.len();
-    };
-    count
-        + newest_first[count..]
-            .iter()
-            .take_while(|message| message.date == last.date)
-            .count()
-}
-
-/// The folder a listed message belongs to when the step takes it: the
-/// folder listed, or on the account's listing one of the stepped ones.
-fn placed(message: &MsgraphMessage, folder: Option<&str>, ask: &StepAsk) -> Option<String> {
-    if let Some(folder) = folder {
-        return Some(folder.to_string());
-    }
-    message
-        .parent_folder_id
-        .as_ref()
-        .filter(|parent| ask.folders.contains(parent))
-        .cloned()
 }
 
 /// Writes one message's bytes to its file of `dir`.

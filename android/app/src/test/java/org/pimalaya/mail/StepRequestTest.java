@@ -11,7 +11,6 @@ import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
-import org.pimalaya.client.GraphStepReply;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MailWire;
@@ -42,30 +41,30 @@ public class StepRequestTest {
     /** Each step asked: its label, the mailbox beside it, the request. */
     private static final List<String> ASKED =
             List.of(
-                    "gmail s0 only=- | null | {\"count\":25,\"frontier\":null,\"bound\":null,\"anchors\":[],\"mailboxes\":[\"INBOX\",\"Sent\",\"Clients\",\"TRASH\"]}",
-                    "gmail s0 only=Clients | Clients | {\"count\":25,\"frontier\":null,\"bound\":null,\"anchors\":[]}",
-                    "gmail s1 only=- | null | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"bound\":null,\"anchors\":[],\"mailboxes\":[\"INBOX\",\"Sent\",\"Clients\",\"TRASH\"]}",
-                    "gmail s1 only=Clients | Clients | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"bound\":null,\"anchors\":[]}",
-                    "gmail s2 only=- | null | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"bound\":null,\"anchors\":[\"a2\",\"a1\"],\"mailboxes\":[\"INBOX\",\"Sent\",\"Clients\",\"TRASH\"]}",
-                    "gmail s2 only=Clients | Clients | {\"count\":25,\"frontier\":\"2098-06-01T00:00:00Z\",\"bound\":null,\"anchors\":[\"c1\"]}",
-                    "gmail s3 only=- | null | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"bound\":\"BOUND\",\"anchors\":[\"a2\",\"a1\"],\"mailboxes\":[\"INBOX\",\"Sent\",\"Clients\",\"TRASH\"]}",
-                    "gmail s3 only=Clients | Clients | {\"count\":25,\"frontier\":\"2098-06-01T00:00:00Z\",\"bound\":\"BOUND\",\"anchors\":[\"c1\"]}",
-                    "gmail s4 only=- | null | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"bound\":\"BOUND\",\"anchors\":[\"a2\",\"a1\"],\"mailboxes\":[\"INBOX\",\"Sent\",\"Clients\",\"TRASH\"]}",
-                    "gmail s4 only=Clients | Clients | {\"count\":25,\"frontier\":\"2098-06-01T00:00:00Z\",\"bound\":\"BOUND\",\"anchors\":[\"c1\"]}",
-                    "gmail s5 only=- | null | {\"count\":25,\"frontier\":\"BOUND\",\"bound\":\"BOUND\",\"anchors\":[\"a2\",\"a1\"],\"mailboxes\":[\"INBOX\",\"Sent\",\"Clients\",\"TRASH\"]}",
-                    "gmail s5 only=Clients | Clients | {\"count\":25,\"frontier\":\"BOUND\",\"bound\":\"BOUND\",\"anchors\":[\"c1\"]}",
-                    "imap s0 only=- | direct | {\"count\":25,\"frontier\":null,\"bound\":null,\"anchors\":[]}",
-                    "imap s0 only=Clients | direct | {\"count\":25,\"frontier\":null,\"bound\":null,\"anchors\":[]}",
-                    "imap s1 only=- | direct | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"bound\":null,\"anchors\":[]}",
-                    "imap s1 only=Clients | direct | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"bound\":null,\"anchors\":[]}",
-                    "imap s2 only=- | direct | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"bound\":null,\"anchors\":[\"a2\",\"a1\"]}",
-                    "imap s2 only=Clients | direct | {\"count\":25,\"frontier\":\"2098-06-01T00:00:00Z\",\"bound\":null,\"anchors\":[\"c1\"]}",
-                    "imap s3 only=- | direct | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"bound\":\"BOUND\",\"anchors\":[\"a2\",\"a1\"]}",
-                    "imap s3 only=Clients | direct | {\"count\":25,\"frontier\":\"2098-06-01T00:00:00Z\",\"bound\":\"BOUND\",\"anchors\":[\"c1\"]}",
-                    "imap s4 only=- | direct | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"bound\":\"BOUND\",\"anchors\":[\"a2\",\"a1\"]}",
-                    "imap s4 only=Clients | direct | {\"count\":25,\"frontier\":\"2098-06-01T00:00:00Z\",\"bound\":\"BOUND\",\"anchors\":[\"c1\"]}",
-                    "imap s5 only=- | direct | {\"count\":25,\"frontier\":\"BOUND\",\"bound\":\"BOUND\",\"anchors\":[\"a2\",\"a1\"]}",
-                    "imap s5 only=Clients | direct | {\"count\":25,\"frontier\":\"2098-06-01T00:00:00Z\",\"bound\":\"BOUND\",\"anchors\":[\"c1\"]}"
+                    "gmail s0 only=- | null | {\"count\":25,\"frontier\":null,\"anchors\":[],\"mailboxes\":[\"INBOX\",\"Sent\",\"Clients\",\"TRASH\"]}",
+                    "gmail s0 only=Clients | Clients | {\"count\":25,\"frontier\":null,\"anchors\":[]}",
+                    "gmail s1 only=- | null | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"anchors\":[],\"mailboxes\":[\"INBOX\",\"Sent\",\"Clients\",\"TRASH\"]}",
+                    "gmail s1 only=Clients | Clients | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"anchors\":[]}",
+                    "gmail s2 only=- | null | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"anchors\":[\"a2\",\"a1\"],\"mailboxes\":[\"INBOX\",\"Sent\",\"Clients\",\"TRASH\"]}",
+                    "gmail s2 only=Clients | Clients | {\"count\":25,\"frontier\":\"2098-06-01T00:00:00Z\",\"anchors\":[\"c1\"]}",
+                    "gmail s3 only=- | null | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"anchors\":[\"a2\",\"a1\"],\"mailboxes\":[\"INBOX\",\"Sent\",\"Clients\",\"TRASH\"]}",
+                    "gmail s3 only=Clients | Clients | {\"count\":25,\"frontier\":\"2098-06-01T00:00:00Z\",\"anchors\":[\"c1\"]}",
+                    "gmail s4 only=- | null | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"anchors\":[\"a2\",\"a1\"],\"mailboxes\":[\"INBOX\",\"Sent\",\"Clients\",\"TRASH\"]}",
+                    "gmail s4 only=Clients | Clients | {\"count\":25,\"frontier\":\"2098-06-01T00:00:00Z\",\"anchors\":[\"c1\"]}",
+                    "gmail s5 only=- | null | {\"count\":25,\"frontier\":\"BOUND\",\"anchors\":[\"a2\",\"a1\"],\"mailboxes\":[\"INBOX\",\"Sent\",\"Clients\",\"TRASH\"]}",
+                    "gmail s5 only=Clients | Clients | {\"count\":25,\"frontier\":\"BOUND\",\"anchors\":[\"c1\"]}",
+                    "imap s0 only=- | direct | {\"count\":25,\"frontier\":null,\"anchors\":[]}",
+                    "imap s0 only=Clients | direct | {\"count\":25,\"frontier\":null,\"anchors\":[]}",
+                    "imap s1 only=- | direct | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"anchors\":[]}",
+                    "imap s1 only=Clients | direct | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"anchors\":[]}",
+                    "imap s2 only=- | direct | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"anchors\":[\"a2\",\"a1\"]}",
+                    "imap s2 only=Clients | direct | {\"count\":25,\"frontier\":\"2098-06-01T00:00:00Z\",\"anchors\":[\"c1\"]}",
+                    "imap s3 only=- | direct | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"anchors\":[\"a2\",\"a1\"]}",
+                    "imap s3 only=Clients | direct | {\"count\":25,\"frontier\":\"2098-06-01T00:00:00Z\",\"anchors\":[\"c1\"]}",
+                    "imap s4 only=- | direct | {\"count\":25,\"frontier\":\"2099-01-01T00:00:00Z\",\"anchors\":[\"a2\",\"a1\"]}",
+                    "imap s4 only=Clients | direct | {\"count\":25,\"frontier\":\"2098-06-01T00:00:00Z\",\"anchors\":[\"c1\"]}",
+                    "imap s5 only=- | direct | {\"count\":25,\"frontier\":\"BOUND\",\"anchors\":[\"a2\",\"a1\"]}",
+                    "imap s5 only=Clients | direct | {\"count\":25,\"frontier\":\"2098-06-01T00:00:00Z\",\"anchors\":[\"c1\"]}"
 );
 
     /** An account whose steps bring nothing, recording what they ask. */
@@ -77,13 +76,6 @@ public class StepRequestTest {
                 MailSession session, StepRequest request, File dir, OfflineDriver store) {
             asked.add(request);
             return new NamedStep(null, false, false, "h", List.of());
-        }
-
-        @Override
-        public GraphStepReply graphStep(
-                MailSession session, StepRequest request, File dir, OfflineDriver store) {
-            asked.add(request);
-            return new GraphStepReply(false, List.of());
         }
     }
 
@@ -185,7 +177,7 @@ public class StepRequestTest {
                                 + "\"sortKey\":\"2026-01-06T08:30:00Z\","
                                 + "\"summary\":{\"subject\":\"Lunch\"}},"
                                 + "{\"flags\":[],\"handle\":\"m2\",\"linkId\":\"m2\","
-                                + "\"mailboxes\":[],\"path\":\"/d/m2\",\"received\":null,"
+                                + "\"mailboxes\":[\"INBOX\"],\"path\":\"/d/m2\",\"received\":null,"
                                 + "\"size\":0}]}");
         NamedStepItem full = step.items().get(0);
         JSONObject named = MailEngine.named(full).toJson();

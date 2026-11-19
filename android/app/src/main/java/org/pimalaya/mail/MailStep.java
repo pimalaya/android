@@ -41,10 +41,18 @@ public interface MailStep {
         /** How many messages it brought. */
         public final int brought;
 
+        /** How many mailbox names it brought that the store holds none of. */
+        public final int unresolved;
+
         Outcome(String frontier, boolean exhausted, int brought) {
+            this(frontier, exhausted, brought, 0);
+        }
+
+        Outcome(String frontier, boolean exhausted, int brought, int unresolved) {
             this.frontier = frontier;
             this.exhausted = exhausted;
             this.brought = brought;
+            this.unresolved = unresolved;
         }
     }
 
@@ -56,7 +64,7 @@ public interface MailStep {
     /**
      * The step of an account's mail backend, as its facts say it walks.
      *
-     * <p>Gmail and JMAP step through the account as one listing
+     * <p>Gmail alone steps through the account as one listing
      * ({@link GmailStep}); every other account steps from the store, which
      * its fill lists ({@link WidenStep}), its bodies left to the body step.
      */

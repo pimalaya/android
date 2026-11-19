@@ -337,7 +337,8 @@ final class Native {
      *
      * <p>{@code mailbox} empty for the account, {@code request} a
      * {@link StepRequest}; {@code store} answers {@code {op: "held", handles}}
-     * a page at a time. Returns {@link NamedStep} or {@link GraphStepReply}.
+     * a page at a time. Returns {@link NamedStep}; an IMAP or Graph account
+     * steps from the store and is refused.
      */
     static native String mailStep(
             Transport transport,
