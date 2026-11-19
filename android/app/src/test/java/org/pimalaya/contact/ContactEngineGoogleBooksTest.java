@@ -279,7 +279,7 @@ public class ContactEngineGoogleBooksTest {
         assertEquals(List.of("seed"), held().get("c1"));
         assertEquals(vcard(JANE, "Jane Edit"), people.bodies.get("c1"));
         assertEquals(List.of(SEED), contacts.collectionsOf(JANE));
-        assertEquals(List.of(), UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+        assertEquals(List.of(), UnsentContacts.rows(pimdir, store, RuntimeEnvironment.getApplication()));
     }
 
     @Test
@@ -505,7 +505,7 @@ public class ContactEngineGoogleBooksTest {
         pass(CONTACTS, L1, SEED);
         assertEquals(
                 List.of(new UnsentContacts.Row(JANE, "Jane Edit", SEED, null)),
-                UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+                UnsentContacts.rows(pimdir, store, RuntimeEnvironment.getApplication()));
 
         // NOTE: the web sets the same name, which Contacts pulls; the next run
         // of Seed then sends the add, and its listing after fails.
@@ -519,7 +519,7 @@ public class ContactEngineGoogleBooksTest {
         }
 
         assertTrue(held().toString(), held().get("c1").contains("seed"));
-        assertEquals(List.of(), UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+        assertEquals(List.of(), UnsentContacts.rows(pimdir, store, RuntimeEnvironment.getApplication()));
     }
 
     @Test
@@ -545,10 +545,13 @@ public class ContactEngineGoogleBooksTest {
         rename(SEED, JANE, "Jane Edit");
         pass(CONTACTS, L1, SEED);
 
-        PimdirDb restarted = new PimdirDb(RuntimeEnvironment.getApplication());
-        assertEquals(
-                List.of(new UnsentContacts.Row(JANE, "Jane Edit", SEED, null)),
-                UnsentContacts.rows(restarted, RuntimeEnvironment.getApplication()));
+        Context context = RuntimeEnvironment.getApplication();
+        PimdirDb restarted = new PimdirDb(context);
+        try (CardStore cards = new CardStore(context, restarted)) {
+            assertEquals(
+                    List.of(new UnsentContacts.Row(JANE, "Jane Edit", SEED, null)),
+                    UnsentContacts.rows(restarted, cards, context));
+        }
     }
 
     @Test
@@ -597,7 +600,7 @@ public class ContactEngineGoogleBooksTest {
 
         assertEquals(
                 List.of(new UnsentContacts.Row(JANE, "Jane Edit", SEED, null)),
-                UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+                UnsentContacts.rows(pimdir, store, RuntimeEnvironment.getApplication()));
     }
 
     @Test
@@ -609,7 +612,7 @@ public class ContactEngineGoogleBooksTest {
         assertEquals(List.of(), people.calls);
         assertEquals(
                 List.of(new UnsentContacts.Row(JANE, "Jane", CONTACTS, SEED)),
-                UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+                UnsentContacts.rows(pimdir, store, RuntimeEnvironment.getApplication()));
     }
 
     @Test
@@ -617,7 +620,7 @@ public class ContactEngineGoogleBooksTest {
         move(CONTACTS, SEED, JANE);
         pass(CONTACTS, L1, SEED);
 
-        assertEquals(List.of(), UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+        assertEquals(List.of(), UnsentContacts.rows(pimdir, store, RuntimeEnvironment.getApplication()));
     }
 
     @Test
@@ -654,7 +657,7 @@ public class ContactEngineGoogleBooksTest {
 
         // NOTE: Contacts sends the same edit on its own, then Seed patches.
         assertEquals(List.of(), people.calls);
-        assertEquals(List.of(), UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+        assertEquals(List.of(), UnsentContacts.rows(pimdir, store, RuntimeEnvironment.getApplication()));
         pass(CONTACTS, L1, SEED);
 
         assertEquals(List.of("updateCard c1", "updateCardBooks c1 +[seed] -[]"), people.calls);
@@ -671,7 +674,7 @@ public class ContactEngineGoogleBooksTest {
 
         assertEquals(
                 List.of(new UnsentContacts.Row(JANE, "Jane Edit", CONTACTS, SEED)),
-                UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+                UnsentContacts.rows(pimdir, store, RuntimeEnvironment.getApplication()));
     }
 
     @Test
@@ -737,7 +740,7 @@ public class ContactEngineGoogleBooksTest {
         assertEquals(List.of("other"), held().get("c1"));
         assertEquals(
                 List.of(new UnsentContacts.Row(JANE, "Jane Edit", SEED, null)),
-                UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+                UnsentContacts.rows(pimdir, store, RuntimeEnvironment.getApplication()));
     }
 
     @Test
@@ -902,6 +905,6 @@ public class ContactEngineGoogleBooksTest {
         assertEquals(List.of(), people.calls);
         assertEquals(
                 List.of(new UnsentContacts.Row(JANE, "Jane Edit", SEED, null)),
-                UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication()));
+                UnsentContacts.rows(pimdir, store, RuntimeEnvironment.getApplication()));
     }
 }

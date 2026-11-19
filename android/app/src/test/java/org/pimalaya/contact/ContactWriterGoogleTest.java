@@ -160,7 +160,7 @@ public class ContactWriterGoogleTest {
         assertTrue(people.calls.toString(), people.calls.contains("updateCard c1"));
         assertTrue(
                 people.calls.toString(), people.calls.contains("updateCardBooks c1 +[3e1f] -[]"));
-        assertEquals(List.of(), UnsentContacts.rows(pimdir, host));
+        assertEquals(List.of(), UnsentContacts.rows(pimdir, store, host));
         assertTrue(people.bodies.get("c1"), people.bodies.get("c1").contains("FN:Jane Edit\r\n"));
     }
 
@@ -261,7 +261,7 @@ public class ContactWriterGoogleTest {
     @Test
     public void notSentYetNamesEachHeldChangeByContactAndBook() throws Exception {
         unsentOnTheLabel();
-        List<UnsentContacts.Row> rows = UnsentContacts.rows(pimdir, host);
+        List<UnsentContacts.Row> rows = UnsentContacts.rows(pimdir, store, host);
         UnsentContacts.show(host, pimdir, rows);
 
         AlertDialog shown = dialog();
@@ -307,7 +307,7 @@ public class ContactWriterGoogleTest {
                         new Account(BASE, EMAIL, "token"));
         engine.syncBook(CONTACTS, true);
 
-        UnsentContacts.show(host, pimdir, UnsentContacts.rows(pimdir, host));
+        UnsentContacts.show(host, pimdir, UnsentContacts.rows(pimdir, store, host));
         assertEquals(
                 host.getString(R.string.sync_unsent_body)
                         + "\n\n"

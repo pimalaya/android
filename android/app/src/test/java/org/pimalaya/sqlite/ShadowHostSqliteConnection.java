@@ -60,6 +60,17 @@ public class ShadowHostSqliteConnection {
         return opened;
     }
 
+    /** How many connections to {@code path} are open now. */
+    public static synchronized int openNow(String path) {
+        int open = 0;
+        for (String each : OPEN.values()) {
+            if (each.equals(path)) {
+                open++;
+            }
+        }
+        return open;
+    }
+
     /**
      * The journal mode every statement setting one asked, with the path of
      * its connection, in order since the test began.

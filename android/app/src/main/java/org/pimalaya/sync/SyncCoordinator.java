@@ -22,6 +22,7 @@ import org.pimalaya.calendar.CalendarRows;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.contact.BookEntry;
+import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.contact.ContactPhonePass;
 import org.pimalaya.contact.UnsentContacts;
@@ -98,6 +99,8 @@ public final class SyncCoordinator implements MailSync {
     private final Screens screens;
 
     private final PimdirDb pimdir;
+
+    private final CardStore cards;
 
     private final MailStore mail;
 
@@ -186,6 +189,7 @@ public final class SyncCoordinator implements MailSync {
         this.host = host;
         this.screens = screens;
         this.pimdir = parts.pimdir();
+        this.cards = parts.cards();
         this.mail = parts.mail();
         this.clients = parts.clients();
         progress =
@@ -259,7 +263,7 @@ public final class SyncCoordinator implements MailSync {
      * marker shows it again.
      */
     private void offerUnsent() {
-        List<UnsentContacts.Row> rows = UnsentContacts.rows(pimdir, host);
+        List<UnsentContacts.Row> rows = UnsentContacts.rows(pimdir, cards, host);
         Set<String> keys = new HashSet<>(UnsentContacts.keys(rows));
         if (keys.equals(unsentOffered)) {
             return;

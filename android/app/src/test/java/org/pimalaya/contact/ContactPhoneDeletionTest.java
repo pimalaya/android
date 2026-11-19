@@ -242,7 +242,7 @@ public class ContactPhoneDeletionTest {
                 List.of(
                         new UnsentContacts.Row(JANE, "Jane Edit", SEED, null),
                         new UnsentContacts.Row(JANE, "Jane Edit", SEED, null, true)),
-                UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication(), phone));
+                UnsentContacts.rows(pimdir, store, RuntimeEnvironment.getApplication(), phone));
         assertTrue(phone.deleted.contains(handle));
     }
 
@@ -258,7 +258,7 @@ public class ContactPhoneDeletionTest {
         assertEquals(List.of(CONTACTS), contacts.collectionsOf(JANE));
         assertFalse(contacts.withdrawalWaits(CONTACTS, JANE));
         assertEquals(
-                List.of(), UnsentContacts.rows(pimdir, RuntimeEnvironment.getApplication(), phone));
+                List.of(), UnsentContacts.rows(pimdir, store, RuntimeEnvironment.getApplication(), phone));
     }
 
     @Test

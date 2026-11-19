@@ -222,7 +222,7 @@ public final class ContactsList implements SelectionBar.Owner {
                     Map<String, CardFacts.Indexed> read = parts.contacts().facts();
                     Map<String, CardFacts.Indexed> known =
                             read != null ? read : CardFacts.fromBodies(entries);
-                    List<UnsentContacts.Row> waiting = UnsentContacts.rows(parts.pimdir(), host);
+                    List<UnsentContacts.Row> waiting = UnsentContacts.rows(parts.pimdir(), parts.cards(), host);
                     host.postAlive(
                             () -> {
                                 contacts = entries;

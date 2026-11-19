@@ -51,18 +51,21 @@ public final class UnsentContacts {
 
     private UnsentContacts() {}
 
-    /** The changes waiting now, by book then contact. */
-    public static List<Row> rows(PimdirDb pimdir, Context context) {
-        return rows(pimdir, context, new PhoneRemote(context, pimdir));
+    /**
+     * The changes waiting now, by book then contact, the switches read off
+     * {@code cards}: the app's one card store, never one opened per call.
+     */
+    public static List<Row> rows(PimdirDb pimdir, CardStore cards, Context context) {
+        return rows(pimdir, cards, context, new PhoneRemote(context, pimdir));
     }
 
     /** The same, the phone's deletions read off {@code phone}. */
-    static List<Row> rows(PimdirDb pimdir, Context context, PhoneSpoke phone) {
+    static List<Row> rows(PimdirDb pimdir, CardStore cards, Context context, PhoneSpoke phone) {
         PimdirStorage offline = new PimdirStorage(pimdir);
         PimdirContacts contacts = new PimdirContacts(pimdir);
         List<Row> rows = new ArrayList<>();
         Set<String> synced = new java.util.HashSet<>();
-        for (BookEntry entry : new CardStore(context, pimdir).loadAllAddressbooks()) {
+        for (BookEntry entry : cards.loadAllAddressbooks()) {
             if (entry.subscribed && entry.remoteSynced) {
                 synced.add(entry.book.url());
             }
