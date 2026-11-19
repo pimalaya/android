@@ -56,7 +56,7 @@ public class SyncVectorsTest {
     @Rule public final TemporaryFolder folder = new TemporaryFolder();
 
     /** The format version this runner reads a case under (SYNC §11). */
-    private static final int FORMAT = 7;
+    private static final int FORMAT = 8;
 
     /** The system flags, each its bit of {@code marks} (STORAGE §13). */
     private static final List<String> MARKS =
@@ -420,7 +420,12 @@ public class SyncVectorsTest {
                         id
                     });
         }
+        JSONObject objects = stated.getJSONObject("objects");
         for (Map.Entry<String, String> object : run.hashes.entrySet()) {
+            // NOTE: a file under its name and no row (SYNC §11, format 8).
+            if (!objects.getJSONObject(object.getKey()).optBoolean("row", true)) {
+                continue;
+            }
             PimdirDb.exec(
                     db,
                     "STORE_OBJECT",
