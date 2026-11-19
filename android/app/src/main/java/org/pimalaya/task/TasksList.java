@@ -16,6 +16,7 @@ import org.pimalaya.calendar.Zones;
 import org.pimalaya.client.BodyReplaced;
 import org.pimalaya.client.Task;
 import org.pimalaya.client.TaskEdit;
+import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.AvatarSlot;
 import org.pimalaya.ui.CardSections;
 import org.pimalaya.ui.Dates;
@@ -1222,43 +1223,48 @@ public final class TasksList implements SelectionBar.Owner {
             summary.setPaintFlags(
                     struck ? summary.getPaintFlags() | strike : summary.getPaintFlags() & ~strike);
 
-            // NOTE: a capture is clarified rather than ticked off, its slot
-            // the Inbox glyph clarifying it; a closed task's tick reopens it.
-            ImageButton done = view.findViewById(R.id.task_done);
+            // NOTE: the avatar is the task list's, its initial on its hue as
+            // an agenda entry's; a closed task's shows a check or a cross
+            // in the letter's place, and a capture the Inbox glyph, as it
+            // is clarified rather than ticked off. A tap on it closes the
+            // task, reopens a closed one, clarifies a capture.
             boolean capture = Task.INBOX.equals(only()) && !closed;
             boolean picked = selected.containsKey(keyOf(row.stored));
-            // NOTE: a picked task shows the other lists' check disc in its
-            // tick's place, at full strength on a closed row too.
-            done.setVisibility(picked ? View.INVISIBLE : View.VISIBLE);
-            view.findViewById(R.id.avatar_slot).setVisibility(picked ? View.VISIBLE : View.GONE);
-            if (picked) {
-                AvatarSlot.bind(host, view, "", "", null, true, false);
-                ((View) done.getParent()).setAlpha(1f);
-            }
-            done.setImageTintList(
-                    android.content.res.ColorStateList.valueOf(
-                            host.resolveColor(android.R.attr.textColorSecondary)));
+            int glyph = 0;
             if (capture) {
-                done.setImageResource(R.drawable.ic_task_inbox);
-            } else if (!closed) {
-                done.setImageDrawable(null);
-            } else {
-                done.setImageResource(
+                glyph = R.drawable.ic_task_inbox;
+            } else if (closed) {
+                glyph =
                         TaskOrder.DONE.equals(task.status())
                                 ? R.drawable.ic_check
-                                : R.drawable.ic_close);
+                                : R.drawable.ic_close;
+            }
+            AvatarSlot.bind(
+                    host,
+                    view,
+                    Avatar.letter(row.stored.calendar.name),
+                    glyph,
+                    row.stored.calendar.id,
+                    row.stored.calendar.color,
+                    picked,
+                    false);
+            View avatar = view.findViewById(R.id.avatar_slot);
+            // NOTE: a picked row's check reads at full strength, closed or
+            // not.
+            if (picked) {
+                avatar.setAlpha(1f);
             }
             if (isSelectionMode()) {
-                // NOTE: while selecting, the tick's tap toggles the
+                // NOTE: while selecting, the avatar's tap toggles the
                 // selection, as the row's does.
-                done.setOnClickListener(button -> toggle(row.stored));
-                done.setContentDescription(host.getString(R.string.select));
+                avatar.setOnClickListener(button -> toggle(row.stored));
+                avatar.setContentDescription(host.getString(R.string.select));
             } else if (capture) {
-                done.setOnClickListener(button -> clarify.open(List.of(row.stored)));
-                done.setContentDescription(host.getString(R.string.task_clarify));
+                avatar.setOnClickListener(button -> clarify.open(List.of(row.stored)));
+                avatar.setContentDescription(host.getString(R.string.task_clarify));
             } else {
-                done.setOnClickListener(button -> done(row.stored, !closed));
-                done.setContentDescription(
+                avatar.setOnClickListener(button -> done(row.stored, !closed));
+                avatar.setContentDescription(
                         host.getString(closed ? R.string.task_reopen : R.string.task_mark_done));
             }
             return view;

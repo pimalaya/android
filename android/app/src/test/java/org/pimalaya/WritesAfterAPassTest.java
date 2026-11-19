@@ -474,13 +474,13 @@ public class WritesAfterAPassTest {
 
         serve("g1", TaskEdit.at("20261111T100000Z").withText("Call Ann", "From Google"));
         sync(list, "google://" + EMAIL);
-        View tick = clickableById(host.findViewById(R.id.tasks_list), R.id.task_done);
-        assertNotNull("the row has its tick", tick);
-        tick.performClick();
+        View disc = clickableById(host.findViewById(R.id.tasks_list), R.id.avatar_slot);
+        assertNotNull("the row has its disc", disc);
+        disc.performClick();
         settle();
 
         Task stored = new TaskStore(parts).load(context).get(0).full();
-        assertTrue("the tick closes the task, " + failure("task edit failed"), stored.closed());
+        assertTrue("the disc's tap closes the task, " + failure("task edit failed"), stored.closed());
         assertEquals("keeping the notes the pass brought", "From Google", stored.description());
     }
 

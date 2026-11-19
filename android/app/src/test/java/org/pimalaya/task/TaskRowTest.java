@@ -14,11 +14,11 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * A Tasks row takes the list's tap, its tick aside.
+ * A Tasks row takes the list's tap, its avatar aside.
  *
  * <p>A list hands a tap to a row only when nothing in it takes focus
- * (AbsListView), and an ImageButton makes itself focusable whatever its
- * layout says, so the row must block its descendants.
+ * (AbsListView), and a clickable child may make itself focusable whatever
+ * its layout says, so the row must block its descendants.
  */
 @RunWith(RobolectricTestRunner.class)
 public class TaskRowTest {

@@ -47,13 +47,14 @@
          without leaving the column's axis. This is the one number to
          change to resize every avatar. -->
     <dimen name="item_avatar_inset">2dp</dimen>
+    <!-- A glyph drawn on a disc in its letter's place (a task's check). -->
+    <dimen name="avatar_glyph">20dp</dimen>
 
     <!-- The grouped lists: rows sit in rounded cards inset from the
          screen edge, under a section header, below a large title. -->
     <dimen name="card_radius">22dp</dimen>
     <dimen name="card_gutter">12dp</dimen>
     <dimen name="card_avatar">42dp</dimen>
-    <dimen name="task_box_stroke">2dp</dimen>
     <dimen name="large_title">32sp</dimen>
 
     <!-- The week card's day discs and calendar dots. -->

@@ -9,8 +9,10 @@ import android.content.Context;
 import android.os.Looper;
 import android.view.View;
 import android.view.ViewParent;
+import android.widget.ImageView;
 import android.widget.ListAdapter;
 import android.widget.ListView;
+import android.widget.TextView;
 
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
@@ -180,29 +182,71 @@ public class TasksTabSyncTest {
         host.reload(PimDomain.CALENDAR);
         settle(host);
 
-        tick(host);
+        tapDisc(host);
         settle(host);
 
         List<TaskStore.Stored> tasks = new TaskStore(parts).load(context);
         assertEquals(1, tasks.size());
         assertTrue(
-                "the tick closes the task, not " + editFailure(),
+                "the disc's tap closes the task, not " + editFailure(),
                 tasks.get(0).task.closed());
     }
 
-    /** Taps the tick of the one task row the Tasks list shows. */
-    private static void tick(TasksHost host) {
+    @Test
+    public void aTapOnTheDiscMarksTheTaskDone() throws Exception {
+        TasksHost host = Robolectric.buildActivity(TasksHost.class).create().get();
+        PimdirDb pimdir = App.of(context).pimdir();
+        Clients clients =
+                new Clients(
+                        new AccountClient(), new ContactClient(), new Google(),
+                        new MailClient(), new OfflineClient());
+        EventStore events = new EventStore(context, pimdir);
+        events.replaceCalendars(
+                EMAIL, List.of(new Calendar("list-1", "My Tasks", LIST, "", null, "", true, true)));
+        CalendarParts parts = new CalendarParts(pimdir, clients, events);
+        new TaskWrites(parts)
+                .add(events.loadCalendars().get(0), "Call Ann", null, null, Task.NEXT, List.of());
+        host.tasksList.reload();
+        settle(host);
+
+        View open = row(host);
+        assertEquals("the disc shows the list's initial",
+                "M", ((TextView) open.findViewById(R.id.avatar_disc)).getText().toString());
+        assertEquals("and no glyph",
+                View.GONE, open.findViewById(R.id.avatar_glyph).getVisibility());
+
+        open.findViewById(R.id.avatar_slot).performClick();
+        settle(host);
+
+        assertTrue("the disc's tap closes the task, not " + editFailure(),
+                new TaskStore(parts).load(context).get(0).task.closed());
+        View done = row(host);
+        assertEquals("the done task's disc drops its letter",
+                "", ((TextView) done.findViewById(R.id.avatar_disc)).getText().toString());
+        ImageView glyph = done.findViewById(R.id.avatar_glyph);
+        assertEquals("for a glyph", View.VISIBLE, glyph.getVisibility());
+        assertEquals("the check",
+                R.drawable.ic_check, shadowOf(glyph.getDrawable()).getCreatedFromResId());
+    }
+
+    /** Taps the avatar disc of the one task row the Tasks list shows. */
+    private static void tapDisc(TasksHost host) {
+        row(host).findViewById(R.id.avatar_slot).performClick();
+    }
+
+    /** The one task row the Tasks list shows. */
+    private static View row(TasksHost host) {
         ListView list = host.findViewById(R.id.tasks_list);
         ListAdapter adapter = list.getAdapter();
-        List<View> ticks = new ArrayList<>();
+        List<View> rows = new ArrayList<>();
         for (int position = 0; position < adapter.getCount(); position++) {
-            View tick = adapter.getView(position, null, list).findViewById(R.id.task_done);
-            if (tick != null) {
-                ticks.add(tick);
+            View row = adapter.getView(position, null, list);
+            if (row.findViewById(R.id.avatar_slot) != null) {
+                rows.add(row);
             }
         }
-        assertEquals("one task row", 1, ticks.size());
-        ticks.get(0).performClick();
+        assertEquals("one task row", 1, rows.size());
+        return rows.get(0);
     }
 
     /**

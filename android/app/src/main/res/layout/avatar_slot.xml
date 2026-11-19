@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A row's avatar, the same in every domain (AvatarSlot binds it): the
-     disc in the palette's tones under its letter; while the row is picked,
-     the accent disc and its check in its place, at its size; an unread
-     message's badge on its top-right edge, ringed in the card's tone so it
-     shifts nothing. -->
+     disc in the palette's tones under its letter or a glyph; while the
+     row is picked, the accent disc and its check in its place, at its
+     size; an unread message's badge on its top-right edge, ringed in the
+     card's tone so it shifts nothing. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/avatar_slot"
     android:layout_width="@dimen/card_avatar"
@@ -17,6 +17,16 @@
         android:layout_height="match_parent"
         android:gravity="center"
         android:textSize="17sp" />
+
+    <!-- A glyph in the letter's place, on the disc in its ink: a closed
+         task's check or cross, an Inbox item's tray. -->
+    <ImageView
+        android:id="@+id/avatar_glyph"
+        android:layout_width="@dimen/avatar_glyph"
+        android:layout_height="@dimen/avatar_glyph"
+        android:layout_gravity="center"
+        android:importantForAccessibility="no"
+        android:visibility="gone" />
 
     <ImageView
         android:id="@+id/avatar_check"
