@@ -10,10 +10,7 @@
 //!
 //! The backend is told apart once, when the session opens, not per verb.
 
-use std::{
-    fs::{self, File},
-    path::Path,
-};
+use std::{fs::File, path::Path};
 
 use io_pimdir::intent::PimdirSubmit;
 use jni::{
@@ -364,7 +361,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_describeMessage<'local>(
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let source = read_string(env, &source);
-        let json = match fs::read(&source) {
+        let json = match File::open(&source).and_then(|file| blobs::Mapped::of(&file)) {
             Ok(raw) => {
                 to_string(&read::describe(&raw)).unwrap_or_else(|err| error_json(err.to_string()))
             }
@@ -871,7 +868,7 @@ struct FailingReply {
 
 /// The stored message in file `source`, its bytes hashing to `hash`, or
 /// the reply of the read that failed ([`blobs::verified`]).
-fn stored(source: &str, hash: &str) -> Result<Vec<u8>, String> {
+fn stored(source: &str, hash: &str) -> Result<blobs::Mapped, String> {
     match blobs::verified(Path::new(source), hash) {
         Ok(Some(raw)) => Ok(raw),
         Ok(None) => {

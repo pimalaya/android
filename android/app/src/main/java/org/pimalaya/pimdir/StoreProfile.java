@@ -85,6 +85,12 @@ public final class StoreProfile {
         return sorted;
     }
 
+    /** How many times the statement of text {@code sql} ran. */
+    public long runs(String sql) {
+        long[] entry = spent.get(sql);
+        return entry == null ? 0 : entry[1];
+    }
+
     /** The time inside statements, in nanoseconds. */
     public long inStatements() {
         long total = 0;

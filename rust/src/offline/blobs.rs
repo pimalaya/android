@@ -20,7 +20,11 @@
 use std::{
     fs::{self, File, Metadata, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    ops::Deref,
+    os::unix::{
+        fs::{MetadataExt, OpenOptionsExt},
+        io::AsRawFd,
+    },
     path::Path,
 };
 
@@ -128,11 +132,15 @@ fn regular(path: &Path) -> io::Result<Option<File>> {
     Ok(file.metadata()?.is_file().then_some(file))
 }
 
-/// The body `name` read whole from `path` and checked in memory against
-/// its name before anything parses it (STORAGE §7): `None` when the file
-/// fails it, as other bytes, a part a crashed copy left, a link or
-/// anything but a regular file, for the owner to move into quarantine/.
-pub fn verified(path: &Path, name: &str) -> io::Result<Option<Vec<u8>>> {
+/// The body `name` mapped from `path` and checked against its name before
+/// anything parses it (STORAGE §7): `None` when the file fails it, as other
+/// bytes, a part a crashed copy left, a link or anything but a regular file,
+/// for the owner to move into quarantine/.
+///
+/// Mapped rather than read: the pages are the file's own, which the kernel
+/// can drop and read again, so a message of a hundred megabytes is no copy
+/// of a hundred megabytes on the native heap.
+pub fn verified(path: &Path, name: &str) -> io::Result<Option<Mapped>> {
     let name = PimdirHash::from(name);
     if !name.is_name() {
         return Err(io::Error::new(
@@ -140,12 +148,78 @@ pub fn verified(path: &Path, name: &str) -> io::Result<Option<Vec<u8>>> {
             format!("{} is no body's name", name.0),
         ));
     }
-    let Some(mut held) = regular(path)? else {
+    let Some(held) = regular(path)? else {
         return Ok(None);
     };
-    let mut body = Vec::new();
-    held.read_to_end(&mut body)?;
+    let body = Mapped::of(&held)?;
     Ok((hash::hash(&body) == name).then_some(body))
+}
+
+/// A file's bytes mapped read-only and private, as they were when mapped.
+///
+/// The app writes a body to a temporary and renames it into its name, and
+/// unlinks or renames a name away, never truncating one in place: a file
+/// mapped here keeps its length while it is mapped, so no read of the map
+/// faults past its end.
+pub struct Mapped {
+    at: *mut libc::c_void,
+    len: usize,
+}
+
+// SAFETY: a read-only map this value alone owns races with no other thread.
+unsafe impl Send for Mapped {}
+
+impl Mapped {
+    /// Maps the whole of `file`, its length as it is now; an empty file maps
+    /// to no bytes, `mmap` refusing a length of zero.
+    pub fn of(file: &File) -> io::Result<Self> {
+        let len = usize::try_from(file.metadata()?.len())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "too large to map"))?;
+        if len == 0 {
+            return Ok(Self {
+                at: std::ptr::null_mut(),
+                len,
+            });
+        }
+        // SAFETY: a new read-only private map of a readable fd, `len` long.
+        let at = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                len,
+                libc::PROT_READ,
+                libc::MAP_PRIVATE,
+                file.as_raw_fd(),
+                0,
+            )
+        };
+        if at == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self { at, len })
+    }
+}
+
+impl Deref for Mapped {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        if self.len == 0 {
+            return &[];
+        }
+        // SAFETY: `len` bytes mapped at `at` until drop, the file never cut.
+        unsafe { std::slice::from_raw_parts(self.at.cast::<u8>(), self.len) }
+    }
+}
+
+impl Drop for Mapped {
+    fn drop(&mut self) {
+        if self.len > 0 {
+            // SAFETY: the map `of` made, unmapped once, no slice outliving it.
+            unsafe {
+                libc::munmap(self.at, self.len);
+            }
+        }
+    }
 }
 
 /// [`rename_noreplace`] through `rename`, a rename refusing a name held.
@@ -273,7 +347,11 @@ fn renameat2(_from: &Path, _to: &Path) -> io::Result<()> {
 mod tests {
     use std::fs;
 
-    use crate::offline::blobs::{Filed, claimed, file, rename_noreplace, rename_noreplace_on};
+    use io_pimdir::hash;
+
+    use crate::offline::blobs::{
+        Filed, claimed, file, rename_noreplace, rename_noreplace_on, verified,
+    };
 
     /// Writers racing for one name through the fallback: one files it, every
     /// other is told it is held, and what holds the name is the bytes of the
@@ -469,6 +547,26 @@ mod tests {
                 Filed::Moved
             );
             assert_eq!(fs::read(&to).unwrap(), body);
+        }
+    }
+
+    /// A stored body is read through a map of its file, the very bytes, and
+    /// an empty one maps to none rather than failing the map (`mmap` takes
+    /// no length of zero); bytes the name does not hash to answer `None`.
+    #[test]
+    fn a_body_is_read_through_a_map_of_its_file() {
+        let dir = tempfile::tempdir().unwrap();
+        for body in [&b"From: a@example.org\r\n\r\nHello\r\n"[..], b""] {
+            let path = dir.path().join("body");
+            fs::write(&path, body).unwrap();
+            let name = hash::hash(body).0;
+
+            let mapped = verified(&path, &name).unwrap().expect("its name");
+            assert_eq!(&*mapped, body);
+            drop(mapped);
+
+            fs::write(&path, b"other").unwrap();
+            assert!(verified(&path, &name).unwrap().is_none());
         }
     }
 }

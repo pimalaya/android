@@ -191,7 +191,7 @@ public final class PimdirCollections {
         Set<String> readOnly = readOnly();
         List<String[]> rows = new ArrayList<>();
         String sql = PimdirSql.split(PimdirSql.of("LIST_COLLECTIONS"))[0];
-        try (Cursor cursor = store.getReadableDatabase().rawQuery(sql, null)) {
+        try (Cursor cursor = PimdirDb.typed(store.getReadableDatabase(), sql, new Object[0])) {
             while (cursor.moveToNext()) {
                 if (!kind.equals(cursor.getString(2))) {
                     continue;

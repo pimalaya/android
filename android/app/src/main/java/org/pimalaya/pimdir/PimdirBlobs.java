@@ -183,15 +183,28 @@ public final class PimdirBlobs {
         return false;
     }
 
+    /** The largest body {@link #get} reads whole, the most an array holds. */
+    static final long WHOLE_MAX = Integer.MAX_VALUE - 8;
+
     /**
      * Reads a body back, checked against its name; null when it is not
      * stored or fails its name, which moves it into quarantine/ (§7).
+     *
+     * @throws IOException for a body past {@link #WHOLE_MAX}, which no array
+     *     holds: such a body is read through its file
      */
     byte[] get(String hash) throws IOException {
         if (!has(hash)) {
             return null;
         }
         File source = pathOf(hash);
+        // NOTE: no array holds more, and readAllBytes would throw an
+        // OutOfMemoryError past it, which no caller of a read catches.
+        if (source.length() > WHOLE_MAX) {
+            throw new IOException(
+                    "The body " + hash + " is too large to read whole: " + source.length()
+                            + " bytes");
+        }
         byte[] body = Files.readAllBytes(source.toPath());
         if (!hash.equals(PimdirHash.of(body))) {
             quarantine(hash);

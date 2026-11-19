@@ -198,6 +198,33 @@ public class PimdirDbTest {
     }
 
     /**
+     * A body no array holds is refused by a whole read with an IOException,
+     * the one its callers catch, rather than an OutOfMemoryError ending the
+     * worker; the file stays where it is, not taken for a failing one.
+     */
+    @Test
+    public void aBodyPastWhatAnArrayHoldsIsRefusedWhole() throws IOException {
+        PimdirBlobs blobs = new PimdirBlobs(store.blobs());
+        String hash = PimdirHash.of(new byte[] {1});
+        File path = blobs.pathOf(hash);
+        assertTrue(path.getParentFile().mkdirs());
+        // NOTE: sparse, so it holds no disk.
+        try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(path, "rw")) {
+            file.setLength(PimdirBlobs.WHOLE_MAX + 1);
+        }
+
+        try {
+            blobs.get(hash);
+            throw new AssertionError("read whole");
+        } catch (IOException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains("too large"));
+        } finally {
+            assertTrue("left in place", blobs.has(hash));
+            assertTrue(path.delete());
+        }
+    }
+
+    /**
      * A write finding its name held keeps the file there only once it checks
      * against the name (STORAGE §5): other bytes, a part a crashed copy left
      * and a link are moved into quarantine/ (§7), never unlinked, and the body

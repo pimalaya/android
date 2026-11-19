@@ -35,6 +35,7 @@ import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.pimdir.StoreProfile;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -388,6 +389,147 @@ public class StorePerformanceTest {
                 plan(MailStore.unjoined(
                         PimdirSql.bind("COUNT_MAIL", query.values(null, -1)), null));
         assertFalse(plan, plan.contains("mail_summary_1"));
+    }
+
+    @Test
+    public void aQuerysPagesReadTheRosterItWasBuiltWith() throws Exception {
+        list(inbox, "i", 30, "2026-03-02T00:30:00Z");
+        list(archive, "a", 5, "2026-03-02T00:30:00Z");
+        MailStore.Query query = store.query((account, collection) -> true, false, false, "");
+        String roster = PimdirSql.split(PimdirSql.of("LIST_COLLECTIONS"))[0];
+
+        // NOTE: the roster a page names its rows' accounts by is the one the
+        // refresh read building its query, never read again per page.
+        StoreProfile.begin();
+        List<MailStore.StoredMessage> first = store.page(query, null, 0, 10);
+        List<MailStore.StoredMessage> second =
+                store.page(query, first.get(first.size() - 1), 0, 10);
+        List<MailStore.StoredMessage> landed = store.pageBelow(query.since(null), null, 20, 10);
+        StoreProfile profile = StoreProfile.end();
+
+        assertEquals("the roster read no more", 0, profile.runs(roster));
+        assertEquals(10, first.size());
+        assertEquals(10, second.size());
+        assertEquals(10, landed.size());
+        for (List<MailStore.StoredMessage> page : List.of(first, second, landed)) {
+            for (MailStore.StoredMessage message : page) {
+                assertEquals(EMAIL, message.accountEmail);
+            }
+        }
+
+        // NOTE: a query built with no roster still names its rows.
+        StoreProfile.begin();
+        MailStore.Query bare = new MailStore.Query(List.of(inbox), null, null, null, List.of());
+        assertEquals(10, store.page(bare, null, 0, 10).size());
+        assertEquals(1, StoreProfile.end().runs(roster));
+    }
+
+    /** A body's name of one letter, which the schema takes (STORAGE §5). */
+    private static String body(char letter) {
+        return String.valueOf(letter).repeat(52);
+    }
+
+    /**
+     * One listed message with its server binding, straight into the tables:
+     * its body, its binding's base and shared body, any of them null.
+     */
+    private void message(
+            String collection, long seq, String date, String object, String base, String shared) {
+        db.execSQL(
+                "INSERT INTO items(collection, link_id, seq, flags_known, object_hash, sort_key,"
+                        + " level) VALUES(?, ?, ?, 1, ?, ?, ?)",
+                new Object[] {collection, "m" + seq, seq, object, date, object == null ? 1 : 2});
+        db.execSQL(
+                "INSERT INTO bindings(item, collection, source, handle, base_flags_known,"
+                        + " base_object, base_present, shared_object) SELECT id, collection,"
+                        + " 'server', ?, 1, ?, 1, ? FROM items WHERE collection = ? AND link_id = ?",
+                new Object[] {"h" + seq, base, shared, collection, "m" + seq});
+        db.execSQL(
+                "INSERT INTO mail_summary(item, subject, date) SELECT id, 's', ? FROM items"
+                        + " WHERE collection = ? AND link_id = ?",
+                new Object[] {date, collection, "m" + seq});
+    }
+
+    /** Every object's count, by name. */
+    private Map<String, Long> counts() {
+        Map<String, Long> counts = new java.util.TreeMap<>();
+        try (Cursor cursor = db.rawQuery("SELECT hash, refcount FROM objects", null)) {
+            while (cursor.moveToNext()) {
+                counts.put(cursor.getString(0), cursor.getLong(1));
+            }
+        }
+        return counts;
+    }
+
+    /**
+     * The mail a collector reaches, bodies shared across mailboxes and with
+     * the bindings, every count right, then {@code drifted}'s count set off
+     * by hand: a body no collector write reaches.
+     */
+    private void seedCollected(String drifted) {
+        for (char letter : "abcdefg".toCharArray()) {
+            db.execSQL(
+                    "INSERT INTO objects(hash, size, refcount) VALUES(?, 10, 0)",
+                    new Object[] {body(letter)});
+        }
+        String old = "2001-01-01T00:00:00Z";
+        String recent = "2026-01-01T00:00:00Z";
+        message(inbox, 1, old, body('a'), body('a'), null);
+        message(inbox, 2, old, body('b'), body('b'), null);
+        message(archive, 3, recent, body('b'), body('b'), null);
+        message(inbox, 4, old, body('c'), body('c'), body('c'));
+        message(inbox, 5, old, body('e'), body('e'), body('f'));
+        message(archive, 6, recent, body('d'), body('d'), body('f'));
+        message(inbox, 7, old, null, null, body('g'));
+        message(inbox, 8, recent, body('g'), body('g'), null);
+        PimdirDb.exec(db, "RECOMPUTE_REFCOUNTS", Map.of());
+        db.execSQL("UPDATE objects SET refcount = 5 WHERE hash = ?", new Object[] {drifted});
+    }
+
+    /**
+     * After a collector's writes, every count a full recount would restate
+     * but the hand-set one, which the collector's own recount never reached.
+     */
+    private void assertCountsAsRecounted(String drifted) {
+        Map<String, Long> collected = counts();
+        assertEquals("a count no write moved is left as it is", 5L, (long) collected.get(drifted));
+        PimdirDb.exec(db, "RECOMPUTE_REFCOUNTS", Map.of());
+        Map<String, Long> recounted = counts();
+        recounted.put(drifted, 5L);
+        assertEquals(recounted, collected);
+    }
+
+    @Test
+    public void anEvictionRecountsTheBodiesItReachedAsAFullRecountWould() {
+        seedCollected(body('d'));
+
+        assertEquals("the bodiless one too", 5, store.evictBefore(EMAIL, "2002-01-01T00:00:00Z"));
+
+        assertCountsAsRecounted(body('d'));
+        Map<String, Long> counts = counts();
+        assertFalse("its last pins gone, collected", counts.containsKey(body('a')));
+        assertFalse(counts.containsKey(body('c')));
+        assertFalse(counts.containsKey(body('e')));
+        assertEquals("the other mailbox's two pins", 2L, (long) counts.get(body('b')));
+        assertEquals("the other mailbox's shared pin", 1L, (long) counts.get(body('f')));
+        assertEquals("a recent message's two pins", 2L, (long) counts.get(body('g')));
+    }
+
+    @Test
+    public void aReleaseRecountsTheBodiesItReachedAsAFullRecountWould() {
+        seedCollected(body('d'));
+
+        assertEquals(4, store.release(EMAIL, "2002-01-01T00:00:00Z"));
+
+        assertCountsAsRecounted(body('d'));
+        Map<String, Long> counts = counts();
+        assertFalse("its last pins gone, collected", counts.containsKey(body('a')));
+        assertFalse(counts.containsKey(body('c')));
+        assertFalse(counts.containsKey(body('e')));
+        assertEquals("the other mailbox's two pins", 2L, (long) counts.get(body('b')));
+        assertEquals("two bindings' shared pins", 2L, (long) counts.get(body('f')));
+        assertEquals("a recent message's two, a released one's shared", 3L,
+                (long) counts.get(body('g')));
     }
 
 
