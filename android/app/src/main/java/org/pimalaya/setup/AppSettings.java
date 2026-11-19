@@ -13,6 +13,7 @@ import org.pimalaya.calendar.WeekStart;
 import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
+import org.pimalaya.ui.RecentsSnapshot;
 import org.pimalaya.ui.Sections;
 import org.pimalaya.ui.Switches;
 
@@ -99,6 +100,28 @@ public final class AppSettings {
                                 host.getString(R.string.locked_details),
                                 host.getString(R.string.locked_details_note),
                                 details)),
+                null,
+                false);
+
+        label(content, R.string.settings_privacy_label);
+        Switch recents = Switches.of(host);
+        recents.setChecked(RecentsSnapshot.hidden(host));
+        recents.setOnCheckedChangeListener(
+                (view, checked) -> RecentsSnapshot.setHidden(host, checked));
+        int note =
+                RecentsSnapshot.blanksCaptures()
+                        ? R.string.hide_in_recents_captures_note
+                        : R.string.hide_in_recents_note;
+        sections.section(
+                0,
+                0,
+                List.of(
+                        AccountSettings.switchRow(
+                                host,
+                                sections,
+                                host.getString(R.string.hide_in_recents),
+                                host.getString(note),
+                                recents)),
                 null,
                 false);
     }

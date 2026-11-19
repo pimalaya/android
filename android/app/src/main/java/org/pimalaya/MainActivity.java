@@ -87,6 +87,7 @@ import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
+import org.pimalaya.ui.RecentsSnapshot;
 import org.pimalaya.ui.SelectionBar;
 import org.pimalaya.ui.SyncDock;
 import org.pimalaya.ui.SyncPill;
@@ -252,6 +253,7 @@ public class MainActivity extends Host
             return;
         }
         setContentView(R.layout.activity_main);
+        RecentsSnapshot.apply(this);
         drawer = findViewById(R.id.drawer);
         applyEdgeToEdge();
 

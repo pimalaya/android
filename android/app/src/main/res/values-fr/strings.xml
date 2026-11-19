@@ -62,6 +62,10 @@
     <string name="settings_notifications_label">Notifications</string>
     <string name="locked_details">Expéditeur et objet sur l\'écran verrouillé</string>
     <string name="locked_details_note">Désactivé, un téléphone verrouillé indique seulement combien de messages sont arrivés. Activé, il suit le réglage du téléphone.</string>
+    <string name="settings_privacy_label">Confidentialité</string>
+    <string name="hide_in_recents">Masquer dans les applis récentes</string>
+    <string name="hide_in_recents_note">Désactivé, les applis récentes montrent l\'écran que vous avez quitté. Activé, elles montrent une carte vide.</string>
+    <string name="hide_in_recents_captures_note">Désactivé, les applis récentes montrent l\'écran que vous avez quitté. Activé, elles montrent une carte vide, et les captures et enregistrements d\'écran de l\'appli sont vides aussi.</string>
     <string name="week_start">Premier jour de la semaine</string>
     <string name="week_start_note">La vue semaine commence par lui. Tant que vous n\'en choisissez pas, il suit la langue du téléphone.</string>
     <string-array name="week_start_days">
