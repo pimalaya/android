@@ -17,7 +17,10 @@ use io_jmap::rfc8620::{
 use io_msgraph::v1::{
     rest::users::contacts::vcard::MsgraphContactVcardError, send::MsgraphSendError,
 };
-use io_webdav::rfc4918::{follow_redirects::WebdavFollowRedirectsError, send::WebdavSendError};
+use io_webdav::{
+    rfc4918::{follow_redirects::WebdavFollowRedirectsError, send::WebdavSendError},
+    rfc6578::sync_collection::WebdavSyncCollectionError,
+};
 use serde::Serialize;
 
 /// One failed bridge operation, the `{"error", "status"?}` reply Java parses.
@@ -197,6 +200,9 @@ fn throttled(text: &str) -> bool {
 /// io-webdav reads as a duplicate `UID` keeps the status it came in:
 /// Fastmail's 403 to a second resource of one `UID` is that item's
 /// refusal, not the pass's.
+///
+/// A `sync-collection` failure wraps its send transparently, which hides
+/// it from the source chain: its status is read inside it.
 fn http_status(err: &(dyn StdError + 'static)) -> Option<u16> {
     let mut cause = Some(err);
 
@@ -210,6 +216,9 @@ fn http_status(err: &(dyn StdError + 'static)) -> Option<u16> {
         }
         if let Some(WebdavFollowRedirectsError::HttpStatus { status, .. }) = err.downcast_ref() {
             return Some(*status);
+        }
+        if let Some(WebdavSyncCollectionError::Send(send)) = err.downcast_ref() {
+            return http_status(send);
         }
         if let Some(JmapSendError::HttpStatus(status) | JmapSendError::Request { status, .. }) =
             err.downcast_ref()
@@ -302,6 +311,9 @@ mod tests {
         blob_upload::JmapBlobUploadError, error::JmapRequestError, send::JmapSendError,
         session_get::JmapSessionGetError,
     };
+    use io_webdav::{
+        rfc4918::send::WebdavSendError, rfc6578::sync_collection::WebdavSyncCollectionError,
+    };
 
     use crate::error::{BridgeError, REFUSED, coroutine_error, parts_failure, refused_for_good};
 
@@ -347,6 +359,21 @@ mod tests {
             assert!(!refused_for_good(&failed(status, "")), "{status}");
         }
         assert!(!refused_for_good(&BridgeError::from("No connection")));
+    }
+
+    /// A `sync-collection` round or its fallback listing failing on an HTTP
+    /// status keeps it, though the coroutine error wraps the send
+    /// transparently: a 401 there must still ask to sign in again.
+    #[test]
+    fn a_sync_collection_status_crosses() {
+        for status in [401, 404] {
+            let send = WebdavSendError::HttpStatus {
+                status,
+                body: String::new(),
+            };
+            let err = coroutine_error(&WebdavSyncCollectionError::Send(send));
+            assert_eq!(err.status, Some(status));
+        }
     }
 
     #[test]
