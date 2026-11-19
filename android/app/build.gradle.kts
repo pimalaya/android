@@ -56,7 +56,7 @@ android {
         // on.
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
+        versionCode = 8
         versionName = "0.3.0"
         // The app's own languages: drops the other locales libraries
         // (AndroidX, Material) bring, so the app is not half-translated
