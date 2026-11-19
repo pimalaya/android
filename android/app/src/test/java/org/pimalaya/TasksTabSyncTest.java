@@ -210,8 +210,8 @@ public class TasksTabSyncTest {
         settle(host);
 
         View open = row(host);
-        assertEquals("the disc shows the list's initial",
-                "M", ((TextView) open.findViewById(R.id.avatar_disc)).getText().toString());
+        assertEquals("the disc shows the title's initial, not the list's",
+                "C", ((TextView) open.findViewById(R.id.avatar_disc)).getText().toString());
         assertEquals("and no glyph",
                 View.GONE, open.findViewById(R.id.avatar_glyph).getVisibility());
 

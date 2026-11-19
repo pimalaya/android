@@ -1223,10 +1223,11 @@ public final class TasksList implements SelectionBar.Owner {
             summary.setPaintFlags(
                     struck ? summary.getPaintFlags() | strike : summary.getPaintFlags() & ~strike);
 
-            // NOTE: the avatar is the task list's, its initial on its hue as
-            // an agenda entry's; a closed task's shows a check or a cross
-            // in the letter's place, and a capture the Inbox glyph, as it
-            // is clarified rather than ticked off. A tap on it closes the
+            // NOTE: the avatar is the task's own, its title's initial on a
+            // hue derived from the title, so the tasks of one list tell
+            // apart; a closed task's shows a check or a cross in the
+            // letter's place, and a capture the Inbox glyph, as it is
+            // clarified rather than ticked off. A tap on it closes the
             // task, reopens a closed one, clarifies a capture.
             boolean capture = Task.INBOX.equals(only()) && !closed;
             boolean picked = selected.containsKey(keyOf(row.stored));
@@ -1242,10 +1243,10 @@ public final class TasksList implements SelectionBar.Owner {
             AvatarSlot.bind(
                     host,
                     view,
-                    Avatar.letter(row.stored.calendar.name),
+                    Avatar.letter(task.summary()),
                     glyph,
-                    row.stored.calendar.id,
-                    row.stored.calendar.color,
+                    task.summary(),
+                    null,
                     picked,
                     false);
             View avatar = view.findViewById(R.id.avatar_slot);
