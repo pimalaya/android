@@ -42,17 +42,14 @@ Every screen, light and dark, is drawn on the [design canvas](https://claude.ai/
 
 ## Features
 
-- **One merged view**: mail, contacts, calendars, tasks and files, each in one list across every account, narrowed by filters and chips.
-- **Local-first**: everything lives on the phone and works offline; changes sync once the network is back, merged rather than overwritten.
-- **Automatic setup**: type your email address, the servers and the sign-in are found for you.
-- **Light syncs**: mail in steps of about 50, only the mailboxes you tick, only what changed, in the background as often as you choose.
-- **Mail**: read, reply, forward, star, move, copy and delete, write in rich text or plain text, open or save attachments. Drafts and attachments in the composer are not there yet.
-- **Contacts**: a complete vCard editor, upcoming birthdays, duplicates merged, import and export.
-- **Calendars**: create, edit and delete events, to-dos and journal entries, in a week or a list view.
-- **Tasks**: the to-dos of every calendar and task list in one list, kept the GTD way (Getting Things Done): Inbox, Waiting and Someday lists, a clarify flow and a weekly review, captures from a widget, a shortcut or the share sheet.
-- **Files**: every attachment as a file, beside your own folders on the phone, searchable by name and sender.
-- **Phone integration**: contacts and calendars in Android's own apps, new-mail notifications, home screen widgets.
-- **Private**: no account with us, no analytics, no ads; the app talks only to your providers, and to Cloudflare's DNS resolver for your domain name when you add an account.
+- **One merged view**: mail, contacts, calendars, tasks and files in one list each, across every account
+- **Local-first**: everything works offline on the phone, and syncs merge changes rather than overwrite them
+- **Automatic setup**: type your email address, the servers and the sign-in are found for you
+- **Mail**: read, reply, forward, move and delete, in rich or plain text, with attachments
+- **Contacts**: a complete vCard editor with birthdays, duplicate merging, import and export
+- **Calendars and tasks**: events in a week or list view, to-dos kept the GTD way with a weekly review
+- **Phone integration**: contacts and calendars in Android's own apps, notifications and widgets
+- **Private**: no account with us, no analytics, no ads, see the [privacy policy](./PRIVACY.md)
 
 ## Coverage
 
