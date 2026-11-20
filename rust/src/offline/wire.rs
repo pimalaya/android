@@ -943,6 +943,12 @@ pub struct LoadedJson {
     /// the store offers it of items other sources hold (SYNC §3, §9).
     #[serde(default)]
     pub offered: Vec<String>,
+    /// The loaded placements whose item holds a body another source folded
+    /// in since this source last agreed with it (`PimdirHub::folded`, SYNC
+    /// §5, §9): a change the source owes as propagation, never its own
+    /// edit. Absent, every such body reads as the source's own edit.
+    #[serde(default)]
+    pub folded: Vec<String>,
     /// The refusals standing on the source's bindings (`list_refusals`,
     /// SYNC §5), each held while the engine derives the change it names.
     #[serde(default)]
@@ -1324,6 +1330,14 @@ pub struct WrittenJson {
     /// The bodies a policy did not adopt, each kept as a retained item.
     #[serde(default)]
     pub overruled: Vec<OverruledJson>,
+    /// The handles whose upsert's body became the item's over the one it
+    /// held, which a policy kept (SYNC §9): a pull to report.
+    #[serde(default)]
+    pub adopted: Vec<String>,
+    /// The handles whose upsert's body a policy kept apart, the item
+    /// keeping its own (SYNC §9): no pull to report.
+    #[serde(default)]
+    pub refused: Vec<String>,
 }
 
 /// A body kept as a retained item, and the handle whose write kept it.

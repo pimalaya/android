@@ -237,6 +237,7 @@ fn answer(
                             collection: text(row, 0)?,
                             seq: int(row, 1)?,
                             link_id: PimdirLinkId(text(row, 2)?),
+                            hash: opt_text(row, 3)?.map(PimdirHash),
                         })
                     })
                     .collect::<Result<_, BridgeError>>()?,
@@ -724,6 +725,11 @@ fn write(batch: &mut Batch, op: PimdirIndexOp) -> Result<(), BridgeError> {
             let values = [(":hash", Value::from(&hash.0))];
             batch.add("DROP_OBJECT_TEXT", &values)?;
             batch.add("DELETE_OBJECT_ROW", &values)?;
+        }
+        PimdirIndexOp::DropUnplaced(hash) => {
+            let values = [(":hash", Value::from(&hash.0))];
+            batch.add("DROP_UNPLACED_OBJECT_TEXT", &values)?;
+            batch.add("DROP_UNPLACED_OBJECT_ROW", &values)?;
         }
         PimdirIndexOp::PutPlacement(placement) => {
             batch.add(

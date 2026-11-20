@@ -8,7 +8,7 @@ status: current
 
 The app keeps one pimdir store for every account and every domain: `collections.kind` carries the media type (`message/rfc822`, `text/vcard`, `text/calendar`) and `collections.account` groups by account, so the merged view's two filter axes are columns rather than three databases. Bodies live in a content-addressed blob directory beside the database, referenced by hash and refcounted.
 
-The schema is io-pimdir's canonical storage-draft-14 schema, handed to Java over JNI rather than transcribed; the statements run on it are the app's own text, the `pimalaya-android` shape, which SQLite 3.18 runs, so the store lives on the platform's own SQLite from Android 8.0 up and the app bundles none. The search index, index.db beside the store, is a second database on that same SQLite, written by io-pimdir's I/O-free refresh. The crate is taken without its `client` feature: compiling a second engine into every ABI would work against the app's first design goal.
+The schema is io-pimdir's canonical storage-draft-15 schema, handed to Java over JNI rather than transcribed; the statements run on it are the app's own text, the `pimalaya-android` shape, which SQLite 3.18 runs, so the store lives on the platform's own SQLite from Android 8.0 up and the app bundles none. The search index, index.db beside the store, is a second database on that same SQLite, written by io-pimdir's I/O-free refresh. The crate is taken without its `client` feature: compiling a second engine into every ABI would work against the app's first design goal.
 
 Every collection is reconciled by io-pimdir's sync engine, so every collection carries bindings, staged writes and conflicts. A contacts collection is reconciled against two sources, the server and the phone, which the store holds as one item with one `bindings` row per source; mail and calendar have the one source each and are otherwise the same. Nothing replaces a collection's contents: a refresh reconciles it, which is what lets a write staged before it survive it.
 
@@ -21,7 +21,7 @@ The bridge SHALL run io-pimdir's sync, upgrade and mutate coroutines, and the ap
 - THEN `PimdirSync` derives the push and the driver services its yields
 
 ### Requirement: The store's shape follows the canonical schema
-The store SHALL be created by the canonical draft-14 schema alone (0001_init.sql and `init_store_meta`), served over JNI, and SHALL NOT reconcile, widen, narrow nor rebuild a store of another shape: drafts are exact (STORAGE §4.2), and a store whose schema differs from the canonical text is refused as damaged. The statements it runs SHALL be the app's own shape, `pimalaya-android` (STORAGE §4.4: each canonical statement's name, parameters, columns and effect kept, its text free), and the store SHALL record no shape: a store the canonical statement text wrote is the same store and opens.
+The store SHALL be created by the canonical draft-15 schema alone (0001_init.sql and `init_store_meta`), served over JNI, and SHALL NOT reconcile, widen, narrow nor rebuild a store of another shape: drafts are exact (STORAGE §4.2), and a store whose schema differs from the canonical text is refused as damaged. The statements it runs SHALL be the app's own shape, `pimalaya-android` (STORAGE §4.4: each canonical statement's name, parameters, columns and effect kept, its text free), and the store SHALL record no shape: a store the canonical statement text wrote is the same store and opens.
 
 #### Scenario: A store whose index moved
 - GIVEN a store holding an index the canonical text does not declare
@@ -684,20 +684,20 @@ The app SHALL NOT take the owner lock nor the staging lock of pimdir STORAGE §8
 - THEN it takes no pass and writes nothing, and runs at its next schedule
 
 ### Requirement: A store of another draft is not opened
-The app SHALL create its store at storage-draft-14 (`store_meta.format_version`, a `store_id` and an `incarnation` by the canonical text, `derivation` 3) and record `sync_version`, sync-draft-14, with the first engine write. It SHALL decide whether an existing store opens by io-pimdir's rules (STORAGE §6) over facts read off the file read-only, and SHALL NOT read, write nor reconcile a store another draft, another program or another sync version wrote: start-up stands aside on a screen saying the app has to be reinstalled, and the background job, the sync adapters and the time-zone receiver do nothing. A refusal for the store's `format_version` SHALL say which of the two is the earlier, by STORAGE §4.2's order (none, then drafts by number, then releases by major, io-pimdir's `PimdirFormatOrder`), or that the order reads neither. The app states its conformance as `storage-draft-14 owner (own statement text), sync-draft-14 engine` (STORAGE §17).
+The app SHALL create its store at storage-draft-15 (`store_meta.format_version`, a `store_id` and an `incarnation` by the canonical text, `derivation` 3) and record `sync_version`, sync-draft-15, with the first engine write. It SHALL decide whether an existing store opens by io-pimdir's rules (STORAGE §6) over facts read off the file read-only, and SHALL NOT read, write nor reconcile a store another draft, another program or another sync version wrote: start-up stands aside on a screen saying the app has to be reinstalled, and the background job, the sync adapters and the time-zone receiver do nothing. A refusal for the store's `format_version` SHALL say which of the two is the earlier, by STORAGE §4.2's order (none, then drafts by number, then releases by major, io-pimdir's `PimdirFormatOrder`), or that the order reads neither. The app states its conformance as `storage-draft-15 owner (own statement text), sync-draft-15 engine` (STORAGE §17).
 
 #### Scenario: A store an earlier version wrote
-- GIVEN a store created before draft-14, a draft-13 store among them
+- GIVEN a store created before draft-15, a draft-14 store among them
 - WHEN the app starts
 - THEN it opens on the reinstall screen, its reason naming the store's version earlier than the app's, and nothing in the store is written
 
 #### Scenario: A store a later version wrote
-- GIVEN a store at storage-draft-15 or at a released storage version
+- GIVEN a store at storage-draft-16 or at a released storage version
 - WHEN the app starts
 - THEN it opens on the reinstall screen, its reason naming the store's version later than the app's, and nothing in the store is written
 
 #### Scenario: Sync state an earlier sync draft wrote
-- GIVEN a store at storage-draft-14 whose `sync_version` is sync-draft-13
+- GIVEN a store at storage-draft-15 whose `sync_version` is sync-draft-14
 - WHEN the app starts
 - THEN it opens on the reinstall screen, and nothing in the store is written
 
@@ -829,7 +829,7 @@ Every statement the app runs on the store SHALL prepare and run on SQLite 3.18 a
 - THEN the row is inserted, then updated, keeping the invitation the first write stated
 
 #### Scenario: A store the previous build wrote
-- GIVEN a store created by io-pimdir's canonical statement text at storage-draft-14
+- GIVEN a store created by io-pimdir's canonical statement text at storage-draft-15
 - WHEN this build starts
 - THEN the store opens, and its rows are read and written by the app's statements
 
@@ -850,7 +850,7 @@ The app SHALL write and query index.db on the same SQLite as the store, and SHAL
 - THEN one SQLite in the process holds both files, and the search answers once the refresh's current chunk commits
 
 ### Requirement: The index is the app's own shape over FTS4
-The app SHALL keep a search index, index.db beside the store, in a shape of its own named `pimalaya-android` in `index_meta.shape` (pimdir SEARCH §2), at search-draft-14: the canonical index on SQLite 3.18, ordinary FTS4 tables in place of FTS5 over text io-pimdir folded, `unicode61` with `remove_diacritics=0` and prefixes of 2 and 3. It SHALL record in `index_meta.extraction` the revision of SEARCH §6 io-pimdir extracts under and in `index_meta.extractor` its own revision then io-pimdir's. It SHALL refuse and leave as it is an index of another shape or a later version, and rebuild one of its shape at an earlier version (versions ordered as SEARCH §2 says: drafts by number, every draft below every release, releases by major; one of no form the order reads refused), under another tokenizer or schema, recording another extraction or extractor, or built from another store. The index SHALL be refreshed by io-pimdir's refresh at start, after each engine write batch and at the end of each sync, a run of at most 200 rows of the store's feed per transaction, each run a deferred transaction that takes no lock of the store.
+The app SHALL keep a search index, index.db beside the store, in a shape of its own named `pimalaya-android` in `index_meta.shape` (pimdir SEARCH §2), at search-draft-15: the canonical index on SQLite 3.18, ordinary FTS4 tables in place of FTS5 over text io-pimdir folded, `unicode61` with `remove_diacritics=0` and prefixes of 2 and 3. It SHALL record in `index_meta.extraction` the revision of SEARCH §6 io-pimdir extracts under and in `index_meta.extractor` its own revision then io-pimdir's. It SHALL refuse and leave as it is an index of another shape or a later version, and rebuild one of its shape at an earlier version (versions ordered as SEARCH §2 says: drafts by number, every draft below every release, releases by major; one of no form the order reads refused), under another tokenizer or schema, recording another extraction or extractor, or built from another store. The index SHALL be refreshed by io-pimdir's refresh at start, after each engine write batch and at the end of each sync, a run of at most 200 rows of the store's feed per transaction, each run a deferred transaction that takes no lock of the store.
 
 #### Scenario: A sync writing while the index refreshes
 - GIVEN a refresh run reading the store

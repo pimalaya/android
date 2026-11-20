@@ -479,7 +479,7 @@ mod tests {
             objects,
             meta: Some(MetaFacts {
                 format: Some("pimdir".into()),
-                format_version: Some("storage-draft-14".into()),
+                format_version: Some("storage-draft-15".into()),
                 version: Some(1),
                 hash_algo: Some("blake3".into()),
                 sync_version: None,
@@ -527,11 +527,19 @@ mod tests {
         assert_eq!(check(&facts).unwrap_err().code, "store-version");
 
         let mut facts = current();
+        facts.meta.as_mut().unwrap().format_version = Some("storage-draft-14".into());
+        assert_eq!(check(&facts).unwrap_err().code, "store-version");
+
+        let mut facts = current();
         facts.meta.as_mut().unwrap().sync_version = Some("sync-draft-11".into());
         assert_eq!(check(&facts).unwrap_err().code, "sync-version");
 
         let mut facts = current();
         facts.meta.as_mut().unwrap().sync_version = Some("sync-draft-13".into());
+        assert_eq!(check(&facts).unwrap_err().code, "sync-version");
+
+        let mut facts = current();
+        facts.meta.as_mut().unwrap().sync_version = Some("sync-draft-14".into());
         assert_eq!(check(&facts).unwrap_err().code, "sync-version");
     }
 
@@ -549,21 +557,21 @@ mod tests {
             refusal.detail
         };
 
-        let earlier = "earlier than this app's storage-draft-14";
+        let earlier = "earlier than this app's storage-draft-15";
         assert_eq!(
             detail(Some("storage-draft-13")),
             format!("storage-draft-13, {earlier}")
         );
         assert_eq!(detail(None), format!("no format_version, {earlier}"));
-        let later = "later than this app's storage-draft-14";
+        let later = "later than this app's storage-draft-15";
         assert_eq!(
-            detail(Some("storage-draft-15")),
-            format!("storage-draft-15, {later}")
+            detail(Some("storage-draft-16")),
+            format!("storage-draft-16, {later}")
         );
         assert_eq!(detail(Some("storage-v1")), format!("storage-v1, {later}"));
         assert_eq!(
             detail(Some("storage-v01")),
-            "storage-v01, of no order beside this app's storage-draft-14"
+            "storage-v01, of no order beside this app's storage-draft-15"
         );
     }
 

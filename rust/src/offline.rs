@@ -419,6 +419,7 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
                     })
                     .collect(),
                 offered: loaded.offered.into_iter().map(PimdirHandle).collect(),
+                folded: loaded.folded.into_iter().map(PimdirHandle).collect(),
                 refused: loaded
                     .refused
                     .into_iter()
@@ -453,6 +454,8 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
                     .into_iter()
                     .map(|kept| (PimdirHandle(kept.handle), PimdirLinkId(kept.link_id)))
                     .collect(),
+                adopted: written.adopted.into_iter().map(PimdirHandle).collect(),
+                refused: written.refused.into_iter().map(PimdirHandle).collect(),
             })
         }
         PimdirYield::WantsVerify(_) => {
