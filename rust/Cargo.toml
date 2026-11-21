@@ -18,26 +18,26 @@ strip = "symbols"
 opt-level = "s"
 
 [dev-dependencies]
-io-pimdir = { version = "0.19.0", features = ["client", "vendored"] }
+io-pimdir = { version = "0.19.1", features = ["client", "vendored"] }
 rusqlite = { version = "0.43", default-features = false, features = ["bundled"] }
 tempfile = { version = "3", default-features = false }
 
 [dependencies]
 chrono = { version = "0.4", default-features = false }
 ical-rs = { version = "0.7.3", default-features = false, features = ["jscalendar", "parser"] }
-io-gcal = { version = "0.5.2", default-features = false, features = ["ical"] }
-io-gmail = { version = "0.9", default-features = false }
-io-gpeople = { version = "0.8.1", default-features = false, features = ["vcard"] }
-io-gtasks = { version = "0.2.1", default-features = false, features = ["ical"] }
-io-http = { version = "0.8", default-features = false }
+io-gcal = { version = "0.6.0", default-features = false, features = ["client", "ical"] }
+io-gmail = { version = "0.10", default-features = false, features = ["client"] }
+io-gpeople = { version = "0.9.0", default-features = false, features = ["client", "vcard"] }
+io-gtasks = { version = "0.3.0", default-features = false, features = ["client", "ical"] }
+io-http = { version = "0.9", default-features = false, features = ["client"] }
 io-imap = { version = "0.12.0", default-features = false, features = ["client"] }
-io-jmap = { version = "0.10.1", default-features = false, features = ["ical", "vcard"] }
-io-msgraph = { version = "0.9.3", default-features = false, features = ["ical", "vcard"] }
-io-oauth = { version = "0.7", default-features = false }
-io-pim-discovery = { version = "0.14", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
-io-pimdir = { version = "0.19.0", default-features = false, features = ["search"] }
+io-jmap = { version = "0.11.0", default-features = false, features = ["client", "ical", "vcard"] }
+io-msgraph = { version = "0.10.0", default-features = false, features = ["client", "ical", "vcard"] }
+io-oauth = { version = "0.8", default-features = false, features = ["client"] }
+io-pim-discovery = { version = "0.15.0", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
+io-pimdir = { version = "0.19.1", default-features = false, features = ["search"] }
 io-smtp = { version = "0.10.0", default-features = false, features = ["client"] }
-io-webdav = { version = "0.12.0", default-features = false, features = ["client"] }
+io-webdav = { version = "0.13.0", default-features = false, features = ["client"] }
 jiff = { version = "1", default-features = false, features = ["std"] }
 jni = "0.22"
 libc = { version = "0.2", default-features = false }

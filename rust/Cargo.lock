@@ -552,9 +552,9 @@ dependencies = [
 
 [[package]]
 name = "io-gcal"
-version = "0.5.2"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e20425de10be3034cbe5b9df7a390b58a1103be91ae34fcfab99709a0cbc3933"
+checksum = "30688344ee65594f121140f1ad8a7892c597c2fa5c3372f5c2a79443c7a5e83e"
 dependencies = [
  "ical-rs",
  "io-http",
@@ -568,9 +568,9 @@ dependencies = [
 
 [[package]]
 name = "io-gmail"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5992425f089d8eb98b68d71f8264b1177ac188a8ad7dddd6485dbd58b00f8fc2"
+checksum = "bd99f4990ab48e66b72baf82cf8eb3662b12281e24c6d87bbe90a9135fc6f552"
 dependencies = [
  "base64-codec",
  "io-http",
@@ -583,9 +583,9 @@ dependencies = [
 
 [[package]]
 name = "io-gpeople"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "980996a1bf71f18c42874b52cf3034751e6df840813a8286704e51d93f8382a2"
+checksum = "7f8a058c6978002a25f1a0d68fd17454a9bf2210e11238f5aca04c9d83a75683"
 dependencies = [
  "base64-codec",
  "io-http",
@@ -599,9 +599,9 @@ dependencies = [
 
 [[package]]
 name = "io-gtasks"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a460fd28c047f8b1c90f03ed674b5f54d509d1b3ce1e0a862358c0f69643bff"
+checksum = "5ae63461115591cfc5ef54a6aa9abbc161d6736723567cd557cd2e3a59a55e6d"
 dependencies = [
  "ical-rs",
  "io-http",
@@ -615,9 +615,9 @@ dependencies = [
 
 [[package]]
 name = "io-http"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47ae262c265c95e13dc5dd88370d23b74f5e5b307d503ba208e0e6117ddfbd3e"
+checksum = "80214cd8fd62f9ce721483416c1f4cf1b924c2a11f6fd9151f0d3dfa627856ed"
 dependencies = [
  "base64-codec",
  "httparse",
@@ -645,9 +645,9 @@ dependencies = [
 
 [[package]]
 name = "io-jmap"
-version = "0.10.1"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aee41358457abdfedef4ad23f8b0c09447e4034db9d695b9e71439292b33a610"
+checksum = "3cdbbd260f3ef7a9894d59e19b2a2607cb60c56c41190a5108459068486cbdd5"
 dependencies = [
  "ical-rs",
  "io-http",
@@ -662,9 +662,9 @@ dependencies = [
 
 [[package]]
 name = "io-msgraph"
-version = "0.9.3"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aecd5bd9319b486f79a7a32ece8f14e354986efc92f034e029864c2982fdc079"
+checksum = "31c4cb2124dedfa3717f994b3db6770793c60cfa373c3ceed40c90f5c26defb7"
 dependencies = [
  "base64-codec",
  "ical-rs",
@@ -679,11 +679,12 @@ dependencies = [
 
 [[package]]
 name = "io-oauth"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a1e90de37723f2e56f2e91aaf42e6bf5c6980ae018de265eb6ad4fb4d88af41"
+checksum = "4d011668b36e4e6380b4cc24edc82e1c683712e3aa0e7368f61fec8ec47e360f"
 dependencies = [
  "base64-codec",
+ "getrandom",
  "io-http",
  "log",
  "secrecy",
@@ -696,9 +697,9 @@ dependencies = [
 
 [[package]]
 name = "io-pim-discovery"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdbfcc871f62efd498a47e6d2cc3b26e5e58588f7dfbaf4eccdcb18a33651692"
+checksum = "ff57a359baebc7c90e2da6d8bf94518420e0b47c2652ca728616c2be439ee5f2"
 dependencies = [
  "base64-codec",
  "domain",
@@ -716,9 +717,9 @@ dependencies = [
 
 [[package]]
 name = "io-pimdir"
-version = "0.19.0"
+version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "478fe68c04b2021b226818ca07ce43b1d875786a9e974ea77a0c142ecbf7c445"
+checksum = "e4f11c48d2a4482bda9e9c0ac7924af6b9b3791ba45d233618282b546a255557"
 dependencies = [
  "blake3",
  "encoding_rs",
@@ -765,9 +766,9 @@ dependencies = [
 
 [[package]]
 name = "io-webdav"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de481e88fd54ae82f8c2a1fcd5b11539fec6a94b9609c7bb4a972bdd495c42d5"
+checksum = "4cf4e05eb97fb5c974f872beb03117c43a0dfc4519b4dc87f27ee86fa28ee876"
 dependencies = [
  "io-http",
  "log",
