@@ -200,6 +200,7 @@ public final class PimdirStorage {
 
         JSONArray conflicted = new JSONArray();
         JSONArray offered = new JSONArray();
+        JSONArray folded = new JSONArray();
         try (Cursor cursor = PimdirDb.query(db, scoped(db, scope, stored, source))) {
             while (cursor.moveToNext()) {
                 // NOTE: one placement per item the source binds, and one
@@ -214,6 +215,12 @@ public final class PimdirStorage {
                 // NOTE: nor is a removal this source already carried out,
                 // waiting on another source: it is no create here.
                 if (cursor.isNull(5) && cursor.getInt(13) == 1) {
+                    continue;
+                }
+                // NOTE: nor is an item under a hash: key, which asserts no
+                // identity another source could hold (SYNC §9), so it is
+                // offered to none.
+                if (cursor.isNull(5) && cursor.getString(0).startsWith("hash:")) {
                     continue;
                 }
                 JSONObject placement = placementOf(collection, cursor);
@@ -235,6 +242,14 @@ public final class PimdirStorage {
                     }
                     conflicted.put(item);
                 }
+                // NOTE: a body another source folded in since this binding
+                // last agreed with the item, its shared body or else its
+                // base's, is propagation the source owes (SYNC §5, §9),
+                // never its own edit: left out, a server edit meeting it
+                // reads as the source's own conflict.
+                if (folded(cursor)) {
+                    folded.put(placement.getString("handle"));
+                }
             }
         }
         if (conflicted.length() > 0) {
@@ -242,6 +257,9 @@ public final class PimdirStorage {
         }
         if (offered.length() > 0) {
             reply.put("offered", offered);
+        }
+        if (folded.length() > 0) {
+            reply.put("folded", folded);
         }
         held(db, stored, placements, reply);
         superseded(db, stored, source, placements, reply);
@@ -722,7 +740,7 @@ public final class PimdirStorage {
      */
     private static String statusOf(Cursor cursor) {
         // NOTE: a bound tombstone wins over every rule below, whatever
-        // conflict stands (SYNC §3, draft-14): a delete settles none, the
+        // conflict stands (SYNC §3, draft-15): a delete settles none, the
         // binding's conflict_revision it carries beating the delete, and an
         // item's conflict holds no delete back. It keeps its content, so a
         // later edit still beats the delete.
@@ -1532,12 +1550,16 @@ public final class PimdirStorage {
     /**
      * What a write batch recorded beyond its ops (SYNC §9), the engine's
      * {@code Written} reply: the bodies kept as retained items and the handles
-     * whose upsert recorded a divergence on the item, from the {@code
-     * overruled} and {@code conflicted} effects {@link #applyWrites} answered.
+     * whose upsert recorded a divergence on the item, took the item over with
+     * its body or had it kept apart, from the {@code overruled}, {@code
+     * conflicted}, {@code adopted} and {@code refused} effects {@link
+     * #applyWrites} answered.
      */
     public static JSONObject written(JSONArray effects) throws JSONException {
         JSONArray overruled = new JSONArray();
         JSONArray conflicted = new JSONArray();
+        JSONArray adopted = new JSONArray();
+        JSONArray refused = new JSONArray();
         for (int index = 0; index < effects.length(); index++) {
             JSONObject effect = effects.getJSONObject(index);
             if ("overruled".equals(effect.optString("kind"))) {
@@ -1547,6 +1569,10 @@ public final class PimdirStorage {
                                 .put("linkId", effect.getString("linkId")));
             } else if ("conflicted".equals(effect.optString("kind"))) {
                 conflicted.put(effect.getString("handle"));
+            } else if ("adopted".equals(effect.optString("kind"))) {
+                adopted.put(effect.getString("handle"));
+            } else if ("refused".equals(effect.optString("kind"))) {
+                refused.put(effect.getString("handle"));
             }
         }
         JSONObject written = new JSONObject();
@@ -1555,6 +1581,12 @@ public final class PimdirStorage {
         }
         if (conflicted.length() > 0) {
             written.put("conflicted", conflicted);
+        }
+        if (adopted.length() > 0) {
+            written.put("adopted", adopted);
+        }
+        if (refused.length() > 0) {
+            written.put("refused", refused);
         }
         return written;
     }
@@ -1759,6 +1791,13 @@ public final class PimdirStorage {
                 level = object == null ? 1 : Math.max(level, Integer.parseInt(item[3]));
             }
             lost = merged.optJSONObject("lost");
+            // NOTE: a policy taking the incoming body over the item's is a
+            // pull, one keeping the item's apart from it none (SYNC §9).
+            if (lost != null && "shared".equals(lost.optString("side"))) {
+                effects.put(effect(engineCollection, handle, "adopted"));
+            } else if (lost != null && "incoming".equals(lost.optString("side"))) {
+                effects.put(effect(engineCollection, handle, "refused"));
+            }
             if (merged.optBoolean("diverged")) {
                 effects.put(effect(engineCollection, handle, "conflicted"));
             }
@@ -2316,8 +2355,20 @@ public final class PimdirStorage {
                 if (!cursor.isNull(4)) {
                     conflict.put("etag", cursor.getString(4));
                 }
-                conflict.put("vcard", bodyOf(cursor.isNull(1) ? null : cursor.getString(1)));
-                if (!cursor.isNull(3)) {
+                String object = cursor.isNull(1) ? null : cursor.getString(1);
+                String diverging = cursor.getString(6);
+                conflict.put("vcard", bodyOf(object));
+                // NOTE: a resolution naming the item's diverging body settles
+                // the item's conflict too (SYNC §7), so its merge reads that
+                // conflict's ancestor. The binding's base may be that very
+                // body, a pull of it having met the item's conflict, and
+                // merged over it the body would read as no change and go.
+                boolean itemToo =
+                        cursor.getInt(7) == 1 && diverging.equals(cursor.getString(8));
+                if (itemToo && object != null) {
+                    conflict.put("baseVcard",
+                            ancestorOf(db, collection, linkId, object, diverging));
+                } else if (!cursor.isNull(3)) {
                     conflict.put("baseVcard", bodyOf(cursor.getString(3)));
                 }
                 if (!cursor.isNull(5)) {
@@ -3145,6 +3196,28 @@ public final class PimdirStorage {
             strings.add(values.getString(index));
         }
         return strings;
+    }
+
+    /**
+     * Whether a load row's item holds a body another source folded in since
+     * its binding last agreed with it ({@code PimdirHub::folded}, SYNC §9):
+     * bound with a base, the item holding a body other than the binding's
+     * {@code shared_object}, or its base's until it folded once. A message
+     * is left out: its body is no content to propagate (SYNC §3 rule 4), and
+     * the one a reader stored would name every opened message.
+     */
+    private static boolean folded(Cursor cursor) {
+        if (!mutable(cursor.getString(15))
+                || cursor.isNull(5)
+                || !hasBase(cursor)
+                || cursor.isNull(2)) {
+            return false;
+        }
+        String agreed = cursor.isNull(27) ? null : cursor.getString(27);
+        if (agreed == null && !cursor.isNull(7)) {
+            agreed = cursor.getString(7);
+        }
+        return !cursor.getString(2).equals(agreed);
     }
 
     /**

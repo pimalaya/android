@@ -56,7 +56,7 @@ public class SyncVectorsTest {
     @Rule public final TemporaryFolder folder = new TemporaryFolder();
 
     /** The format version this runner reads a case under (SYNC §11). */
-    private static final int FORMAT = 8;
+    private static final int FORMAT = 11;
 
     /** The system flags, each its bit of {@code marks} (STORAGE §13). */
     private static final List<String> MARKS =
@@ -973,6 +973,7 @@ public class SyncVectorsTest {
         List<JSONObject> events = new ArrayList<>();
         boolean failed;
         JSONObject parked;
+        int unlisted;
     }
 
     /** Runs one case's verb through the bridge. */
@@ -1046,6 +1047,7 @@ public class SyncVectorsTest {
         }
         ran.failed = reply.optBoolean("failed");
         ran.parked = reply.optJSONObject("parked");
+        ran.unlisted = reply.optInt("unlisted");
         return ran;
     }
 
@@ -1196,6 +1198,10 @@ public class SyncVectorsTest {
         String parked = canon(run.expect.isNull("parked") ? null : run.expect.get("parked"));
         if (!parked.equals(canon(ran.parked))) {
             differences.add("parked: expected " + parked + ", got " + canon(ran.parked));
+        }
+        int unlisted = run.expect.optInt("unlisted");
+        if (unlisted != ran.unlisted) {
+            differences.add("unlisted: expected " + unlisted + ", got " + ran.unlisted);
         }
 
         SQLiteDatabase db = store.getReadableDatabase();

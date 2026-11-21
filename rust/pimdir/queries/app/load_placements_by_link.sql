@@ -21,7 +21,7 @@ SELECT i.link_id,
        b.base_object, b.base_revision, b.base_present, b.conflicted, b.conflict_revision,
        b.conflict_object, i.deleted, i.conflicted, c.kind, s.date, s.subject, s.sender,
        i.conflict_object AS item_conflict_object, s.size, s.attachment, s.invitation,
-       fs.name, fs.media_type, fs.size AS file_size, fs.part
+       fs.name, fs.media_type, fs.size AS file_size, fs.part, b.shared_object
 FROM items i
 JOIN collections c ON c.id = i.collection
 LEFT JOIN bindings b ON b.item = i.id

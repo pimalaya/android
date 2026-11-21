@@ -3,6 +3,7 @@ package org.pimalaya.pimdir;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -1246,7 +1247,7 @@ public class PimdirStorageTest {
         assertEquals(0, scalar("SELECT count(*) FROM store_meta WHERE sync_version IS NOT NULL"));
         storage.applyWrites(batch(storeObject("aa01", "body"), upsert("a.vcf", "uid-a", h("aa01"), "a")));
         assertEquals(
-                1, scalar("SELECT count(*) FROM store_meta WHERE sync_version = 'sync-draft-14'"));
+                1, scalar("SELECT count(*) FROM store_meta WHERE sync_version = 'sync-draft-15'"));
 
         db.execSQL("UPDATE store_meta SET sync_version = 'sync-draft-06'");
         try {
@@ -1408,9 +1409,63 @@ public class PimdirStorageTest {
         assertRefcountsHold();
     }
 
+    /** The phone's edit of {@code uid-c}, flowed in over the server's base. */
+    private void phoneEdited() throws Exception {
+        String server = "acct/Contacts";
+        String phone = PimdirStorage.phoneCollection(server);
+        storage.applyWrites(batch(storeObject("dd01", "BASE"),
+                sourced(server, "c.vcf", h("dd01"), "e1")));
+        storage.applyWrites(batch(sourced(phone, "raw-1", h("dd01"), "v1")));
+        storage.applyWrites(batch(storeObject("dd02", "PHONE"),
+                sourced(phone, "raw-1", h("dd02"), "v2")));
+    }
+
+    /**
+     * A body another source folded in since a binding last agreed with the
+     * item is loaded as {@code folded} for that source alone (SYNC §5, §9):
+     * what it owes is propagation, never an edit made through it.
+     */
+    @Test
+    public void aBodyAnotherSourceFoldedInLoadsAsFolded() throws Exception {
+        phoneEdited();
+        String phone = PimdirStorage.phoneCollection("acct/Contacts");
+
+        JSONArray folded = storage.loadCollection("acct/Contacts", null).optJSONArray("folded");
+        assertNotNull("the server owes the phone's edit", folded);
+        assertEquals(List.of("c.vcf"), stringsOf(folded));
+        assertFalse("the phone made it", storage.loadCollection(phone, null).has("folded"));
+    }
+
+    /**
+     * A policy taking the incoming body over the item's reports its handle in
+     * {@code Written.adopted}, one keeping the item's in {@code
+     * Written.refused} (SYNC §9).
+     */
+    @Test
+    public void aPolicyReportsTheBodyItAdoptedOrRefused() throws Exception {
+        phoneEdited();
+        db.execSQL("UPDATE collections SET conflict = 'prefer-incoming' WHERE id = 'acct/Contacts'");
+        JSONObject written =
+                PimdirStorage.written(storage.applyWrites(batch(storeObject("dd03", "SERVER"),
+                        sourced("acct/Contacts", "c.vcf", h("dd03"), "e2"))));
+        assertEquals(List.of("c.vcf"), stringsOf(written.getJSONArray("adopted")));
+        assertFalse(written.has("refused"));
+        assertEquals(h("dd03"), stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+
+        db.execSQL("UPDATE collections SET conflict = 'prefer-existing' WHERE id = 'acct/Contacts'");
+        written =
+                PimdirStorage.written(storage.applyWrites(batch(storeObject("dd04", "PHONE2"),
+                        sourced(PimdirStorage.phoneCollection("acct/Contacts"), "raw-1",
+                                h("dd04"), "v3"))));
+        assertEquals(List.of("raw-1"), stringsOf(written.getJSONArray("refused")));
+        assertFalse(written.has("adopted"));
+        assertEquals(h("dd03"), stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+        assertRefcountsHold();
+    }
+
     /**
      * A delete settles no conflict and is held back by none (pimdir SYNC §3,
-     * draft-14): a source binding the deleted item projects a tombstone over
+     * draft-15): a source binding the deleted item projects a tombstone over
      * the item's conflict, so the delete propagates, and the item keeps its
      * conflict and both bodies.
      */

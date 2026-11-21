@@ -65,7 +65,9 @@ pub extern "system" fn Java_org_pimalaya_client_SyncVectors_sync<'local>(
         }
         .coroutine();
         let ran = match Driver::new(JniHost::offline(env, &driver)).drive(&mut sync) {
-            Ok(Ok(report)) => RanJson::done(&report.events, report.parked),
+            Ok(Ok(report)) => {
+                RanJson::done(&report.events, report.parked).unlisted(report.unlisted)
+            }
             Ok(Err(err)) => RanJson::refused(&sync.report().events, err),
             Err(err) => RanJson::cut(&sync.report().events, err),
         };
@@ -216,6 +218,9 @@ struct RanJson {
     /// Why the engine failed it.
     #[serde(skip_serializing_if = "Option::is_none")]
     refusal: Option<String>,
+    /// The based bindings in scope a capped or narrowed round did not list
+    /// and kept (SYNC §5, sync format 11), 0 for every other run.
+    unlisted: usize,
 }
 
 impl RanJson {
@@ -230,7 +235,13 @@ impl RanJson {
                 bound: parked.bound,
             }),
             refusal: None,
+            unlisted: 0,
         }
+    }
+
+    /// A completed sync, with the based bindings its round left unlisted.
+    fn unlisted(self, unlisted: usize) -> Self {
+        Self { unlisted, ..self }
     }
 
     /// A run the engine failed.

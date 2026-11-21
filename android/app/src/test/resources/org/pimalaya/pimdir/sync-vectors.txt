@@ -18,6 +18,7 @@ unbound 89-a-rekey-missing-most-members-parks: the bridge runs no rekey
 unbound 95-a-rekey-reusing-a-gone-handle-drops-it-first: the bridge runs no rekey
 unbound 96-a-rekey-matches-copies-at-one-revision-in-handle-order: the bridge runs no rekey
 unbound 159-a-capped-rekey-leaving-a-member-out-parks: the bridge runs no rekey
+unbound 190-a-rekey-reports-an-arrival-added: the bridge runs no rekey
 unbound 14-both-edited-prefer-remote-pulls: the bridge syncs under the manual policy alone
 unbound 15-both-edited-prefer-local-over-an-unread-body-conflicts: the bridge syncs under the manual policy alone
 unbound 33-an-item-conflict-reports-a-server-edit: the bridge syncs under the manual policy alone
@@ -25,6 +26,12 @@ unbound 83-a-body-less-pull-over-an-edit-conflicts: the bridge syncs under the m
 unbound 97-a-bodiless-arrival-landing-a-mutable-create-conflicts: the bridge syncs under the manual policy alone
 unbound 116-an-upgrade-settles-a-prefer-local-conflict-keeping-the-server-body: the bridge syncs under the manual policy alone
 unbound 117-prefer-local-keeps-the-body-it-pushes-over: the bridge syncs under the manual policy alone
+unbound 174-keep-local-pushes-over-a-change-the-source-alone-made: the bridge syncs under the manual policy alone
+unbound 175-keep-local-records-an-unread-change-the-source-alone-made: the bridge syncs under the manual policy alone
+unbound 181-prefer-remote-over-an-item-another-source-changed-meets-prefer-incoming: the bridge syncs under the manual policy alone
+unbound 182-prefer-remote-over-an-item-another-source-changed-meets-prefer-existing: the bridge syncs under the manual policy alone
+unbound 183-prefer-remote-over-an-item-another-source-changed-meets-manual: the bridge syncs under the manual policy alone
+unbound 194-a-write-draws-named-members-seqs-before-kept-bodies: the bridge syncs under the manual policy alone
 unbound 62-a-delta-head-lands-an-arrival-the-round-keeps: the bridge lists no head
 unbound 63-a-removal-a-head-states-applies-at-once: the bridge lists no head
 unbound 64-a-member-a-head-named-and-a-page-lists-is-one: the bridge lists no head

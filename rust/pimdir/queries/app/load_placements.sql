@@ -3,8 +3,9 @@
 -- sender, and the size, mark and invitation its body told) and a file's
 -- whole summary: the rows a load projects placements from (SYNC §3, §5, §6),
 -- and the item's diverging body, what an edit meets beside its binding's
--- conflict (SYNC §7). Retained rows are left out (STORAGE §11). Flags as
--- one text, on load_items' terms (§4.4).
+-- conflict (SYNC §7), and the binding's shared body, what tells a body
+-- another source folded in (SYNC §9). Retained rows are left out (STORAGE
+-- §11). Flags as one text, on load_items' terms (§4.4).
 SELECT i.link_id,
        CASE WHEN i.flags_known = 1
             THEN trim(CASE WHEN i.marks & 1 THEN '\Seen ' ELSE '' END
@@ -26,7 +27,7 @@ SELECT i.link_id,
        b.base_object, b.base_revision, b.base_present, b.conflicted, b.conflict_revision,
        b.conflict_object, i.deleted, i.conflicted, c.kind, s.date, s.subject, s.sender,
        i.conflict_object AS item_conflict_object, s.size, s.attachment, s.invitation,
-       fs.name, fs.media_type, fs.size AS file_size, fs.part
+       fs.name, fs.media_type, fs.size AS file_size, fs.part, b.shared_object
 FROM items i
 JOIN collections c ON c.id = i.collection
 LEFT JOIN bindings b ON b.item = i.id

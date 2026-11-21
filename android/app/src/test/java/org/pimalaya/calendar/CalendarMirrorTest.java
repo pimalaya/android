@@ -466,7 +466,15 @@ public class CalendarMirrorTest {
         phonePass();
         phonePass();
 
-        assertEquals(1, new PimdirStorage(pimdir).loadConflicts(SPOKE).size());
+        // NOTE: the server's edit was folded into the item before the phone
+        // pass met the phone's, so the two are the collection's divergence,
+        // the item's conflict, offered on the server's binding with the
+        // phone's body (SYNC §5, §9, sync-draft-15). The second pass's
+        // triage merges it over the item conflict's ancestor, never over the
+        // phone binding's base, which is the phone's own body.
+        List<JSONObject> offered = new PimdirStorage(pimdir).loadConflicts(COLLECTION);
+        assertEquals(1, offered.size());
+        assertTrue(offered.get(0).getString("remoteVcard").contains("SUMMARY:Phone\r\n"));
         assertEquals("Phone", events().get(0).get(Events.TITLE));
         assertTrue(stored().get("ev-1.ics").contains("SUMMARY:Server\r\n"));
     }

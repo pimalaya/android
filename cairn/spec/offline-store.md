@@ -774,7 +774,12 @@ Every binding SHALL record in `bindings.shared_object` the body it last agreed w
 - THEN the binding still names the body and the body stays stored
 
 ### Requirement: Two sources changing one item diverge
-The store SHALL merge a source's upsert of a mutable kind into the shared item by io-pimdir's cross-source rules (SYNC §9): a change one source made flows in, and two sources having changed the item differently diverge, the item keeping its body, recording the incoming one in `items.conflict_object` and standing conflicted for every source, the write reporting the upsert's handle in `Written.conflicted`. A message never diverges.
+The store SHALL merge a source's upsert of a mutable kind into the shared item by io-pimdir's cross-source rules (SYNC §9): a change one source made flows in, and two sources having changed the item differently diverge, the item keeping its body, recording the incoming one in `items.conflict_object` and standing conflicted for every source, the write reporting the upsert's handle in `Written.conflicted`. A load SHALL report in `Loaded.folded` each placement of a mutable kind whose item holds a body another source folded in since its binding last agreed with it (its `shared_object`, else its base, as `PimdirHub::folded` reads it), so a server edit meeting it is the collection's divergence, settled by its policy, never the source's own conflict. A message never diverges.
+
+#### Scenario: A card the phone edited, loaded for the server
+- GIVEN a card the phone edited and the store took, the server binding still agreeing with the body before
+- WHEN the engine loads the server's collection
+- THEN the card is reported folded for the server, and for the phone not
 
 #### Scenario: A card edited on the phone and on the server
 - GIVEN a card the phone edited and the store took
@@ -782,7 +787,7 @@ The store SHALL merge a source's upsert of a mutable kind into the shared item b
 - THEN the card keeps the phone's body, records the server's and reads as conflicted, and nothing is pushed over either
 
 ### Requirement: A body no item keeps is kept retained
-A body a collection's conflict policy did not adopt (SYNC §9: the item's own body `prefer-incoming` replaced, the upsert's `prefer-existing` refused, the diverging body a fill settled, or a local edit a pull dropped), and the body a retained row of a mutable kind held when an upsert carrying none revived it (STORAGE §11.1), SHALL be kept as a retained item keyed by the identity minted over the upsert's handle (`dup:<link>#<handle>`, minted again over a held key), with a public id of its own, the item's flags, deleted and retained by the upsert's source, its summary the held row, the upsert's or the one its body derives, and the write SHALL report it in `Written.overruled`. The revived row SHALL hold no body, at the level its upsert states, for the upgrade to fetch. The verdict is read off the facts io-pimdir's hub reads (`PimdirHub::reconcile_content`), which keeps its own record to the crate.
+A body a collection's conflict policy did not adopt (SYNC §9: the item's own body `prefer-incoming` replaced, the upsert's `prefer-existing` refused, the diverging body a fill settled, or a local edit a pull dropped), and the body a retained row of a mutable kind held when an upsert carrying none revived it (STORAGE §11.1), SHALL be kept as a retained item keyed by the identity minted over the upsert's handle (`dup:<link>#<handle>`, minted again over a held key), with a public id of its own, the item's flags, deleted and retained by the upsert's source, its summary the held row, the upsert's or the one its body derives, and the write SHALL report it in `Written.overruled`. A write whose policy took the upsert's body over the item's SHALL also report the upsert's handle in `Written.adopted`, a pull, and one whose policy kept the item's body apart from it in `Written.refused`, no pull (SYNC §9). The revived row SHALL hold no body, at the level its upsert states, for the upgrade to fetch. The verdict is read off the facts io-pimdir's hub reads (`PimdirHub::reconcile_content`), which keeps its own record to the crate.
 
 #### Scenario: A file restored on its server
 - GIVEN a file the store retains with its body after its server deleted it
@@ -792,7 +797,7 @@ A body a collection's conflict policy did not adopt (SYNC §9: the item's own bo
 #### Scenario: A collection preferring the incoming body
 - GIVEN a card collection whose policy something else set to prefer-incoming, the card changed on two sources
 - WHEN the second change lands
-- THEN the card takes it, and the body it replaced is kept as a retained item and reported overruled
+- THEN the card takes it, and the body it replaced is kept as a retained item and reported overruled, the handle reported adopted
 
 ### Requirement: A round finding most of a collection gone asks first
 A round whose listing names no member while the store binds some, or finds more than half of at least 20 bound members absent (SYNC §5, §8), SHALL park rather than remove them, and the app SHALL say so once the pass ends, naming each collection and how many of its items the server no longer lists, offering to remove them too or to keep them. Removing them SHALL run the next sync of those collections accepting the absences; keeping them SHALL leave the round parked, decided again by the next pass.
@@ -1059,7 +1064,7 @@ The attachments the reader lists, and the store records stand-ins from, SHALL be
 - THEN the part is listed as first.csv and opens to what its base64 decodes to
 
 ### Requirement: The sync vectors run through the app's load and write
-The app SHALL run every case of the sync vectors of the io-pimdir it pins (pimdir SYNC §11) in a host test, on a store of its own over Android 8.0's SQLite: the case's rows seeded by the standard's own statements and plain SQL, never through the write under test; its run driven by io-pimdir's engine through the coroutines the bridge's sync, upgrade and mutate exports build, every load, lookup, verification and write served by the app's storage half and the remote scripted from the case on the wire a connector answers; its pushes, events, failure, park and rows compared as §11 says. Under format 7 a binding's `refusal` and `refused_key` are seeded and compared, and a `Refused` outcome is fed back with its reason; under format 8 an object stating `row` false is seeded as its file alone. A case the app does not pass SHALL be listed beside the test with its reason, as `fails` when the app runs it and departs from it, as `unbound` when the bridge states no such verb, option or mutation or the case binds another kind of owner, and the test SHALL fail when a listed case passes, an unlisted one fails, a case listed unbound binds, an unlisted one cannot be bound, or a listed one is not among the vectors. At io-pimdir 0.18, 172 cases: 141 pass, none fails, 31 are unbound. While a case is listed `fails`, the app's `sync-draft-14 engine` statement stands short of SYNC §12 by it.
+The app SHALL run every case of the sync vectors of the io-pimdir it pins (pimdir SYNC §11) in a host test, on a store of its own over Android 8.0's SQLite: the case's rows seeded by the standard's own statements and plain SQL, never through the write under test; its run driven by io-pimdir's engine through the coroutines the bridge's sync, upgrade and mutate exports build, every load, lookup, verification and write served by the app's storage half and the remote scripted from the case on the wire a connector answers; its pushes, events, failure, park and rows compared as §11 says. Under format 7 a binding's `refusal` and `refused_key` are seeded and compared, and a `Refused` outcome is fed back with its reason; under format 8 an object stating `row` false is seeded as its file alone; under format 11 a run's `unlisted` count is compared. A case the app does not pass SHALL be listed beside the test with its reason, as `fails` when the app runs it and departs from it, as `unbound` when the bridge states no such verb, option or mutation or the case binds another kind of owner, and the test SHALL fail when a listed case passes, an unlisted one fails, a case listed unbound binds, an unlisted one cannot be bound, or a listed one is not among the vectors. At io-pimdir 0.19, 194 cases (format 11): 156 pass, none fails, 38 are unbound. While a case is listed `fails`, the app's `sync-draft-15 engine` statement stands short of SYNC §12 by it.
 
 #### Scenario: A rule the Java write lacks
 - GIVEN a vector whose expected rows the Java write does not leave
@@ -1077,7 +1082,7 @@ The app SHALL run every case of the sync vectors of the io-pimdir it pins (pimdi
 - THEN the case runs, and the suite fails if it fails or cannot be bound
 
 ### Requirement: A load states the copies it offers
-A store load SHALL name, as `offered`, each placement it projects as a create for an item the source does not bind: a copy the store offers it of an item another source holds (pimdir SYNC §3, §9). Every other create is the source's own, pending or delivered, which alone the engine reports a member minted apart from (`Disagreed`, SYNC §6).
+A store load SHALL name, as `offered`, each placement it projects as a create for an item the source does not bind: a copy the store offers it of an item another source holds (pimdir SYNC §3, §9). An item under a `hash:` key, which asserts no identity another source could hold, SHALL be offered to none. Every other create is the source's own, pending or delivered, which alone the engine reports a member minted apart from (`Disagreed`, SYNC §6).
 
 #### Scenario: A message another source holds
 - GIVEN a message one source binds, and a second source listing another message under its `Message-ID`
