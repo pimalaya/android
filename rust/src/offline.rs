@@ -654,7 +654,8 @@ pub(crate) mod tests {
             panic!(
                 "no io-pimdir {version} spec with its vectors under {}: the \
                  published crate leaves them out, point \
-                 PIMALAYA_IO_PIMDIR_SPEC at a checkout's spec/",
+                 PIMALAYA_IO_PIMDIR_SPEC at a checkout's spec/ (the devshell \
+                 sets it from flake.nix's ioPimdirVersion)",
                 root.display()
             )
         })

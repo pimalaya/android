@@ -231,6 +231,14 @@ An expansion SHALL walk at most 200 000 occurrences of a series, placed or not, 
 - WHEN the calendar is synced
 - THEN its exceptions are read from five years back to five years ahead, and the occurrence seven years ahead shows at the rule's time
 
+### Requirement: A phone edit read is stamped at its listed revision
+An event a calendar app edited SHALL list at `dirty:` and its rows' fingerprint, and the read bringing it into the store, or putting the store's body back over an edit refused, SHALL stamp its rows clean at that same revision, the one the engine records with the body (pimdir SYNC §5), never at the body's hash: the next pass SHALL read the event unchanged, and a push SHALL find its `If-Match` held.
+
+#### Scenario: An event edited on the phone, read twice
+- GIVEN an event a calendar app edited
+- WHEN two phone passes run
+- THEN the first brings the edit into the store and stamps the rows at the revision it listed, and the second reads no change
+
 ### Requirement: The phone's calendars take bounded data
 The phone mirror SHALL list a secondly or minutely series instance by instance rather than hand its rule to the provider, and SHALL carry at most 5 reminders an event, 1024 characters of title and of location and 16 384 of description, cut between characters, the store keeping the whole text.
 

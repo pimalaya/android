@@ -283,6 +283,41 @@ public class CalendarMirrorTest {
         return bodies;
     }
 
+    /** The revision the store's phone binding of {@code handle} agreed at. */
+    private String phoneRevision(String handle) {
+        try (Cursor cursor =
+                new PimdirItems(pimdir)
+                        .readable()
+                        .rawQuery(
+                                "SELECT b.base_revision FROM bindings b JOIN items i"
+                                        + " ON i.id = b.item WHERE i.collection = ?"
+                                        + " AND b.handle = ? AND b.source = ?",
+                                new String[] {
+                                    COLLECTION, handle, PimdirStorage.sourceOf(SPOKE)
+                                })) {
+            return cursor.moveToFirst() ? cursor.getString(0) : null;
+        }
+    }
+
+    /**
+     * A phone edit the pass reads is stamped at the revision its listing named,
+     * the one the store records, so the next pass reads no change (SYNC §5).
+     */
+    @Test
+    public void aReadPhoneEditListsAtTheRevisionTheStoreRecorded() {
+        projected("ev-1.ics", STANDUP);
+        edit(id(events().get(0)), Events.TITLE, "Mine now");
+
+        phonePass();
+        String recorded = phoneRevision("ev-1.ics");
+        assertEquals("0", events().get(0).get(Events.DIRTY));
+        assertEquals(recorded, events().get(0).get(Events.SYNC_DATA1));
+
+        phonePass();
+        assertEquals(recorded, phoneRevision("ev-1.ics"));
+        assertTrue(stored().get("ev-1.ics").contains("SUMMARY:Mine now\r\n"));
+    }
+
     private static long at(String local, ZoneId zone) {
         return LocalDateTime.parse(local).atZone(zone).toInstant().toEpochMilli();
     }

@@ -502,12 +502,17 @@ final class CalendarRemote implements PhoneSpoke {
         }
         String token = PimdirHash.of(body);
 
+        // NOTE: stamped at the revision a listing names the rows at, which
+        // the engine records with the body it fetches (SYNC §5): stamped at
+        // another, the next listing would name a change nobody made, and a
+        // push over the stamp would miss its If-Match.
+        String listed = revision(target, handle);
         boolean stamped =
                 revert
-                        ? write(target, handle, body, observed)
-                        : stamp(target, handle, observed, token, projected(body));
+                        ? write(target, handle, body, observed, listed)
+                        : stamp(target, handle, observed, listed, projected(body));
         String revision =
-                stamped ? token : DIRTY + CalendarMapping.fingerprint(live);
+                stamped ? listed : DIRTY + CalendarMapping.fingerprint(live);
 
         // NOTE: as a server listing carries it (CalendarSummaries), keyed as
         // STORAGE §9 assigns: a bound entry keeps the key the store holds
@@ -678,9 +683,17 @@ final class CalendarRemote implements PhoneSpoke {
      */
     private boolean write(Target target, String handle, String body, List<Row> observed)
             throws JSONException {
+        return write(target, handle, body, observed, PimdirHash.of(body));
+    }
+
+    /**
+     * Writes an object's rows as {@link #write(Target, String, String, List)}
+     * does, stamped at {@code revision}.
+     */
+    private boolean write(Target target, String handle, String body, List<Row> observed,
+            String revision) throws JSONException {
         PhoneEvent view = CalendarClient.projectEvent(body, now());
         List<Row> desired = CalendarMapping.rows(view, phone(target, handle));
-        String token = PimdirHash.of(body);
         String projected = projected(body);
         int exceptions = 0;
         for (Row row : desired) {
@@ -689,7 +702,7 @@ final class CalendarRemote implements PhoneSpoke {
         for (Row row : desired) {
             row.values.put(Events.DIRTY, 0);
             row.values.put(Events.DELETED, 0);
-            row.values.put(Events.SYNC_DATA1, token);
+            row.values.put(Events.SYNC_DATA1, revision);
             if (row.values.get(Events.ORIGINAL_INSTANCE_TIME) == null) {
                 row.values.put(Events.SYNC_DATA2, String.valueOf(exceptions));
                 row.values.put(Events.SYNC_DATA4, projected);
@@ -706,7 +719,7 @@ final class CalendarRemote implements PhoneSpoke {
         } catch (OperationApplicationException moved) {
             return false;
         } catch (TransactionTooLargeException large) {
-            return split(target, handle, plan, guards, body, observed);
+            return split(target, handle, plan, guards, body, observed, revision);
         } catch (RemoteException failure) {
             throw new RuntimeException(failure);
         }
@@ -720,8 +733,8 @@ final class CalendarRemote implements PhoneSpoke {
      * rows span transactions.
      */
     private boolean split(Target target, String handle, List<Write> plan,
-            List<ContentProviderOperation> guards, String body, List<Row> observed)
-            throws JSONException {
+            List<ContentProviderOperation> guards, String body, List<Row> observed,
+            String revision) throws JSONException {
         List<Write> inserts = new ArrayList<>();
         Map<Integer, Integer> moved = new HashMap<>();
         for (int index = 0; index < plan.size(); index++) {
@@ -738,7 +751,7 @@ final class CalendarRemote implements PhoneSpoke {
             if (!inserts.isEmpty()) {
                 apply(guards, inserts, target, true);
                 return write(target, handle, body,
-                        observed == null ? null : rows(target, handle, true));
+                        observed == null ? null : rows(target, handle, true), revision);
             }
 
             List<ContentProviderOperation> clean = new ArrayList<>(guards);

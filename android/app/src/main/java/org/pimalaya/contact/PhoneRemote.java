@@ -329,15 +329,15 @@ final class PhoneRemote implements PhoneSpoke {
         // NOTE: stamp the row clean so it stops enumerating as pending;
         // this clears DIRTY on the pull path and heals pre-SYNC1 rows,
         // which otherwise refetch on every VERSION bump. Already-stamped
-        // rows skip the write.
+        // rows skip the write. The stamp is the revision the listing named
+        // the row at, which the engine records with the body it fetches
+        // (SYNC §5): stamped at another, the next listing would name a
+        // change nobody made, and a push over the stamp would miss its
+        // If-Match. A race lost leaves the row dirty, still at that revision.
         String token = CardStore.byteHash(body);
-        String revision;
-        if (!dirty && token.equals(heldToken)) {
-            revision = token;
-        } else if (stampIfUnchanged(resolver, account, rawId, token, version)) {
-            revision = token;
-        } else {
-            revision = revisionOf(heldToken, dirty, version);
+        String revision = revisionOf(heldToken, dirty, version);
+        if (dirty || heldToken == null) {
+            stampIfUnchanged(resolver, account, rawId, revision, version);
         }
 
         // NOTE: the key STORAGE §9 assigns, as the server spoke names it.

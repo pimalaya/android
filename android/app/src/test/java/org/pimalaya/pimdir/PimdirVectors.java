@@ -89,7 +89,8 @@ final class PimdirVectors {
                         + " under "
                         + parent
                         + ": the published crate leaves the vectors out, point"
-                        + " PIMALAYA_IO_PIMDIR_SPEC at a checkout's spec/");
+                        + " PIMALAYA_IO_PIMDIR_SPEC at a checkout's spec/ (the devshell sets it"
+                        + " from flake.nix's ioPimdirVersion)");
     }
 
     private PimdirVectors() {}

@@ -371,6 +371,30 @@
           '';
         };
 
+        # The pimdir spec io-pimdir vendors, whose vectors the published
+        # crate leaves out: the Rust and Java tests read it from
+        # PIMALAYA_IO_PIMDIR_SPEC (rust/src/offline.rs, PimdirVectors.java).
+        # Pinned to the tag of the version rust/Cargo.lock locks; bump both
+        # together, the shell warns while they differ.
+        ioPimdirVersion = "0.19.0";
+        ioPimdirSpec =
+          pkgs.fetchFromGitHub {
+            owner = "pimalaya";
+            repo = "io-pimdir";
+            rev = "v${ioPimdirVersion}";
+            sha256 = "1y73js59m20lrmfaihjrg7y4y69x4wgyx6lixvpzhcvwc3kbvsrb";
+          }
+          + "/spec";
+        ioPimdirLocked =
+          let
+            blocks = builtins.filter builtins.isString (
+              builtins.split "\n\n" (builtins.readFile ./rust/Cargo.lock)
+            );
+            pattern = "[[][[]package]]\nname = \"io-pimdir\"\nversion = \"([^\"]*)\"(\n.*)?";
+            found = builtins.filter (m: m != null) (map (builtins.match pattern) blocks);
+          in
+          builtins.head (builtins.head found);
+
       in
       {
         devShells.default = pkgs.mkShell {
@@ -411,7 +435,18 @@
             mkdir -p "$GRADLE_USER_HOME"
             echo "android.aapt2FromMavenOverride=${sdkRoot}/build-tools/${buildToolsVersion}/aapt2" \
               > "$GRADLE_USER_HOME/gradle.properties"
-          '';
+          ''
+          + (
+            # NOTE: a spec set before entering (a working tree's) wins.
+            if ioPimdirLocked == ioPimdirVersion then
+              ''
+                export PIMALAYA_IO_PIMDIR_SPEC="''${PIMALAYA_IO_PIMDIR_SPEC:-${ioPimdirSpec}}"
+              ''
+            else
+              ''
+                echo "flake.nix pins io-pimdir ${ioPimdirVersion}, rust/Cargo.lock locks ${ioPimdirLocked}: no spec vectors" >&2
+              ''
+          );
         };
       }
     );
