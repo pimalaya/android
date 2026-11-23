@@ -153,13 +153,20 @@ public final class MailReader {
         return stored != null ? stored : fetch(message, open);
     }
 
-    /** A message's stand-ins, else under a derived key its body's parts. */
+    /**
+     * A message's stand-ins, else, under a derived key or one another message
+     * of its account holds (STORAGE §14.3: its stand-ins are that one's), its
+     * body's own parts.
+     */
     public List<FileStore.StoredFile> attachments(
             MailStore.StoredMessage message, MessageBody body) {
-        if (ItemLinks.derived(message.id)) {
+        String accountId = mail.accountIdOf(message.accountEmail);
+        if (ItemLinks.derived(message.id)
+                || (!message.pending()
+                        && files.keyOfAnotherMessage(accountId, message.collection, message.id))) {
             return body == null ? List.of() : FileStore.parts(message.seq, body.attachments());
         }
-        return files.attachments(mail.accountIdOf(message.accountEmail), message.id);
+        return files.attachments(accountId, message.id);
     }
 
     /**

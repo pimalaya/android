@@ -465,6 +465,8 @@ public class MessageIdNamingTest {
                 subjects);
         MailStore.StoredMessage third = row(archive);
         assertEquals("Third", storedSubject(third));
+        assertEquals("its own parts, never the first one's stand-ins", List.of("c.pdf"),
+                shown(third, reader().read(third, () -> null)));
         MailStore.StoredMessage second = store.message(inbox, "dup:same@example.org#2");
         assertEquals("its own parts", List.of("b.pdf"),
                 shown(second, reader().read(second, () -> null)));

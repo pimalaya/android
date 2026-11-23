@@ -234,6 +234,19 @@ public final class FileStore {
     }
 
     /** A message's attached files, in document order, from its references. */
+    /**
+     * Whether a message's key is another message's in its account (STORAGE
+     * §14.3, {@code key_of_another_message}): its stand-ins are then the
+     * other one's, never its own.
+     */
+    public boolean keyOfAnotherMessage(String accountId, String mailbox, String messageLinkId) {
+        Map<String, Object> message = new HashMap<>();
+        message.put("account", accountId);
+        message.put("collection", mailbox);
+        message.put("link_id", messageLinkId);
+        return text(items.readable(), "KEY_OF_ANOTHER_MESSAGE", message) != null;
+    }
+
     public List<StoredFile> attachments(String accountId, String messageLinkId) {
         Map<String, Object> values = new HashMap<>();
         values.put("account", accountId);
