@@ -780,6 +780,11 @@ fn message(id: &str, subject: &str, text: &str) -> Vec<u8> {
 }
 
 /// Files a message into INBOX as source `local`.
+///
+/// Each call opens the store anew: a test calling it, or opening the store,
+/// more than once holds one store open throughout, since a child another
+/// test forks keeps a released owner lock until its exec, and a reopen
+/// could find the store `Owned`.
 fn file_message(dir: &Path, body: Vec<u8>) {
     let mut owner = PimdirStore::open(dir).unwrap().for_source("local");
     owner.ensure_collection("INBOX", "message/rfc822").unwrap();
@@ -821,6 +826,7 @@ fn seqs(floor: &mut Floor, query: &str) -> Vec<i64> {
 #[test]
 fn a_refresh_follows_the_store_in_chunks() {
     let dir = tempfile::tempdir().unwrap();
+    let _held = PimdirStore::open(dir.path()).unwrap();
     file_message(
         dir.path(),
         message("a@x", "Alpha", "the roadmap for Réunion"),
@@ -1091,6 +1097,7 @@ fn a_run_holds_the_store_writer_off_never() {
 #[ignore]
 fn index_weight_per_message() {
     let dir = tempfile::tempdir().unwrap();
+    let _held = PimdirStore::open(dir.path()).unwrap();
     let mut state = 0x2545_f491_4f6c_dd1du64;
     let mut word = || {
         state ^= state << 13;
@@ -1169,6 +1176,7 @@ fn file_entry(dir: &Path, handle: &str, body: &str) {
 #[test]
 fn the_agenda_reads_occurrences_with_their_rows() {
     let dir = tempfile::tempdir().unwrap();
+    let _held = PimdirStore::open(dir.path()).unwrap();
     file_entry(
         dir.path(),
         "standup.ics",
@@ -1262,6 +1270,7 @@ fn seqs_at(floor: &mut Floor, query: &str, now: i64) -> Vec<i64> {
 #[test]
 fn the_draft_17_query_forms_answer_on_the_floor() {
     let dir = tempfile::tempdir().unwrap();
+    let _held = PimdirStore::open(dir.path()).unwrap();
     file_message(dir.path(), message("a@x", "Alpha", "the roadmap"));
     file_message(dir.path(), message("b@x", "Beta", "the budget"));
     let mut floor = index(dir.path());
@@ -1325,6 +1334,7 @@ fn page_after(
 fn a_hit_arriving_between_two_pages_repeats_and_hides_nothing() {
     for sort in [Sort::NewestFirst, Sort::Title] {
         let dir = tempfile::tempdir().unwrap();
+        let _held = PimdirStore::open(dir.path()).unwrap();
         file_message(dir.path(), message("b@x", "Beta", "the roadmap"));
         file_message(dir.path(), message("c@x", "Gamma", "the roadmap"));
         let mut floor = index(dir.path());
