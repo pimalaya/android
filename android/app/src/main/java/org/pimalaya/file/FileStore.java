@@ -424,7 +424,12 @@ public final class FileStore {
      * <p>Null when it holds none or its blob is gone.
      */
     public java.io.File saved(StoredFile file) {
-        return items.blobFile(file.objectHash);
+        // NOTE: served only once its bytes hash to its name (STORAGE §7):
+        // a blob failing it goes to quarantine and serves nothing, the
+        // caller writing the part out of its message instead.
+        return file.objectHash != null && items.verified(file.objectHash)
+                ? items.blobFile(file.objectHash)
+                : null;
     }
 
     /** The device's folders, by name. */

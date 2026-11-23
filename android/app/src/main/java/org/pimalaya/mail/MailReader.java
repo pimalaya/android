@@ -146,7 +146,9 @@ public final class MailReader {
     private File again(
             MailStore.StoredMessage message, File failing, Supplier<MailSession> open) {
         Log.w("pimalaya", "mail body " + failing.getName() + " fails its name, fetching it again");
-        mail.quarantine(failing);
+        synchronized (stager.locks.store) {
+            mail.quarantine(message, failing);
+        }
         File stored = mail.sourceFile(message);
         return stored != null ? stored : fetch(message, open);
     }

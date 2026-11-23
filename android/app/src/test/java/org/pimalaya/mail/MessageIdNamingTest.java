@@ -501,6 +501,35 @@ public class MessageIdNamingTest {
                 scalar("SELECT count(DISTINCT object) FROM items WHERE link_id = 'same@example.org'"));
     }
 
+    /**
+     * A held body failing its name is set aside (STORAGE §7) and, with no
+     * network to fetch it again, its row no longer says the phone holds it.
+     */
+    @Test
+    public void aBodySetAsideWithNoNetworkLeavesItsRowBodiless() throws Exception {
+        server.list("INBOX", listed("5", "held@example.org", "Held"));
+        server.sources.put(
+                "INBOX 5", source("held@example.org", "Held", "a.pdf", "application/pdf"));
+        server.engine.sync(inbox);
+        server.engine.downloadStep(List.of(inbox), null, null);
+        MailStore.StoredMessage held = row(inbox);
+        assertTrue(held.bodied);
+
+        java.io.File blob = store.sourceFile(held);
+        java.nio.file.Files.write(blob.toPath(), "tampered".getBytes(StandardCharsets.UTF_8));
+        try {
+            reader().read(held, () -> {
+                throw new org.pimalaya.client.PimalayaException("offline");
+            });
+            throw new AssertionError("a body failing its name read with no network");
+        } catch (org.pimalaya.client.PimalayaException offline) {
+            assertEquals("offline", offline.getMessage());
+        }
+
+        assertFalse("the row says the body is not on the phone", row(inbox).bodied);
+        assertNull(store.sourceFile(row(inbox)));
+    }
+
     @Test
     public void aSentCopyKeepsItsMessageIdAsItsKey() throws Exception {
         synced(sent);

@@ -290,13 +290,46 @@ public final class PimdirItems {
         }
     }
 
+    /**
+     * Takes a body set aside into quarantine/ off the held item naming it,
+     * lowering it to meta, so its row no longer says the phone holds it
+     * (STORAGE §7); an item naming another body is left as it is.
+     */
+    public void setAside(String collection, String linkId, String hash) {
+        SQLiteDatabase db = writable();
+        db.beginTransaction();
+        try {
+            if (hash == null || !hash.equals(objectOf(db, collection, linkId))) {
+                return;
+            }
+            Map<String, Object> values = key(collection, linkId);
+            values.put("object_hash", null);
+            values.put("level", META);
+            PimdirDb.exec(db, "SET_ITEM_OBJECT", values);
+            adjustRefcount(db, hash, null);
+            collectGarbage(db);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /**
+     * Whether the blob under {@code hash} holds bytes hashing to it, one
+     * failing it moved into quarantine/ (STORAGE §7).
+     */
+    public boolean verified(String hash) {
+        return blobs.verified(hash);
+    }
+
     /** The file one body is stored in, null when no such blob is held. */
     public java.io.File blobFile(String hash) {
         if (hash == null) {
             return null;
         }
-        java.io.File file = blobs.pathOf(hash);
-        return file.isFile() ? file : null;
+        // NOTE: a regular file under the name, never a link followed
+        // (STORAGE §5): a link in a blob's place holds no body.
+        return blobs.has(hash) ? blobs.pathOf(hash) : null;
     }
 
     /** The file one item's body is stored in, null when it holds none. */

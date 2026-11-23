@@ -88,14 +88,14 @@ Conventions:
 
 ## G. Bugs (each reproduced by a failing test first; sources in inventory.md G)
 
-- [ ] G1. `PimdirItems.blobFile` follows a link, and `FileStore.saved` serves a blob unverified. Both go through the bridge's verified read (offline-store.md:718).
+- [x] G1. `PimdirItems.blobFile` follows a link, and `FileStore.saved` serves a blob unverified. Both go through the bridge's verified read (offline-store.md:718).
 - [ ] G2. A restore from Deleted items whose stored summary disagrees with the body makes a second row: revive the held row.
 - [ ] G3. Two messages reusing one `Message-ID`: the reader of the second lists the first's stand-ins, and a section fails to open.
 - [ ] G4. An IMAP listing holding an unreadable line fails its mailbox's round on every pass: apply what was read and park the line.
 - [ ] G5. Search paging by offset repeats or hides a hit arriving between two pages (rust/src/search/find.rs): page by `PimdirSearchCursor`, which builds without `client` now.
-- [ ] G6. BackgroundJob.java's `stopped` flag is never reset when the service instance is reused, and a stop between `allowWaits()` and `jobFinished` leaves the waits cut.
-- [ ] G7. A5: a test compares the app's `DERIVATION` with a store io-pimdir's `PimdirStore` creates (N3).
-- [ ] G8. A body set aside with no network leaves its row saying it is held.
+- [x] G6. BackgroundJob.java's `stopped` flag is never reset when the service instance is reused, and a stop between `allowWaits()` and `jobFinished` leaves the waits cut.
+- [x] G7. A5: a test compares the app's `DERIVATION` with a store io-pimdir's `PimdirStore` creates (N3).
+- [x] G8. A body set aside with no network leaves its row saying it is held.
 - [ ] G9. Gate of E to G: R, J, `:app:assembleDebug`, and `:app:assembleRelease` (R8: the new `Native` methods kept). Commit per item.
 
 ## H. Performance (thresholds against H0)

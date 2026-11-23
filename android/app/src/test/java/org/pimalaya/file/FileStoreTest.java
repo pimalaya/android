@@ -370,6 +370,31 @@ public class FileStoreTest {
                 PimdirHash.of(bytes)));
     }
 
+    /**
+     * A saved file is served only from a blob holding its name's bytes,
+     * never through a link (STORAGE §5, §7): one whose bytes fail the name
+     * goes to quarantine and is not served, and a link standing in a blob's
+     * place serves nothing.
+     */
+    @Test
+    public void aSavedFileIsServedOnlyFromABlobHoldingItsBytes() throws Exception {
+        String folder = files.createFolder("Inbox");
+        byte[] bytes = "hello".getBytes(StandardCharsets.UTF_8);
+        files.importFile(folder, "Hello.txt", "text/plain", file(bytes));
+        FileStore.StoredFile held = files.files(folder).get(0);
+        java.io.File blob = files.saved(held);
+        assertArrayEquals(bytes, bytes(blob));
+
+        java.nio.file.Files.write(blob.toPath(), "tampered".getBytes(StandardCharsets.UTF_8));
+        assertNull("bytes failing the name are not served", files.saved(held));
+        assertFalse("and they are moved aside", blob.exists());
+
+        java.io.File elsewhere = file(bytes);
+        java.nio.file.Files.createSymbolicLink(blob.toPath(), elsewhere.toPath());
+        assertNull("a link in a blob's place is not followed", items.blobFile(held.objectHash));
+        assertNull(files.saved(held));
+    }
+
     @Test
     public void aStandInIsNotDeletedByHandAndAFolderGoesWithItsFiles() throws Exception {
         stored("m1");

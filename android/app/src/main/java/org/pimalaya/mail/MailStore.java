@@ -1775,11 +1775,14 @@ public final class MailStore {
     }
 
     /**
-     * Moves a {@link #sourceFile} whose bytes failed its name, the hash it
-     * is filed under, into quarantine/ (STORAGE §7).
+     * Moves {@code message}'s {@link #sourceFile} whose bytes failed its name,
+     * the hash it is filed under, into quarantine/ (STORAGE §7), its row no
+     * longer saying the phone holds the body: a fetch failing after it leaves
+     * the message as one the phone lacks.
      */
-    void quarantine(java.io.File source) {
+    void quarantine(StoredMessage message, java.io.File source) {
         items.quarantine(source.getName());
+        items.setAside(message.collection, message.id, source.getName());
     }
 
     /**
