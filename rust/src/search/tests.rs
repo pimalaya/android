@@ -175,7 +175,7 @@ fn served_index_sql_holds_to_the_sqlite_floor() {
             jiff::tz::TimeZone::UTC,
         );
         for sort in [Sort::NewestFirst, Sort::Title] {
-            let select = compiled.select(sort, Some((10, 0)));
+            let select = compiled.select(sort, Some((10, 0)), None);
             texts.extend(checked("statement", case["query"].to_string(), &select));
         }
         for matches in &compiled.matches {
@@ -1036,7 +1036,7 @@ fn a_hit_carries_a_snippet_of_its_body() {
         "roadmap",
         Sort::NewestFirst,
         10,
-        0,
+        None,
         0,
     )
     .unwrap() else {
@@ -1300,5 +1300,57 @@ fn the_draft_17_query_forms_answer_on_the_floor() {
             assert_eq!((refused.start, refused.end), (0, 4));
         }
         Answer::Found(_) => panic!("~foo answered"),
+    }
+}
+
+/// One page of a search answered past a place, as a token.
+fn page_after(
+    floor: &mut Floor,
+    dir: &Path,
+    query: &str,
+    sort: Sort,
+    after: Option<&str>,
+) -> find::Page {
+    match find::search(floor, &dir.join("objects"), query, sort, 1, after, 0).unwrap() {
+        Answer::Found(page) => page,
+        Answer::Refused(refused) => panic!("{query:?} refused: {}", refused.message),
+    }
+}
+
+/// A search pages by the place of its last hit, never by offset (pimdir
+/// SEARCH §8.2): a hit arriving between two pages, ahead of the first one,
+/// neither repeats the first page's hit on the second nor hides the next,
+/// in both orders.
+#[test]
+fn a_hit_arriving_between_two_pages_repeats_and_hides_nothing() {
+    for sort in [Sort::NewestFirst, Sort::Title] {
+        let dir = tempfile::tempdir().unwrap();
+        file_message(dir.path(), message("b@x", "Beta", "the roadmap"));
+        file_message(dir.path(), message("c@x", "Gamma", "the roadmap"));
+        let mut floor = index(dir.path());
+        refreshed(&mut floor, dir.path(), 0, 10);
+
+        let first = page_after(&mut floor, dir.path(), "roadmap", sort, None);
+        assert!(first.more);
+        let seen = first.hits[0].seq;
+
+        let arriving = "Message-ID: <a@x>\r\nSubject: Alpha\r\nFrom: Ann <ann@example.org>\r\n\
+             Date: Sun, 02 Aug 2026 12:00:00 +0000\r\n\r\nthe roadmap\r\n";
+        file_message(dir.path(), arriving.as_bytes().to_vec());
+        refreshed(&mut floor, dir.path(), 0, 10);
+
+        let second = page_after(
+            &mut floor,
+            dir.path(),
+            "roadmap",
+            sort,
+            first.cursor.as_deref(),
+        );
+        assert_eq!(second.hits.len(), 1, "{sort:?}");
+        assert_ne!(
+            second.hits[0].seq, seen,
+            "{sort:?}: the first page's hit again"
+        );
+        assert!(!second.more, "{sort:?}: nothing hidden past the second");
     }
 }

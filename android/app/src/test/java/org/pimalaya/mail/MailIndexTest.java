@@ -135,7 +135,7 @@ public class MailIndexTest {
         PimdirIndexDb index = pimdir.startIndex();
         index.refresh();
 
-        JSONObject page = index.search("quarter", "date", 10, 0);
+        JSONObject page = index.search("quarter", "date", 10, null);
         JSONArray hits = page.getJSONArray("hits");
         assertEquals(1, hits.length());
         JSONObject hit = hits.getJSONObject(0);

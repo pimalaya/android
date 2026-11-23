@@ -886,14 +886,18 @@ final class Native {
     static native String pimdirIndexMailHits(
             PimdirIndex.Steps index, String query, String scope, long now);
 
-    /** One page of a query's hits described: {@code {hits, more}} or {@code {refused}}. */
+    /**
+     * One page of a query's hits described, past the page cursor {@code
+     * after} (empty from the first hit): {@code {hits, more, cursor?}} or
+     * {@code {refused}}.
+     */
     static native String pimdirIndexSearch(
             PimdirIndex.Steps index,
             String blobs,
             String query,
             String order,
             int limit,
-            int offset,
+            String after,
             long now);
 
     /**

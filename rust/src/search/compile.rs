@@ -18,6 +18,7 @@ use io_pimdir::{
     codec, property,
     search::{
         fold,
+        plan::PimdirSearchCursor,
         query::{
             PimdirQuery, PimdirQueryDateRange, PimdirQueryId, PimdirQueryKind,
             PimdirQueryPredicate, PimdirQueryPriority, PimdirQueryTerm, PimdirQueryText,
@@ -126,16 +127,36 @@ impl Compiled {
     }
 
     /// The hits in `sort` order, `limit` of them after `offset`, `None`
-    /// for every one: account, seq, sort key, whether undated, title. The
+    /// for every one, those of the newest-first order past `after` alone:
+    /// account, seq, sort key, whether undated, title. The
     /// `name` order folds titles as SQL cannot, so its caller sorts the
     /// whole set itself; the date order leaves the title empty.
-    pub fn select(&mut self, sort: Sort, page: Option<(usize, usize)>) -> String {
+    pub fn select(
+        &mut self,
+        sort: Sort,
+        page: Option<(usize, usize)>,
+        after: Option<&PimdirSearchCursor>,
+    ) -> String {
         let order = match sort {
             Sort::NewestFirst => {
                 "undated ASC, CASE WHEN undated = 0 THEN sort_key END DESC, \
-                 CASE WHEN undated = 1 THEN sort_key END ASC, h.seq ASC, h.akey ASC"
+                 CASE WHEN undated = 1 THEN sort_key END ASC, seq ASC, akey ASC"
             }
-            Sort::Title => "h.seq ASC, h.akey ASC",
+            Sort::Title => "seq ASC, akey ASC",
+        };
+        let after = match after.filter(|_| sort == Sort::NewestFirst) {
+            None => String::from("1"),
+            Some(after) => {
+                let undated = self.bind(Value::Integer(i64::from(after.is_undated())));
+                let key = self.bind(after.sort_key().unwrap_or_default().into());
+                let seq = self.bind(Value::Integer(after.seq()));
+                let account = self.bind(after.account().into());
+                format!(
+                    "(undated > {undated} OR (undated = {undated} AND \
+                     (({undated} = 0 AND sort_key < {key}) OR ({undated} = 1 AND sort_key > {key}) \
+                     OR (sort_key = {key} AND (seq > {seq} OR (seq = {seq} AND akey > {account}))))))"
+                )
+            }
         };
         let (limit, offset) = page.unwrap_or((i64::MAX as usize, 0));
         let limit = self.bind(Value::Integer(limit.min(i64::MAX as usize) as i64));
@@ -154,11 +175,12 @@ impl Compiled {
 
         format!(
             "{}
-SELECT h.account, h.seq,
+SELECT account, seq, sort_key, undated, title FROM (
+SELECT h.account, h.seq, h.akey,
   (SELECT max(i.sort_key) {placements}) AS sort_key,
   (SELECT max(c.kind IN ('text/vcard', 'application/octet-stream')) {placements}) AS undated,
   {title} AS title
-FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
+FROM hits h) WHERE {after} ORDER BY {order} LIMIT {limit} OFFSET {offset}",
             self.with(),
         )
     }

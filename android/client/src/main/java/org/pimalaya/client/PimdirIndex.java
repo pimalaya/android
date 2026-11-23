@@ -106,9 +106,10 @@ public final class PimdirIndex {
      * and a snippet of its body: {@code {hits, more}} or {@code {refused}}.
      */
     public static JSONObject search(
-            Steps index, String blobs, String query, String order, int limit, int offset,
+            Steps index, String blobs, String query, String order, int limit, String after,
             long now) {
         return Replies.object(
-                Native.pimdirIndexSearch(index, blobs, query, order, limit, offset, now));
+                Native.pimdirIndexSearch(
+                        index, blobs, query, order, limit, after == null ? "" : after, now));
     }
 }

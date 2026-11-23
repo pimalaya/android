@@ -268,15 +268,17 @@ public final class PimdirIndexDb implements PimdirIndex.Steps {
     }
 
     /**
-     * One page of a query's hits, each with its placements and a snippet of
-     * its body: {@code {hits, more}}, {@code {refused}}, or null for an
-     * index refused.
+     * One page of a query's hits past the page cursor {@code after} (null from
+     * the first hit), each with its placements and a snippet of its body:
+     * {@code {hits, more, cursor?}}, {@code {refused}}, or null for an index
+     * refused. Paged by place, so a hit arriving between two pages repeats
+     * and hides nothing.
      */
-    public JSONObject search(String query, String order, int limit, int offset) {
+    public JSONObject search(String query, String order, int limit, String after) {
         long now = System.currentTimeMillis() / 1000;
         String blobs = store.blobs().getAbsolutePath();
         return run(
-                handle -> PimdirIndex.search(this, blobs, query, order, limit, offset, now));
+                handle -> PimdirIndex.search(this, blobs, query, order, limit, after, now));
     }
 
     /**

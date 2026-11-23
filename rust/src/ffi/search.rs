@@ -207,9 +207,10 @@ impl<T> Answered<T> {
 }
 
 /// `Native.pimdirIndexSearch`: one page of `query`'s hits described,
-/// `limit` after `offset`, each with its placements and a snippet of its
-/// body read off `blobs`: `{"hits": [{"account"?, "seq", "kind", "title",
-/// "sortKey", "placements", "snippet"?}], "more"}`, or `{"refused"}`.
+/// `limit` past the page cursor `after` (empty from the first hit), each
+/// with its placements and a snippet of its body read off `blobs`:
+/// `{"hits": [{"account"?, "seq", "kind", "title", "sortKey",
+/// "placements", "snippet"?}], "more", "cursor"?}`, or `{"refused"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_pimdirIndexSearch<'local>(
     mut env: EnvUnowned<'local>,
@@ -219,13 +220,14 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirIndexSearch<'local>
     query: JString<'local>,
     order: JString<'local>,
     limit: jint,
-    offset: jint,
+    after: JString<'local>,
     now: jlong,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let blobs = read_string(env, &blobs);
         let query = read_string(env, &query);
         let order = read_string(env, &order);
+        let after = read_string(env, &after);
         let mut sql = HostSql(JniHost::offline(env, &index));
         let found = find::search(
             &mut sql,
@@ -233,7 +235,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirIndexSearch<'local>
             &query,
             sort(&order),
             limit.max(0) as usize,
-            offset.max(0) as usize,
+            Some(after.as_str()).filter(|after| !after.is_empty()),
             now,
         )
         .map(Answered::from);

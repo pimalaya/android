@@ -15,6 +15,7 @@ use io_pimdir::{
         chunk,
         extract::PimdirExtract,
         fold,
+        plan::{PimdirSearchCursor, PimdirSearchSort},
         query::{PimdirQuery, PimdirQueryError, PimdirQueryKind, PimdirQueryPredicate},
     },
 };
@@ -125,6 +126,10 @@ pub struct Page {
     pub hits: Vec<Described>,
     /// Whether hits follow the page.
     pub more: bool,
+    /// Where the next page starts, the last hit's place as a
+    /// [`PimdirSearchCursor`] token, absent for a page holding none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
 }
 
 /// Every hit of `query` in `sort` order, `page` holding how many after
@@ -140,43 +145,58 @@ pub fn hits(
         Ok(parsed) => parsed,
         Err(err) => return Ok(Answer::Refused(err.into())),
     };
-    let (found, _) = run(sql, &parsed, sort, page, now)?;
-    Ok(Answer::Found(found))
+    let (found, _) = run(sql, &parsed, sort, page, None, now)?;
+    Ok(Answer::Found(
+        found.into_iter().map(|(hit, _)| hit).collect(),
+    ))
 }
 
-/// One page of `query`'s hits described, `limit` after `offset`, each with
-/// a snippet of its body read off `blobs`.
+/// One page of `query`'s hits described, `limit` past the place `after`
+/// names (a [`Page::cursor`] token, `None` from the first hit), each with
+/// a snippet of its body read off `blobs`. Paged by place, never by
+/// offset, so a hit arriving between two pages is neither repeated nor
+/// hidden among those already listed.
 pub fn search(
     sql: &mut impl IndexSql,
     blobs: &Path,
     query: &str,
     sort: Sort,
     limit: usize,
-    offset: usize,
+    after: Option<&str>,
     now: i64,
 ) -> Result<Answer<Page>, BridgeError> {
     let parsed = match PimdirQuery::parse(query) {
         Ok(parsed) => parsed,
         Err(err) => return Ok(Answer::Refused(err.into())),
     };
+    let after = match after {
+        None => None,
+        Some(token) => Some(
+            PimdirSearchCursor::from_token(token)
+                .ok_or_else(|| format!("search cannot read the page cursor {token:?}"))?,
+        ),
+    };
     let probe = limit.saturating_add(1);
-    let (mut found, words) = run(sql, &parsed, sort, Some((probe, offset)), now)?;
+    let (mut found, words) = run(sql, &parsed, sort, Some((probe, 0)), after.as_ref(), now)?;
     let more = found.len() > limit;
     found.truncate(limit);
+    let cursor = found.last().map(|(_, place)| place.token());
+    let found = found.into_iter().map(|(hit, _)| hit).collect();
     let hits = describe(sql, blobs, found, &words)?;
-    Ok(Answer::Found(Page { hits, more }))
+    Ok(Answer::Found(Page { hits, more, cursor }))
 }
 
 /// Runs a parsed query: its categories and ends read, its text terms'
-/// matches and its select in one round. Answers the hits and the words a
-/// snippet looks for.
+/// matches and its select in one round. Answers the hits past `after`,
+/// each with its place, and the words a snippet looks for.
 fn run(
     sql: &mut impl IndexSql,
     parsed: &PimdirQuery,
     sort: Sort,
     page: Option<(usize, usize)>,
+    after: Option<&PimdirSearchCursor>,
     now: i64,
-) -> Result<(Vec<Hit>, Vec<String>), BridgeError> {
+) -> Result<(Vec<Placed>, Vec<String>), BridgeError> {
     let ends = ends(sql, parsed)?;
     let categories = categories(sql, parsed)?;
     let labels = labels(sql, parsed)?;
@@ -184,7 +204,7 @@ fn run(
     let mut compiled = Compiled::new(parsed, ends, categories, labels, now, zone);
     // NOTE: the `name` order folds titles in Rust, so it reads every hit
     // and pages here.
-    let select = compiled.select(sort, page.filter(|_| sort == Sort::NewestFirst));
+    let select = compiled.select(sort, page.filter(|_| sort == Sort::NewestFirst), after);
 
     let mut batch = Batch::default();
     batch.add("CREATE_TERM_MATCH", &[])?;
@@ -198,20 +218,31 @@ fn run(
     let mut found = answers
         .rows(rows)
         .iter()
-        .map(|row| Ok((opt_text(row, 0)?, int(row, 1)?, text(row, 4)?)))
+        .map(|row| {
+            let account = opt_text(row, 0)?;
+            let seq = int(row, 1)?;
+            let place = match sort {
+                Sort::NewestFirst => PimdirSearchCursor::dated(
+                    int(row, 3)? == 1,
+                    text(row, 2)?,
+                    seq,
+                    account.clone().unwrap_or_default(),
+                ),
+                Sort::Title => titled(&fold::value(&text(row, 4)?), seq, account.as_deref()),
+            };
+            Ok((Hit { account, seq }, place))
+        })
         .collect::<Result<Vec<_>, BridgeError>>()?;
     if sort == Sort::Title {
-        // NOTE: ties to the seq then the account, as the SQL order gave.
-        found.sort_by_cached_key(|(_, _, title)| fold::value(title));
+        found.sort_by(|(_, left), (_, right)| left.compare(right, PimdirSearchSort::Title));
+        if let Some(after) = after {
+            found.retain(|(_, place)| place.compare(after, PimdirSearchSort::Title).is_gt());
+        }
         if let Some((limit, offset)) = page {
             found = found.into_iter().skip(offset).take(limit).collect();
         }
     }
-    let hits = found
-        .into_iter()
-        .map(|(account, seq, _)| Hit { account, seq })
-        .collect();
-    Ok((hits, compiled.words))
+    Ok((found, compiled.words))
 }
 
 /// The zone a query's days are read in (SEARCH §8.1): the one the index
@@ -265,6 +296,21 @@ fn categories(sql: &mut impl IndexSql, parsed: &PimdirQuery) -> Result<Categorie
         categories.push((folded, values));
     }
     Ok(categories)
+}
+
+/// A hit and its place in the query's order.
+type Placed = (Hit, PimdirSearchCursor);
+
+/// The place of a hit in the title order: its title folded, its seq and
+/// its account, as a [`PimdirSearchCursor`] token spells them.
+fn titled(title: &str, seq: i64, account: Option<&str>) -> PimdirSearchCursor {
+    let hex = |text: &str| -> String { text.bytes().map(|byte| format!("{byte:02x}")).collect() };
+    let token = format!(
+        "1.0.-.-.{}.{seq}.{}",
+        hex(title),
+        hex(account.unwrap_or_default())
+    );
+    PimdirSearchCursor::from_token(&token).expect("a token of the cursor's own form")
 }
 
 /// The local labels each `label:` term names: every spelling the store
