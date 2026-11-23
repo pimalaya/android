@@ -20,6 +20,19 @@ unbound 96-a-rekey-matches-copies-at-one-revision-in-handle-order: the bridge ru
 unbound 159-a-capped-rekey-leaving-a-member-out-parks: the bridge runs no rekey
 unbound 190-a-rekey-reports-an-arrival-added: the bridge runs no rekey
 unbound 195-a-rekey-runs-the-flag-axis-on-its-listed-flags: the bridge runs no rekey
+unbound 201-a-rekey-listing-unknown-flags-keeps-the-base: the bridge runs no rekey
+unbound 202-a-rekey-listing-no-revision-carries-the-conflict: the bridge runs no rekey
+unbound 203-a-rekey-lands-a-delivered-create-on-its-member: the bridge runs no rekey
+unbound 204-a-rekey-joins-an-offered-copy-to-its-member: the bridge runs no rekey
+unbound 205-a-rekey-lands-a-pending-create-on-its-member: the bridge runs no rekey
+unbound 206-a-rekey-mints-a-member-disagreeing-with-a-pending-create-apart: the bridge runs no rekey
+unbound 207-a-rekey-carries-a-conflicted-tombstone-listed-at-its-base-revision: the bridge runs no rekey
+unbound 208-a-rekey-carries-a-conflicted-tombstone-listed-at-its-conflict-revision: the bridge runs no rekey
+unbound 209-a-rekey-records-a-tombstone-holding-an-edit-as-a-conflict: the bridge runs no rekey
+unbound 210-a-rekey-listing-a-handle-twice-keeps-its-first-entry: the bridge runs no rekey
+unbound 211-a-rekey-stores-an-arrivals-listed-body: the bridge runs no rekey
+unbound 212-a-rekey-pull-stores-its-listed-body: the bridge runs no rekey
+unbound 213-a-rekey-carries-a-tombstone-taking-the-listed-flags: the bridge runs no rekey
 unbound 14-both-edited-prefer-remote-pulls: the bridge syncs under the manual policy alone
 unbound 15-both-edited-prefer-local-over-an-unread-body-conflicts: the bridge syncs under the manual policy alone
 unbound 33-an-item-conflict-reports-a-server-edit: the bridge syncs under the manual policy alone
