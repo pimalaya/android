@@ -506,6 +506,24 @@ mod tests {
         }
     }
 
+    /// The derivation the app stamps is the one io-pimdir's owner creates a
+    /// store with (pimdir audit A5): `client::schema::DERIVATION` is the
+    /// crate's own, so the store it writes is the witness.
+    #[test]
+    fn the_derivation_is_io_pimdirs() {
+        let dir = tempfile::tempdir().unwrap();
+        drop(io_pimdir::client::PimdirStore::open(dir.path()).unwrap());
+        let db = rusqlite::Connection::open(dir.path().join("pimdir.db")).unwrap();
+        let derivation: i64 = db
+            .query_row(
+                "SELECT derivation FROM store_meta WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(derivation, crate::offline::store::DERIVATION);
+    }
+
     #[test]
     fn a_store_of_this_draft_opens() {
         assert_eq!(check(&current()), Ok(()));
