@@ -670,18 +670,13 @@ public final class PimdirStorage {
         }
         // NOTE: a file's summary whole, its size the held body's (Annex A.7).
         if (!cursor.isNull(23)) {
-            JSONObject file = new JSONObject();
-            file.put("name", cursor.getString(23));
-            if (!cursor.isNull(24)) {
-                file.put("media_type", cursor.getString(24));
-            }
-            if (!cursor.isNull(25)) {
-                file.put("size", cursor.getLong(25));
-            }
-            if (!cursor.isNull(26)) {
-                file.put("part", cursor.getString(26));
-            }
-            placement.put("summary", new JSONObject().put("file", file));
+            placement.put(
+                    "summary",
+                    PimdirSummary.file(
+                            cursor.getString(23),
+                            cursor.isNull(24) ? null : cursor.getString(24),
+                            cursor.isNull(25) ? null : cursor.getLong(25),
+                            cursor.isNull(26) ? null : cursor.getString(26)));
         }
         if (!cursor.isNull(11)) {
             placement.put("conflictRevision", cursor.getString(11));
@@ -727,6 +722,11 @@ public final class PimdirStorage {
             if (destination != null) {
                 placement.put("origin", destination);
             }
+        }
+        // NOTE: the server's id of the member's content, as the source last
+        // stated it (SYNC §4), left out when it stated none.
+        if (!cursor.isNull(28)) {
+            placement.put("serverObjectId", cursor.getString(28));
         }
         return placement;
     }
@@ -1091,16 +1091,19 @@ public final class PimdirStorage {
      * (replicas sharing a UID diverge).
      */
     public JSONObject lookupObjects(JSONArray links) throws JSONException {
-        return lookupObjects(links, null);
+        return lookupObjects(links, null, null);
     }
 
     /**
-     * {@link #lookupObjects(JSONArray)} within one account's collections.
+     * {@link #lookupObjects(JSONArray)} within one account's collections, each
+     * holder with the server object id the binding of {@code collection}'s
+     * source states (SYNC §6), none for a null collection.
      *
      * <p>STORAGE §14 binds the caller's account: across accounts a link id is
      * not a fact. A null account means every account's.
      */
-    public JSONObject lookupObjects(JSONArray links, String account) throws JSONException {
+    public JSONObject lookupObjects(JSONArray links, String account, String collection)
+            throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
         JSONObject objects = new JSONObject();
 
@@ -1110,7 +1113,10 @@ public final class PimdirStorage {
                     PimdirDb.query(
                             db,
                             "HELD_OBJECT",
-                            PimdirSql.values("link_id", linkId, "account", account))) {
+                            PimdirSql.values(
+                                    "link_id", linkId,
+                                    "account", account,
+                                    "source", collection == null ? null : sourceOf(collection)))) {
                 held(objects, linkId, cursor);
             }
         }
@@ -1123,14 +1129,18 @@ public final class PimdirStorage {
     /**
      * {@link #lookupObjects} for an account's messages: every holder of each
      * key, never a derived one, the engine linking a body only from a row
-     * agreeing with the message (SYNC §6).
+     * agreeing with the message (SYNC §6), and never from one whose binding
+     * of {@code collection}'s source states another server object id.
      */
-    public JSONObject lookupMessages(JSONArray links, String account) throws JSONException {
+    public JSONObject lookupMessages(JSONArray links, String account, String collection)
+            throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
         JSONObject objects = new JSONObject();
+        String source = collection == null ? null : sourceOf(collection);
         for (int index = 0; index < links.length(); index++) {
             String linkId = links.getString(index);
-            Map<String, Object> values = PimdirSql.values("link_id", linkId, "account", account);
+            Map<String, Object> values =
+                    PimdirSql.values("link_id", linkId, "account", account, "source", source);
             try (Cursor cursor = PimdirDb.query(db, "HELD_MESSAGE_OBJECT", values)) {
                 held(objects, linkId, cursor);
             }
@@ -1161,6 +1171,7 @@ public final class PimdirStorage {
             putText(object, "subject", cursor, 2);
             putText(object, "date", cursor, 3);
             putText(object, "sender", cursor, 4);
+            putText(object, "server_object_id", cursor, 5);
             holders.put(object);
         }
         if (holders.length() > 0) {
@@ -1209,6 +1220,9 @@ public final class PimdirStorage {
                         break;
                     case "deliverPlacement":
                         deliver(db, op);
+                        break;
+                    case "landPlacement":
+                        land(db, op);
                         break;
                     case "setCheckpoint":
                         setCheckpoint(db, op);
@@ -1535,6 +1549,7 @@ public final class PimdirStorage {
         kept.put("conflicted", 0);
         // NOTE: no system flag yet: writeFlags sets the bits with the rows.
         kept.put("marks", 0);
+        kept.put("keywords", "");
         PimdirDb.exec(db, "INSERT_ITEM", kept);
         PimdirItems.writeFlags(db, collection, key, PimdirItems.flagsFrom(flags));
         Map<String, Object> values = new HashMap<>();
@@ -1821,6 +1836,7 @@ public final class PimdirStorage {
             row.put("conflicted", 0);
             // NOTE: no system flag yet: writeFlags sets the bits with the rows.
             row.put("marks", 0);
+            row.put("keywords", "");
             PimdirDb.exec(db, "INSERT_ITEM", row);
         } else {
             // NOTE: a write not restating the key keeps it (SPEC.md §9.3); the
@@ -1946,6 +1962,11 @@ public final class PimdirStorage {
         row.put("conflict_revision", conflictRevision);
         row.put("conflict_object", conflictObject);
         row.put("shared_object", shared);
+        row.put(
+                "server_object_id",
+                placement.isNull("serverObjectId")
+                        ? null
+                        : placement.optString("serverObjectId", null));
         PimdirDb.exec(db, "WRITE_BINDING", row);
         PimdirItems.writeBaseFlags(db, collection, linkId, source, baseFlags);
         adjustRefcount(db, previousBase, baseObject);
@@ -2072,6 +2093,45 @@ public final class PimdirStorage {
                         "collection", collectionOf(collection),
                         "source", sourceOf(collection),
                         "handle", op.getString("handle")));
+    }
+
+    /**
+     * Lands a relocation's destination create on the handle the relocation
+     * stated (pimdir SYNC §4), as io-pimdir's write applies {@code
+     * LandPlacement}: a source binding {@code landed} in the collection
+     * already records the create delivered; otherwise the binding under the
+     * provisional handle moves to {@code landed}, based on the item's flags
+     * and body and the outcome's revision ({@code land_binding}), its pins
+     * moving with it.
+     */
+    private void land(SQLiteDatabase db, JSONObject op) throws JSONException {
+        String engine = op.getString("collection");
+        String collection = collectionOf(engine);
+        String source = sourceOf(engine);
+        String handle = op.getString("handle");
+        String landed = op.getString("landed");
+        if (linkOf(db, collection, source, landed) != null) {
+            deliver(db, op);
+            return;
+        }
+        String linkId = linkOf(db, collection, source, handle);
+        if (linkId == null) {
+            return;
+        }
+        String object = one(db, "ITEM_OBJECT", PimdirItems.key(collection, linkId));
+        String base = baseObjectOf(db, collection, linkId, source);
+        String shared = sharedObjectOf(db, collection, linkId, source);
+        Map<String, Object> values = source(collection, source);
+        values.put("handle", handle);
+        values.put("landed", landed);
+        values.put("revision", op.has("revision") ? op.getString("revision") : null);
+        if (PimdirDb.exec(db, "LAND_BINDING", values) == 0) {
+            return;
+        }
+        adjustRefcount(db, base, object);
+        if (object != null) {
+            adjustRefcount(db, shared, object);
+        }
     }
 
     /**

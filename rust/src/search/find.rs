@@ -10,7 +10,9 @@ use std::path::Path;
 
 use io_pimdir::{
     object::PimdirHash,
+    property,
     search::{
+        chunk,
         extract::PimdirExtract,
         fold,
         query::{PimdirQuery, PimdirQueryError, PimdirQueryKind, PimdirQueryPredicate},
@@ -22,7 +24,7 @@ use serde::Serialize;
 use crate::{
     error::BridgeError,
     search::{
-        compile::{self, Categories, Compiled, Ends, Sort},
+        compile::{self, Categories, Compiled, Ends, Labels, Sort},
         refresh,
         sql::{Batch, IndexSql, Value, int, opt_text, query, text},
     },
@@ -177,11 +179,12 @@ fn run(
 ) -> Result<(Vec<Hit>, Vec<String>), BridgeError> {
     let ends = ends(sql, parsed)?;
     let categories = categories(sql, parsed)?;
+    let labels = labels(sql, parsed)?;
     let zone = zone(sql, parsed)?;
-    let mut compiled = Compiled::new(parsed, ends, categories, now, zone);
+    let mut compiled = Compiled::new(parsed, ends, categories, labels, now, zone);
     // NOTE: the `name` order folds titles in Rust, so it reads every hit
     // and pages here.
-    let select = compiled.select(sort, page.filter(|_| sort == Sort::Date));
+    let select = compiled.select(sort, page.filter(|_| sort == Sort::NewestFirst));
 
     let mut batch = Batch::default();
     batch.add("CREATE_TERM_MATCH", &[])?;
@@ -197,7 +200,7 @@ fn run(
         .iter()
         .map(|row| Ok((opt_text(row, 0)?, int(row, 1)?, text(row, 4)?)))
         .collect::<Result<Vec<_>, BridgeError>>()?;
-    if sort == Sort::Name {
+    if sort == Sort::Title {
         // NOTE: ties to the seq then the account, as the SQL order gave.
         found.sort_by_cached_key(|(_, _, title)| fold::value(title));
         if let Some((limit, offset)) = page {
@@ -262,6 +265,45 @@ fn categories(sql: &mut impl IndexSql, parsed: &PimdirQuery) -> Result<Categorie
         categories.push((folded, values));
     }
     Ok(categories)
+}
+
+/// The local labels each `label:` term names: every spelling the store
+/// holds whose fold is the term's (STORAGE §4.3), both folded in Rust.
+fn labels(sql: &mut impl IndexSql, parsed: &PimdirQuery) -> Result<Labels, BridgeError> {
+    let mut labels = Vec::new();
+    let mut held: Option<Vec<(String, String)>> = None;
+    for (term, _) in parsed.terms() {
+        let PimdirQueryPredicate::Label(label) = &term.predicate else {
+            continue;
+        };
+        let held = match &mut held {
+            Some(held) => held,
+            None => {
+                let values = query(
+                    sql,
+                    "LIST_PROPERTY_VALUES",
+                    &[(":key", property::LABEL.into())],
+                )?
+                .iter()
+                .map(|row| text(row, 0))
+                .collect::<Result<Vec<_>, _>>()?;
+                held.insert(
+                    values
+                        .into_iter()
+                        .map(|value| (property::fold(&value), value))
+                        .collect(),
+                )
+            }
+        };
+        let folded = property::fold(label);
+        let spellings = held
+            .iter()
+            .filter(|(held, _)| *held == folded)
+            .map(|(_, value)| value.clone())
+            .collect();
+        labels.push((folded, spellings));
+    }
+    Ok(labels)
 }
 
 /// The items each `linked:` term names, every kind each is held under.
@@ -344,41 +386,21 @@ fn describe(
         });
     }
 
-    let mut batch = Batch::default();
-    let mut chunked = Vec::new();
-    for (at, hit) in described.iter().enumerate() {
+    for hit in &mut described {
         let Some(hash) = hit.placements.iter().find_map(|p| p.object.clone()) else {
             continue;
         };
-        let handle = batch.add("CHUNKS_OF", &[(":hash", (&hash).into())])?;
-        chunked.push((at, hash, handle));
-    }
-    let answers = batch.run(sql)?;
-    for (at, hash, handle) in chunked {
-        let chunks = answers
-            .rows(handle)
-            .iter()
-            .map(|row| Ok((text(row, 1)?, int(row, 2)? as usize, int(row, 3)? as usize)))
-            .collect::<Result<Vec<_>, BridgeError>>()?;
-        let hit = &mut described[at];
-        hit.snippet = snippet(blobs, &hit.kind, &PimdirHash(hash), &chunks, words);
+        hit.snippet = snippet(blobs, &hit.kind, &PimdirHash(hash), words);
     }
     Ok(described)
 }
 
 /// A passage of a body: the first chunk naming one of `words`, else the
 /// first chunk, trimmed to about [`SNIPPET_LEN`] characters around the
-/// word, as io-pimdir's canonical query client cuts it.
-fn snippet(
-    blobs: &Path,
-    kind: &str,
-    hash: &PimdirHash,
-    chunks: &[(String, usize, usize)],
-    words: &[String],
-) -> Option<String> {
-    if chunks.is_empty() {
-        return None;
-    }
+/// word, as io-pimdir's canonical query client cuts it. The chunks are cut
+/// from the body's `body` and `note` fields here (SEARCH §6,
+/// `search::chunk`), the index storing none.
+fn snippet(blobs: &Path, kind: &str, hash: &PimdirHash, words: &[String]) -> Option<String> {
     let blob = refresh::body(blobs, hash)?;
     let media_type = match PimdirQueryKind::parse(kind) {
         Some(kind) => compile::media_type(kind),
@@ -386,9 +408,10 @@ fn snippet(
     };
     let extract = PimdirExtract::body(media_type, &blob)?;
     let words: Vec<String> = words.iter().map(|word| fold::text(word)).collect();
-    let texts: Vec<&str> = chunks
-        .iter()
-        .filter_map(|(field, start, end)| extract.field(field)?.get(*start..*end))
+    let texts: Vec<&str> = ["body", "note"]
+        .into_iter()
+        .filter_map(|field| extract.field(field))
+        .flat_map(|field| chunk::Chunks::new(field).filter_map(|range| field.get(range)))
         .collect();
 
     for text in &texts {

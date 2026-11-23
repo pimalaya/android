@@ -512,7 +512,7 @@ impl<H: Host> Gmail<'_, H> {
                     false,
                     marks.starred.contains(&id),
                 );
-                Named::unnamed(id, marked)
+                Named::unnamed(id.clone(), marked).with_server_object_id(id)
             })
             .collect();
         let next = page.next.map(|next| format!("{LABEL_CURSOR}{next}"));

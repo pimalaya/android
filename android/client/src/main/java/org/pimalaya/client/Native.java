@@ -228,6 +228,13 @@ final class Native {
     static native String pimdirHashFile(String path);
 
     /**
+     * The columns a whole flag set, a JSON array, is written as (STORAGE
+     * §13): {@code {marks, keywords}}, or {@code {error}} for a flag the
+     * store cannot hold.
+     */
+    static native String pimdirFlags(String flags);
+
+    /**
      * The versions a store is created with and opened at.
      *
      * <p>{@code {formatVersion, syncVersion, derivation, version, hashAlgo}}.

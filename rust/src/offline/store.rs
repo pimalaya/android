@@ -108,6 +108,10 @@ pub struct Refusal {
     pub code: &'static str,
     /// What was found, for the log; never shown as the reason alone.
     pub detail: String,
+    /// For `store-version`, where the store's version stands beside the
+    /// app's (STORAGE §4.2): `earlier`, `later`, `unknown` or `same`; what
+    /// the refusal screen words its advice by.
+    pub order: Option<&'static str>,
 }
 
 impl Refusal {
@@ -115,6 +119,7 @@ impl Refusal {
         Self {
             code,
             detail: detail.into(),
+            order: None,
         }
     }
 }
@@ -152,10 +157,13 @@ pub fn check(facts: &StoreFacts) -> Result<(), Refusal> {
 
     let format_version = meta.format_version.as_deref();
     if format_version != Some(sql::FORMAT_VERSION) {
-        return Err(Refusal::new(
-            "store-version",
-            ordered(format_version, sql::FORMAT_VERSION),
-        ));
+        return Err(Refusal {
+            order: Some(order(format_version, sql::FORMAT_VERSION)),
+            ..Refusal::new(
+                "store-version",
+                ordered(format_version, sql::FORMAT_VERSION),
+            )
+        });
     }
     if meta.version != Some(facts.user_version) {
         return Err(Refusal::new(
@@ -205,17 +213,28 @@ pub fn check(facts: &StoreFacts) -> Result<(), Refusal> {
 /// which of the two is the earlier, by STORAGE §4.2's order (io-pimdir's
 /// [`PimdirFormatRefusal::order`]), or that the order reads neither.
 fn ordered(found: Option<&str>, own: &str) -> String {
+    let found_text = found.unwrap_or("no format_version");
+    match order(found, own) {
+        "earlier" => format!("{found_text}, earlier than this app's {own}"),
+        "later" => format!("{found_text}, later than this app's {own}"),
+        "unknown" => format!("{found_text}, of no order beside this app's {own}"),
+        _ => format!("{found_text}, not this app's {own} to the word"),
+    }
+}
+
+/// Where a store's format version stands beside the app's (STORAGE §4.2):
+/// `earlier`, `later`, `unknown` (an order reading neither) or `same`.
+fn order(found: Option<&str>, own: &str) -> &'static str {
     let refusal = PimdirFormatRefusal {
         found,
         own,
         program: "this app",
     };
-    let found = found.unwrap_or("no format_version");
     match refusal.order() {
-        PimdirFormatOrder::Earlier => format!("{found}, earlier than this app's {own}"),
-        PimdirFormatOrder::Later => format!("{found}, later than this app's {own}"),
-        PimdirFormatOrder::Unknown => format!("{found}, of no order beside this app's {own}"),
-        PimdirFormatOrder::Same => format!("{found}, not this app's {own} to the word"),
+        PimdirFormatOrder::Earlier => "earlier",
+        PimdirFormatOrder::Later => "later",
+        PimdirFormatOrder::Unknown => "unknown",
+        PimdirFormatOrder::Same => "same",
     }
 }
 
@@ -479,7 +498,7 @@ mod tests {
             objects,
             meta: Some(MetaFacts {
                 format: Some("pimdir".into()),
-                format_version: Some("storage-draft-15".into()),
+                format_version: Some("storage-draft-17".into()),
                 version: Some(1),
                 hash_algo: Some("blake3".into()),
                 sync_version: None,
@@ -531,6 +550,14 @@ mod tests {
         assert_eq!(check(&facts).unwrap_err().code, "store-version");
 
         let mut facts = current();
+        facts.meta.as_mut().unwrap().format_version = Some("storage-draft-15".into());
+        assert_eq!(check(&facts).unwrap_err().code, "store-version");
+
+        let mut facts = current();
+        facts.meta.as_mut().unwrap().format_version = Some("storage-draft-16".into());
+        assert_eq!(check(&facts).unwrap_err().code, "store-version");
+
+        let mut facts = current();
         facts.meta.as_mut().unwrap().sync_version = Some("sync-draft-11".into());
         assert_eq!(check(&facts).unwrap_err().code, "sync-version");
 
@@ -544,7 +571,7 @@ mod tests {
     }
 
     /// A store of another format version is refused saying which of the
-    /// two is the earlier (STORAGE §4.2): a draft-13 store an earlier
+    /// two is the earlier (STORAGE §4.2): a draft-15 store an earlier
     /// build wrote, a later draft's, a release's, and a marker the order
     /// does not read.
     #[test]
@@ -557,21 +584,21 @@ mod tests {
             refusal.detail
         };
 
-        let earlier = "earlier than this app's storage-draft-15";
+        let earlier = "earlier than this app's storage-draft-17";
         assert_eq!(
-            detail(Some("storage-draft-13")),
-            format!("storage-draft-13, {earlier}")
+            detail(Some("storage-draft-15")),
+            format!("storage-draft-15, {earlier}")
         );
         assert_eq!(detail(None), format!("no format_version, {earlier}"));
-        let later = "later than this app's storage-draft-15";
+        let later = "later than this app's storage-draft-17";
         assert_eq!(
-            detail(Some("storage-draft-16")),
-            format!("storage-draft-16, {later}")
+            detail(Some("storage-draft-18")),
+            format!("storage-draft-18, {later}")
         );
         assert_eq!(detail(Some("storage-v1")), format!("storage-v1, {later}"));
         assert_eq!(
             detail(Some("storage-v01")),
-            "storage-v01, of no order beside this app's storage-draft-15"
+            "storage-v01, of no order beside this app's storage-draft-17"
         );
     }
 

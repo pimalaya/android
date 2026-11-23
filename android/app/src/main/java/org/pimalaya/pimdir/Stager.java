@@ -61,14 +61,15 @@ public abstract class Stager implements OfflineDriver {
     }
 
     /**
-     * The bodies the store holds under some link ids, replying to a lookup.
+     * The bodies the store holds under some link ids, replying to a lookup
+     * the run over {@code collection} asks, null when it named none.
      *
      * <p>Asked by an upgrade before fetching ({@link
      * PimdirStorage#lookupObjects}); a driver whose link ids name nothing
      * outside its collection answers fewer.
      */
-    protected JSONObject lookup(JSONArray links) throws JSONException {
-        return offline.lookupObjects(links);
+    protected JSONObject lookup(JSONArray links, String collection) throws JSONException {
+        return offline.lookupObjects(links, null, collection);
     }
 
     /**
@@ -187,7 +188,11 @@ public abstract class Stager implements OfflineDriver {
                     synchronized (locks.store) {
                         long began = System.nanoTime();
                         page.waited += began - asked;
-                        reply = lookup(yielded.getJSONArray("links")).toString();
+                        reply =
+                                lookup(
+                                                yielded.getJSONArray("links"),
+                                                yielded.optString("collection", null))
+                                        .toString();
                         page.store += System.nanoTime() - began;
                     }
                     break;

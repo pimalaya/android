@@ -6,8 +6,8 @@
 -- against. The member is then keyed apart, never joining, landing nor
 -- reviving the row.
 SELECT 1 FROM items i
-JOIN mail_summary m ON m.item = i.id
+JOIN summary m ON m.item = i.id AND m.component = 'mail'
 WHERE i.collection = :collection AND i.link_id = :link_id
   AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.item = i.id AND b.source = :source)
-  AND NOT (m.subject IS :subject AND m.date IS :date AND m.sender IS :sender
+  AND NOT (m.title IS :subject AND m.date IS :date AND m.sender IS :sender
            AND (i.retained_at IS NULL OR m.size IS NULL OR :size IS NULL OR m.size = :size));

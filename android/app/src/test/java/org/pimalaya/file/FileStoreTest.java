@@ -157,7 +157,7 @@ public class FileStoreTest {
         assertEquals(
                 "a stand-in holds no body",
                 PimdirItems.META,
-                scalar("SELECT level FROM items WHERE link_id = ? AND object_hash IS NULL",
+                scalar("SELECT level FROM items WHERE link_id = ? AND object IS NULL",
                         "part:m1#2"));
         assertEquals(
                 "sorted on its name, lowercased",
@@ -288,7 +288,7 @@ public class FileStoreTest {
         try (Cursor cursor =
                 pimdir.getReadableDatabase()
                         .rawQuery(
-                                "SELECT object_hash FROM items WHERE collection = ? AND link_id = ?",
+                                "SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE collection = ? AND link_id = ?",
                                 new String[] {folder, first.linkId})) {
             assertTrue(cursor.moveToFirst());
             assertEquals("the copy holds the bytes", hash, cursor.getString(0));

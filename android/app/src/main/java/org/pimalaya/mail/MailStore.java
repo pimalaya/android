@@ -174,7 +174,7 @@ public final class MailStore {
     /** Drops all of one account's mail, its outbox included. */
     public void forget(String accountEmail) {
         // NOTE: before its collections go, which a row anchored on one of
-        // them would refuse (collections_keep_queued).
+        // them would refuse (the queue's ON DELETE RESTRICT).
         for (PimdirQueue.Action action : outbox.submissions(accountEmail)) {
             queue.cancel(action.id());
         }

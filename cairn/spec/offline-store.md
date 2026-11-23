@@ -8,7 +8,7 @@ status: current
 
 The app keeps one pimdir store for every account and every domain: `collections.kind` carries the media type (`message/rfc822`, `text/vcard`, `text/calendar`) and `collections.account` groups by account, so the merged view's two filter axes are columns rather than three databases. Bodies live in a content-addressed blob directory beside the database, referenced by hash and refcounted.
 
-The schema is io-pimdir's canonical storage-draft-15 schema, handed to Java over JNI rather than transcribed; the statements run on it are the app's own text, the `pimalaya-android` shape, which SQLite 3.18 runs, so the store lives on the platform's own SQLite from Android 8.0 up and the app bundles none. The search index, index.db beside the store, is a second database on that same SQLite, written by io-pimdir's I/O-free refresh. The crate is taken without its `client` feature: compiling a second engine into every ABI would work against the app's first design goal.
+The schema is io-pimdir's canonical storage-draft-17 schema, handed to Java over JNI rather than transcribed; the statements run on it are the app's own text, the `pimalaya-android` shape, which SQLite 3.18 runs, so the store lives on the platform's own SQLite from Android 8.0 up and the app bundles none. The search index, index.db beside the store, is a second database on that same SQLite, written by io-pimdir's I/O-free refresh. The crate is taken with `indexer` and without `client` or `search`: compiling a second engine into every ABI would work against the app's first design goal.
 
 Every collection is reconciled by io-pimdir's sync engine, so every collection carries bindings, staged writes and conflicts. A contacts collection is reconciled against two sources, the server and the phone, which the store holds as one item with one `bindings` row per source; mail and calendar have the one source each and are otherwise the same. Nothing replaces a collection's contents: a refresh reconciles it, which is what lets a write staged before it survive it.
 
@@ -21,7 +21,12 @@ The bridge SHALL run io-pimdir's sync, upgrade and mutate coroutines, and the ap
 - THEN `PimdirSync` derives the push and the driver services its yields
 
 ### Requirement: The store's shape follows the canonical schema
-The store SHALL be created by the canonical draft-15 schema alone (0001_init.sql and `init_store_meta`), served over JNI, and SHALL NOT reconcile, widen, narrow nor rebuild a store of another shape: drafts are exact (STORAGE §4.2), and a store whose schema differs from the canonical text is refused as damaged. The statements it runs SHALL be the app's own shape, `pimalaya-android` (STORAGE §4.4: each canonical statement's name, parameters, columns and effect kept, its text free), and the store SHALL record no shape: a store the canonical statement text wrote is the same store and opens.
+The store SHALL be created by the canonical storage-draft-17 schema alone (0001_init.sql and `init_store_meta`), served over JNI, and SHALL NOT reconcile, widen, narrow nor rebuild a store of another shape: drafts are exact (STORAGE §4.2), and a store whose schema differs from the canonical text is refused as damaged. The statements it runs SHALL be the app's own shape, `pimalaya-android` (STORAGE §4.4: each canonical statement's name, parameters, columns and effect kept, its text free). A statement of the app's own SHALL name a body by its hash and join `objects` by id, never read or write an object pointer column (`items.object`, `conflict_object`, `bindings.base_object`, `conflict_object`, `shared_object`, `queue.object`) as a hash. The store SHALL record no shape: a store the canonical statement text wrote is the same store and opens.
+
+#### Scenario: A pointer read by the app's own statement
+- GIVEN a store whose items and bindings point at their bodies by `objects.id`
+- WHEN any app read naming a body runs
+- THEN it answers the body's 52-character name, never the id (`every_pointer_read_answers_a_hash`)
 
 #### Scenario: A store whose index moved
 - GIVEN a store holding an index the canonical text does not declare
@@ -639,12 +644,17 @@ A delta's load (`owing`, pimdir SYNC §10) SHALL read the rows of the handles it
 - THEN that row and the create come back, and no other (PimdirStorageTest `anOwingLoadAnswersWhatItNamesAndWhatOwesAPush`)
 
 ### Requirement: A flag set's system flags are the row's bits
-A placement's or a base's flag set SHALL be written whole: `set_flags_known` and `set_base_flags_known` take it in the `flags` slot and write its system flags (`\Seen`, `\Answered`, `\Flagged`, `\Draft`, `\Deleted`, each by its exact bytes) as `marks` and `base_marks` (STORAGE §13), the app's `add_flags` and `add_base_flags` skip them and keep every other flag, `\seen` included, as a row, and every read answers the bits and the rows as one set. No Java reads which flag is which.
+A placement's or a base's flag set SHALL be written whole, in the row's own write: its system flags (`\Seen`, `\Answered`, `\Flagged`, `\Draft`, `\Deleted`, each by its exact bytes) as `marks` and `base_marks`, and every other flag as `items.keywords` and `bindings.base_keywords`, sorted bytewise and joined by one space, `\seen` included (STORAGE §13). The bridge SHALL compute both (`PimdirSql.flags`, io-pimdir's `codec::marks_to_int` and `codec::keywords_to_text`), refusing a flag the store cannot hold. An unknown set SHALL write `0` and `''`. Every read SHALL answer the bits and the keywords as one set. No Java reads which flag is which, and no Java builds the keywords text.
 
 #### Scenario: A read message round-trips
 - GIVEN a message listed `\Seen`
 - WHEN its write lands and the list reads it back
-- THEN its row holds bit 1 and no flag row, and it reads `\Seen` (BodyLossRacesTest, DeletedItemsTest)
+- THEN its row holds bit 1 and no keyword, and it reads `\Seen` (BodyLossRacesTest, DeletedItemsTest)
+
+#### Scenario: A set mixing system flags and keywords
+- GIVEN a placement written with `$Forwarded`, `work`, `\Seen` and `\seen`
+- WHEN it is loaded back
+- THEN it reads the four, its row holding bit 1 and the keywords `$Forwarded \seen work` (PimdirStorageTest `aFlagSetIsReadBackWhole`)
 
 ### Requirement: A store write is never read through a cursor
 A write SHALL run as a statement and count what it changed (`changes()`), its `RETURNING` clause dropped, never stepped through a cursor: a cursor runs its statement again each time it refills its window, so a delete read through one runs again past its first window. A purge whose pins a statement would return SHALL leave them to the collector's recount.
@@ -684,20 +694,20 @@ The app SHALL NOT take the owner lock nor the staging lock of pimdir STORAGE §8
 - THEN it takes no pass and writes nothing, and runs at its next schedule
 
 ### Requirement: A store of another draft is not opened
-The app SHALL create its store at storage-draft-15 (`store_meta.format_version`, a `store_id` and an `incarnation` by the canonical text, `derivation` 3) and record `sync_version`, sync-draft-15, with the first engine write. It SHALL decide whether an existing store opens by io-pimdir's rules (STORAGE §6) over facts read off the file read-only, and SHALL NOT read, write nor reconcile a store another draft, another program or another sync version wrote: start-up stands aside on a screen saying the app has to be reinstalled, and the background job, the sync adapters and the time-zone receiver do nothing. A refusal for the store's `format_version` SHALL say which of the two is the earlier, by STORAGE §4.2's order (none, then drafts by number, then releases by major, io-pimdir's `PimdirFormatOrder`), or that the order reads neither. The app states its conformance as `storage-draft-15 owner (own statement text), sync-draft-15 engine` (STORAGE §17).
+The app SHALL create its store at storage-draft-17 (`store_meta.format_version`, a `store_id` and an `incarnation` by the canonical text, `derivation` 3) and record `sync_version`, sync-draft-15, with the first engine write. It SHALL decide whether an existing store opens by io-pimdir's rules (STORAGE §6) over facts read off the file read-only, and SHALL NOT read, write nor reconcile a store another draft, another program or another sync version wrote: start-up stands aside on a screen, and the background job, the sync adapters and the time-zone receiver do nothing. A refusal for the store's `format_version` SHALL say which of the two is the earlier, by STORAGE §4.2's order (none, then drafts by number, then releases by major, io-pimdir's `PimdirFormatOrder`), or that the order reads neither, and the screen SHALL word its advice by that order: a store a later version wrote asks for an update and is never offered for deletion; any other asks for a reinstall. The app states its conformance as `storage-draft-17 owner (own statement text), sync-draft-15 engine` (STORAGE §17).
 
-#### Scenario: A store an earlier version wrote
-- GIVEN a store created before draft-15, a draft-14 store among them
+#### Scenario: A store the previous release wrote
+- GIVEN a store at storage-draft-15, which every build on io-pimdir 0.19 wrote
 - WHEN the app starts
-- THEN it opens on the reinstall screen, its reason naming the store's version earlier than the app's, and nothing in the store is written
+- THEN it opens on the reinstall screen, its reason `store-version (storage-draft-15, earlier than this app's storage-draft-17)`, and nothing in the store is written
 
 #### Scenario: A store a later version wrote
-- GIVEN a store at storage-draft-16 or at a released storage version
+- GIVEN a store at storage-draft-18 or at a released storage version
 - WHEN the app starts
-- THEN it opens on the reinstall screen, its reason naming the store's version later than the app's, and nothing in the store is written
+- THEN it opens on a screen asking for an update of the app, never for its reinstall, its reason naming the store's version later than the app's, and nothing in the store is written
 
 #### Scenario: Sync state an earlier sync draft wrote
-- GIVEN a store at storage-draft-15 whose `sync_version` is sync-draft-14
+- GIVEN a store at storage-draft-17 whose `sync_version` is sync-draft-14
 - WHEN the app starts
 - THEN it opens on the reinstall screen, and nothing in the store is written
 
@@ -855,7 +865,7 @@ The app SHALL write and query index.db on the same SQLite as the store, and SHAL
 - THEN one SQLite in the process holds both files, and the search answers once the refresh's current chunk commits
 
 ### Requirement: The index is the app's own shape over FTS4
-The app SHALL keep a search index, index.db beside the store, in a shape of its own named `pimalaya-android` in `index_meta.shape` (pimdir SEARCH §2), at search-draft-15: the canonical index on SQLite 3.18, ordinary FTS4 tables in place of FTS5 over text io-pimdir folded, `unicode61` with `remove_diacritics=0` and prefixes of 2 and 3. It SHALL record in `index_meta.extraction` the revision of SEARCH §6 io-pimdir extracts under and in `index_meta.extractor` its own revision then io-pimdir's. It SHALL refuse and leave as it is an index of another shape or a later version, and rebuild one of its shape at an earlier version (versions ordered as SEARCH §2 says: drafts by number, every draft below every release, releases by major; one of no form the order reads refused), under another tokenizer or schema, recording another extraction or extractor, or built from another store. The index SHALL be refreshed by io-pimdir's refresh at start, after each engine write batch and at the end of each sync, a run of at most 200 rows of the store's feed per transaction, each run a deferred transaction that takes no lock of the store.
+The app SHALL keep a search index, index.db beside the store, in a shape of its own named `pimalaya-android` in `index_meta.shape` (pimdir SEARCH §2), at search-draft-17: the canonical index on SQLite 3.18, ordinary FTS4 tables in place of FTS5 over text io-pimdir folded, `unicode61` with `remove_diacritics=0` and prefixes of 2 and 3, a placement naming its body by `object.id`, and no `chunk`, `thread` or `split` table. A snippet SHALL be cut from the body, and a thread's span SHALL be read from the store. The flag table SHALL hold keywords alone; `is:` and a `tag:` naming a system flag SHALL read `items.marks` as the store holds it. The app SHALL serve the canonical index statements its bridge binds and no others. It SHALL record in `index_meta.extraction` the revision of SEARCH §6 io-pimdir extracts under and in `index_meta.extractor` its own revision then io-pimdir's. It SHALL refuse and leave as it is an index of another shape or a later version, and rebuild one of its shape at an earlier version (versions ordered as SEARCH §2 says: drafts by number, every draft below every release, releases by major; one of no form the order reads refused), under another tokenizer or schema, recording another extraction or extractor, or built from another store. The index SHALL be refreshed by io-pimdir's refresh at start, after each engine write batch and at the end of each sync, a run of at most 200 rows of the store's feed per transaction, each run a deferred transaction that takes no lock of the store.
 
 #### Scenario: A sync writing while the index refreshes
 - GIVEN a refresh run reading the store
@@ -1064,7 +1074,7 @@ The attachments the reader lists, and the store records stand-ins from, SHALL be
 - THEN the part is listed as first.csv and opens to what its base64 decodes to
 
 ### Requirement: The sync vectors run through the app's load and write
-The app SHALL run every case of the sync vectors of the io-pimdir it pins (pimdir SYNC §11) in a host test, on a store of its own over Android 8.0's SQLite: the case's rows seeded by the standard's own statements and plain SQL, never through the write under test; its run driven by io-pimdir's engine through the coroutines the bridge's sync, upgrade and mutate exports build, every load, lookup, verification and write served by the app's storage half and the remote scripted from the case on the wire a connector answers; its pushes, events, failure, park and rows compared as §11 says. Under format 7 a binding's `refusal` and `refused_key` are seeded and compared, and a `Refused` outcome is fed back with its reason; under format 8 an object stating `row` false is seeded as its file alone; under format 11 a run's `unlisted` count is compared. A case the app does not pass SHALL be listed beside the test with its reason, as `fails` when the app runs it and departs from it, as `unbound` when the bridge states no such verb, option or mutation or the case binds another kind of owner, and the test SHALL fail when a listed case passes, an unlisted one fails, a case listed unbound binds, an unlisted one cannot be bound, or a listed one is not among the vectors. At io-pimdir 0.19, 194 cases (format 11): 156 pass, none fails, 38 are unbound. While a case is listed `fails`, the app's `sync-draft-15 engine` statement stands short of SYNC §12 by it.
+The app SHALL run every case of the sync vectors of the io-pimdir it pins (pimdir SYNC §11) in a host test, on a store of its own over Android 8.0's SQLite: the case's rows seeded by the standard's own statements and plain SQL, never through the write under test; its run driven by io-pimdir's engine through the coroutines the bridge's sync, upgrade and mutate exports build, every load, lookup, verification and write served by the app's storage half and the remote scripted from the case on the wire a connector answers; its pushes, events, failure, park and rows compared as §11 says. Under format 7 a binding's `refusal` and `refused_key` are seeded and compared, and a `Refused` outcome is fed back with its reason; under format 8 an object stating `row` false is seeded as its file alone; under format 11 a run's `unlisted` count is compared. A case the app does not pass SHALL be listed beside the test with its reason, as `fails` when the app runs it and departs from it, as `unbound` when the bridge states no such verb, option or mutation or the case binds another kind of owner, and the test SHALL fail when a listed case passes, an unlisted one fails, a case listed unbound binds, an unlisted one cannot be bound, or a listed one is not among the vectors. At io-pimdir cc3021b, 200 cases (format 11): 161 pass, none fails, 39 are unbound. While a case is listed `fails`, the app's `sync-draft-15 engine` statement stands short of SYNC §12 by it.
 
 #### Scenario: A rule the Java write lacks
 - GIVEN a vector whose expected rows the Java write does not leave
@@ -1140,3 +1150,19 @@ A CardDAV or CalDAV body SHALL be stored and hashed as the bytes its server sent
 - GIVEN a CardDAV server answering a card holding the byte 0xE9
 - WHEN the card is read
 - THEN the store keeps those bytes under their hash, and an edit of the card is refused rather than written to the server
+
+### Requirement: A relocation stating its member's handle lands its create
+When an accepted relocating remove states the handle its member took in the destination (`PimdirPushResult::assigned`: an IMAP `COPYUID`, a Graph move's new id), the store SHALL apply the engine's `LandPlacement` in the batch recording the outcome: the provisional create's binding moves to the stated handle, based on the item's flags, body and the outcome's revision (`land_binding`). When the source already binds that handle in the collection, the store SHALL record the create delivered instead (pimdir SYNC §4).
+
+#### Scenario: A message moved on IMAP
+- GIVEN a message moved into Trash, the server answering `COPYUID` with UID 812
+- WHEN the push's outcome is written
+- THEN Trash's create is bound under 812 at once, never withdrawn for a later listing to bring (MailMoveTest `aMoveStatingItsCopyUidLandsTheTargetCreateOnIt`)
+
+### Requirement: A binding keeps the server's object id
+A mail binding SHALL record the id its server gives the message's content, as the source last stated it with the member's meta (`bindings.server_object_id`): Gmail's message id, JMAP's `Email/id`, Graph's message id; an IMAP source states none (io-imap reads no `EMAILID`). A load SHALL hand it back, and a lookup SHALL answer each holder with the id its binding of the asking source states. Two bindings of one source stating different ids SHALL never share a body by link id (pimdir SYNC §6).
+
+#### Scenario: Two messages sharing a Message-ID
+- GIVEN two messages with one `Message-ID`, subject, date and sender, each stating its own server id, one held in full
+- WHEN the other is upgraded
+- THEN its body is fetched, never linked from the first (MessageIdNamingTest `twoMessagesStatingTheirServerIdsNeverShareABody`, vectors 199 and 200)

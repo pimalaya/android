@@ -1,2 +1,4 @@
 -- One item's body, NULL for none; no row for no item.
-SELECT object_hash FROM items WHERE collection = :collection AND link_id = :link_id;
+-- The body by its hash.
+SELECT (SELECT o.hash FROM objects o WHERE o.id = i.object) FROM items i
+WHERE i.collection = :collection AND i.link_id = :link_id;

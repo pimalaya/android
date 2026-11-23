@@ -1396,7 +1396,7 @@ impl Vector {
     /// own on a row); none when it names the fixture as the case states.
     fn misses(&self, named: &Named) -> Vec<String> {
         let named = serde_json::to_value(named).unwrap();
-        let mail = &named["summary"]["mail"];
+        let mail = &mail_view(&named["summary"]);
         let stated = &self.case["summary"];
         let mut misses = Vec::new();
         let mut check = |key: &str, got: &Value, want: &Value| {
@@ -1436,6 +1436,51 @@ impl Vector {
         );
         misses
     }
+}
+
+/// A message's summary row as the vectors state it (Annex A.1): its
+/// `uid` as `message_id`, its `title` as `subject`, its `in-reply-to`
+/// values as `in_reply_to` and its other values as `addresses`.
+fn mail_view(row: &Value) -> Value {
+    let values = row["values"].as_array().cloned().unwrap_or_default();
+    let in_reply_to: Vec<Value> = values
+        .iter()
+        .filter(|value| value["role"] == "in-reply-to")
+        .map(|value| value["value"].clone())
+        .collect();
+    let addresses: Vec<Value> = values
+        .iter()
+        .filter(|value| value["role"] != "in-reply-to")
+        .map(|value| {
+            let mut address = serde_json::json!({
+                "role": value["role"],
+                "position": value["position"],
+                "address": value["value"],
+            });
+            if let Some(name) = value.get("name") {
+                address["name"] = name.clone();
+            }
+            address
+        })
+        .collect();
+    let mut view = serde_json::json!({
+        "in_reply_to": in_reply_to,
+        "addresses": addresses,
+        "subject": row["title"],
+    });
+    for (key, column) in [
+        ("message_id", "uid"),
+        ("sender", "sender"),
+        ("sender_name", "sender_name"),
+        ("date", "date"),
+        ("size", "size"),
+        ("attachment", "attachment"),
+    ] {
+        if let Some(value) = row.get(column) {
+            view[key] = value.clone();
+        }
+    }
+    view
 }
 
 /// Each header field of a message's header block as name and value in
@@ -1501,7 +1546,7 @@ fn a_row_listing_its_header_fields_is_named_as_the_vectors_state() {
         let named = named_row(headed_row("m1", &vector.fields));
         misses.extend(vector.misses(&named));
 
-        let mail = &serde_json::to_value(&named).unwrap()["summary"]["mail"];
+        let mail = &mail_view(&serde_json::to_value(&named).unwrap()["summary"]);
         let mark = vector.case["meta_attachment"] == 1;
         if mail["attachment"] != mark {
             let got = &mail["attachment"];
@@ -1561,7 +1606,7 @@ fn a_row_listing_no_header_field_is_keyed_by_its_internet_message_id() {
             run += 1;
 
             let named = serde_json::to_value(named_row(row)).unwrap();
-            let mail = &named["summary"]["mail"];
+            let mail = &mail_view(&named["summary"]);
             for (key, got) in [
                 ("link_id", &named["linkId"]),
                 ("message_id", &mail["message_id"]),

@@ -8,7 +8,7 @@ WHERE i.collection = :collection AND i.retained_at IS NULL
               JOIN collections nc ON nc.id = n.collection
               WHERE n.link_id = i.link_id AND n.collection <> i.collection
                 AND n.deleted = 0 AND n.retained_at IS NULL
-                AND n.object_hash IS NOT NULL
+                AND n.object IS NOT NULL
                 AND nc.account = c.account AND nc.kind = c.kind
                 AND NOT EXISTS (SELECT 1 FROM bindings h
                                 WHERE h.item = n.id AND h.source = :source

@@ -203,18 +203,20 @@ public class StorePerformanceTest {
                     new Object[] {object, object});
         }
         db.execSQL(
-                rows + "INSERT INTO items(collection, link_id, seq, flags_known, object_hash,"
-                        + " sort_key, level) SELECT ?, 'm' || i, i, 1, " + NAME + ", ?, ? FROM n",
+                rows + "INSERT INTO items(collection, link_id, seq, flags_known, object,"
+                        + " sort_key, level) SELECT ?, 'm' || i, i, 1,"
+                        + " (SELECT id FROM objects WHERE hash = " + NAME + "), ?, ? FROM n",
                 new Object[] {collection, object, object, date, object == null ? 1 : 2});
         db.execSQL(
                 rows + "INSERT INTO bindings(item, collection, source, handle,"
                         + " base_flags_known, base_object, base_present) SELECT x.id, x.collection,"
-                        + " 'server', 'h' || i, 1, " + NAME + ", 1 FROM n"
+                        + " 'server', 'h' || i, 1, (SELECT id FROM objects WHERE hash = " + NAME
+                        + "), 1 FROM n"
                         + " JOIN items x ON x.collection = ? AND x.link_id = 'm' || i",
                 new Object[] {object, object, collection});
         db.execSQL(
-                rows + "INSERT INTO mail_summary(item, subject, date)"
-                        + " SELECT x.id, 's', ? FROM n"
+                rows + "INSERT INTO summary(item, component, title, date)"
+                        + " SELECT x.id, 'mail', 's', ? FROM n"
                         + " JOIN items x ON x.collection = ? AND x.link_id = 'm' || i",
                 new Object[] {date, collection});
     }
@@ -240,7 +242,7 @@ public class StorePerformanceTest {
         seed(inbox, 0, PAST_A_WINDOW, "2001-01-01T00:00:00Z", "body");
 
         assertEquals(PAST_A_WINDOW, store.release(EMAIL, "2002-01-01T00:00:00Z"));
-        assertEquals(0, scalar("SELECT count(*) FROM items WHERE object_hash IS NOT NULL"));
+        assertEquals(0, scalar("SELECT count(*) FROM items WHERE object IS NOT NULL"));
         assertEquals("the body went to the collector", 0, scalar("SELECT count(*) FROM objects"));
     }
 
@@ -251,8 +253,9 @@ public class StorePerformanceTest {
         db.execSQL(
                 "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < "
                         + PAST_A_WINDOW + ") INSERT INTO items(collection, link_id, seq,"
-                        + " object_hash, level, deleted, retained_at)"
-                        + " SELECT ?, 'r' || i, i, '" + PINNED + "', 2, 1, '2001-01-01T00:00:00.000Z' FROM n",
+                        + " object, level, deleted, retained_at)"
+                        + " SELECT ?, 'r' || i, i, (SELECT id FROM objects WHERE hash = '" + PINNED
+                        + "'), 2, 1, '2001-01-01T00:00:00.000Z' FROM n",
                 new Object[] {inbox});
 
         DeletedItems deleted = new DeletedItems(pimdir, context);
@@ -388,7 +391,7 @@ public class StorePerformanceTest {
         String plan =
                 plan(MailStore.unjoined(
                         PimdirSql.bind("COUNT_MAIL", query.values(null, -1)), null));
-        assertFalse(plan, plan.contains("mail_summary_1"));
+        assertFalse(plan, plan.contains("TABLE summary"));
     }
 
     @Test
@@ -436,16 +439,19 @@ public class StorePerformanceTest {
     private void message(
             String collection, long seq, String date, String object, String base, String shared) {
         db.execSQL(
-                "INSERT INTO items(collection, link_id, seq, flags_known, object_hash, sort_key,"
-                        + " level) VALUES(?, ?, ?, 1, ?, ?, ?)",
+                "INSERT INTO items(collection, link_id, seq, flags_known, object, sort_key,"
+                        + " level) VALUES(?, ?, ?, 1, (SELECT id FROM objects WHERE hash = ?), ?, ?)",
                 new Object[] {collection, "m" + seq, seq, object, date, object == null ? 1 : 2});
         db.execSQL(
                 "INSERT INTO bindings(item, collection, source, handle, base_flags_known,"
                         + " base_object, base_present, shared_object) SELECT id, collection,"
-                        + " 'server', ?, 1, ?, 1, ? FROM items WHERE collection = ? AND link_id = ?",
+                        + " 'server', ?, 1, (SELECT id FROM objects WHERE hash = ?), 1,"
+                        + " (SELECT id FROM objects WHERE hash = ?)"
+                        + " FROM items WHERE collection = ? AND link_id = ?",
                 new Object[] {"h" + seq, base, shared, collection, "m" + seq});
         db.execSQL(
-                "INSERT INTO mail_summary(item, subject, date) SELECT id, 's', ? FROM items"
+                "INSERT INTO summary(item, component, title, date)"
+                        + " SELECT id, 'mail', 's', ? FROM items"
                         + " WHERE collection = ? AND link_id = ?",
                 new Object[] {date, collection, "m" + seq});
     }
@@ -663,7 +669,7 @@ public class StorePerformanceTest {
         assertEquals(
                 "the summary restated from the body",
                 1,
-                scalar("SELECT attachment FROM mail_summary WHERE item IN (SELECT id FROM items WHERE link_id = '42')"));
+                scalar("SELECT attachment FROM summary WHERE item IN (SELECT id FROM items WHERE link_id = '42')"));
 
         MailReader.Read again = reader.read(store.message(inbox, "42"), () -> null);
         assertFalse(again.fetched);

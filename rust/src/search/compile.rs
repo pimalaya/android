@@ -14,29 +14,35 @@
 //! No relevance (SEARCH §8.2): FTS4 ranks nothing, so the shape orders by
 //! `date`, the default, or `name`.
 
-use io_pimdir::search::{
-    fold,
-    query::{
-        PimdirQuery, PimdirQueryDate, PimdirQueryDateRange, PimdirQueryDateUnit, PimdirQueryId,
-        PimdirQueryKind, PimdirQueryPredicate, PimdirQueryPriority, PimdirQueryTerm,
-        PimdirQueryText, PimdirQueryTextField,
+use io_pimdir::{
+    codec, property,
+    search::{
+        fold,
+        query::{
+            PimdirQuery, PimdirQueryDateRange, PimdirQueryId, PimdirQueryKind,
+            PimdirQueryPredicate, PimdirQueryPriority, PimdirQueryTerm, PimdirQueryText,
+            PimdirQueryTextField,
+        },
     },
 };
-use jiff::{Timestamp, civil::Date, tz::TimeZone};
+use jiff::tz::TimeZone;
 
 use crate::search::{
     shape::{self, Prepared},
     sql::Value,
 };
 
-/// The order of a search's hits (SEARCH §8.2).
+/// The order of a search's hits (SEARCH §8.2), two of its five: the app
+/// offers no oldest-first or sender order, and FTS4 ranks nothing.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Sort {
-    /// `sort_key` descending, the undated last in their own ascending.
+    /// `newest-first`: `sort_key` descending, the undated last in their
+    /// own ascending.
     #[default]
-    Date,
-    /// The title folded as STORAGE Annex A.2 folds `fn`, ascending.
-    Name,
+    NewestFirst,
+    /// `title`: the title folded as STORAGE Annex A.2 folds `fn`,
+    /// ascending.
+    Title,
 }
 
 /// The items each `linked:` term names, as `(kind, link id)` pairs per
@@ -46,6 +52,10 @@ pub type Ends = Vec<(PimdirQueryId, Vec<(String, String)>)>;
 /// The task categories each `category:` term names: its value folded, and
 /// every value a task states that folds to it, as stated.
 pub type Categories = Vec<(String, Vec<String>)>;
+
+/// The spellings of a local label each `label:` term names: its value
+/// folded, and every label the store holds that folds to it, as held.
+pub type Labels = Vec<(String, Vec<String>)>;
 
 /// A statement filling `temp.term_match`, run before the query.
 pub struct Matches {
@@ -70,6 +80,7 @@ pub struct Compiled {
     pub words: Vec<String>,
     ends: Ends,
     categories: Categories,
+    labels: Labels,
     /// The instant relative dates resolve against, Unix seconds.
     now: i64,
     /// The zone calendar spans are read in.
@@ -78,12 +89,14 @@ pub struct Compiled {
 
 impl Compiled {
     /// Compiles a query, `ends` holding the items each `linked:` term
-    /// names and `categories` the task categories each `category:` term
-    /// names, its dates resolved against `now` (Unix seconds) in `zone`.
+    /// names, `categories` the task categories each `category:` term
+    /// names and `labels` the spellings each `label:` term names, its dates
+    /// resolved against `now` (Unix seconds) in `zone`.
     pub fn new(
         query: &PimdirQuery,
         ends: Ends,
         categories: Categories,
+        labels: Labels,
         now: i64,
         zone: TimeZone,
     ) -> Self {
@@ -104,6 +117,7 @@ impl Compiled {
             words: Vec::new(),
             ends,
             categories,
+            labels,
             now,
             zone,
         };
@@ -117,11 +131,11 @@ impl Compiled {
     /// whole set itself; the date order leaves the title empty.
     pub fn select(&mut self, sort: Sort, page: Option<(usize, usize)>) -> String {
         let order = match sort {
-            Sort::Date => {
+            Sort::NewestFirst => {
                 "undated ASC, CASE WHEN undated = 0 THEN sort_key END DESC, \
                  CASE WHEN undated = 1 THEN sort_key END ASC, h.seq ASC, h.akey ASC"
             }
-            Sort::Name => "h.seq ASC, h.akey ASC",
+            Sort::Title => "h.seq ASC, h.akey ASC",
         };
         let (limit, offset) = page.unwrap_or((i64::MAX as usize, 0));
         let limit = self.bind(Value::Integer(limit.min(i64::MAX as usize) as i64));
@@ -130,12 +144,12 @@ impl Compiled {
             WHERE i.seq = h.seq AND ifnull(c.account, '') = h.akey \
             AND i.deleted = 0 AND i.retained_at IS NULL";
         let title = match sort {
-            Sort::Name => format!(
-                "(SELECT coalesce(ms.subject, cs.fn, es.summary, ts.summary, js.summary, fs.name, '') \
+            Sort::Title => format!(
+                "(SELECT coalesce(s.title, '') \
                  {TITLES} WHERE i.seq = h.seq AND ifnull(c.account, '') = h.akey AND i.deleted = 0 \
                  AND i.retained_at IS NULL ORDER BY i.collection LIMIT 1)"
             ),
-            Sort::Date => String::from("''"),
+            Sort::NewestFirst => String::from("''"),
         };
 
         format!(
@@ -310,21 +324,26 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
                 }
                 linked.join(" UNION ")
             }
-            PimdirQueryPredicate::Flag(flag) => self.embed("FLAGGED", vec![(":flag", flag.into())]),
+            PimdirQueryPredicate::Flag(flag) => match codec::mark_of(flag) {
+                Some(bit) => {
+                    format!("SELECT i.collection, i.seq {live} AND i.marks & {bit} = {bit}")
+                }
+                None => self.embed("FLAGGED", vec![(":flag", flag.into())]),
+            },
             PimdirQueryPredicate::Encrypted => {
-                "SELECT p.collection, p.seq FROM placement p JOIN object o ON o.hash = p.hash \
+                "SELECT p.collection, p.seq FROM placement p JOIN object o ON o.id = p.object \
                  WHERE o.status = 'encrypted'"
                     .into()
             }
             PimdirQueryPredicate::HasBody => {
-                format!("SELECT i.collection, i.seq {live} AND i.object_hash IS NOT NULL")
+                format!("SELECT i.collection, i.seq {live} AND i.object IS NOT NULL")
             }
             PimdirQueryPredicate::HasAttachment => {
                 // NOTE: a calendar item by the mark its body's extraction
                 // recorded (SEARCH §6), the FTS rows keeping no text.
                 let attached = self.embed("ATTACHED", Vec::new());
                 format!(
-                    "SELECT i.collection, i.seq {live} AND (EXISTS (SELECT 1 FROM store.mail_summary m \
+                    "SELECT i.collection, i.seq {live} AND (EXISTS (SELECT 1 FROM store.summary m \
                      WHERE m.item = i.id AND m.attachment = 1) \
                      OR (c.kind = 'text/calendar' AND (i.collection, i.seq) IN ({attached})))"
                 )
@@ -341,14 +360,14 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
             }
             PimdirQueryPredicate::Kind(kind) => match kind {
                 PimdirQueryKind::Event | PimdirQueryKind::Task | PimdirQueryKind::Journal => {
-                    let table = match kind {
-                        PimdirQueryKind::Event => "event_summary",
-                        PimdirQueryKind::Task => "task_summary",
-                        _ => "journal_summary",
+                    let component = match kind {
+                        PimdirQueryKind::Event => "event",
+                        PimdirQueryKind::Task => "task",
+                        _ => "journal",
                     };
                     format!(
-                        "SELECT i.collection, i.seq {live} AND EXISTS (SELECT 1 FROM store.{table} s \
-                         WHERE s.item = i.id)"
+                        "SELECT i.collection, i.seq {live} AND EXISTS (SELECT 1 FROM store.summary s \
+                         WHERE s.item = i.id AND s.component = '{component}')"
                     )
                 }
                 kind => {
@@ -359,8 +378,8 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
             PimdirQueryPredicate::Status(status) => {
                 let status = self.bind(status.into());
                 format!(
-                    "SELECT i.collection, i.seq {live} AND EXISTS (SELECT 1 FROM store.task_summary s \
-                     WHERE s.item = i.id \
+                    "SELECT i.collection, i.seq {live} AND EXISTS (SELECT 1 FROM store.summary s \
+                     WHERE s.item = i.id AND s.component = 'task' \
                      AND s.status = {status})"
                 )
             }
@@ -372,13 +391,13 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
                     PimdirQueryPriority::None => "ifnull(s.priority, 0) = 0",
                 };
                 format!(
-                    "SELECT i.collection, i.seq {live} AND EXISTS (SELECT 1 FROM store.task_summary s \
-                     WHERE s.item = i.id AND {band})"
+                    "SELECT i.collection, i.seq {live} AND EXISTS (SELECT 1 FROM store.summary s \
+                     WHERE s.item = i.id AND s.component = 'task' AND {band})"
                 )
             }
             PimdirQueryPredicate::Category(category) => {
                 // NOTE: both sides folded as STORAGE Annex A.2 folds `fn`,
-                // in Rust: a task by the task_category values the caller
+                // in Rust: a task by the category values the caller
                 // found folding to the term's, a card by the values its
                 // body's extraction recorded (SEARCH §6), folded already.
                 let folded = fold::value(category);
@@ -400,10 +419,30 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
                     }
                 };
                 format!(
-                    "SELECT i.collection, i.seq {live} AND (EXISTS (SELECT 1 FROM store.task_category s \
-                     WHERE s.item = i.id \
+                    "SELECT i.collection, i.seq {live} AND (EXISTS (SELECT 1 FROM store.summary_value s \
+                     WHERE s.item = i.id AND s.role = 'category' \
                      AND {stated}) OR (i.collection, i.seq) IN ({carded}))"
                 )
+            }
+            PimdirQueryPredicate::Mid(id) => {
+                let id = self.bind(id.into());
+                format!(
+                    "SELECT i.collection, i.seq {live} AND EXISTS (SELECT 1 FROM store.summary s \
+                     WHERE s.item = i.id AND s.component = 'mail' AND s.uid = {id})"
+                )
+            }
+            PimdirQueryPredicate::Label(label) => {
+                let folded = property::fold(label);
+                let spellings = self
+                    .labels
+                    .iter()
+                    .find(|(term, _)| *term == folded)
+                    .map(|(_, held)| held.clone())
+                    .unwrap_or_default();
+                self.property(property::LABEL, spellings)
+            }
+            PimdirQueryPredicate::Property { key, value } => {
+                self.property(key, vec![value.clone()])
             }
             PimdirQueryPredicate::Account(account) => {
                 return format!("(akey = {})", self.bind(account.into()));
@@ -441,7 +480,7 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
                 };
                 format!(
                     "SELECT i.collection, i.seq {live} AND ((c.kind = 'message/rfc822' \
-                     OR (c.kind = 'text/calendar' AND i.object_hash IS NULL)) \
+                     OR (c.kind = 'text/calendar' AND i.object IS NULL)) \
                      AND i.sort_key != '' AND ({since} IS NULL OR i.sort_key >= {since}) \
                      AND ({until} IS NULL OR i.sort_key < {until})) \
                      UNION SELECT collection, seq FROM ({occurring}) \
@@ -477,6 +516,26 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
         ))
     }
 
+    /// The live placements whose item holds one of `values` under `key`
+    /// (STORAGE §4.3), each compared byte for byte; none for no value.
+    fn property(&mut self, key: &str, values: Vec<String>) -> String {
+        let live = "FROM store.items i JOIN store.collections c ON c.id = i.collection \
+                    WHERE i.deleted = 0 AND i.retained_at IS NULL";
+        if values.is_empty() {
+            return format!("SELECT i.collection, i.seq {live} AND 0");
+        }
+        let key = self.bind(key.into());
+        let values: Vec<String> = values
+            .into_iter()
+            .map(|value| self.bind(value.into()))
+            .collect();
+        format!(
+            "SELECT i.collection, i.seq {live} AND EXISTS (SELECT 1 FROM store.item_property p \
+             WHERE p.seq = i.seq AND p.key = {key} AND p.value IN ({}))",
+            values.join(", ")
+        )
+    }
+
     /// The placements of `person:` (SEARCH §8): the contacts whose title
     /// matches, and every item naming one of their addresses in any role.
     fn person(&mut self, text: &PimdirQueryText) -> String {
@@ -491,10 +550,11 @@ FROM hits h ORDER BY {order} LIMIT {limit} OFFSET {offset}",
 
         format!(
             "{contacts} UNION \
-             SELECT i.collection, i.seq FROM store.item_address a \
+             SELECT i.collection, i.seq FROM store.summary_value a \
              JOIN store.items i ON i.id = a.item \
-             WHERE i.deleted = 0 AND i.retained_at IS NULL AND a.address IN ( \
-               SELECT e.address FROM store.item_address e \
+             WHERE i.deleted = 0 AND i.retained_at IS NULL \
+               AND a.role NOT IN ('in-reply-to', 'category') AND a.value IN ( \
+               SELECT e.value FROM store.summary_value e \
                JOIN store.items ei ON ei.id = e.item \
                WHERE e.role = 'email' AND (ei.collection, ei.seq) IN ({contacts}))"
         )
@@ -598,21 +658,10 @@ fn member(hits: &str) -> String {
 
 /// The titles a hit's placements carry, joined for the `name` order.
 const TITLES: &str = "FROM store.items i JOIN store.collections c ON c.id = i.collection
-   LEFT JOIN store.mail_summary ms ON ms.item = i.id
-   LEFT JOIN store.contact_summary cs ON cs.item = i.id
-   LEFT JOIN store.event_summary es ON es.item = i.id
-   LEFT JOIN store.task_summary ts ON ts.item = i.id
-   LEFT JOIN store.journal_summary js ON js.item = i.id
-   LEFT JOIN store.file_summary fs ON fs.item = i.id";
+   LEFT JOIN store.summary s ON s.item = i.id";
 
 /// Seconds in a day.
 const DAY: i64 = 86_400;
-
-/// The first instant of year 0, the earliest an RFC 3339 instant spells.
-const YEAR_ZERO: i64 = -62_167_219_200;
-
-/// The last instant a four-digit year states: `9999-12-31T23:59:59Z`.
-const YEAR_LAST: i64 = 253_402_300_799;
 
 /// The collection media type of a kind.
 pub fn media_type(kind: PimdirQueryKind) -> &'static str {
@@ -627,112 +676,15 @@ pub fn media_type(kind: PimdirQueryKind) -> &'static str {
 }
 
 /// The instants a range spans (SEARCH §8.1), `[since, until)` as RFC 3339
-/// in UTC, either side `None` open, as io-pimdir's canonical compile reads
-/// them: a calendar point its day, month or year in `zone`, `today` and
-/// `yesterday` theirs around `now` (Unix seconds), a relative amount the
-/// instant that long before `now`, its span alone running to `now`. A bound
-/// no instant of a four-digit year states is open: a start before
-/// `0000-01-01T00:00:00Z` and an end past `9999-12-31T23:59:59Z`. An end
-/// before year 0 is its first instant, the range then holding nothing.
+/// in UTC, either side `None` open, read by io-pimdir's
+/// [`PimdirQueryDateRange::bounds`] against `now` (Unix seconds) in `zone`.
 pub fn bounds(
     range: &PimdirQueryDateRange,
     now: i64,
     zone: &TimeZone,
 ) -> (Option<String>, Option<String>) {
-    let single = range.start.is_some() && range.start == range.end;
-    let since = range.start.as_ref().map(|point| span(point, now, zone).0);
-    let until = range.end.as_ref().map(|point| match point {
-        PimdirQueryDate::Relative { .. } if single => now,
-        point => span(point, now, zone).1,
-    });
-    let since = since.filter(|since| *since >= YEAR_ZERO);
-    let until = until.filter(|until| *until <= YEAR_LAST);
-    (
-        since.map(rfc3339),
-        until.map(|until| rfc3339(until.max(YEAR_ZERO))),
-    )
-}
-
-/// The span of one date point, `[start, end)` in Unix seconds, its days
-/// read in `zone`; a relative amount spans its instant, which may lie
-/// before year 0.
-fn span(point: &PimdirQueryDate, now: i64, zone: &TimeZone) -> (i64, i64) {
-    let day = |year: u16, month: u8, day: u8| {
-        days_from_civil(i32::from(year), u32::from(month), u32::from(day))
-    };
-    let start = |days: i64| start_of_day(days, zone);
-    let today = Timestamp::from_second(now).map_or(now.div_euclid(DAY), |instant| {
-        let date = instant.to_zoned_datetime(zone.clone()).date();
-        days_from_civil(
-            i32::from(date.year()),
-            date.month() as u32,
-            date.day() as u32,
-        )
-    });
-
-    match *point {
-        PimdirQueryDate::Year(year) => (start(day(year, 1, 1)), start(day(year + 1, 1, 1))),
-        PimdirQueryDate::Month { year, month } => {
-            let next = match month {
-                12 => day(year + 1, 1, 1),
-                month => day(year, month + 1, 1),
-            };
-            (start(day(year, month, 1)), start(next))
-        }
-        PimdirQueryDate::Day {
-            year,
-            month,
-            day: date,
-        } => {
-            let first = day(year, month, date);
-            (start(first), start(first + 1))
-        }
-        PimdirQueryDate::Today => (start(today), start(today + 1)),
-        PimdirQueryDate::Yesterday => (start(today - 1), start(today)),
-        PimdirQueryDate::Relative { amount, unit } => {
-            let amount = i64::from(amount);
-            let instant = match unit {
-                PimdirQueryDateUnit::Day => now - amount * DAY,
-                PimdirQueryDateUnit::Week => now - amount * 7 * DAY,
-                PimdirQueryDateUnit::Year => {
-                    let (year, month, date) = civil_from_days(now.div_euclid(DAY));
-                    let year = i64::from(year) - amount;
-                    match i32::try_from(year) {
-                        Ok(year) if year >= 0 => {
-                            let date = date.min(days_in_month(year, month));
-                            days_from_civil(year, month, date) * DAY + now.rem_euclid(DAY)
-                        }
-                        _ => YEAR_ZERO - 1,
-                    }
-                }
-            };
-            (instant, instant)
-        }
-    }
-}
-
-/// The first instant of a day counted from 1970-01-01 in `zone`, so a
-/// midnight a transition skips starts after the gap; its UTC midnight past
-/// the years jiff places.
-fn start_of_day(days: i64, zone: &TimeZone) -> i64 {
-    let (year, month, day) = civil_from_days(days);
-    i16::try_from(year)
-        .ok()
-        .and_then(|year| Date::new(year, month as i8, day as i8).ok())
-        .and_then(|date| date.to_zoned_datetime(zone.clone()).ok())
-        .and_then(|zoned| zoned.start_of_day().ok())
-        .map_or(days * DAY, |zoned| zoned.timestamp().as_second())
-}
-
-/// Days from the Unix epoch to a civil date, proleptic Gregorian.
-fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
-    let year = year - i32::from(month <= 2);
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = (year - era * 400) as i64;
-    let month = month as i64;
-    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day as i64 - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era as i64 * 146_097 + day_of_era - 719_468
+    let (since, until) = range.bounds(now, zone);
+    (since.map(rfc3339), until.map(rfc3339))
 }
 
 /// The civil date a day count from the Unix epoch names.
@@ -748,20 +700,6 @@ fn civil_from_days(days: i64) -> (i32, u32, u32) {
     let day = (day_of_year - (153 * month_prime + 2) / 5 + 1) as u32;
     let month = (month_prime + if month_prime < 10 { 3 } else { -9 }) as u32;
     (year as i32 + i32::from(month <= 2), month, day)
-}
-
-/// The number of days in a month.
-fn days_in_month(year: i32, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if year.rem_euclid(4) == 0
-            && (year.rem_euclid(100) != 0 || year.rem_euclid(400) == 0) =>
-        {
-            29
-        }
-        _ => 28,
-    }
 }
 
 /// A Unix timestamp as the RFC 3339 instant in UTC, seconds precision.

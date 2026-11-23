@@ -8,5 +8,5 @@ SELECT EXISTS (
   WHERE i.collection = :collection
     AND (b.conflicted = 1
          OR ((i.deleted = 1 OR i.retained_at IS NOT NULL) AND b.handle IS NOT NULL)
-         OR (i.deleted = 0 AND i.retained_at IS NULL AND i.object_hash IS NOT NULL
-             AND (b.base_object IS NULL OR b.base_object <> i.object_hash))));
+         OR (i.deleted = 0 AND i.retained_at IS NULL AND i.object IS NOT NULL
+             AND (b.base_object IS NULL OR b.base_object <> i.object))));

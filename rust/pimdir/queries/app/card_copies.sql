@@ -8,7 +8,7 @@ JOIN collections c ON c.id = n.collection
 WHERE t.collection = :collection AND t.deleted = 0
   AND b.source = :source AND b.base_present = 1
   AND n.collection <> t.collection AND n.deleted = 0 AND n.retained_at IS NULL
-  AND n.object_hash = b.base_object
+  AND n.object = b.base_object
   AND NOT EXISTS (SELECT 1 FROM bindings h
                   WHERE h.item = n.id AND h.source = :source AND h.base_present = 1)
   AND c.account = (SELECT account FROM collections WHERE id = :collection)

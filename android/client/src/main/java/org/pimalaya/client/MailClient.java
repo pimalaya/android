@@ -237,18 +237,24 @@ public class MailClient {
         return reply.isNull("messageId") ? null : reply.optString("messageId", null);
     }
 
-    /** Moves one message into {@code target} on the server. */
-    public void relocate(MailSession session, MessageRef message, String target) {
-        Replies.object(
-                on(
-                        session,
-                        open ->
-                                Native.relocateMessage(
-                                        open.transport(),
-                                        open.handle(),
-                                        message.mailbox(),
-                                        message.id(),
-                                        target)));
+    /**
+     * Moves one message into {@code target} on the server, answering the
+     * handle the server states it took there (pimdir SYNC §4: an IMAP {@code
+     * COPYUID}, Graph's new id), null where it states none.
+     */
+    public String relocate(MailSession session, MessageRef message, String target) {
+        JSONObject reply =
+                Replies.object(
+                        on(
+                                session,
+                                open ->
+                                        Native.relocateMessage(
+                                                open.transport(),
+                                                open.handle(),
+                                                message.mailbox(),
+                                                message.id(),
+                                                target)));
+        return reply.isNull("assigned") ? null : reply.optString("assigned", null);
     }
 
     /**

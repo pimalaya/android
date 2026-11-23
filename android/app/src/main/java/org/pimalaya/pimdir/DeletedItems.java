@@ -197,41 +197,21 @@ public final class DeletedItems {
         values.put("collection", collection);
         values.put("links", links);
 
-        String[] statements;
-        switch (kind) {
-            case PimdirSummary.MAIL:
-                statements = new String[] {"LOAD_MAIL_SUMMARIES_BY_LINK"};
-                break;
-            case PimdirSummary.CONTACT:
-                statements = new String[] {"LOAD_CONTACT_SUMMARIES_BY_LINK"};
-                break;
-            default:
-                statements =
-                        new String[] {
-                            "LOAD_EVENT_SUMMARIES_BY_LINK",
-                            "LOAD_TASK_SUMMARIES_BY_LINK",
-                            "LOAD_JOURNAL_SUMMARIES_BY_LINK"
-                        };
-        }
-        for (String statement : statements) {
-            try (Cursor cursor = query(db, statement, values)) {
-                while (cursor.moveToNext()) {
-                    Row row = byLink.get(text(cursor, "link_id"));
-                    if (row == null) {
-                        continue;
-                    }
-                    if (PimdirSummary.MAIL.equals(kind)) {
-                        row.title = text(cursor, "subject");
-                        String name = text(cursor, "sender_name");
-                        row.who = name.isEmpty() ? text(cursor, "sender") : name;
-                        row.when = text(cursor, "date");
-                    } else if (PimdirSummary.CONTACT.equals(kind)) {
-                        row.title = text(cursor, "fn");
-                        row.who = text(cursor, "org");
-                    } else {
-                        row.title = text(cursor, "summary");
-                        row.when = text(cursor, "dtstart");
-                    }
+        try (Cursor cursor = query(db, "LOAD_SUMMARIES_BY_LINK", values)) {
+            while (cursor.moveToNext()) {
+                Row row = byLink.get(text(cursor, "link_id"));
+                if (row == null) {
+                    continue;
+                }
+                row.title = text(cursor, "title");
+                if (PimdirSummary.MAIL.equals(kind)) {
+                    String name = text(cursor, "sender_name");
+                    row.who = name.isEmpty() ? text(cursor, "sender") : name;
+                    row.when = text(cursor, "date");
+                } else if (PimdirSummary.CONTACT.equals(kind)) {
+                    row.who = text(cursor, "org");
+                } else {
+                    row.when = text(cursor, "dtstart");
                 }
             }
         }

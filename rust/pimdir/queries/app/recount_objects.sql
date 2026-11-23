@@ -4,17 +4,17 @@
 -- counts. The O(changes) settling of §14 for a write that knows which
 -- bodies it touched: a count no write of it moved stays as it is.
 UPDATE objects SET refcount =
-    (SELECT count(*) FROM items WHERE object_hash = objects.hash)
-  + (SELECT count(*) FROM items WHERE conflict_object = objects.hash)
-  + (SELECT count(*) FROM bindings WHERE base_object = objects.hash)
-  + (SELECT count(*) FROM bindings WHERE conflict_object = objects.hash)
-  + (SELECT count(*) FROM bindings WHERE shared_object = objects.hash)
-  + (SELECT count(*) FROM queue WHERE object_hash = objects.hash)
+    (SELECT count(*) FROM items WHERE object = objects.id)
+  + (SELECT count(*) FROM items WHERE conflict_object = objects.id)
+  + (SELECT count(*) FROM bindings WHERE base_object = objects.id)
+  + (SELECT count(*) FROM bindings WHERE conflict_object = objects.id)
+  + (SELECT count(*) FROM bindings WHERE shared_object = objects.id)
+  + (SELECT count(*) FROM queue WHERE object = objects.id)
 WHERE hash IN (SELECT value FROM temp.param WHERE slot = 'hashes')
   AND refcount !=
-    (SELECT count(*) FROM items WHERE object_hash = objects.hash)
-  + (SELECT count(*) FROM items WHERE conflict_object = objects.hash)
-  + (SELECT count(*) FROM bindings WHERE base_object = objects.hash)
-  + (SELECT count(*) FROM bindings WHERE conflict_object = objects.hash)
-  + (SELECT count(*) FROM bindings WHERE shared_object = objects.hash)
-  + (SELECT count(*) FROM queue WHERE object_hash = objects.hash);
+    (SELECT count(*) FROM items WHERE object = objects.id)
+  + (SELECT count(*) FROM items WHERE conflict_object = objects.id)
+  + (SELECT count(*) FROM bindings WHERE base_object = objects.id)
+  + (SELECT count(*) FROM bindings WHERE conflict_object = objects.id)
+  + (SELECT count(*) FROM bindings WHERE shared_object = objects.id)
+  + (SELECT count(*) FROM queue WHERE object = objects.id);

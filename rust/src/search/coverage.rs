@@ -184,7 +184,7 @@ pub fn mail(
         Ok(parsed) => parsed,
         Err(err) => return Ok(Answer::Refused(err.into())),
     };
-    let hits = match find::hits(sql, query, compile::Sort::Date, None, now)? {
+    let hits = match find::hits(sql, query, compile::Sort::NewestFirst, None, now)? {
         Answer::Found(hits) => hits,
         Answer::Refused(refused) => return Ok(Answer::Refused(refused)),
     };

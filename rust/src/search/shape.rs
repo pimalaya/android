@@ -31,7 +31,7 @@ pub const VERSION: i64 = 1;
 
 /// The revision of what SEARCH §6 leaves to an indexer that is this
 /// shape's own (SEARCH §2): its FTS4 tables and what it writes in them.
-const EXTRACTOR: &str = "pimalaya-android 1";
+const EXTRACTOR: &str = "pimalaya-android 2";
 
 /// The indexer's revision recorded in `index_meta.extractor` (SEARCH §2):
 /// the shape's own, then io-pimdir's, whose extraction it runs. An index
@@ -44,13 +44,72 @@ pub fn extractor() -> String {
 #[cfg(test)]
 pub const APP: &str = "index";
 
-/// Every statement the shape serves, by name: the canonical search text,
-/// each fork in place of its canonical statement, io-pimdir's own, then
-/// the app's own.
+/// The canonical search statements the bridge binds by name, the only ones
+/// of io-pimdir's the shape serves: the rest read FTS5's posting lists and
+/// split documents, the JSON of a thread's span or the store's coverage
+/// rolled by `FILTER`, which this shape keeps none of or 3.18 cannot run.
+pub const BOUND: &[&str] = &[
+    "ATTACHED",
+    "BEHIND",
+    "CATEGORISED",
+    "COUNT_UNINDEXED",
+    "COVERAGE",
+    "CUT_BEFORE",
+    "DELETE_MISSING",
+    "DELETE_OBJECT_ROW",
+    "DELETE_PLACEMENT",
+    "FLAGGED",
+    "HIT",
+    "HOLDING",
+    "INIT_INDEX_META",
+    "INSERT_FLAG",
+    "INSERT_MISSING",
+    "INSERT_OBJECT",
+    "INSERT_OCCURRENCE",
+    "ITEMS_TO_REEXPAND",
+    "LINKED",
+    "LOAD_CHANGED_ITEMS",
+    "LOAD_ENDS",
+    "LOAD_INDEX_META",
+    "LOAD_MESSAGE",
+    "LOAD_MISSING_ITEMS",
+    "LOAD_PLACEMENT",
+    "MATCH_OBJECTS",
+    "MATCH_SUMMARIES",
+    "MESSAGE_CHILDREN",
+    "MESSAGE_HASH",
+    "MESSAGE_IN_REPLY_TO",
+    "MESSAGE_PRESENCE",
+    "OBJECT_INDEXED",
+    "OBJECTS_GONE",
+    "OCCURRENCES_BETWEEN",
+    "OCCURRING_BETWEEN",
+    "PLACEMENTS_GONE",
+    "PRUNE_MESSAGES",
+    "REPLACE_FLAGS",
+    "REPLACE_OCCURRENCES",
+    "SET_CUT",
+    "SET_FLOATING_ZONE",
+    "SET_HORIZON",
+    "SET_INDEX_CURSOR",
+    "SET_TZDB_VERSION",
+    "TASK_CATEGORY_VALUES",
+    "THREAD_OF",
+    "THREAD_ROWS",
+    "UNPARENT_MESSAGES",
+    "UPSERT_MESSAGE",
+    "UPSERT_PLACEMENT",
+];
+
+/// Every statement the shape serves, by name: the canonical search text
+/// the bridge binds ([`BOUND`]), each fork in place of its canonical
+/// statement, then the app's own.
 pub fn statements() -> &'static BTreeMap<&'static str, &'static str> {
     static STATEMENTS: OnceLock<BTreeMap<&'static str, &'static str>> = OnceLock::new();
     STATEMENTS.get_or_init(|| {
-        let mut statements: BTreeMap<_, _> = search::all().collect();
+        let mut statements: BTreeMap<_, _> = search::all()
+            .filter(|(name, _)| BOUND.contains(name))
+            .collect();
         statements.insert("CREATE_TERM_MATCH", search::CREATE_TERM_MATCH);
         statements.insert("CLEAR_TERM_MATCH", search::CLEAR_TERM_MATCH);
         for (name, _, text) in INDEX {

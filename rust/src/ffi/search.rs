@@ -162,11 +162,12 @@ struct HitsJson {
     hits: Vec<Hit>,
 }
 
-/// The order a query names, `date` unless `name`.
+/// The order a query names (SEARCH §8.2): `title`, or `name` as the app
+/// named it before, else `newest-first`.
 fn sort(name: &str) -> Sort {
     match name {
-        "name" => Sort::Name,
-        _ => Sort::Date,
+        "title" | "name" => Sort::Title,
+        _ => Sort::NewestFirst,
     }
 }
 

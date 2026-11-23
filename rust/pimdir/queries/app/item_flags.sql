@@ -5,7 +5,6 @@ SELECT CASE WHEN i.flags_known = 1
                    || CASE WHEN i.marks & 4 THEN '\Flagged ' ELSE '' END
                    || CASE WHEN i.marks & 8 THEN '\Draft ' ELSE '' END
                    || CASE WHEN i.marks & 16 THEN '\Deleted ' ELSE '' END
-                   || coalesce((SELECT group_concat(f.flag, ' ') FROM placement_flag f
-                                WHERE f.item = i.id), '')) END AS flags
+                   || i.keywords) END AS flags
 FROM items i
 WHERE i.collection = :collection AND i.link_id = :link_id;

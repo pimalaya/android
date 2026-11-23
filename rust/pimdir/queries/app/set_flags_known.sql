@@ -1,13 +1,8 @@
--- Whether a placement's flag set is known, and its system flags as the item's
--- bits (STORAGE §13), from the `flags` slot holding the whole set: written
--- before its rows, which add_flags writes from the same slot, the system
--- flags skipped. 0 forgets them, no bit kept and the schema's trigger
--- dropping the rows.
+-- Whether a placement's flag set is known, its system flags as the item's
+-- bits and every other flag as its keywords (STORAGE §13), as the bridge
+-- computed both from the whole set (`PimdirSql.flags`): 0 and '' when the
+-- set is unknown, as the schema asks.
 UPDATE items SET flags_known = :flags_known,
-  marks = CASE WHEN :flags_known = 1 THEN
-    (SELECT coalesce(sum(CASE value WHEN '\Seen' THEN 1 WHEN '\Answered' THEN 2
-                                    WHEN '\Flagged' THEN 4 WHEN '\Draft' THEN 8
-                                    WHEN '\Deleted' THEN 16 ELSE 0 END), 0)
-     FROM (SELECT DISTINCT value FROM temp.param WHERE slot = 'flags'))
-  ELSE 0 END
+  marks = CASE WHEN :flags_known = 1 THEN :marks ELSE 0 END,
+  keywords = CASE WHEN :flags_known = 1 THEN :keywords ELSE '' END
 WHERE collection = :collection AND link_id = :link_id;

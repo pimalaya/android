@@ -86,6 +86,9 @@ struct HeldBindingJson {
     conflict_object: Option<String>,
     #[serde(default)]
     shared_object: Option<String>,
+    /// The id the source's server gives the member's content (SYNC §4).
+    #[serde(default)]
+    server_object_id: Option<String>,
 }
 
 /// What the merge settled: the item's body and conflict, and the
@@ -223,6 +226,7 @@ fn binding(held: HeldBindingJson) -> PimdirBinding {
         conflict_revision: held.conflict_revision,
         conflict_object: held.conflict_object.map(PimdirHash),
         shared_object: held.shared_object.map(PimdirHash),
+        server_object_id: held.server_object_id,
     }
 }
 

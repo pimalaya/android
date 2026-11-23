@@ -166,8 +166,15 @@ fn served_index_sql_holds_to_the_sqlite_floor() {
             continue;
         };
         let ends = Vec::new();
-        let mut compiled = Compiled::new(&parsed, ends, Vec::new(), 0, jiff::tz::TimeZone::UTC);
-        for sort in [Sort::Date, Sort::Name] {
+        let mut compiled = Compiled::new(
+            &parsed,
+            ends,
+            Vec::new(),
+            Vec::new(),
+            0,
+            jiff::tz::TimeZone::UTC,
+        );
+        for sort in [Sort::NewestFirst, Sort::Title] {
             let select = compiled.select(sort, Some((10, 0)));
             texts.extend(checked("statement", case["query"].to_string(), &select));
         }
@@ -204,6 +211,40 @@ fn served_index_sql_holds_to_the_sqlite_floor() {
         failures.len(),
         failures.join("\n"),
     );
+}
+
+/// Every canonical search statement the bridge or its vector runners bind
+/// by name is one the shape serves, and the shape serves no canonical one
+/// they do not bind.
+#[test]
+fn every_name_the_bridge_binds_is_served() {
+    let sources = [
+        include_str!("compile.rs"),
+        include_str!("coverage.rs"),
+        include_str!("find.rs"),
+        include_str!("held.rs"),
+        include_str!("lists.rs"),
+        include_str!("refresh.rs"),
+        include_str!("../ffi/search.rs"),
+        include_str!("tests.rs"),
+    ];
+    let canonical: BTreeMap<&str, &str> = io_pimdir::sql::search::all().collect();
+    let served = shape::statements();
+    let mut bound = BTreeSet::new();
+    for name in canonical.keys() {
+        let literal = format!("\"{name}\"");
+        if sources.iter().any(|source| source.contains(&literal)) {
+            assert!(served.contains_key(name), "{name} is bound and not served");
+            bound.insert(*name);
+        }
+    }
+    for name in shape::BOUND {
+        assert!(
+            canonical.contains_key(name),
+            "{name} is no canonical statement"
+        );
+        assert!(bound.contains(name), "{name} is served and never bound");
+    }
 }
 
 #[test]
@@ -282,6 +323,7 @@ pub(crate) fn placement(
         conflict_object: None,
         base: None,
         origin: None,
+        server_object_id: None,
     }
 }
 
@@ -328,11 +370,12 @@ fn mail_summary(row: &Json, addresses: &[Json]) -> PimdirSummary {
 }
 
 /// Builds the vectors' fixture store at `dir` through io-pimdir's owner,
-/// as io-pimdir's own suite does (tests/search.rs), then takes out of the
-/// blob directory the body of each item stating `unreadable` (SEARCH §11).
+/// as io-pimdir's own suite does (tests/search.rs), each property it states
+/// added by the owner (STORAGE §4.3), then takes out of the blob directory
+/// the body of each item stating `unreadable` (SEARCH §11).
 fn build(spec: &Path, dir: &Path) {
     let store = json(&spec.join("vectors/search/store.json"));
-    assert_eq!(store["v"], 2, "store.json at another version");
+    assert_eq!(store["v"], 3, "store.json at another version");
     let mut unreadable = Vec::new();
     let mut kinds = BTreeMap::new();
     let mut stand_ins = BTreeSet::new();
@@ -464,6 +507,14 @@ fn build(spec: &Path, dir: &Path) {
             .unwrap()
             .expect("the reference links");
     }
+
+    for property in store["properties"].as_array().into_iter().flatten() {
+        let seq = property["seq"].as_i64().unwrap();
+        let key = property["key"].as_str().unwrap();
+        let value = property["value"].as_str().unwrap();
+        let added = owner.add_property(seq, key, value).unwrap();
+        assert!(added, "{key}={value:?} lands on seq {seq}");
+    }
     drop(owner);
 
     let blobs = PimdirReader::open(dir).unwrap().blobs();
@@ -500,6 +551,9 @@ fn unbound(case: &Json) -> Option<&'static str> {
     if case["sort"] == "relevance" {
         return Some("relevance: the shape ranks nothing and refuses the order (SEARCH §8.2)");
     }
+    if case["sort"] == "oldest-first" || case["sort"] == "sender" {
+        return Some("an order the app does not offer (proposal D4)");
+    }
     if case.get("threads").is_some() {
         return Some("a threaded listing, which the app does not offer");
     }
@@ -514,8 +568,8 @@ fn unbound(case: &Json) -> Option<&'static str> {
 fn answers(floor: &mut Floor, now: i64, case: &Json) -> Option<String> {
     let query = case["query"].as_str().unwrap();
     let sort = match case["sort"].as_str() {
-        Some("name") => Sort::Name,
-        _ => Sort::Date,
+        Some("title") => Sort::Title,
+        _ => Sort::NewestFirst,
     };
     let found = match find::hits(floor, query, sort, None, now) {
         Err(err) => return Some(format!("{query:?}: {err}")),
@@ -633,7 +687,7 @@ fn the_search_vectors_answer_on_the_floor() {
     let _held = PimdirStore::open(dir.path()).unwrap();
     build(&spec, dir.path());
     let vectors = json(&spec.join("vectors/search/queries.json"));
-    assert_eq!(vectors["v"], 4, "queries.json at another version");
+    assert_eq!(vectors["v"], 5, "queries.json at another version");
     let now = unix(vectors["now"].as_str().unwrap());
 
     let mut floor = index(dir.path());
@@ -755,7 +809,7 @@ fn file_message(dir: &Path, body: Vec<u8>) {
 
 /// The seqs a query hits.
 fn seqs(floor: &mut Floor, query: &str) -> Vec<i64> {
-    match find::hits(floor, query, Sort::Date, None, 0).unwrap() {
+    match find::hits(floor, query, Sort::NewestFirst, None, 0).unwrap() {
         Answer::Found(hits) => hits.into_iter().map(|hit| hit.seq).collect(),
         Answer::Refused(refused) => panic!("{query:?} refused: {}", refused.message),
     }
@@ -825,7 +879,7 @@ fn an_index_of_another_shape_is_refused_and_an_older_one_rebuilt() {
         Held::Refused { .. }
     ));
     floor.exec(&format!(
-        "UPDATE index_meta SET shape = '{SHAPE}', format_version = 'search-draft-16'"
+        "UPDATE index_meta SET shape = '{SHAPE}', format_version = 'search-draft-18'"
     ));
     assert!(matches!(
         held::held(&mut floor).unwrap(),
@@ -866,7 +920,17 @@ fn an_index_of_another_shape_is_refused_and_an_older_one_rebuilt() {
         held::held(&mut floor).unwrap(),
         Held::Rebuild { .. }
     ));
-    floor.exec("UPDATE index_meta SET format_version = 'search-draft-15', store_id = 'other'");
+    floor.exec("UPDATE index_meta SET format_version = 'search-draft-15'");
+    assert!(matches!(
+        held::held(&mut floor).unwrap(),
+        Held::Rebuild { .. }
+    ));
+    floor.exec("UPDATE index_meta SET format_version = 'search-draft-16'");
+    assert!(matches!(
+        held::held(&mut floor).unwrap(),
+        Held::Rebuild { .. }
+    ));
+    floor.exec("UPDATE index_meta SET format_version = 'search-draft-17', store_id = 'other'");
     assert!(matches!(
         held::held(&mut floor).unwrap(),
         Held::Rebuild { .. }
@@ -943,7 +1007,7 @@ fn a_refused_query_answers_its_refusal() {
         ("\"open", "unterminated-phrase"),
         (long.as_str(), "limit-exceeded"),
     ] {
-        match find::hits(&mut floor, query, Sort::Date, None, 0).unwrap() {
+        match find::hits(&mut floor, query, Sort::NewestFirst, None, 0).unwrap() {
             Answer::Refused(refused) => assert_eq!(refused.code, code, "{query:?}"),
             Answer::Found(_) => panic!("{query:?} answered"),
         }
@@ -970,7 +1034,7 @@ fn a_hit_carries_a_snippet_of_its_body() {
         &mut floor,
         &dir.path().join("objects"),
         "roadmap",
-        Sort::Date,
+        Sort::NewestFirst,
         10,
         0,
         0,
@@ -1180,4 +1244,61 @@ fn the_agenda_reads_occurrences_with_their_rows() {
     )
     .unwrap();
     assert_eq!(week.occurrences.len(), 1);
+}
+
+/// What a query answers at `now` (Unix seconds), its hits' seqs.
+fn seqs_at(floor: &mut Floor, query: &str, now: i64) -> Vec<i64> {
+    match find::hits(floor, query, Sort::NewestFirst, None, now).unwrap() {
+        Answer::Found(hits) => hits.into_iter().map(|hit| hit.seq).collect(),
+        Answer::Refused(refused) => panic!("{query:?} refused: {}", refused.message),
+    }
+}
+
+/// The query forms io-pimdir's language gained at search-draft-17 answer
+/// on the shape (pimdir SEARCH §8): `mid:` with or without its angle
+/// brackets, an instant and the relative hours of `date:`, `label:` and
+/// `property:` over the store's item properties, and a reserved form
+/// refused as `reserved-form`, its span said.
+#[test]
+fn the_draft_17_query_forms_answer_on_the_floor() {
+    let dir = tempfile::tempdir().unwrap();
+    file_message(dir.path(), message("a@x", "Alpha", "the roadmap"));
+    file_message(dir.path(), message("b@x", "Beta", "the budget"));
+    let mut floor = index(dir.path());
+    refreshed(&mut floor, dir.path(), 0, 10);
+    let alpha = seqs(&mut floor, "subject:alpha");
+    assert_eq!(alpha.len(), 1);
+
+    assert_eq!(seqs(&mut floor, "mid:a@x"), alpha);
+    assert_eq!(seqs(&mut floor, "mid:<a@x>"), alpha);
+    assert!(seqs(&mut floor, "mid:c@x").is_empty());
+
+    assert_eq!(seqs(&mut floor, "date:2026-08-01T12:00").len(), 2);
+    assert!(seqs(&mut floor, "date:2026-08-01T13:00").is_empty());
+    let one = unix("2026-08-01T13:00:00Z");
+    assert_eq!(seqs_at(&mut floor, "date:2h", one).len(), 2);
+    assert!(seqs_at(&mut floor, "date:2h", one + 3 * 3_600).is_empty());
+
+    let mut store = PimdirStore::open(dir.path()).unwrap().for_source("local");
+    assert!(
+        store
+            .add_property(alpha[0], "pimdir/label", "Receipts")
+            .unwrap()
+    );
+    assert!(store.add_property(alpha[0], "app/tag", "Q3").unwrap());
+    drop(store);
+    assert_eq!(seqs(&mut floor, "label:receipts"), alpha);
+    assert_eq!(seqs(&mut floor, "label:RECEIPTS"), alpha);
+    assert!(seqs(&mut floor, "label:invoices").is_empty());
+    assert_eq!(seqs(&mut floor, "property:app/tag=Q3"), alpha);
+    assert!(seqs(&mut floor, "property:app/tag=q3").is_empty());
+
+    match find::hits(&mut floor, "~foo", Sort::NewestFirst, None, 0).unwrap() {
+        Answer::Refused(refused) => {
+            assert_eq!(refused.code, "reserved-form");
+            assert!(!refused.message.is_empty());
+            assert_eq!((refused.start, refused.end), (0, 4));
+        }
+        Answer::Found(_) => panic!("~foo answered"),
+    }
 }

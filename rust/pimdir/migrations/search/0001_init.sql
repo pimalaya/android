@@ -1,4 +1,4 @@
--- Fork of MIGRATION_0001 (sha256 d102db0944466149) for SQLite 3.18: the
+-- Fork of MIGRATION_0001 (sha256 6c1e3ad9a5e7ef75) for SQLite 3.18: the
 -- search index schema, version 1, in the app's own shape, `pimalaya-android`
 -- (SEARCH §2). Section references are to SEARCH.md.
 --
@@ -8,7 +8,9 @@
 -- ordinary FTS4 tables: they store a copy of the text they index and delete
 -- by docid, FTS4 having no delete on a contentless table. The text arrives
 -- folded (§5), so the tokenizer folds no diacritic of its own
--- (`remove_diacritics=0`), and `unicode61` splits words as FTS5's does.
+-- (`remove_diacritics=0`), and `unicode61` splits words as FTS5's does. No
+-- `split` table: its counts drive FTS5's joint matches, which the shape's
+-- per-term FTS4 matches never ask.
 --
 -- Applied to index.db, beside pimdir.db, in one transaction, the index's own
 -- `PRAGMA user_version` set to 1 on success. Derived state: an older version
@@ -41,10 +43,10 @@ CREATE TABLE index_meta (
     extractor     TEXT    NOT NULL CHECK (typeof(extractor) = 'text')
 );
 
--- One row per indexed body, keyed on the store's object hash. `id` is the
--- docid of its object_text row.
+-- One row per indexed body, keyed on the store's object hash, its id never
+-- reused. `id` is the docid of its object_text row.
 CREATE TABLE object (
-    id     INTEGER PRIMARY KEY,
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
     hash   TEXT    NOT NULL UNIQUE CHECK (length(hash) = 52 AND hash NOT GLOB '*[^a-z2-7]*'),
     status TEXT    NOT NULL CHECK (typeof(status) = 'text'),
     attachment INTEGER NOT NULL CHECK (attachment IN (0, 1)),
@@ -56,7 +58,7 @@ CREATE TABLE object (
 
 -- The bodies the extraction did not read whole (§6), encrypted or
 -- unparseable, so a query's coverage counts them by a seek (§8.2).
-CREATE INDEX object_not_ok ON object(status, hash) WHERE status <> 'ok';
+CREATE INDEX object_not_ok ON object(status) WHERE status <> 'ok';
 
 CREATE TABLE object_category (
     object INTEGER NOT NULL REFERENCES object(id) ON DELETE CASCADE,
@@ -75,29 +77,25 @@ CREATE VIRTUAL TABLE object_text USING fts4(
     tokenize=unicode61 "remove_diacritics=0", prefix="2,3"
 );
 
-CREATE TABLE chunk (
-    object INTEGER NOT NULL REFERENCES object(id) ON DELETE CASCADE,
-    ord    INTEGER NOT NULL CHECK (typeof(ord) = 'integer'),
-    field  TEXT    NOT NULL CHECK (typeof(field) = 'text'),
-    start  INTEGER NOT NULL CHECK (typeof(start) = 'integer'),
-    end    INTEGER NOT NULL CHECK (typeof(end) = 'integer'),
-    PRIMARY KEY (object, ord)
-);
-
--- `id` is the docid of its summary_text row.
+-- `id` is the docid of its summary_text row. `object` is the body indexed
+-- for it, its object.id, NULL while bodiless or never read (§4); no foreign
+-- key, a pass deleting a collected body possibly coming before the one
+-- moving a placement off it, and a hash the index does not hold resolving
+-- to 0, which the CHECK refuses.
 CREATE TABLE placement (
     id         INTEGER PRIMARY KEY,
     collection TEXT    NOT NULL CHECK (typeof(collection) = 'text'),
     seq        INTEGER NOT NULL CHECK (typeof(seq) = 'integer'),
     link_id    TEXT    NOT NULL CHECK (typeof(link_id) = 'text'),
-    hash       TEXT    CHECK (length(hash) = 52 AND hash NOT GLOB '*[^a-z2-7]*'),
+    object     INTEGER CHECK (typeof(object) IN ('integer', 'null')) CHECK (object > 0),
     cut        TEXT    CHECK (typeof(cut) IN ('text', 'null')),
     UNIQUE (collection, seq)
 );
 
-CREATE INDEX placement_by_hash ON placement(hash);
+CREATE INDEX placement_by_object ON placement(object) WHERE object IS NOT NULL;
 CREATE INDEX placement_by_link ON placement(link_id);
 CREATE INDEX placement_cut ON placement(collection, cut) WHERE cut IS NOT NULL;
+CREATE INDEX placement_by_seq ON placement(seq);
 
 CREATE TABLE missing (
     collection TEXT    NOT NULL CHECK (typeof(collection) = 'text'),
@@ -113,8 +111,11 @@ CREATE VIRTUAL TABLE summary_text USING fts4(
     tokenize=unicode61 "remove_diacritics=0", prefix="2,3"
 );
 
+-- A placement's keywords alone: the five system flags are the store's
+-- `items.marks`, which `is:` reads (§8).
 CREATE TABLE flag (
-    flag       TEXT    NOT NULL CHECK (typeof(flag) = 'text'),
+    flag       TEXT    NOT NULL CHECK (typeof(flag) = 'text')
+               CHECK (flag NOT IN ('\Seen', '\Answered', '\Flagged', '\Draft', '\Deleted')),
     collection TEXT    NOT NULL CHECK (typeof(collection) = 'text'),
     seq        INTEGER NOT NULL CHECK (typeof(seq) = 'integer'),
     PRIMARY KEY (flag, collection, seq),
@@ -134,16 +135,11 @@ CREATE TABLE occurrence (
 CREATE INDEX occurrence_by_start ON occurrence(start, end);
 CREATE INDEX occurrence_by_item ON occurrence(collection, seq);
 
-CREATE TABLE thread (
-    id    TEXT    PRIMARY KEY CHECK (typeof(id) = 'text'),
-    first TEXT    NOT NULL CHECK (typeof(first) = 'text'),
-    last  TEXT    NOT NULL CHECK (typeof(last) = 'text'),
-    count INTEGER NOT NULL CHECK (typeof(count) = 'integer')
-);
-
+-- A message's thread, a message id, and the message it replies to; a
+-- thread's span is read from the store.
 CREATE TABLE message (
     link_id TEXT PRIMARY KEY CHECK (typeof(link_id) = 'text'),
-    thread  TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
+    thread  TEXT NOT NULL CHECK (typeof(thread) = 'text'),
     parent  TEXT CHECK (typeof(parent) IN ('text', 'null'))
 );
 

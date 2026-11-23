@@ -291,7 +291,7 @@ public class MailEngineTest {
                         .put("alt:Hi||a@example.org");
 
         JSONObject objects =
-                engine.offline.lookupMessages(links, accountId).getJSONObject("objects");
+                engine.offline.lookupMessages(links, accountId, null).getJSONObject("objects");
 
         List<String> answered = new ArrayList<>();
         for (Iterator<String> keys = objects.keys(); keys.hasNext(); ) {
@@ -446,7 +446,7 @@ public class MailEngineTest {
         }
         assertEquals(
                 "the first page landed before the cut", "Subject 101",
-                scalar("SELECT subject FROM mail_summary WHERE item IN (SELECT id FROM items WHERE link_id = ?)", "101"));
+                scalar("SELECT title FROM summary WHERE item IN (SELECT id FROM items WHERE link_id = ?)", "101"));
         assertEquals("2026-01-01T00:00:00Z", asked.get(0).scope().since());
         assertTrue("a first pass is filling in", store.coverage(collection).filling);
         assertNull("and covers nothing yet", store.coverage(collection).at);

@@ -30,7 +30,7 @@ use io_imap::{
     coroutine::{ImapCoroutine, ImapCoroutineState, ImapYield},
     rfc3501::{
         append::{ImapMessageAppend, ImapMessageAppendError, ImapMessageAppendOptions},
-        copy::{ImapMessageCopy, ImapMessageCopyError, ImapMessageCopyOptions},
+        copy::{ImapCopyUid, ImapMessageCopy, ImapMessageCopyError, ImapMessageCopyOptions},
         examine::{
             ExamineData, ImapMailboxExamine, ImapMailboxExamineError, ImapMailboxExamineOptions,
         },
@@ -1513,37 +1513,47 @@ impl<H: Host> ImapSession<'_, H> {
         ))
     }
 
-    /// Relocates one message into `target` (pimdir SYNC §4).
+    /// Relocates one message into `target` (pimdir SYNC §4), answering the
+    /// UID the server states it took there (`COPYUID`, RFC 4315), `None`
+    /// when it states none.
     ///
     /// MOVE (RFC 6851) where the server has it, else COPY then the disposal
     /// [`Self::destroy`] makes, the COPY skipped when `target` holds the
-    /// `Message-ID`: a relocation rerun after a lost answer filed it already.
-    pub fn relocate(&mut self, mailbox: &str, uid: &str, target: &str) -> Result<(), BridgeError> {
+    /// `Message-ID`: a relocation rerun after a lost answer filed it already,
+    /// stating no UID.
+    pub fn relocate(
+        &mut self,
+        mailbox: &str,
+        uid: &str,
+        target: &str,
+    ) -> Result<Option<String>, BridgeError> {
         self.select(mailbox)?;
 
-        match relocation(&self.state.capabilities) {
-            Relocation::Move => {
-                self.write(ImapMessageMove::new(
-                    uids(uid)?,
-                    mailbox_name(target)?,
-                    ImapMessageMoveOptions { uid: true },
-                ))?;
-            }
+        let copied = match relocation(&self.state.capabilities) {
+            Relocation::Move => self.write(ImapMessageMove::new(
+                uids(uid)?,
+                mailbox_name(target)?,
+                ImapMessageMoveOptions { uid: true },
+            ))?,
             Relocation::CopyThenDispose => {
-                if !self.copied(mailbox, uid, target)? {
-                    self.select(mailbox)?;
-                    self.write(ImapMessageCopy::new(
-                        uids(uid)?,
-                        mailbox_name(target)?,
-                        ImapMessageCopyOptions { uid: true },
-                    ))?;
-                }
+                let copied = match self.copied(mailbox, uid, target)? {
+                    true => None,
+                    false => {
+                        self.select(mailbox)?;
+                        self.write(ImapMessageCopy::new(
+                            uids(uid)?,
+                            mailbox_name(target)?,
+                            ImapMessageCopyOptions { uid: true },
+                        ))?
+                    }
+                };
                 self.select(mailbox)?;
                 self.dispose(uid)?;
+                copied
             }
-        }
+        };
 
-        Ok(())
+        Ok(copied.and_then(|code| assigned(&code, uid)))
     }
 
     /// Whether `target` holds a message with the `Message-ID` of message
@@ -1925,6 +1935,30 @@ fn mailbox_name(name: &str) -> Result<Mailbox<'static>, BridgeError> {
     name.to_string()
         .try_into()
         .map_err(|_| BridgeError::from(format!("Invalid mailbox name `{name}`")))
+}
+
+/// The UID a `COPYUID` code states `uid` took in the destination, `None`
+/// when the code names it not.
+fn assigned(code: &ImapCopyUid, uid: &str) -> Option<String> {
+    let uid: u32 = uid.parse().ok()?;
+    let mut at = 0u64;
+    for range in &code.source {
+        let (start, end) = (range.start().get(), range.end().get());
+        if (start..=end).contains(&uid) {
+            at += u64::from(uid - start);
+            let mut left = at;
+            for range in &code.destination {
+                let len = u64::from(range.end().get() - range.start().get()) + 1;
+                if left < len {
+                    return Some((u64::from(range.start().get()) + left).to_string());
+                }
+                left -= len;
+            }
+            return None;
+        }
+        at += u64::from(end - start) + 1;
+    }
+    None
 }
 
 /// How a server relocates one message.

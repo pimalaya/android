@@ -82,7 +82,11 @@ public class TaskRepliesTest {
                 PimdirSummary.mail(
                         id + "@example.org", "Re: the lease", "Ann", "ann@example.org", EMAIL,
                         DATE, 0, false);
-        summary.getJSONObject("mail").put("in_reply_to", new JSONArray().put(inReplyTo));
+        summary.getJSONArray("values")
+                .put(new JSONObject()
+                        .put("role", "in-reply-to")
+                        .put("position", 0)
+                        .put("value", inReplyTo));
         SQLiteDatabase db = new PimdirItems(pimdir).writable();
         db.beginTransaction();
         try {

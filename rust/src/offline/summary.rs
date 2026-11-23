@@ -2,13 +2,15 @@
 //!
 //! The item summary on the JSON wire, both directions.
 //!
-//! STORAGE Annex A fixes one typed row per kind plus the people the item
-//! names: io-pimdir carries it as [`PimdirSummary`], the store in the
-//! kind's summary table and `item_address`; this module translates.
+//! STORAGE Annex A fixes one row per item whatever its kind, `component`
+//! naming the kind, and the lists it carries as `summary_value` rows:
+//! io-pimdir carries it as [`PimdirSummary`], the store as one `summary` row
+//! and its values; this module translates.
 //!
 //! Keys are column names, not the app's camelCase: the object *is* the row,
-//! which Java binds by name into the canonical statement with no column
-//! list of its own. `addresses` is the exception, being rows.
+//! which Java binds by name into `upsert_summary` with no column list of
+//! its own, a column another component owns being absent and so bound
+//! NULL. `values` is the exception, being rows.
 
 use io_pimdir::summary::{
     PimdirAddress, PimdirAddressRole, PimdirSummary,
@@ -19,174 +21,27 @@ use io_pimdir::summary::{
 };
 use serde::{Deserialize, Serialize};
 
-/// One item's summary row and addresses, tagged by the kind's table.
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SummaryJson {
-    /// A `message/rfc822` item (Annex A.1).
-    Mail(MailJson),
-    /// A `text/vcard` item (Annex A.2).
-    Contact(ContactJson),
-    /// A `text/calendar` `VEVENT` resource (Annex A.3).
-    Event(EventJson),
-    /// A `text/calendar` `VTODO` resource (Annex A.4).
-    Task(TaskJson),
-    /// A `text/calendar` `VJOURNAL` resource (Annex A.5).
-    Journal(JournalJson),
-    /// An `application/octet-stream` item (Annex A.7).
-    File(FileJson),
-}
+/// The `summary_value` role of a message's In-Reply-To ids (Annex A.1).
+const IN_REPLY_TO: &str = "in-reply-to";
 
-impl From<&PimdirSummary> for SummaryJson {
-    fn from(summary: &PimdirSummary) -> Self {
-        let addresses = addresses_json(summary);
+/// The `summary_value` role of a task's categories (Annex A.4).
+const CATEGORY: &str = "category";
 
-        match summary {
-            PimdirSummary::Mail(mail) => Self::Mail(MailJson {
-                message_id: mail.message_id.clone(),
-                in_reply_to: mail.in_reply_to.clone(),
-                subject: mail.subject.clone(),
-                sender: mail.sender.clone(),
-                sender_name: mail.sender_name.clone(),
-                // NOTE: the one shape `mail_summary.date` takes (STORAGE
-                // §13); any other is no date, as io-pimdir stores it.
-                date: usable_date(mail.date.as_deref()).map(str::to_owned),
-                size: mail.size,
-                attachment: mail.attachment,
-                invitation: mail.invitation.clone(),
-                addresses,
-            }),
-            PimdirSummary::Contact(contact) => Self::Contact(ContactJson {
-                uid: contact.uid.clone(),
-                full_name: contact.full_name.clone(),
-                kind: contact.kind.clone(),
-                org: contact.org.clone(),
-                addresses,
-            }),
-            PimdirSummary::Event(event) => Self::Event(EventJson {
-                uid: event.uid.clone(),
-                summary: event.summary.clone(),
-                location: event.location.clone(),
-                time: TimeJson::of(event.dtstart.as_ref()),
-                dtend: event.dtend.clone(),
-                recurring: event.recurring,
-                until: event.until.clone(),
-                addresses,
-            }),
-            PimdirSummary::Task(task) => Self::Task(TaskJson {
-                uid: task.uid.clone(),
-                summary: task.summary.clone(),
-                time: TimeJson::of(task.dtstart.as_ref()),
-                due: DueJson::of(task.due.as_ref()),
-                status: task.status.clone(),
-                completed: task.completed.clone(),
-                percent: task.percent,
-                recurring: task.recurring,
-                until: task.until.clone(),
-                priority: task.priority,
-                categories: task.categories.clone(),
-                parent: task.parent.clone(),
-                mid: task.mid.clone(),
-                created: task.created.clone(),
-                addresses,
-            }),
-            PimdirSummary::Journal(journal) => Self::Journal(JournalJson {
-                uid: journal.uid.clone(),
-                summary: journal.summary.clone(),
-                time: TimeJson::of(journal.dtstart.as_ref()),
-                addresses,
-            }),
-            PimdirSummary::File(file) => Self::File(FileJson {
-                name: file.name.clone(),
-                media_type: file.media_type.clone(),
-                size: file.size,
-                part: file.part.clone(),
-            }),
-        }
-    }
-}
-
-impl From<SummaryJson> for PimdirSummary {
-    fn from(wire: SummaryJson) -> Self {
-        match wire {
-            SummaryJson::Mail(mail) => Self::Mail(PimdirMailSummary {
-                message_id: mail.message_id,
-                in_reply_to: mail.in_reply_to,
-                subject: mail.subject,
-                sender: mail.sender,
-                sender_name: mail.sender_name,
-                date: mail.date,
-                size: mail.size,
-                attachment: mail.attachment,
-                invitation: mail.invitation,
-                from: role_of(&mail.addresses, PimdirAddressRole::From),
-                to: role_of(&mail.addresses, PimdirAddressRole::To),
-                cc: role_of(&mail.addresses, PimdirAddressRole::Cc),
-                bcc: role_of(&mail.addresses, PimdirAddressRole::Bcc),
-            }),
-            SummaryJson::Contact(contact) => Self::Contact(PimdirContactSummary {
-                uid: contact.uid,
-                full_name: contact.full_name,
-                kind: contact.kind,
-                org: contact.org,
-                emails: role_of(&contact.addresses, PimdirAddressRole::Email),
-            }),
-            SummaryJson::Event(event) => Self::Event(PimdirEventSummary {
-                uid: event.uid,
-                summary: event.summary,
-                location: event.location,
-                dtstart: event.time.time(),
-                dtend: event.dtend,
-                recurring: event.recurring,
-                until: event.until,
-                organizer: organizer_of(&event.addresses),
-                attendees: role_of(&event.addresses, PimdirAddressRole::Attendee),
-            }),
-            SummaryJson::Task(task) => Self::Task(PimdirTaskSummary {
-                uid: task.uid,
-                summary: task.summary,
-                dtstart: task.time.time(),
-                due: task.due.time(),
-                status: task.status,
-                completed: task.completed,
-                percent: task.percent,
-                recurring: task.recurring,
-                until: task.until,
-                priority: task.priority,
-                categories: task.categories,
-                parent: task.parent,
-                mid: task.mid,
-                created: task.created,
-                organizer: organizer_of(&task.addresses),
-                attendees: role_of(&task.addresses, PimdirAddressRole::Attendee),
-                contacts: role_of(&task.addresses, PimdirAddressRole::Contact),
-            }),
-            SummaryJson::Journal(journal) => Self::Journal(PimdirJournalSummary {
-                uid: journal.uid,
-                summary: journal.summary,
-                dtstart: journal.time.time(),
-                organizer: organizer_of(&journal.addresses),
-                attendees: role_of(&journal.addresses, PimdirAddressRole::Attendee),
-            }),
-            SummaryJson::File(file) => Self::File(PimdirFileSummary {
-                name: file.name,
-                media_type: file.media_type,
-                size: file.size,
-                part: file.part,
-            }),
-        }
-    }
-}
-
-/// The `mail_summary` row (Annex A.1).
-#[derive(Deserialize, Serialize)]
-pub struct MailJson {
+/// One item's `summary` row and its `summary_value` rows.
+///
+/// A message's `date` crosses in the one shape the column takes (STORAGE
+/// §13), any other as none, as io-pimdir stores it. A row of a component
+/// Annex A does not name reads as a message's.
+#[derive(Default, Deserialize, Serialize)]
+pub struct SummaryJson {
+    /// The Annex A section the row follows: `mail`, `contact`, `event`,
+    /// `task`, `journal` or `file`.
+    component: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    message_id: Option<String>,
+    uid: Option<String>,
+    /// Always stated, the column being NOT NULL; it may be empty.
     #[serde(default)]
-    in_reply_to: Vec<String>,
-    #[serde(default)]
-    subject: String,
+    title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     sender: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -199,33 +54,10 @@ pub struct MailJson {
     attachment: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     invitation: Option<String>,
-    #[serde(default)]
-    addresses: Vec<AddressJson>,
-}
-
-/// The `contact_summary` row (Annex A.2).
-#[derive(Deserialize, Serialize)]
-pub struct ContactJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    uid: Option<String>,
-    /// The `FN`, under the column's name, which is a Rust keyword.
-    #[serde(rename = "fn", default)]
-    full_name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    kind: Option<String>,
+    card_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     org: Option<String>,
-    #[serde(default)]
-    addresses: Vec<AddressJson>,
-}
-
-/// The `event_summary` row (Annex A.3).
-#[derive(Deserialize, Serialize)]
-pub struct EventJson {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    uid: Option<String>,
-    #[serde(default)]
-    summary: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     location: Option<String>,
     #[serde(flatten)]
@@ -236,19 +68,6 @@ pub struct EventJson {
     recurring: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     until: Option<String>,
-    #[serde(default)]
-    addresses: Vec<AddressJson>,
-}
-
-/// The `task_summary` row (Annex A.4).
-#[derive(Deserialize, Serialize)]
-pub struct TaskJson {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    uid: Option<String>,
-    #[serde(default)]
-    summary: String,
-    #[serde(flatten)]
-    time: TimeJson,
     #[serde(flatten)]
     due: DueJson,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -258,39 +77,182 @@ pub struct TaskJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     percent: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    recurring: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    until: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     priority: Option<i64>,
-    /// Always stated, `[]` for none: the `task_category` rows, in order.
-    #[serde(default)]
-    categories: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     parent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mid: Option<String>,
-    /// When it was captured (A.4): `CREATED`, else `DTSTAMP`, as an instant.
+    /// When a task was captured (A.4): `CREATED`, else `DTSTAMP`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     created: Option<String>,
-    #[serde(default)]
-    addresses: Vec<AddressJson>,
-}
-
-/// The `journal_summary` row (Annex A.5).
-#[derive(Deserialize, Serialize)]
-pub struct JournalJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    uid: Option<String>,
+    media_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    part: Option<String>,
+    /// Always stated, `[]` for none: the item's `summary_value` rows, each
+    /// role in document order.
     #[serde(default)]
-    summary: String,
-    #[serde(flatten)]
-    time: TimeJson,
-    #[serde(default)]
-    addresses: Vec<AddressJson>,
+    values: Vec<ValueJson>,
 }
 
-/// The `file_summary` row (Annex A.7); a file names no one.
+impl From<&PimdirSummary> for SummaryJson {
+    fn from(summary: &PimdirSummary) -> Self {
+        let mut values = Vec::new();
+        match summary {
+            PimdirSummary::Mail(mail) => list(&mut values, IN_REPLY_TO, &mail.in_reply_to),
+            PimdirSummary::Task(task) => list(&mut values, CATEGORY, &task.categories),
+            _ => {}
+        }
+        addresses(&mut values, summary);
+
+        match summary {
+            PimdirSummary::Mail(mail) => Self {
+                component: "mail".into(),
+                uid: mail.message_id.clone(),
+                title: mail.subject.clone(),
+                sender: mail.sender.clone(),
+                sender_name: mail.sender_name.clone(),
+                date: usable_date(mail.date.as_deref()).map(str::to_owned),
+                size: mail.size,
+                attachment: mail.attachment,
+                invitation: mail.invitation.clone(),
+                values,
+                ..Default::default()
+            },
+            PimdirSummary::Contact(contact) => Self {
+                component: "contact".into(),
+                uid: contact.uid.clone(),
+                title: contact.full_name.clone(),
+                card_kind: contact.kind.clone(),
+                org: contact.org.clone(),
+                values,
+                ..Default::default()
+            },
+            PimdirSummary::Event(event) => Self {
+                component: "event".into(),
+                uid: event.uid.clone(),
+                title: event.summary.clone(),
+                location: event.location.clone(),
+                time: TimeJson::of(event.dtstart.as_ref()),
+                dtend: event.dtend.clone(),
+                recurring: event.recurring,
+                until: event.until.clone(),
+                values,
+                ..Default::default()
+            },
+            PimdirSummary::Task(task) => Self {
+                component: "task".into(),
+                uid: task.uid.clone(),
+                title: task.summary.clone(),
+                time: TimeJson::of(task.dtstart.as_ref()),
+                due: DueJson::of(task.due.as_ref()),
+                status: task.status.clone(),
+                completed: task.completed.clone(),
+                percent: task.percent,
+                recurring: task.recurring,
+                until: task.until.clone(),
+                priority: task.priority,
+                parent: task.parent.clone(),
+                mid: task.mid.clone(),
+                created: task.created.clone(),
+                values,
+                ..Default::default()
+            },
+            PimdirSummary::Journal(journal) => Self {
+                component: "journal".into(),
+                uid: journal.uid.clone(),
+                title: journal.summary.clone(),
+                time: TimeJson::of(journal.dtstart.as_ref()),
+                values,
+                ..Default::default()
+            },
+            PimdirSummary::File(file) => Self {
+                component: "file".into(),
+                title: file.name.clone(),
+                media_type: file.media_type.clone(),
+                size: file.size,
+                part: file.part.clone(),
+                values,
+                ..Default::default()
+            },
+        }
+    }
+}
+
+impl From<SummaryJson> for PimdirSummary {
+    fn from(wire: SummaryJson) -> Self {
+        match wire.component.as_str() {
+            "contact" => Self::Contact(PimdirContactSummary {
+                emails: role_of(&wire.values, PimdirAddressRole::Email),
+                uid: wire.uid,
+                full_name: wire.title,
+                kind: wire.card_kind,
+                org: wire.org,
+            }),
+            "event" => Self::Event(PimdirEventSummary {
+                organizer: organizer_of(&wire.values),
+                attendees: role_of(&wire.values, PimdirAddressRole::Attendee),
+                uid: wire.uid,
+                summary: wire.title,
+                location: wire.location,
+                dtstart: wire.time.time(),
+                dtend: wire.dtend,
+                recurring: wire.recurring,
+                until: wire.until,
+            }),
+            "task" => Self::Task(PimdirTaskSummary {
+                organizer: organizer_of(&wire.values),
+                attendees: role_of(&wire.values, PimdirAddressRole::Attendee),
+                contacts: role_of(&wire.values, PimdirAddressRole::Contact),
+                categories: listed(&wire.values, CATEGORY),
+                uid: wire.uid,
+                summary: wire.title,
+                dtstart: wire.time.time(),
+                due: wire.due.time(),
+                status: wire.status,
+                completed: wire.completed,
+                percent: wire.percent,
+                recurring: wire.recurring,
+                until: wire.until,
+                priority: wire.priority,
+                parent: wire.parent,
+                mid: wire.mid,
+                created: wire.created,
+            }),
+            "journal" => Self::Journal(PimdirJournalSummary {
+                organizer: organizer_of(&wire.values),
+                attendees: role_of(&wire.values, PimdirAddressRole::Attendee),
+                uid: wire.uid,
+                summary: wire.title,
+                dtstart: wire.time.time(),
+            }),
+            "file" => Self::File(PimdirFileSummary {
+                name: wire.title,
+                media_type: wire.media_type,
+                size: wire.size,
+                part: wire.part,
+            }),
+            _ => Self::Mail(PimdirMailSummary {
+                in_reply_to: listed(&wire.values, IN_REPLY_TO),
+                from: role_of(&wire.values, PimdirAddressRole::From),
+                to: role_of(&wire.values, PimdirAddressRole::To),
+                cc: role_of(&wire.values, PimdirAddressRole::Cc),
+                bcc: role_of(&wire.values, PimdirAddressRole::Bcc),
+                message_id: wire.uid,
+                subject: wire.title,
+                sender: wire.sender,
+                sender_name: wire.sender_name,
+                date: wire.date,
+                size: wire.size,
+                attachment: wire.attachment,
+                invitation: wire.invitation,
+            }),
+        }
+    }
+}
+
+/// A file's summary as a scripted remote states it (SYNC §11), the four
+/// columns of Annex A.7 by their own names.
 #[derive(Deserialize, Serialize)]
 pub struct FileJson {
     #[serde(default)]
@@ -301,6 +263,17 @@ pub struct FileJson {
     size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     part: Option<String>,
+}
+
+impl From<FileJson> for PimdirFileSummary {
+    fn from(wire: FileJson) -> Self {
+        Self {
+            name: wire.name,
+            media_type: wire.media_type,
+            size: wire.size,
+            part: wire.part,
+        }
+    }
 }
 
 /// A `DTSTART` as three columns: value verbatim, `TZID`, date or date-time.
@@ -325,13 +298,14 @@ pub struct DueJson {
     due_value: Option<String>,
 }
 
-/// One `item_address` row (Annex A.6): who, under which role, at which
-/// position in that role's document order.
+/// One `summary_value` row (Annex A): a person under an address role, an
+/// In-Reply-To id or a category, at its position in that role's document
+/// order.
 #[derive(Deserialize, Serialize)]
-pub struct AddressJson {
+pub struct ValueJson {
     role: String,
     position: usize,
-    address: String,
+    value: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,
 }
@@ -384,9 +358,20 @@ impl DueJson {
     }
 }
 
-/// Every address the summary names, as `item_address` rows.
-fn addresses_json(summary: &PimdirSummary) -> Vec<AddressJson> {
-    let mut rows = Vec::new();
+/// Appends a list's values under one role, in order.
+fn list(values: &mut Vec<ValueJson>, role: &str, list: &[String]) {
+    for (position, value) in list.iter().enumerate() {
+        values.push(ValueJson {
+            role: role.into(),
+            position,
+            value: value.clone(),
+            name: None,
+        });
+    }
+}
+
+/// Appends every address the summary names, each role from position 0.
+fn addresses(values: &mut Vec<ValueJson>, summary: &PimdirSummary) {
     let mut position = 0;
     let mut current = None;
 
@@ -396,31 +381,36 @@ fn addresses_json(summary: &PimdirSummary) -> Vec<AddressJson> {
             position = 0;
         }
 
-        rows.push(AddressJson {
+        values.push(ValueJson {
             role: role.as_str().into(),
             position,
-            address: address.address.clone(),
+            value: address.address.clone(),
             name: address.name.clone(),
         });
         position += 1;
     }
+}
 
-    rows
+/// The values of one list role, by position.
+fn listed(rows: &[ValueJson], role: &str) -> Vec<String> {
+    let mut rows: Vec<&ValueJson> = rows.iter().filter(|row| row.role == role).collect();
+    rows.sort_by_key(|row| row.position);
+    rows.into_iter().map(|row| row.value.clone()).collect()
 }
 
 /// The addresses of one role, in the order the rows carry them.
-fn role_of(rows: &[AddressJson], role: PimdirAddressRole) -> Vec<PimdirAddress> {
+fn role_of(rows: &[ValueJson], role: PimdirAddressRole) -> Vec<PimdirAddress> {
     rows.iter()
         .filter(|row| PimdirAddressRole::parse(&row.role) == Some(role))
         .map(|row| PimdirAddress {
-            address: row.address.clone(),
+            address: row.value.clone(),
             name: row.name.clone(),
         })
         .collect()
 }
 
 /// The one organizer a calendar component names, if any.
-fn organizer_of(rows: &[AddressJson]) -> Option<PimdirAddress> {
+fn organizer_of(rows: &[ValueJson]) -> Option<PimdirAddress> {
     role_of(rows, PimdirAddressRole::Organizer)
         .into_iter()
         .next()
@@ -441,36 +431,55 @@ mod tests {
         let summary = derive("text/vcard", vcard).unwrap().summary.unwrap();
 
         let wire = to_value(SummaryJson::from(&summary)).unwrap();
-        assert_eq!(wire["contact"]["fn"], "Jane Doe");
-        assert_eq!(wire["contact"]["uid"], "u1");
-        assert_eq!(wire["contact"]["org"], "ACME");
-        assert_eq!(wire["contact"]["addresses"][0]["role"], "email");
-        assert_eq!(wire["contact"]["addresses"][1]["position"], 1);
-        assert_eq!(
-            wire["contact"]["addresses"][0]["address"],
-            "jane@example.org"
-        );
+        assert_eq!(wire["component"], "contact");
+        assert_eq!(wire["title"], "Jane Doe");
+        assert_eq!(wire["uid"], "u1");
+        assert_eq!(wire["org"], "ACME");
+        assert_eq!(wire["values"][0]["role"], "email");
+        assert_eq!(wire["values"][1]["position"], 1);
+        assert_eq!(wire["values"][0]["value"], "jane@example.org");
 
         let back: PimdirSummary = from_value::<SummaryJson>(wire).unwrap().into();
         assert_eq!(back, summary);
     }
 
-    /// A message's four address roles each keep their own positions.
+    /// A message's four address roles each keep their own positions, and
+    /// its In-Reply-To ids are values of their own role.
     #[test]
     fn a_mail_summary_positions_each_role_on_its_own() {
-        let mail = b"Message-ID: <m1@x>\r\nSubject: Hi\r\nFrom: A <a@x>\r\n\
-                     To: b@x, c@x\r\nCc: d@x\r\n\r\nbody\r\n";
+        let mail = b"Message-ID: <m1@x>\r\nIn-Reply-To: <p1@x> <p2@x>\r\nSubject: Hi\r\n\
+                     From: A <a@x>\r\nTo: b@x, c@x\r\nCc: d@x\r\n\r\nbody\r\n";
         let summary = derive("message/rfc822", mail).unwrap().summary.unwrap();
 
         let wire = to_value(SummaryJson::from(&summary)).unwrap();
-        let rows = wire["mail"]["addresses"].as_array().unwrap();
-        assert_eq!(rows[0]["role"], "from");
-        assert_eq!(rows[0]["position"], 0);
-        assert_eq!(rows[1]["role"], "to");
-        assert_eq!(rows[1]["position"], 0);
-        assert_eq!(rows[2]["position"], 1);
-        assert_eq!(rows[3]["role"], "cc");
+        assert_eq!(wire["uid"], "m1@x");
+        let rows = wire["values"].as_array().unwrap();
+        assert_eq!(rows[0]["role"], "in-reply-to");
+        assert_eq!(rows[1]["value"], "p2@x");
+        assert_eq!(rows[1]["position"], 1);
+        assert_eq!(rows[2]["role"], "from");
+        assert_eq!(rows[2]["position"], 0);
+        assert_eq!(rows[3]["role"], "to");
         assert_eq!(rows[3]["position"], 0);
+        assert_eq!(rows[4]["position"], 1);
+        assert_eq!(rows[5]["role"], "cc");
+        assert_eq!(rows[5]["position"], 0);
+
+        let back: PimdirSummary = from_value::<SummaryJson>(wire).unwrap().into();
+        assert_eq!(back, summary);
+    }
+
+    /// A task's categories are values of their own role, in order.
+    #[test]
+    fn a_task_summary_carries_its_categories_as_values() {
+        let ics = b"BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:t1\r\nSUMMARY:Call\r\n\
+                    CATEGORIES:@phone,next\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
+        let summary = derive("text/calendar", ics).unwrap().summary.unwrap();
+
+        let wire = to_value(SummaryJson::from(&summary)).unwrap();
+        assert_eq!(wire["component"], "task");
+        assert_eq!(wire["values"][0]["role"], "category");
+        assert_eq!(wire["values"][1]["value"], "next");
 
         let back: PimdirSummary = from_value::<SummaryJson>(wire).unwrap().into();
         assert_eq!(back, summary);
@@ -488,7 +497,7 @@ mod tests {
                 date: Some(date.into()),
                 ..Default::default()
             });
-            to_value(SummaryJson::from(&summary)).unwrap()["mail"]["date"].clone()
+            to_value(SummaryJson::from(&summary)).unwrap()["date"].clone()
         };
 
         assert_eq!(dated("2026-08-01T10:00:00Z"), "2026-08-01T10:00:00Z");
@@ -513,14 +522,14 @@ mod tests {
         let summary = derive("text/calendar", ics).unwrap().summary.unwrap();
 
         let wire = to_value(SummaryJson::from(&summary)).unwrap();
-        assert_eq!(wire["event"]["dtstart"], "20260908T120000");
-        assert_eq!(wire["event"]["dtstart_tzid"], "Europe/Paris");
-        assert_eq!(wire["event"]["dtstart_value"], "date-time");
+        assert_eq!(wire["dtstart"], "20260908T120000");
+        assert_eq!(wire["dtstart_tzid"], "Europe/Paris");
+        assert_eq!(wire["dtstart_value"], "date-time");
 
         let back: PimdirSummary = from_value::<SummaryJson>(wire).unwrap().into();
         assert_eq!(back, summary);
 
-        let bare: SummaryJson = from_str(r#"{"event":{"summary":"x"}}"#).unwrap();
+        let bare: SummaryJson = from_str(r#"{"component":"event","title":"x"}"#).unwrap();
         let bare: PimdirSummary = bare.into();
         assert_eq!(
             bare,
@@ -533,8 +542,8 @@ mod tests {
 
     /// The store may hand back a row it holds nothing else for.
     #[test]
-    fn a_row_with_no_addresses_reads_as_one() {
-        let wire = json!({ "contact": { "fn": "Nobody" } });
+    fn a_row_with_no_values_reads_as_one() {
+        let wire = json!({ "component": "contact", "title": "Nobody" });
         let summary: PimdirSummary = from_value::<SummaryJson>(wire).unwrap().into();
 
         assert_eq!(summary.title(), "Nobody");

@@ -46,6 +46,70 @@ public class StoreRefusalTest {
     }
 
     /**
+     * A store an earlier draft wrote asks for a reinstall, saying which of
+     * the two is the earlier (STORAGE §4.2).
+     */
+    @Test
+    public void aStoreOfAnEarlierDraftAsksForAReinstall() {
+        App app = (App) RuntimeEnvironment.getApplication();
+        storeOf(app, "storage-draft-15");
+
+        assertEquals("earlier", app.refusal().optString("order"));
+        assertEquals(
+                "storage-draft-15, earlier than this app's storage-draft-17",
+                app.refusal().optString("detail"));
+        StoreRefusedActivity screen =
+                Robolectric.buildActivity(StoreRefusedActivity.class).setup().get();
+        assertEquals(
+                app.getString(R.string.store_refused_title),
+                ((TextView) screen.findViewById(R.id.store_refused_title)).getText().toString());
+        assertEquals(
+                app.getString(R.string.store_refused_message),
+                ((TextView) screen.findViewById(R.id.store_refused_message))
+                        .getText()
+                        .toString());
+    }
+
+    /**
+     * A store a later version wrote asks for an update and is never offered
+     * for deletion: the reinstall wording is not shown.
+     */
+    @Test
+    public void aStoreOfALaterDraftAsksForAnUpdate() {
+        App app = (App) RuntimeEnvironment.getApplication();
+        storeOf(app, "storage-draft-18");
+
+        assertEquals("later", app.refusal().optString("order"));
+        StoreRefusedActivity screen =
+                Robolectric.buildActivity(StoreRefusedActivity.class).setup().get();
+        assertEquals(
+                app.getString(R.string.store_later_title),
+                ((TextView) screen.findViewById(R.id.store_refused_title)).getText().toString());
+        String message =
+                ((TextView) screen.findViewById(R.id.store_refused_message)).getText().toString();
+        assertEquals(app.getString(R.string.store_later_message), message);
+        assertFalse(message.contains(app.getString(R.string.store_refused_message)));
+    }
+
+    /** A store whose only row states a format version, as a draft wrote it. */
+    private static void storeOf(App app, String formatVersion) {
+        File dir = new File(app.getFilesDir(), "pimdir");
+        assertTrue(dir.isDirectory() || dir.mkdirs());
+        SQLiteDatabase old = SQLiteDatabase.openOrCreateDatabase(new File(dir, "pimdir.db"), null);
+        old.execSQL(
+                "CREATE TABLE store_meta (id INTEGER PRIMARY KEY, format TEXT NOT NULL,"
+                        + " format_version TEXT, version INTEGER NOT NULL,"
+                        + " hash_algo TEXT NOT NULL)");
+        old.execSQL(
+                "INSERT INTO store_meta VALUES(1, 'pimdir', ?, 1, 'blake3')",
+                new Object[] {formatVersion});
+        old.setVersion(1);
+        old.close();
+        assertTrue(app.storeRefused());
+        assertEquals("store-version", app.refusal().optString("refused"));
+    }
+
+    /**
      * A phone whose SQLite never syncs the writer at every commit (STORAGE
      * §4.1) stands the app aside on the refusal screen, which says so,
      * rather than crashing at the first write.

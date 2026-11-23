@@ -76,14 +76,14 @@ public final class ItemFixtures {
 
         if (exists) {
             db.execSQL(
-                    "UPDATE items SET object_hash = ?, sort_key = ?,"
+                    "UPDATE items SET object = (SELECT id FROM objects WHERE hash = ?), sort_key = ?,"
                             + " level = ?, deleted = 0, retained_at = NULL, retained_by = NULL"
                             + " WHERE collection = ? AND link_id = ?",
                     new Object[] {hash, row.sortKey, level, collection, row.linkId});
         } else {
             db.execSQL(
-                    "INSERT INTO items(collection, link_id, seq, object_hash,"
-                            + " sort_key, level) VALUES(?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO items(collection, link_id, seq, object,"
+                            + " sort_key, level) VALUES(?, ?, ?, (SELECT id FROM objects WHERE hash = ?), ?, ?)",
                     new Object[] {
                         collection, row.linkId, PimdirItems.seqFor(db, collection, row.linkId),
                         hash, row.sortKey, level
@@ -130,7 +130,7 @@ public final class ItemFixtures {
             String previous = items.objectOf(db, collection, linkId);
             store(db, hash, body);
             db.execSQL(
-                    "UPDATE items SET object_hash = ?, level = ?"
+                    "UPDATE items SET object = (SELECT id FROM objects WHERE hash = ?), level = ?"
                             + " WHERE collection = ? AND link_id = ?",
                     new Object[] {hash, PimdirItems.FULL, collection, linkId});
             items.adjustRefcount(db, previous, hash);

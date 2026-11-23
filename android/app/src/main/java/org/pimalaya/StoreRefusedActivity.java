@@ -11,9 +11,10 @@ import org.json.JSONObject;
  * open (pimdir STORAGE §6): another draft wrote it, or it is damaged, or the
  * phone does not sync its writer at every commit (§4.1).
  *
- * <p>Nothing in the store is read or written; but for the last, which says
- * so, the app has to be reinstalled, which starts a new store. The
- * refusal's code is shown for a report.
+ * <p>Nothing in the store is read or written. A store a later version wrote
+ * asks for an update, which opens it, and is never offered for deletion;
+ * any other but the last, which says so, asks for a reinstall, which starts
+ * a new store. The refusal's code is shown for a report.
  */
 public final class StoreRefusedActivity extends Activity {
     @Override
@@ -26,6 +27,11 @@ public final class StoreRefusedActivity extends Activity {
                     .setText(R.string.store_sync_refused_title);
             ((TextView) findViewById(R.id.store_refused_message))
                     .setText(R.string.store_sync_refused_message);
+        } else if (refusal != null && "later".equals(refusal.optString("order"))) {
+            ((TextView) findViewById(R.id.store_refused_title))
+                    .setText(R.string.store_later_title);
+            ((TextView) findViewById(R.id.store_refused_message))
+                    .setText(R.string.store_later_message);
         }
         TextView code = findViewById(R.id.store_refused_code);
         code.setText(

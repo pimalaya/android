@@ -8,7 +8,7 @@ JOIN collections oc ON oc.id = o.collection
 JOIN bindings b ON b.item = o.id AND b.source = :source AND b.base_present = 1
 WHERE i.collection = :collection AND i.link_id = :link_id
   AND o.deleted = 0 AND o.retained_at IS NULL AND o.conflicted = 0
-  AND o.object_hash = i.object_hash AND b.conflicted = 0
-  AND (b.base_object IS NULL OR b.base_object <> o.object_hash)
+  AND o.object = i.object AND b.conflicted = 0
+  AND (b.base_object IS NULL OR b.base_object <> o.object)
   AND oc.account = c.account AND oc.kind = c.kind
 ORDER BY o.collection;

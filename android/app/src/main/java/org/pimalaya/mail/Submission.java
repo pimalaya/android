@@ -49,9 +49,7 @@ record Submission(String from, String messageId, String subject, String sortKey)
             return new Submission(from, "", "", "");
         }
         JSONObject summary = derived.summary();
-        JSONObject mail = summary == null ? null : summary.optJSONObject("mail");
-        String subject =
-                mail == null || mail.isNull("subject") ? "" : mail.optString("subject");
+        String subject = PimdirSummary.subjectOf(PimdirSummary.mailOf(summary));
         return new Submission(from, derived.linkId(), subject, derived.sortKey());
     }
 

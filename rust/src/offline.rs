@@ -88,6 +88,9 @@ pub struct OfflineSync<'a> {
 pub struct Driver<H> {
     host: H,
     dated: Dated,
+    /// The collection the run last loaded, which a lookup names so the
+    /// store reads the holders' server object ids of its source (SYNC §6).
+    loaded: Option<String>,
 }
 
 impl OfflineSync<'_> {
@@ -270,6 +273,7 @@ impl<H: Host> Driver<H> {
         Self {
             host,
             dated: Dated::default(),
+            loaded: None,
         }
     }
 
@@ -295,7 +299,12 @@ impl<H: Host> Driver<H> {
                 PimdirCoroutineState::Complete(returned) => return Ok(returned),
                 PimdirCoroutineState::Yielded(yielded) => {
                     let yielded = self.dated.strip(yielded);
-                    let reply = self.host.serve(&yield_json(&yielded))?;
+                    if let PimdirYield::WantsLoad { collection, .. } = &yielded {
+                        self.loaded = Some(collection.as_str().into());
+                    }
+                    let reply = self
+                        .host
+                        .serve(&yield_json(&yielded, self.loaded.as_deref()))?;
                     let parsed = parse_arg(&yielded, &reply)?;
                     self.dated.record(&parsed);
                     arg = Some(parsed);
@@ -305,8 +314,9 @@ impl<H: Host> Driver<H> {
     }
 }
 
-/// Serializes one engine yield to its JSON envelope.
-fn yield_json(yielded: &PimdirYield) -> String {
+/// Serializes one engine yield to its JSON envelope, a lookup naming
+/// `loaded`, the collection the run last loaded.
+fn yield_json(yielded: &PimdirYield, loaded: Option<&str>) -> String {
     let envelope = match yielded {
         PimdirYield::WantsLoad {
             collection,
@@ -319,6 +329,7 @@ fn yield_json(yielded: &PimdirYield) -> String {
             hashes: hashes.iter().map(PimdirHash::as_str).collect(),
         },
         PimdirYield::WantsLookupObject(links) => YieldJson::Lookup {
+            collection: loaded,
             links: links.iter().map(PimdirLinkId::as_str).collect(),
         },
         PimdirYield::WantsWrite(ops) => YieldJson::Write {
@@ -672,23 +683,27 @@ pub(crate) mod tests {
             collection: PimdirCollectionId::from("acct/INBOX"),
             selection,
         };
-        let narrowed: Value =
-            serde_json::from_str(&yield_json(&load(PimdirLoadSelection::LastPage {
+        let narrowed: Value = serde_json::from_str(&yield_json(
+            &load(PimdirLoadSelection::LastPage {
                 narrowed: true,
                 enumerated: Some(vec![PimdirHandle("7".into())]),
-            })))
-            .unwrap();
+            }),
+            None,
+        ))
+        .unwrap();
         assert_eq!(
             narrowed["selection"],
             serde_json::json!({"kind": "lastPage", "narrowed": true, "enumerated": ["7"]})
         );
 
-        let whole: Value =
-            serde_json::from_str(&yield_json(&load(PimdirLoadSelection::LastPage {
+        let whole: Value = serde_json::from_str(&yield_json(
+            &load(PimdirLoadSelection::LastPage {
                 narrowed: false,
                 enumerated: None,
-            })))
-            .unwrap();
+            }),
+            None,
+        ))
+        .unwrap();
         assert_eq!(
             whole["selection"],
             serde_json::json!({"kind": "lastPage", "narrowed": false}),
@@ -702,7 +717,7 @@ pub(crate) mod tests {
     #[test]
     fn verify_and_write_replies_reach_the_engine() {
         let verify = PimdirYield::WantsVerify(vec![PimdirHash("a".into()), PimdirHash("b".into())]);
-        let envelope: Value = serde_json::from_str(&yield_json(&verify)).unwrap();
+        let envelope: Value = serde_json::from_str(&yield_json(&verify, None)).unwrap();
         assert_eq!(envelope["op"], "verify");
         assert_eq!(envelope["hashes"], serde_json::json!(["a", "b"]));
         let PimdirArg::Verified(verified) = parse_arg(&verify, r#"{"verified": ["b"]}"#).unwrap()
@@ -839,9 +854,9 @@ pub(crate) mod tests {
             "subject": "Hi", "sender": "jane@example.com"}]}"#;
         let listed = r#"{"items": [{"handle": "900", "linkId": "m1@example.com",
             "flags": ["\\Seen"], "sortKey": "2026-10-08T09:00:00Z",
-            "summary": {"mail": {"message_id": "m1@example.com", "subject": "Hi",
+            "summary": {"component": "mail", "uid": "m1@example.com", "title": "Hi",
             "sender": "jane@example.com", "date": "2026-10-08T09:00:00Z",
-            "in_reply_to": [], "addresses": []}}}], "complete": false}"#;
+            "values": []}}], "complete": false}"#;
         let mut pushed = Vec::new();
         let mut written = Vec::new();
         let mut arg = None;
@@ -854,7 +869,7 @@ pub(crate) mod tests {
                     break;
                 }
             };
-            let envelope: Value = serde_json::from_str(&yield_json(&yielded)).unwrap();
+            let envelope: Value = serde_json::from_str(&yield_json(&yielded, None)).unwrap();
             let reply = match envelope["op"].as_str().unwrap() {
                 "load" => loaded.to_string(),
                 "enumerate" => listed.to_string(),
@@ -907,7 +922,7 @@ pub(crate) mod tests {
                     break;
                 }
             };
-            let envelope: Value = serde_json::from_str(&yield_json(&yielded)).unwrap();
+            let envelope: Value = serde_json::from_str(&yield_json(&yielded, None)).unwrap();
             let reply = match envelope["op"].as_str().unwrap() {
                 "load" => loaded.to_string(),
                 "enumerate" => r#"{"items": [], "complete": true}"#.to_string(),
@@ -958,7 +973,7 @@ pub(crate) mod tests {
                     PimdirCoroutineState::Yielded(yielded) => yielded,
                     PimdirCoroutineState::Complete(done) => break done.unwrap(),
                 };
-                let envelope: Value = serde_json::from_str(&yield_json(&yielded)).unwrap();
+                let envelope: Value = serde_json::from_str(&yield_json(&yielded, None)).unwrap();
                 let reply = match envelope["op"].as_str().unwrap() {
                     "load" => loaded.clone(),
                     "enumerate" => r#"{"items": [], "complete": true}"#.to_string(),
@@ -1021,7 +1036,7 @@ pub(crate) mod tests {
         let loaded = parse_arg(&load, &reply.to_string()).unwrap();
         match mutate.resume(Some(loaded)) {
             PimdirCoroutineState::Yielded(yielded) => {
-                let envelope: Value = from_str(&yield_json(&yielded)).unwrap();
+                let envelope: Value = from_str(&yield_json(&yielded, None)).unwrap();
                 Ok(envelope["writes"]
                     .as_array()
                     .unwrap()

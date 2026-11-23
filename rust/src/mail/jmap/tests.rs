@@ -712,7 +712,7 @@ fn a_message_is_named_from_its_header_bytes() {
         serde_json::to_value(&expected.summary).unwrap(),
     );
     let summary = serde_json::to_value(&named.summary).unwrap();
-    assert_eq!(summary["mail"]["subject"], "=?utf-8?q?x?=");
+    assert_eq!(summary["title"], "=?utf-8?q?x?=");
 }
 
 /// A band round over a mailbox holding a message dated in the band and

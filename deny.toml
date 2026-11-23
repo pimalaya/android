@@ -14,8 +14,9 @@ ignore = [
 multiple-versions = "warn"
 
 [sources]
-# crates.io only: no git source, no other registry.
-allow-git = []
+# crates.io only, but io-pimdir taken from git while rust/Cargo.toml patches
+# it (dropped with the patch once io-pimdir 0.20.0 is released).
+allow-git = ["https://github.com/pimalaya/io-pimdir"]
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 unknown-git = "deny"
 unknown-registry = "deny"

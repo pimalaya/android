@@ -6,6 +6,8 @@
 -- conflict (SYNC §7), and the binding's shared body, what tells a body
 -- another source folded in (SYNC §9). Retained rows are left out (STORAGE
 -- §11). Flags as one text, on load_items' terms (§4.4).
+-- Every body by its hash, the pointers joined to `objects` by id; last, the
+-- server object id the source's binding states (SYNC §4).
 SELECT i.link_id,
        CASE WHEN i.flags_known = 1
             THEN trim(CASE WHEN i.marks & 1 THEN '\Seen ' ELSE '' END
@@ -13,25 +15,29 @@ SELECT i.link_id,
                    || CASE WHEN i.marks & 4 THEN '\Flagged ' ELSE '' END
                    || CASE WHEN i.marks & 8 THEN '\Draft ' ELSE '' END
                    || CASE WHEN i.marks & 16 THEN '\Deleted ' ELSE '' END
-                   || coalesce((SELECT group_concat(f.flag, ' ') FROM placement_flag f
-                                WHERE f.item = i.id), '')) END AS flags,
-       i.object_hash, i.sort_key, i.level, b.handle,
+                   || i.keywords) END AS flags,
+       (SELECT o.hash FROM objects o WHERE o.id = i.object) AS object_hash,
+       i.sort_key, i.level, b.handle,
        CASE WHEN b.base_flags_known = 1
             THEN trim(CASE WHEN b.base_marks & 1 THEN '\Seen ' ELSE '' END
                    || CASE WHEN b.base_marks & 2 THEN '\Answered ' ELSE '' END
                    || CASE WHEN b.base_marks & 4 THEN '\Flagged ' ELSE '' END
                    || CASE WHEN b.base_marks & 8 THEN '\Draft ' ELSE '' END
                    || CASE WHEN b.base_marks & 16 THEN '\Deleted ' ELSE '' END
-                   || coalesce((SELECT group_concat(g.flag, ' ') FROM binding_base_flag g
-                                WHERE g.item = b.item AND g.source = b.source), '')) END AS base_flags,
-       b.base_object, b.base_revision, b.base_present, b.conflicted, b.conflict_revision,
-       b.conflict_object, i.deleted, i.conflicted, c.kind, s.date, s.subject, s.sender,
-       i.conflict_object AS item_conflict_object, s.size, s.attachment, s.invitation,
-       fs.name, fs.media_type, fs.size AS file_size, fs.part, b.shared_object
+                   || b.base_keywords) END AS base_flags,
+       (SELECT o.hash FROM objects o WHERE o.id = b.base_object) AS base_object,
+       b.base_revision, b.base_present, b.conflicted, b.conflict_revision,
+       (SELECT o.hash FROM objects o WHERE o.id = b.conflict_object) AS conflict_object,
+       i.deleted, i.conflicted, c.kind, s.date, s.title AS subject, s.sender,
+       (SELECT o.hash FROM objects o WHERE o.id = i.conflict_object) AS item_conflict_object,
+       s.size, s.attachment, s.invitation,
+       fs.title AS name, fs.media_type, fs.size AS file_size, fs.part,
+       (SELECT o.hash FROM objects o WHERE o.id = b.shared_object) AS shared_object,
+       b.server_object_id
 FROM items i
 JOIN collections c ON c.id = i.collection
 LEFT JOIN bindings b ON b.item = i.id
                     AND b.source = :source
-LEFT JOIN mail_summary s ON s.item = i.id
-LEFT JOIN file_summary fs ON fs.item = i.id
+LEFT JOIN summary s ON s.item = i.id AND s.component = 'mail'
+LEFT JOIN summary fs ON fs.item = i.id AND fs.component = 'file'
 WHERE i.collection = :collection AND i.retained_at IS NULL;

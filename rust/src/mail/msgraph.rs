@@ -271,14 +271,15 @@ impl<H: Host> Msgraph<'_, H> {
         Ok(())
     }
 
-    /// Moves one message into the folder `to` (a folder id); one gone
-    /// stays gone ([`converged`]).
-    pub fn relocate_message(&mut self, id: &str, to: &str) -> Result<(), BridgeError> {
+    /// Moves one message into the folder `to` (a folder id), answering the
+    /// id Graph gives the moved message, a move changing it; one gone stays
+    /// gone ([`converged`]) and states none.
+    pub fn relocate_message(&mut self, id: &str, to: &str) -> Result<Option<String>, BridgeError> {
         let auth = HttpAuthBearer::new(self.token);
         let coroutine =
             MsgraphMessageMove::new(&auth, "me", id, to).map_err(|err| err.to_string())?;
-        converged(self.run(coroutine))?;
-        Ok(())
+        let moved = converged(self.run(coroutine))?;
+        Ok(moved.map(|message| message.id).filter(|id| !id.is_empty()))
     }
 
     /// Copies one message into the folder `to` (a folder id), failing
@@ -795,7 +796,8 @@ fn changes(
             continue;
         }
         let marks = marks(&row.message);
-        items.push(Named::unnamed(row.message.id, marks));
+        let id = row.message.id;
+        items.push(Named::unnamed(id.clone(), marks).with_server_object_id(id));
     }
 }
 
@@ -827,7 +829,8 @@ fn named(message: MsgraphMessage, scope: &Scope, items: &mut Vec<Named>) {
         return;
     }
     let flags = marks(&message);
-    items.push(Named::new(message.id, flags, summary));
+    let id = message.id;
+    items.push(Named::new(id.clone(), flags, summary).with_server_object_id(id));
 }
 
 /// The header fields a summary reads, among those a row lists.

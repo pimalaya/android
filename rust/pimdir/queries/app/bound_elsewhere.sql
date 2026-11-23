@@ -11,7 +11,7 @@ WHERE i.link_id IN (:link_id, CASE WHEN :link_id GLOB 'dup:*'
   AND (i.link_id = :link_id OR 'dup:' || i.link_id || '#' || char(1) || i.link_id = :link_id)
   AND b.source = :source AND b.collection <> :collection
   AND b.base_present = 1 AND substr(b.handle, 1, 1) <> char(1)
-  AND (:object IS NULL OR b.base_object = :object)
+  AND (:object IS NULL OR b.base_object = (SELECT id FROM objects WHERE hash = :object))
   AND c.account IS (SELECT account FROM collections WHERE id = :collection)
   AND c.kind = (SELECT kind FROM collections WHERE id = :collection)
 ORDER BY i.link_id <> :link_id, i.deleted, b.collection

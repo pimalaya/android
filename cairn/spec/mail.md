@@ -1183,7 +1183,7 @@ A long press on Send SHALL offer Send and Send and wait for a reply; the latter 
 - THEN Waiting For holds its subject, waiting on Léa Martin, linked to the sent mail
 
 ### Requirement: The mail search reads the index
-The mail list's search SHALL read its words as a query of pimdir SEARCH §8, answered by the index over every field of every stored message, the body's text included, ordered by date or by name (no relevance order), with the sender and subject match it had before kept beside the index's hits; a query the language refuses SHALL say why on the search field, the sender and subject match still answering.
+The mail list's search SHALL read its words as a query of pimdir SEARCH §8 at search-draft-17, answered by the index over every field of every stored message, the body's text included. It is ordered newest first or by title (io-pimdir's `NewestFirst` and `Title`; no oldest-first, sender or relevance order), with the sender and subject match it had before kept beside the index's hits. `mid:` SHALL match a stored `Message-ID` whole, with or without its angle brackets. `label:` and `property:` SHALL read the store's item properties, which the app writes none of. A query the language refuses, a reserved form (`~`, `/`, `{`) among them, SHALL say why on the search field, the sender and subject match still answering.
 
 #### Scenario: A word of a body
 - GIVEN a stored message whose body alone holds `roadmap`

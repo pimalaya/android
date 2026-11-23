@@ -170,9 +170,10 @@ pub struct GmailEnvelope {
 impl GmailEnvelope {
     /// This message as a label listing's member, when its `Date` is in scope.
     pub fn named(&self, id: &str, scope: &Scope) -> Option<Named> {
-        scope
-            .contains(self.summary.date.as_deref())
-            .then(|| Named::new(id.to_string(), self.flags.clone(), self.summary.clone()))
+        scope.contains(self.summary.date.as_deref()).then(|| {
+            Named::new(id.to_string(), self.flags.clone(), self.summary.clone())
+                .with_server_object_id(id)
+        })
     }
 
     /// Whether this message is a member of `label`'s mailbox ([`belongs`]).

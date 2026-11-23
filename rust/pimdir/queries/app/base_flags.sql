@@ -6,7 +6,6 @@ SELECT CASE WHEN b.base_flags_known = 1
                    || CASE WHEN b.base_marks & 4 THEN '\Flagged ' ELSE '' END
                    || CASE WHEN b.base_marks & 8 THEN '\Draft ' ELSE '' END
                    || CASE WHEN b.base_marks & 16 THEN '\Deleted ' ELSE '' END
-                   || coalesce((SELECT group_concat(g.flag, ' ') FROM binding_base_flag g
-                                WHERE g.item = b.item AND g.source = b.source), '')) END AS base_flags
+                   || b.base_keywords) END AS base_flags
 FROM bindings b
 WHERE b.item = (SELECT id FROM items WHERE collection = :collection AND link_id = :link_id) AND b.source = :source;

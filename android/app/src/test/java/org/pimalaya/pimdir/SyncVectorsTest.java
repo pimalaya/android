@@ -445,8 +445,10 @@ public class SyncVectorsTest {
             JSONArray flags = item.optJSONArray("flags");
             Map<String, Object> row = PimdirSql.values("collection", collection, "link_id", linkId);
             row.put("seq", seq);
+            PimdirSql.FlagColumns columns = PimdirSql.flags(strings(flags));
             row.put("flags_known", flags == null ? 0 : 1);
-            row.put("marks", marks(flags));
+            row.put("marks", columns.marks());
+            row.put("keywords", columns.keywords());
             row.put("object_hash", run.hash(item, "object"));
             row.put("sort_key", item.isNull("sort_key") ? "" : item.getString("sort_key"));
             row.put("level", item.optLong("level", 0));
@@ -454,12 +456,6 @@ public class SyncVectorsTest {
             row.put("conflicted", item.optLong("conflicted", 0));
             row.put("conflict_object", run.hash(item, "conflict_object"));
             PimdirDb.exec(db, "INSERT_ITEM", row);
-            for (String flag : flagRows(flags)) {
-                db.execSQL(
-                        "INSERT INTO placement_flag(item, flag) VALUES("
-                                + "(SELECT id FROM items WHERE collection = ? AND link_id = ?), ?)",
-                        new Object[] {collection, linkId, flag});
-            }
             if (item.optBoolean("retained")) {
                 PimdirDb.exec(
                         db,
@@ -497,8 +493,10 @@ public class SyncVectorsTest {
             Map<String, Object> row = PimdirSql.values("collection", collection, "link_id", linkId);
             row.put("source", source);
             row.put("handle", binding.getString("handle"));
+            PimdirSql.FlagColumns baseColumns = PimdirSql.flags(strings(baseFlags));
             row.put("base_flags_known", baseFlags == null ? 0 : 1);
-            row.put("base_marks", marks(baseFlags));
+            row.put("base_marks", baseColumns.marks());
+            row.put("base_keywords", baseColumns.keywords());
             row.put("base_object", run.hash(binding, "base_object"));
             row.put("base_revision", text(binding, "base_revision"));
             row.put("base_present", binding.optLong("base_present", 0));
@@ -506,14 +504,8 @@ public class SyncVectorsTest {
             row.put("conflict_revision", text(binding, "conflict_revision"));
             row.put("conflict_object", run.hash(binding, "conflict_object"));
             row.put("shared_object", shared);
+            row.put("server_object_id", text(binding, "server_object_id"));
             PimdirDb.exec(db, "INSERT_BINDING", row);
-            for (String flag : flagRows(baseFlags)) {
-                db.execSQL(
-                        "INSERT INTO binding_base_flag(item, source, flag) VALUES("
-                                + "(SELECT id FROM items WHERE collection = ? AND link_id = ?),"
-                                + " ?, ?)",
-                        new Object[] {collection, linkId, source, flag});
-            }
         }
 
         JSONArray supersessions = stated.optJSONArray("supersessions");
@@ -614,7 +606,11 @@ public class SyncVectorsTest {
         PimdirDb.exec(db, "RECOMPUTE_REFCOUNTS", PimdirSql.values());
     }
 
-    /** One summary row a case states, its lists in their tables (§16). */
+    /**
+     * One summary row a case states, as the store keeps it (STORAGE §4.4):
+     * the one {@code summary} row of the case table's component, its columns
+     * by their {@code summary} names, its lists as {@code summary_value} rows.
+     */
     private static void seedSummary(SQLiteDatabase db, JSONObject entry) throws JSONException {
         String table = entry.getString("table");
         JSONObject row = entry.getJSONObject("row");
@@ -622,12 +618,13 @@ public class SyncVectorsTest {
         List<Object> bound = new ArrayList<>();
         bound.add(entry.getString("collection"));
         bound.add(entry.getString("link_id"));
+        bound.add(componentOf(table));
         for (String column : keys(row)) {
-            if (listOf(table, column) != null) {
+            if (roleOf(table, column) != null) {
                 continue;
             }
             Object value = row.get(column);
-            columns.add(column);
+            columns.add(summaryColumn(table, column));
             if (value == JSONObject.NULL) {
                 bound.add(null);
             } else if (value instanceof Boolean) {
@@ -638,22 +635,27 @@ public class SyncVectorsTest {
                 bound.add(value.toString());
             }
         }
+        if (!columns.contains("title")) {
+            columns.add("title");
+            bound.add("");
+        }
         db.execSQL(
-                "INSERT INTO " + table + " (item, " + String.join(", ", columns) + ") VALUES ("
-                        + "(SELECT id FROM items WHERE collection = ? AND link_id = ?)"
+                "INSERT INTO summary (item, component, " + String.join(", ", columns)
+                        + ") VALUES ((SELECT id FROM items WHERE collection = ? AND link_id = ?), ?"
                         + ", ?".repeat(columns.size()) + ")",
                 bound.toArray());
         for (String column : keys(row)) {
-            String[] list = listOf(table, column);
+            String role = roleOf(table, column);
             JSONArray values = row.optJSONArray(column);
-            for (int at = 0; list != null && values != null && at < values.length(); at++) {
+            for (int at = 0; role != null && values != null && at < values.length(); at++) {
                 db.execSQL(
-                        "INSERT INTO " + list[0] + " (item, position, " + list[1] + ") VALUES ("
+                        "INSERT INTO summary_value (item, role, position, value) VALUES ("
                                 + "(SELECT id FROM items WHERE collection = ? AND link_id = ?),"
-                                + " ?, ?)",
+                                + " ?, ?, ?)",
                         new Object[] {
                             entry.getString("collection"),
                             entry.getString("link_id"),
+                            role,
                             at,
                             values.getString(at)
                         });
@@ -661,39 +663,51 @@ public class SyncVectorsTest {
         }
     }
 
+    /** The component of the summary a case's table names (STORAGE §4.4). */
+    private static String componentOf(String table) {
+        return table.substring(0, table.length() - "_summary".length());
+    }
+
+    /** The column of {@code summary} a case's summary column is kept in. */
+    private static String summaryColumn(String table, String column) {
+        switch (table + "." + column) {
+            case "mail_summary.message_id":
+                return "uid";
+            case "mail_summary.subject":
+            case "contact_summary.fn":
+            case "file_summary.name":
+            case "event_summary.summary":
+            case "task_summary.summary":
+            case "journal_summary.summary":
+                return "title";
+            case "contact_summary.kind":
+                return "card_kind";
+            default:
+                return column;
+        }
+    }
+
     /**
-     * The table and value column a summary list a case states as an array is
-     * kept in (STORAGE §4.3), null for a column of the summary's own.
+     * The {@code summary_value} role a summary list a case states as an array
+     * is kept under (STORAGE §4.4), null for a column of the summary's own.
      */
-    private static String[] listOf(String table, String column) {
+    private static String roleOf(String table, String column) {
         if ("mail_summary".equals(table) && "in_reply_to".equals(column)) {
-            return new String[] {"mail_in_reply_to", "message_id"};
+            return "in-reply-to";
         }
         if ("task_summary".equals(table) && "categories".equals(column)) {
-            return new String[] {"task_category", "value"};
+            return "category";
         }
         return null;
     }
 
-    /** A flag set's system flags as the row's bits, 0 for an unknown set. */
-    private static long marks(JSONArray flags) throws JSONException {
-        long marks = 0;
-        for (int index = 0; flags != null && index < flags.length(); index++) {
-            int bit = MARKS.indexOf(flags.getString(index));
-            marks += bit < 0 ? 0 : 1L << bit;
+    /** A JSON array of strings as a list, empty for none. */
+    private static List<String> strings(JSONArray values) throws JSONException {
+        List<String> strings = new ArrayList<>();
+        for (int index = 0; values != null && index < values.length(); index++) {
+            strings.add(values.getString(index));
         }
-        return marks;
-    }
-
-    /** A flag set's other flags, each a row. */
-    private static List<String> flagRows(JSONArray flags) throws JSONException {
-        List<String> rows = new ArrayList<>();
-        for (int index = 0; flags != null && index < flags.length(); index++) {
-            if (!MARKS.contains(flags.getString(index))) {
-                rows.add(flags.getString(index));
-            }
-        }
-        return rows;
+        return strings;
     }
 
     /**
@@ -735,9 +749,9 @@ public class SyncVectorsTest {
 
         /** A message's bodies as the mail driver looks them up, else all. */
         @Override
-        protected JSONObject lookup(JSONArray links) throws JSONException {
+        protected JSONObject lookup(JSONArray links, String collection) throws JSONException {
             if (!PimdirSummary.MAIL.equals(bare(run.kind))) {
-                return super.lookup(links);
+                return super.lookup(links, collection);
             }
             JSONArray collections = run.vector.getJSONObject("store").getJSONArray("collections");
             String account = null;
@@ -747,7 +761,7 @@ public class SyncVectorsTest {
                     account = text(stated, "account");
                 }
             }
-            return offline.lookupMessages(links, account);
+            return offline.lookupMessages(links, account, collection);
         }
 
         @Override
@@ -807,6 +821,7 @@ public class SyncVectorsTest {
                             "The wire states a listed member's flags, " + member + " states none");
                 }
                 JSONObject item = SyncVectors.named(run.kind, meta, body);
+                item.putOpt("serverObjectId", text(meta, "server_object_id"));
                 item.put("handle", member.getString("handle"));
                 item.put("flags", member.getJSONArray("flags"));
                 item.putOpt("revision", text(member, "revision"));
@@ -864,6 +879,10 @@ public class SyncVectorsTest {
                 }
                 item.put("handle", handle);
                 item.putOpt("revision", text(answer, "revision"));
+                JSONObject stated = answer.optJSONObject("meta");
+                if (stated != null) {
+                    item.putOpt("serverObjectId", text(stated, "server_object_id"));
+                }
                 if (full) {
                     item.put("hash", PimdirHash.of(body));
                     String text = utf8OrNull(body);
@@ -1323,7 +1342,7 @@ public class SyncVectorsTest {
                         + " || CASE WHEN %2$s & 4 THEN '\\Flagged ' ELSE '' END"
                         + " || CASE WHEN %2$s & 8 THEN '\\Draft ' ELSE '' END"
                         + " || CASE WHEN %2$s & 16 THEN '\\Deleted ' ELSE '' END"
-                        + " || coalesce((%3$s), '')) END";
+                        + " || %3$s) END";
         String query;
         switch (table) {
             case "items":
@@ -1333,10 +1352,11 @@ public class SyncVectorsTest {
                                         flags,
                                         "i.",
                                         "i.marks",
-                                        "SELECT group_concat(f.flag, ' ') FROM placement_flag f"
-                                                + " WHERE f.item = i.id")
-                                + ", i.object_hash, i.level, i.deleted, i.retained_at,"
-                                + " i.retained_by, i.sort_key, i.conflicted, i.conflict_object"
+                                        "i.keywords")
+                                + ", (SELECT o.hash FROM objects o WHERE o.id = i.object),"
+                                + " i.level, i.deleted, i.retained_at,"
+                                + " i.retained_by, i.sort_key, i.conflicted,"
+                                + " (SELECT o.hash FROM objects o WHERE o.id = i.conflict_object)"
                                 + " FROM items i";
                 break;
             case "bindings":
@@ -1346,11 +1366,14 @@ public class SyncVectorsTest {
                                         flags,
                                         "b.base_",
                                         "b.base_marks",
-                                        "SELECT group_concat(g.flag, ' ') FROM binding_base_flag g"
-                                                + " WHERE g.item = b.item AND g.source = b.source")
-                                + ", b.base_object, b.base_revision, b.base_present, b.conflicted,"
-                                + " b.conflict_revision, b.conflict_object, b.shared_object,"
-                                + " b.round, b.refusal, b.refused_key FROM bindings b JOIN items i ON i.id = b.item";
+                                        "b.base_keywords")
+                                + ", (SELECT o.hash FROM objects o WHERE o.id = b.base_object),"
+                                + " b.base_revision, b.base_present, b.conflicted,"
+                                + " b.conflict_revision,"
+                                + " (SELECT o.hash FROM objects o WHERE o.id = b.conflict_object),"
+                                + " (SELECT o.hash FROM objects o WHERE o.id = b.shared_object),"
+                                + " b.round, b.refusal, b.refused_key, b.server_object_id"
+                                + " FROM bindings b JOIN items i ON i.id = b.item";
                 break;
             case "sources":
                 query =
@@ -1366,8 +1389,9 @@ public class SyncVectorsTest {
                 break;
             case "addresses":
                 query =
-                        "SELECT i.collection, i.link_id, a.role, a.position, a.address, a.name"
-                                + " FROM item_address a JOIN items i ON i.id = a.item";
+                        "SELECT i.collection, i.link_id, a.role, a.position, a.value, a.name"
+                                + " FROM summary_value a JOIN items i ON i.id = a.item"
+                                + " WHERE a.role NOT IN ('in-reply-to', 'category')";
                 break;
             case "references":
                 query =
@@ -1419,6 +1443,7 @@ public class SyncVectorsTest {
                         row.put("round", cursor.isNull(12) ? JSONObject.NULL : cursor.getLong(12));
                         row.put("refusal", orNull(textOrNull(cursor, 13)));
                         row.put("refused_key", orNull(textOrNull(cursor, 14)));
+                        row.put("server_object_id", orNull(textOrNull(cursor, 15)));
                         break;
                     case "sources":
                         row.put("collection", cursor.getString(0));
@@ -1488,14 +1513,18 @@ public class SyncVectorsTest {
             List<String> columns = new ArrayList<>();
             List<String> lists = new ArrayList<>();
             for (String column : keys(entry.getJSONObject("row"))) {
-                (listOf(table, column) == null ? columns : lists).add(column);
+                (roleOf(table, column) == null ? columns : lists).add(column);
+            }
+            List<String> selected = new ArrayList<>();
+            for (String column : columns) {
+                selected.add(summaryColumn(table, column) + " AS " + column);
             }
             Object row = JSONObject.NULL;
             try (Cursor cursor =
                     db.rawQuery(
-                            "SELECT " + String.join(", ", columns) + " FROM " + table
-                                    + " WHERE item = (SELECT id FROM items WHERE collection = ?"
-                                    + " AND link_id = ?)",
+                            "SELECT " + (selected.isEmpty() ? "1" : String.join(", ", selected))
+                                    + " FROM summary WHERE item = (SELECT id FROM items"
+                                    + " WHERE collection = ? AND link_id = ?)",
                             key)) {
                 if (cursor.moveToFirst()) {
                     JSONObject read = new JSONObject();
@@ -1521,14 +1550,13 @@ public class SyncVectorsTest {
                 if (row == JSONObject.NULL) {
                     break;
                 }
-                String[] list = listOf(table, column);
                 JSONArray values = new JSONArray();
                 try (Cursor cursor =
                         db.rawQuery(
-                                "SELECT " + list[1] + " FROM " + list[0] + " WHERE item ="
+                                "SELECT value FROM summary_value WHERE item ="
                                         + " (SELECT id FROM items WHERE collection = ?"
-                                        + " AND link_id = ?) ORDER BY position",
-                                key)) {
+                                        + " AND link_id = ?) AND role = ? ORDER BY position",
+                                new String[] {key[0], key[1], roleOf(table, column)})) {
                     while (cursor.moveToNext()) {
                         values.put(cursor.getString(0));
                     }

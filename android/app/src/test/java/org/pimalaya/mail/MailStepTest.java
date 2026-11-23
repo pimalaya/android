@@ -183,6 +183,7 @@ public class MailStepTest {
                                     file.getAbsolutePath(),
                                     mail.received.toEpochMilli(),
                                     mail.source().length,
+                                    mail.id,
                                     PimdirSummary.mailSortKey(mail.date),
                                     PimdirSummary.mail(
                                             mail.messageId, "Mail " + mail.id, "",

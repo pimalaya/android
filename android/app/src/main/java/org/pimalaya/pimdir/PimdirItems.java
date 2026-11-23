@@ -176,10 +176,9 @@ public final class PimdirItems {
 
     /**
      * Writes an item's flags (STORAGE §13): {@code set_flags_known} over the
-     * whole set, its system flags becoming the item's bits, then {@code
-     * retain_flags} and {@code add_flags}, which keep the other flags as
-     * rows; null forgets them, no bit kept and the schema's trigger dropping
-     * the rows. The row is written first.
+     * whole set, its system flags the item's bits and every other flag its
+     * keywords, both computed by the bridge ({@link PimdirSql#flags}); null
+     * forgets them. The row is written first.
      */
     public static void writeFlags(
             SQLiteDatabase db,
@@ -187,24 +186,13 @@ public final class PimdirItems {
             String linkId,
             java.util.Collection<String> flags) {
         Map<String, Object> known = key(collection, linkId);
-        known.put("flags_known", flags == null ? 0 : 1);
-        known.put("flags", flags == null ? List.of() : new ArrayList<Object>(flags));
+        putFlags(known, "flags_known", flags);
         PimdirDb.exec(db, "SET_FLAGS_KNOWN", known);
-        if (flags == null) {
-            return;
-        }
-        Map<String, Object> values = new java.util.HashMap<>();
-        values.put("collection", collection);
-        values.put("link_id", linkId);
-        values.put("flags", new ArrayList<Object>(new java.util.LinkedHashSet<>(flags)));
-        PimdirDb.changedSharing(
-                db, PimdirSql.bind("RETAIN_FLAGS", values), PimdirSql.bind("ADD_FLAGS", values));
     }
 
     /**
      * Writes a binding's base flags on {@link #writeFlags}'s terms ({@code
-     * set_base_flags_known}, {@code retain_base_flags}, {@code
-     * add_base_flags}).
+     * set_base_flags_known}).
      */
     public static void writeBaseFlags(
             SQLiteDatabase db,
@@ -214,21 +202,17 @@ public final class PimdirItems {
             java.util.Collection<String> flags) {
         Map<String, Object> known = key(collection, linkId);
         known.put("source", source);
-        known.put("base_flags_known", flags == null ? 0 : 1);
-        known.put("flags", flags == null ? List.of() : new ArrayList<Object>(flags));
+        putFlags(known, "base_flags_known", flags);
         PimdirDb.exec(db, "SET_BASE_FLAGS_KNOWN", known);
-        if (flags == null) {
-            return;
-        }
-        Map<String, Object> values = new java.util.HashMap<>();
-        values.put("collection", collection);
-        values.put("link_id", linkId);
-        values.put("source", source);
-        values.put("flags", new ArrayList<Object>(new java.util.LinkedHashSet<>(flags)));
-        PimdirDb.changedSharing(
-                db,
-                PimdirSql.bind("RETAIN_BASE_FLAGS", values),
-                PimdirSql.bind("ADD_BASE_FLAGS", values));
+    }
+
+    /** Binds a flag set's {@code known}, {@code marks} and {@code keywords}. */
+    private static void putFlags(
+            Map<String, Object> values, String known, java.util.Collection<String> flags) {
+        PimdirSql.FlagColumns columns = PimdirSql.flags(flags == null ? List.of() : flags);
+        values.put(known, flags == null ? 0 : 1);
+        values.put("marks", columns.marks());
+        values.put("keywords", columns.keywords());
     }
 
     /** A space-joined flags column as its flags, null for a NULL one. */

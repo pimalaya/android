@@ -17,15 +17,28 @@ import org.json.JSONObject;
  * @param handle its UID within its mailbox, or the provider's message id
  * @param linkId the identity hint the store keys it by (its {@code
  *     Message-ID}), the bound or create's link id once named; null unnamed
+ * @param serverObjectId the id its server gives its content (pimdir SYNC
+ *     §4), null where the source states none
  * @param sortKey its summary's sort key, empty when listed unnamed
  * @param summary its summary, opaque (the pimdir persistence format),
  *     read-only by contract; null when listed unnamed
  */
 public record Named(
-        List<String> flags, String handle, String linkId, String sortKey, JSONObject summary) {
+        List<String> flags,
+        String handle,
+        String linkId,
+        String serverObjectId,
+        String sortKey,
+        JSONObject summary) {
+    /** A message stating no server object id. */
+    public Named(
+            List<String> flags, String handle, String linkId, String sortKey, JSONObject summary) {
+        this(flags, handle, linkId, null, sortKey, summary);
+    }
+
     /** The same message filed under {@code linkId}. */
     public Named linked(String linkId) {
-        return new Named(flags, handle, linkId, sortKey, summary);
+        return new Named(flags, handle, linkId, serverObjectId, sortKey, summary);
     }
 
     /**
@@ -33,7 +46,7 @@ public record Named(
      * left out, as a member listed unnamed is.
      */
     public Named bare(String linkId) {
-        return new Named(flags, handle, linkId, "", null);
+        return new Named(flags, handle, linkId, serverObjectId, "", null);
     }
 
     /** The message on the engine's wire, no summary or sort key when none. */
@@ -44,6 +57,9 @@ public record Named(
                             .put("handle", handle)
                             .put("flags", new JSONArray(flags))
                             .put("linkId", linkId);
+            if (serverObjectId != null) {
+                item.put("serverObjectId", serverObjectId);
+            }
             if (summary != null) {
                 item.put("summary", summary);
             }
@@ -62,6 +78,7 @@ public record Named(
                 Json.strings(item.optJSONArray("flags")),
                 Json.string(item, "handle"),
                 item.isNull("linkId") ? null : item.optString("linkId"),
+                item.isNull("serverObjectId") ? null : item.optString("serverObjectId", null),
                 item.optString("sortKey"),
                 item.optJSONObject("summary"));
     }

@@ -1379,7 +1379,7 @@ impl Boxes {
                 .get_mut(&unquote(target))
                 .unwrap()
                 .push((next, id, false));
-            return format!("{tag} OK copied\r\n");
+            return format!("{tag} OK [COPYUID 7 {uid} {next}] copied\r\n");
         }
         if let Some(store) = command.strip_prefix("UID STORE ") {
             let uid: u32 = store.split_once(' ').unwrap().0.parse().unwrap();
@@ -1486,9 +1486,10 @@ fn a_relocation_run_again_after_a_lost_copy_files_one_copy() {
 
     client.host.dead = false;
     let mut again = state(vec![Capability::UidPlus]);
-    ImapSession::bind(&mut client, &mut again)
+    let assigned = ImapSession::bind(&mut client, &mut again)
         .relocate("INBOX", "1", "Archive")
         .unwrap();
+    assert_eq!(assigned, None, "no COPY ran, so no UID was stated");
 
     assert_eq!(client.host.ids("Archive"), ["m1@example.org"], "one copy");
     assert!(
@@ -1699,4 +1700,25 @@ fn a_write_whose_connection_died_opens_it_again() {
 
     let opened = commands.map(|command| (command, Ok(()), 1));
     assert_eq!(written, opened);
+}
+
+/// A relocation answers the UID its `COPYUID` states the message took in
+/// the target (pimdir SYNC §4), so its create lands on it.
+#[test]
+fn a_relocation_answers_the_uid_its_copyuid_states() {
+    let mut client = Client::new(Boxes::new(&[
+        ("INBOX", &[(1, "m1@example.org"), (2, "m2@example.org")]),
+        ("Archive", &[]),
+    ]));
+    let mut session = state(vec![Capability::UidPlus]);
+    let assigned = ImapSession::bind(&mut client, &mut session)
+        .relocate("INBOX", "2", "Archive")
+        .unwrap();
+
+    let held: Vec<u32> = client.host.mailboxes["Archive"]
+        .iter()
+        .map(|(uid, _, _)| *uid)
+        .collect();
+    assert_eq!(held.len(), 1);
+    assert_eq!(assigned, Some(held[0].to_string()));
 }

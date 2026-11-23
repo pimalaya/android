@@ -32,6 +32,7 @@ import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirItems;
 import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.pimdir.PimdirEngine;
 
 import java.io.File;
@@ -112,10 +113,10 @@ public final class MailEngine extends PimdirEngine {
 
     /** The bodies the account holds for {@link #upgrading}'s messages. */
     @Override
-    protected JSONObject lookup(JSONArray links) throws JSONException {
+    protected JSONObject lookup(JSONArray links, String collection) throws JSONException {
         return upgrading == null
                 ? new JSONObject().put("objects", new JSONObject())
-                : offline.lookupMessages(links, accountId);
+                : offline.lookupMessages(links, accountId, collection);
     }
 
     /**
@@ -725,8 +726,7 @@ public final class MailEngine extends PimdirEngine {
         List<Named> named = new ArrayList<>(items.size());
         for (Named item : items) {
             JSONObject summary = item.summary();
-            JSONObject mail = summary == null ? null : summary.optJSONObject("mail");
-            String messageId = mail == null ? null : mail.optString("message_id", null);
+            String messageId = PimdirSummary.messageIdOf(PimdirSummary.mailOf(summary));
             if (messageId == null || bound.containsKey(item.handle())) {
                 named.add(item);
                 continue;
@@ -1163,7 +1163,12 @@ public final class MailEngine extends PimdirEngine {
     /** A step's item as a listed member, its file and labels left out. */
     static Named named(NamedStepItem item) {
         return new Named(
-                item.flags(), item.handle(), item.linkId(), item.sortKey(), item.summary());
+                item.flags(),
+                item.handle(),
+                item.linkId(),
+                item.serverObjectId(),
+                item.sortKey(),
+                item.summary());
     }
 
     /** The handles {@link #sources} found gone while a download runs. */
@@ -1305,8 +1310,10 @@ public final class MailEngine extends PimdirEngine {
         // NOTE: a message gone is moved nowhere, so its target's create
         // goes as a delivered move's does elsewhere.
         boolean moved = true;
+        String assigned = null;
         try {
-            clients.mail().relocate(session, new MessageRef(mailbox, handle), mailboxOf(to));
+            assigned =
+                    clients.mail().relocate(session, new MessageRef(mailbox, handle), mailboxOf(to));
         } catch (RuntimeException failure) {
             // NOTE: refused, the move is held and its target's create with
             // it, pending behind the removal it is the target of.
@@ -1325,6 +1332,13 @@ public final class MailEngine extends PimdirEngine {
         // §4): only a relocation delivers the target's create.
         if (moved && accountWide()) {
             return result(handle, true, null, null).put("relocated", true);
+        }
+        // NOTE: the handle the server stated the member took in the target
+        // (an IMAP COPYUID, Graph's new id) lands the target's create on it
+        // in this push's write (pimdir SYNC §4), so no later listing lands
+        // it on another message stating the same Message-ID.
+        if (moved && assigned != null) {
+            return result(handle, true, assigned, null).put("relocated", true);
         }
         synchronized (locks.store) {
             String create = offline.pendingCreateOf(to, linkId);

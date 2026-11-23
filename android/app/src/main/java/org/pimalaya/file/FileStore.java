@@ -678,6 +678,7 @@ public final class FileStore {
         values.put("conflicted", 0);
         // NOTE: a file holds no flag, so no system flag bit (STORAGE §13).
         values.put("marks", 0);
+        values.put("keywords", "");
         exec(db, "INSERT_ITEM", values);
     }
 
@@ -699,22 +700,12 @@ public final class FileStore {
     }
 
     /**
-     * One placement's {@code file_summary} row.
-     *
-     * <p>As {@link PimdirSummary#write} takes it: a null value is left out,
-     * which binds NULL.
+     * One placement's file summary row (Annex A.7), as {@link
+     * PimdirSummary#write} takes it: a null value is left out, which binds
+     * NULL.
      */
     private static JSONObject summary(String name, String mediaType, long size, String part) {
-        try {
-            JSONObject row = new JSONObject();
-            row.put("name", name);
-            row.put("media_type", mediaType);
-            row.put("size", size);
-            row.put("part", part);
-            return new JSONObject().put("file", row);
-        } catch (JSONException error) {
-            throw new IllegalStateException(error);
-        }
+        return PimdirSummary.file(name, mediaType, size, part);
     }
 
     private static void exec(SQLiteDatabase db, String name, Map<String, Object> values) {

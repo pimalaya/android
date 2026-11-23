@@ -361,6 +361,11 @@ pub struct Named {
     /// The summary's sort key, empty when listed unnamed.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub sort_key: String,
+    /// The id its server gives its content (pimdir SYNC §4: Gmail's and
+    /// Graph's message id, JMAP's `Email/id`), absent where the source
+    /// states none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_object_id: Option<String>,
     /// Its Annex A summary, absent when listed unnamed.
     #[serde(serialize_with = "sorted", skip_serializing_if = "Option::is_none")]
     pub summary: Option<SummaryJson>,
@@ -376,7 +381,14 @@ impl Named {
             flags,
             summary: Some(SummaryJson::from(&PimdirSummary::Mail(summary))),
             sort_key,
+            server_object_id: None,
         }
+    }
+
+    /// The same message stating the id its server gives its content.
+    pub fn with_server_object_id(mut self, id: impl Into<String>) -> Self {
+        self.server_object_id = Some(id.into());
+        self
     }
 
     /// A message listed by id and markers alone, to be named by its
@@ -388,6 +400,7 @@ impl Named {
             flags,
             summary: None,
             sort_key: String::new(),
+            server_object_id: None,
         }
     }
 }
@@ -595,9 +608,9 @@ mod tests {
             serde_json::to_string(&round).unwrap(),
             concat!(
                 r#"{"complete":true,"cursor":"7:8","items":[{"flags":["\\Seen"],"handle":"7","#,
-                r#""linkId":"m1@example.org","sortKey":"2026-10-01T08:00:00Z","summary":{"mail":"#,
-                r#"{"addresses":[],"date":"2026-10-01T08:00:00Z","in_reply_to":[],"#,
-                r#""message_id":"m1@example.org","subject":"Hi"}}},{"flags":[],"handle":"8"}],"#,
+                r#""linkId":"m1@example.org","sortKey":"2026-10-01T08:00:00Z","summary":{"#,
+                r#""component":"mail","date":"2026-10-01T08:00:00Z","title":"Hi","#,
+                r#""uid":"m1@example.org","values":[]}},{"flags":[],"handle":"8"}],"#,
                 r#""last":false,"vanished":[]}"#
             )
         );

@@ -146,8 +146,9 @@ public class MessageIdNamingTest {
         }
 
         @Override
-        public void relocate(MailSession session, MessageRef message, String target) {
+        public String relocate(MailSession session, MessageRef message, String target) {
             calls.add("relocate " + message.mailbox() + " " + message.id() + " " + target);
+            return null;
         }
 
         @Override
@@ -467,6 +468,37 @@ public class MessageIdNamingTest {
         MailStore.StoredMessage second = store.message(inbox, "dup:same@example.org#2");
         assertEquals("its own parts", List.of("b.pdf"),
                 shown(second, reader().read(second, () -> null)));
+    }
+
+    /**
+     * Two messages sharing a Message-ID, a subject, a date and a sender, each
+     * stating its own server id (Gmail's message id, pimdir SYNC §4), never
+     * share a body: the second is fetched, never linked from the first's
+     * holder (SYNC §6), its server id recorded on its binding.
+     */
+    @Test
+    public void twoMessagesStatingTheirServerIdsNeverShareABody() throws Exception {
+        server.list("INBOX", listed("A1", "same@example.org", "Same").put("serverObjectId", "A1"));
+        server.list(
+                "Archive", listed("B1", "same@example.org", "Same").put("serverObjectId", "B1"));
+        String pdf = "application/pdf";
+        server.sources.put("INBOX A1", source("same@example.org", "Same", "a.pdf", pdf));
+        server.sources.put("Archive B1", source("same@example.org", "Same", "b.pdf", pdf));
+
+        server.engine.sync(inbox);
+        server.engine.downloadStep(List.of(inbox), null, null);
+        server.engine.sync(archive);
+        server.engine.downloadStep(List.of(archive), null, null);
+
+        assertEquals(List.of("INBOX A1", "Archive B1"), server.read);
+        assertEquals(
+                "B1",
+                scalar("SELECT b.server_object_id FROM bindings b JOIN items i ON i.id = b.item"
+                        + " WHERE i.collection = ?", archive));
+        assertEquals(
+                "two bodies",
+                "2",
+                scalar("SELECT count(DISTINCT object) FROM items WHERE link_id = 'same@example.org'"));
     }
 
     @Test

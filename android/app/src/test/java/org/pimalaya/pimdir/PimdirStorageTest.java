@@ -125,20 +125,21 @@ public class PimdirStorageTest {
         return placement;
     }
 
-    /** The typed contact summary an engine write carries, wire-spelled. */
+    /** The contact summary row an engine write carries, wire-spelled. */
     private JSONObject contactSummary(String uid) throws Exception {
         JSONObject row = new JSONObject();
+        row.put("component", "contact");
         row.put("uid", uid);
-        row.put("fn", "Alice");
+        row.put("title", "Alice");
         row.put(
-                "addresses",
+                "values",
                 new JSONArray()
                         .put(
                                 new JSONObject()
                                         .put("role", "email")
                                         .put("position", 0)
-                                        .put("address", uid + "@example.org")));
-        return new JSONObject().put("contact", row);
+                                        .put("value", uid + "@example.org")));
+        return row;
     }
 
     private JSONArray batch(JSONObject... ops) {
@@ -223,6 +224,83 @@ public class PimdirStorageTest {
         // in: comparing the stored text would derive a push on every sync for a
         // set nobody moved.
         assertEquals("clean", statusOf("f.vcf"));
+    }
+
+    /**
+     * A flag set is written whole and read back whole (STORAGE §13): its
+     * system flags as the row's bits, every other flag as its keywords, a
+     * keyword of the same letters as a system flag ({@code \seen}) kept apart.
+     */
+    @Test
+    public void aFlagSetIsReadBackWhole() throws Exception {
+        JSONObject placement =
+                synced("k.vcf", "uid-k", null, "kim").getJSONObject("placement");
+        placement.put(
+                "flags",
+                new JSONArray().put("$Forwarded").put("work").put("\\Seen").put("\\seen"));
+        placement.getJSONObject("base")
+                .put("flags", new JSONArray().put("work").put("\\Seen").put("$Forwarded"));
+        JSONObject op = new JSONObject();
+        op.put("op", "upsert");
+        op.put("placement", placement);
+        storage.applyWrites(batch(op));
+
+        JSONObject loaded = placementOf("k.vcf");
+        assertEquals(
+                Set.of("$Forwarded", "work", "\\Seen", "\\seen"),
+                stringSet(loaded.getJSONArray("flags")));
+        assertEquals(
+                Set.of("$Forwarded", "work", "\\Seen"),
+                stringSet(loaded.getJSONObject("base").getJSONArray("flags")));
+        assertEquals("1", stringOf("SELECT marks FROM items WHERE link_id = 'uid-k'"));
+        assertEquals(
+                "$Forwarded \\seen work",
+                stringOf("SELECT keywords FROM items WHERE link_id = 'uid-k'"));
+        assertEquals(
+                "$Forwarded work",
+                stringOf("SELECT base_keywords FROM bindings WHERE handle = 'k.vcf'"));
+    }
+
+    /**
+     * io-pimdir writes a page of up to {@code PimdirSync::WRITE_CHUNK}
+     * members, 4,096 since 0.20, in one write batch: Java lands it whole, in
+     * the one transaction applyWrites opens, the batch's JSON crossing the
+     * bridge once.
+     */
+    @Test
+    public void aWriteChunkOfFourThousandMembersLandsInOneBatch() throws Exception {
+        JSONArray writes = new JSONArray();
+        for (int index = 0; index < 4_096; index++) {
+            writes.put(synced(index + ".vcf", "uid-" + index, null, "n" + index));
+        }
+        int bytes = writes.toString().length();
+        System.out.println("write chunk: 4096 members, " + bytes + " bytes of JSON");
+
+        storage.applyWrites(writes);
+
+        assertEquals(4_096, scalar("SELECT count(*) FROM items"));
+        assertEquals(4_096, scalar("SELECT count(*) FROM bindings"));
+    }
+
+    /** One handle's placement as the projection gives it. */
+    private JSONObject placementOf(String handle) throws Exception {
+        JSONArray placements =
+                storage.loadCollection("acct/Contacts", null).getJSONArray("placements");
+        for (int index = 0; index < placements.length(); index++) {
+            if (handle.equals(placements.getJSONObject(index).getString("handle"))) {
+                return placements.getJSONObject(index);
+            }
+        }
+        throw new AssertionError("no placement " + handle);
+    }
+
+    /** A JSON array of strings as a set. */
+    private static Set<String> stringSet(JSONArray values) throws Exception {
+        Set<String> set = new java.util.HashSet<>();
+        for (int index = 0; index < values.length(); index++) {
+            set.add(values.getString(index));
+        }
+        return set;
     }
 
     @Test
@@ -1000,11 +1078,11 @@ public class PimdirStorageTest {
         storage.applyWrites(
                 batch(storeObject("ba12", "body"), upsert("x.vcf", "uid-x", h("ba12"), "xena")));
 
-        assertEquals(1, scalar("SELECT count(*) FROM contact_summary WHERE item IN (SELECT id FROM items WHERE link_id = 'uid-x')"));
+        assertEquals(1, scalar("SELECT count(*) FROM summary WHERE item IN (SELECT id FROM items WHERE link_id = 'uid-x')"));
         assertEquals(
                 1,
                 scalar(
-                        "SELECT count(*) FROM item_address WHERE item IN (SELECT id FROM items WHERE link_id = 'uid-x')"
+                        "SELECT count(*) FROM summary_value WHERE item IN (SELECT id FROM items WHERE link_id = 'uid-x')"
                                 + " AND role = 'email' AND position = 0"));
 
         // NOTE: a flag push carries no summary, and a write that does not
@@ -1017,7 +1095,7 @@ public class PimdirStorageTest {
         op.put("placement", placement);
         storage.applyWrites(batch(op));
 
-        assertEquals(1, scalar("SELECT count(*) FROM contact_summary WHERE item IN (SELECT id FROM items WHERE link_id = 'uid-x')"));
+        assertEquals(1, scalar("SELECT count(*) FROM summary WHERE item IN (SELECT id FROM items WHERE link_id = 'uid-x')"));
     }
 
     @Test
@@ -1028,8 +1106,9 @@ public class PimdirStorageTest {
                         + " VALUES('acct/INBOX', 'acct', 'message/rfc822', 'INBOX')");
         db.execSQL("INSERT INTO objects(hash, size, refcount) VALUES('" + h("ba13") + "', 7, 1)");
         db.execSQL(
-                "INSERT INTO items(collection, link_id, seq, object_hash, level)"
-                        + " VALUES('acct/INBOX', 'mid-1', 1, '" + h("ba13") + "', 2)");
+                "INSERT INTO items(collection, link_id, seq, object, level)"
+                        + " VALUES('acct/INBOX', 'mid-1', 1,"
+                        + " (SELECT id FROM objects WHERE hash = '" + h("ba13") + "'), 2)");
         new PimdirBlobs(store.blobs()).put(h("ba13"), "message".getBytes("UTF-8"));
 
         JSONObject objects =
@@ -1056,8 +1135,9 @@ public class PimdirStorageTest {
         String hash = PimdirHash.of("message");
         db.execSQL("INSERT INTO objects(hash, size, refcount) VALUES(?, 7, 1)", new Object[] {hash});
         db.execSQL(
-                "INSERT INTO items(collection, link_id, seq, object_hash, level)"
-                        + " VALUES('acct/INBOX', 'mid-1', 1, ?, 2)",
+                "INSERT INTO items(collection, link_id, seq, object, level)"
+                        + " VALUES('acct/INBOX', 'mid-1', 1,"
+                        + " (SELECT id FROM objects WHERE hash = ?), 2)",
                 new Object[] {hash});
         new PimdirBlobs(store.blobs()).put(hash, "tampered".getBytes("UTF-8"));
 
@@ -1288,7 +1368,8 @@ public class PimdirStorageTest {
         String kept = "dup:uid-p#p.vcf";
         assertEquals(kept, PimdirStorage.written(effects).getJSONArray("overruled")
                 .getJSONObject(0).getString("linkId"));
-        assertEquals(1, scalar("SELECT count(*) FROM items WHERE link_id = ? AND object_hash = ?"
+        assertEquals(1, scalar("SELECT count(*) FROM items WHERE link_id = ?"
+                + " AND object = (SELECT id FROM objects WHERE hash = ?)"
                 + " AND deleted = 1 AND retained_at IS NOT NULL", kept, h("dd05")));
 
         storage.applyWrites(batch(conflicted(h("dd04"), null)));
@@ -1335,7 +1416,7 @@ public class PimdirStorageTest {
 
     private String sharedOf(String collection) {
         return stringOf(
-                "SELECT shared_object FROM bindings WHERE item = (SELECT id FROM items"
+                "SELECT (SELECT o.hash FROM objects o WHERE o.id = bindings.shared_object) FROM bindings WHERE item = (SELECT id FROM items"
                         + " WHERE collection = 'acct/Contacts' AND link_id = 'uid-c') AND source = ?",
                 PimdirStorage.sourceOf(collection));
     }
@@ -1358,7 +1439,7 @@ public class PimdirStorageTest {
 
         // NOTE: a pull at meta took the item's body away and agreed to none.
         storage.applyWrites(batch(sourced(server, "c.vcf", null, "e1")));
-        assertNull(stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+        assertNull(stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE link_id = 'uid-c'"));
         assertEquals("not moved by a bodiless upsert", h("cc01"), sharedOf(server));
         assertEquals("pinned by the shared body alone", 1,
                 scalar("SELECT refcount FROM objects WHERE hash = ?", h("cc01")));
@@ -1390,7 +1471,7 @@ public class PimdirStorageTest {
                 storage.applyWrites(batch(storeObject("dd02", "PHONE"),
                         sourced(phone, "raw-1", h("dd02"), "v2")));
         assertEquals("a change one source made flows in", h("dd02"),
-                stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+                stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE link_id = 'uid-c'"));
         assertFalse(PimdirStorage.written(phoneEdit).has("conflicted"));
 
         JSONArray effects =
@@ -1398,10 +1479,10 @@ public class PimdirStorageTest {
                         sourced(server, "c.vcf", h("dd03"), "e2")));
 
         assertEquals("the item keeps its body", h("dd02"),
-                stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+                stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE link_id = 'uid-c'"));
         assertEquals(1, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
         assertEquals("and records the incoming one", h("dd03"),
-                stringOf("SELECT conflict_object FROM items WHERE link_id = 'uid-c'"));
+                stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.conflict_object) FROM items WHERE link_id = 'uid-c'"));
         assertEquals("the agreement point stays", h("dd01"), sharedOf(server));
         assertEquals(List.of("c.vcf"), stringsOf(
                 PimdirStorage.written(effects).getJSONArray("conflicted")));
@@ -1450,7 +1531,7 @@ public class PimdirStorageTest {
                         sourced("acct/Contacts", "c.vcf", h("dd03"), "e2"))));
         assertEquals(List.of("c.vcf"), stringsOf(written.getJSONArray("adopted")));
         assertFalse(written.has("refused"));
-        assertEquals(h("dd03"), stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+        assertEquals(h("dd03"), stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE link_id = 'uid-c'"));
 
         db.execSQL("UPDATE collections SET conflict = 'prefer-existing' WHERE id = 'acct/Contacts'");
         written =
@@ -1459,7 +1540,7 @@ public class PimdirStorageTest {
                                 h("dd04"), "v3"))));
         assertEquals(List.of("raw-1"), stringsOf(written.getJSONArray("refused")));
         assertFalse(written.has("adopted"));
-        assertEquals(h("dd03"), stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+        assertEquals(h("dd03"), stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE link_id = 'uid-c'"));
         assertRefcountsHold();
     }
 
@@ -1492,7 +1573,7 @@ public class PimdirStorageTest {
         assertEquals("tombstone", statusOf("c.vcf"));
         assertEquals(1, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
         assertEquals(h("dd03"),
-                stringOf("SELECT conflict_object FROM items WHERE link_id = 'uid-c'"));
+                stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.conflict_object) FROM items WHERE link_id = 'uid-c'"));
         assertRefcountsHold();
     }
 
@@ -1611,9 +1692,9 @@ public class PimdirStorageTest {
         new Stager(store, Clients.real()) {}.mutateResolve(server, "c.vcf", body, null, "", shown);
 
         assertEquals(0, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
-        assertNull(stringOf("SELECT conflict_object FROM items WHERE link_id = 'uid-c'"));
+        assertNull(stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.conflict_object) FROM items WHERE link_id = 'uid-c'"));
         assertEquals(PimdirHash.of(body),
-                stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+                stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE link_id = 'uid-c'"));
         assertEquals(0, scalar("SELECT count(*) FROM bindings WHERE conflicted = 1"));
         assertEquals("the server agrees on it", PimdirHash.of(body), sharedOf(server));
         assertEquals("SERVER".equals(body) ? "clean" : "dirty", statusIn(server, "c.vcf"));
@@ -1651,8 +1732,8 @@ public class PimdirStorageTest {
 
         assertEquals(1, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
         assertEquals(h("dd03"),
-                stringOf("SELECT conflict_object FROM items WHERE link_id = 'uid-c'"));
-        assertEquals(h("dd02"), stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+                stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.conflict_object) FROM items WHERE link_id = 'uid-c'"));
+        assertEquals(h("dd02"), stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE link_id = 'uid-c'"));
         assertEquals(0, scalar("SELECT count(*) FROM objects WHERE hash = '"
                 + PimdirHash.of("EDITED") + "'"));
         assertEquals(1, storage.loadConflicts(server).size());
@@ -1722,7 +1803,7 @@ public class PimdirStorageTest {
                 PimdirStorage.resolvesOf(conflicts.get(0)));
         assertEquals(0, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
         assertEquals(PimdirHash.of("MERGED"),
-                stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+                stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE link_id = 'uid-c'"));
         assertEquals("dirty", statusIn(server, "c.vcf"));
         assertEquals("dirty", statusIn(phone, "raw-1"));
         assertRefcountsHold();
@@ -1760,7 +1841,7 @@ public class PimdirStorageTest {
 
         assertEquals(0, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-c'"));
         assertEquals(PimdirHash.of(card("Joe", "+33100")),
-                stringOf("SELECT object_hash FROM items WHERE link_id = 'uid-c'"));
+                stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE link_id = 'uid-c'"));
         assertTrue(storage.loadConflicts(server).isEmpty());
         assertRefcountsHold();
     }
@@ -1850,18 +1931,18 @@ public class PimdirStorageTest {
                 "the retained row keeps its body and stays retained",
                 h("m1"),
                 stringOf(
-                        "SELECT object_hash FROM items WHERE link_id = 'mid@x'"
+                        "SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE link_id = 'mid@x'"
                                 + " AND retained_at IS NOT NULL"));
         assertEquals(
                 "the member is a row of its own, under a key minted over its handle",
                 1,
                 scalar(
                         "SELECT count(*) FROM items WHERE link_id = 'dup:mid@x#9'"
-                                + " AND retained_at IS NULL AND object_hash IS NULL"));
+                                + " AND retained_at IS NULL AND object IS NULL"));
         assertEquals(
                 "Second",
                 stringOf(
-                        "SELECT m.subject FROM mail_summary m JOIN items i ON i.id = m.item"
+                        "SELECT m.title FROM summary m JOIN items i ON i.id = m.item"
                                 + " WHERE i.link_id = 'dup:mid@x#9'"));
 
         storage.applyWrites(batch(message("INBOX", "12", "mid@x", "First", null)));
@@ -1899,7 +1980,7 @@ public class PimdirStorageTest {
                         + " AND link_id = 'moved@x'"));
         assertEquals(
                 h("m1"),
-                stringOf("SELECT object_hash FROM items WHERE collection = 'acct/Archive'"));
+                stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE collection = 'acct/Archive'"));
         assertEquals(
                 "the deleted one is retained",
                 1,
@@ -1959,7 +2040,7 @@ public class PimdirStorageTest {
         assertEquals(
                 seq,
                 scalar("SELECT seq FROM items WHERE collection = 'acct/INBOX'"
-                        + " AND retained_at IS NULL AND object_hash IS NOT NULL"));
+                        + " AND retained_at IS NULL AND object IS NOT NULL"));
         assertRefcountsHold();
     }
 }

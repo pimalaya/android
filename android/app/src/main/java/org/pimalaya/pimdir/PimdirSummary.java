@@ -35,11 +35,12 @@ public final class PimdirSummary {
     public static final String FILE = "application/octet-stream";
 
     /**
-     * Writes one item's summary row and the addresses beside it.
+     * Writes one item's summary row and the values beside it.
      *
      * <p>A null summary keeps what is stored (SPEC.md §9.3), or a flag change
-     * would blank the row. The summary object is the row, bound by name to the
-     * canonical statements.
+     * would blank the row. The summary object is the row (STORAGE Annex A),
+     * bound by name to {@code upsert_summary}; its {@code values} are the
+     * {@code summary_value} rows.
      */
     public static void write(SQLiteDatabase db, String collection, String linkId, JSONObject summary) {
         write(db, collection, linkId, summary, false);
@@ -48,8 +49,8 @@ public final class PimdirSummary {
     /**
      * Writes a summary; {@code fresh} for an item this write just created.
      *
-     * <p>A fresh item has no addresses to replace and its insert drew the
-     * change stamp, so those two statements are skipped.
+     * <p>A fresh item has no values to replace and its insert drew the change
+     * stamp, so those two statements are skipped.
      */
     public static void write(
             SQLiteDatabase db, String collection, String linkId, JSONObject summary,
@@ -57,11 +58,8 @@ public final class PimdirSummary {
         if (summary == null) {
             return;
         }
-
-        Iterator<String> kinds = summary.keys();
-        String kind = kinds.hasNext() ? kinds.next() : null;
-        JSONObject row = kind == null ? null : summary.optJSONObject(kind);
-        if (row == null) {
+        String component = summary.optString("component", null);
+        if (component == null) {
             Log.w("pimalaya", "unreadable summary for " + linkId);
             return;
         }
@@ -69,27 +67,15 @@ public final class PimdirSummary {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("collection", collection);
         values.put("link_id", linkId);
-        JSONArray addresses = row.optJSONArray("addresses");
-        // NOTE: a message's reply ids and a task's categories are rows of
-        // their own (STORAGE Annex A.1, A.4), written after the row they
-        // hang off.
-        JSONArray lists = null;
-        String list = LISTS.get(kind);
-        for (Iterator<String> columns = row.keys(); columns.hasNext(); ) {
+        for (Iterator<String> columns = summary.keys(); columns.hasNext(); ) {
             String column = columns.next();
-            if (column.equals(list)) {
-                lists = row.optJSONArray(column);
-            } else if (!"addresses".equals(column)) {
-                values.put(column, value(row.opt(column)));
+            if (!"values".equals(column)) {
+                values.put(column, value(summary.opt(column)));
             }
         }
-
-        exec(db, "UPSERT_" + kind.toUpperCase(Locale.ROOT) + "_SUMMARY", values);
-        if (list != null) {
-            writeList(db, kind, collection, linkId, lists);
-        }
-        writeAddresses(db, collection, linkId, addresses, fresh);
-        for (String rule : rulesOf(kind)) {
+        exec(db, "UPSERT_SUMMARY", values);
+        writeValues(db, collection, linkId, summary.optJSONArray("values"), fresh);
+        for (String rule : rulesOf(component)) {
             link(db, rule, linkId);
         }
         if (fresh) {
@@ -113,8 +99,8 @@ public final class PimdirSummary {
      * its body is stored, {@code MailStore.restateFromBody}), a task the mail
      * its {@code mid} names, whichever is written last.
      */
-    private static List<String> rulesOf(String kind) {
-        switch (kind) {
+    private static List<String> rulesOf(String component) {
+        switch (component) {
             case "mail":
                 return List.of("LINK_SENDERS_OF", "LINK_SOURCES_TO");
             case "contact":
@@ -136,55 +122,34 @@ public final class PimdirSummary {
     }
 
     /**
-     * Replaces the item's addresses with the ones its summary names.
+     * Replaces the item's values with the ones its summary names: its
+     * people, a message's In-Reply-To ids, a task's categories.
      *
      * <p>As a set, which is what the canonical statement is for: the derivation
-     * yields the whole list, and diffing a handful of rows buys nothing.
+     * yields every list whole, and diffing a handful of rows buys nothing.
      */
-    private static void writeAddresses(
-            SQLiteDatabase db, String collection, String linkId, JSONArray addresses, boolean fresh) {
+    private static void writeValues(
+            SQLiteDatabase db, String collection, String linkId, JSONArray rows, boolean fresh) {
         Map<String, Object> scope = new LinkedHashMap<>();
         scope.put("collection", collection);
         scope.put("link_id", linkId);
         if (!fresh) {
-            exec(db, "REPLACE_ADDRESSES", scope);
+            Map<String, Object> replace = new LinkedHashMap<>(scope);
+            replace.put("lists", 1);
+            exec(db, "REPLACE_VALUES", replace);
         }
 
-        for (int index = 0; addresses != null && index < addresses.length(); index++) {
-            JSONObject address = addresses.optJSONObject(index);
-            if (address == null) {
+        for (int index = 0; rows != null && index < rows.length(); index++) {
+            JSONObject row = rows.optJSONObject(index);
+            if (row == null) {
                 continue;
             }
             Map<String, Object> values = new LinkedHashMap<>(scope);
-            values.put("role", address.optString("role"));
-            values.put("position", address.optInt("position"));
-            values.put("address", address.optString("address"));
-            values.put("name", value(address.opt("name")));
-            exec(db, "INSERT_ADDRESS", values);
-        }
-    }
-
-    /** The list a kind's summary carries as rows of its own, by kind. */
-    private static final Map<String, String> LISTS =
-            Map.of("mail", "in_reply_to", "task", "categories");
-
-    /**
-     * Replaces a message's {@code In-Reply-To} ids ({@code mail_in_reply_to})
-     * or a task's categories ({@code task_category}) with the summary's, in
-     * order; a summary stating none clears them.
-     */
-    private static void writeList(
-            SQLiteDatabase db, String kind, String collection, String linkId, JSONArray values) {
-        boolean mail = "mail".equals(kind);
-        Map<String, Object> scope = new LinkedHashMap<>();
-        scope.put("collection", collection);
-        scope.put("link_id", linkId);
-        exec(db, mail ? "REPLACE_IN_REPLY_TO" : "REPLACE_CATEGORIES", scope);
-        for (int index = 0; values != null && index < values.length(); index++) {
-            Map<String, Object> row = new LinkedHashMap<>(scope);
-            row.put("position", index);
-            row.put(mail ? "message_id" : "value", values.optString(index));
-            exec(db, mail ? "INSERT_IN_REPLY_TO" : "INSERT_CATEGORY", row);
+            values.put("role", row.optString("role"));
+            values.put("position", row.optInt("position"));
+            values.put("value", row.optString("value"));
+            values.put("name", value(row.opt("name")));
+            exec(db, "INSERT_VALUE", values);
         }
     }
 
@@ -201,22 +166,37 @@ public final class PimdirSummary {
      * kind or none.
      */
     public static Map<String, Object> witnesses(JSONObject summary) {
-        JSONObject mail = summary == null ? null : summary.optJSONObject("mail");
+        JSONObject mail = mailOf(summary);
         if (mail == null) {
             return null;
         }
         Map<String, Object> witnesses = new LinkedHashMap<>();
-        for (String witness : new String[] {"subject", "date", "sender", "size"}) {
+        witnesses.put("subject", value(mail.opt("title")));
+        for (String witness : new String[] {"date", "sender", "size"}) {
             witnesses.put(witness, value(mail.opt(witness)));
         }
         return witnesses;
     }
 
+    /** A summary's row when it is a message's (Annex A.1), else null. */
+    public static JSONObject mailOf(JSONObject summary) {
+        return summary != null && "mail".equals(summary.optString("component"))
+                ? summary
+                : null;
+    }
+
+    /** A message summary's subject, empty when it states none. */
+    public static String subjectOf(JSONObject mail) {
+        return mail == null || mail.isNull("title") ? "" : mail.optString("title");
+    }
+
+    /** A message summary's bare {@code Message-ID}, null when it states none. */
+    public static String messageIdOf(JSONObject mail) {
+        return mail == null ? null : mail.optString("uid", null);
+    }
+
     /**
-     * One JSON value as SQLite takes it.
-     *
-     * <p>Absent is NULL; a list is the JSON text the column holds ({@code
-     * in_reply_to}).
+     * One JSON value as SQLite takes it: absent is NULL.
      */
     private static Object value(Object value) {
         if (value == null || value == JSONObject.NULL) {
@@ -242,11 +222,9 @@ public final class PimdirSummary {
             boolean attachment) {
         try {
             JSONObject row = new JSONObject();
-            putIfSet(row, "message_id", bare(messageId));
-            // NOTE: the column is NOT NULL and an envelope carries no
-            // reference chain, so the value is the empty list.
-            row.put("in_reply_to", new JSONArray());
-            row.put("subject", subject == null ? "" : subject);
+            row.put("component", "mail");
+            putIfSet(row, "uid", bare(messageId));
+            row.put("title", subject == null ? "" : subject);
             putIfSet(row, "sender", canonical(fromAddress));
             putIfSet(row, "sender_name", fromName);
             putIfSet(row, "date", rfc3339(date));
@@ -255,12 +233,14 @@ public final class PimdirSummary {
             }
             row.put("attachment", attachment);
 
-            JSONArray addresses = new JSONArray();
-            address(addresses, "from", 0, canonical(fromAddress), fromName);
-            address(addresses, "to", 0, canonical(to), null);
-            row.put("addresses", addresses);
+            // NOTE: an envelope carries no reference chain, so the message
+            // states no In-Reply-To value.
+            JSONArray values = new JSONArray();
+            address(values, "from", 0, canonical(fromAddress), fromName);
+            address(values, "to", 0, canonical(to), null);
+            row.put("values", values);
 
-            return new JSONObject().put("mail", row);
+            return row;
         } catch (JSONException error) {
             Log.w("pimalaya", "mail summary failed", error);
             return null;
@@ -272,9 +252,9 @@ public final class PimdirSummary {
         return rfc3339(date);
     }
 
-    /** Appends one {@code item_address} row when it names anybody. */
+    /** Appends one address's {@code summary_value} row when it names anybody. */
     private static void address(
-            JSONArray addresses, String role, int position, String address, String name)
+            JSONArray values, String role, int position, String address, String name)
             throws JSONException {
         if (address == null || address.isEmpty()) {
             return;
@@ -282,9 +262,29 @@ public final class PimdirSummary {
         JSONObject row = new JSONObject();
         row.put("role", role);
         row.put("position", position);
-        row.put("address", address);
+        row.put("value", address);
         putIfSet(row, "name", name);
-        addresses.put(row);
+        values.put(row);
+    }
+
+    /**
+     * A file's summary row (Annex A.7): its name in its collection, then its
+     * media type, size and part, each left out when null, which binds NULL.
+     */
+    public static JSONObject file(String name, String mediaType, Long size, String part) {
+        try {
+            JSONObject row = new JSONObject();
+            row.put("component", "file");
+            row.put("title", name == null ? "" : name);
+            putIfSet(row, "media_type", mediaType);
+            if (size != null) {
+                row.put("size", size.longValue());
+            }
+            putIfSet(row, "part", part);
+            return row;
+        } catch (JSONException error) {
+            throw new IllegalStateException(error);
+        }
     }
 
     /**

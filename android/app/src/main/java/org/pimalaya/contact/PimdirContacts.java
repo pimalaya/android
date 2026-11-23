@@ -811,6 +811,7 @@ public final class PimdirContacts {
         row.put("conflicted", 0);
         // NOTE: no system flag yet: writeFlags sets the bits with the rows.
         row.put("marks", 0);
+        row.put("keywords", "");
         PimdirDb.exec(db, "INSERT_ITEM", row);
         PimdirItems.writeFlags(db, target, linkId, flags);
         PimdirSummary.write(db, target, linkId, index.summary());

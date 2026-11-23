@@ -70,14 +70,15 @@ public class PimdirContactsTest {
     private void bind(String collection, String linkId, String handle, String revision) {
         String object = objectOf(collection, linkId);
         db.execSQL(
-                "UPDATE bindings SET handle = ?, base_object = ?, base_revision = ?,"
+                "UPDATE bindings SET handle = ?, base_object = (SELECT id FROM objects WHERE hash = ?), base_revision = ?,"
                         + " base_present = 1"
                         + " WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = ?)"
                         + " AND source = 'server'",
                 new Object[] {handle, object, revision, collection, linkId});
         db.execSQL(
                 "INSERT INTO bindings(item, collection, source, handle, base_object,"
-                        + " base_revision, base_present) SELECT i.id, i.collection, 'server', ?, ?, ?, 1"
+                        + " base_revision, base_present) SELECT i.id, i.collection, 'server', ?,"
+                        + " (SELECT id FROM objects WHERE hash = ?), ?, 1"
                         + " FROM items i WHERE i.collection = ? AND i.link_id = ?"
                         + " AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.item = i.id"
                         + " AND b.source = 'server')",
@@ -90,7 +91,7 @@ public class PimdirContactsTest {
     private String objectOf(String collection, String linkId) {
         try (Cursor cursor =
                 db.rawQuery(
-                        "SELECT object_hash FROM items WHERE collection = ? AND link_id = ?",
+                        "SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE collection = ? AND link_id = ?",
                         new String[] {collection, linkId})) {
             return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getString(0) : null;
         }
@@ -135,7 +136,7 @@ public class PimdirContactsTest {
         // pending push.
         assertNotEquals(base, objectOf(BOOK, "u2"));
         assertEquals("what the server last confirmed did not change", base,
-                stringOf("SELECT base_object FROM bindings WHERE item IN (SELECT id FROM items WHERE link_id = 'u2')"));
+                stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = bindings.base_object) FROM bindings WHERE item IN (SELECT id FROM items WHERE link_id = 'u2')"));
         assertEquals("etag-1",
                 stringOf("SELECT base_revision FROM bindings WHERE item IN (SELECT id FROM items WHERE link_id = 'u2')"));
 
@@ -237,7 +238,7 @@ public class PimdirContactsTest {
         assertEquals(held, objectOf(BOOK, "u7"));
         assertEquals(1, scalar("SELECT conflicted FROM bindings WHERE item IN (SELECT id FROM items WHERE link_id = 'u7')"));
         assertEquals(diverging,
-                stringOf("SELECT conflict_object FROM bindings WHERE item IN (SELECT id FROM items WHERE link_id = 'u7')"));
+                stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = bindings.conflict_object) FROM bindings WHERE item IN (SELECT id FROM items WHERE link_id = 'u7')"));
         assertTrue(contacts.list(BOOK).get(0).conflicted);
     }
 
@@ -248,7 +249,7 @@ public class PimdirContactsTest {
         String diverging = storeBody("REMOTE");
         db.execSQL(
                 "UPDATE bindings SET conflicted = 1, conflict_revision = 'etag-remote',"
-                        + " conflict_object = ?"
+                        + " conflict_object = (SELECT id FROM objects WHERE hash = ?)"
                         + " WHERE item IN (SELECT id FROM items WHERE link_id = 'u7')",
                 new Object[] {diverging});
         assertTrue(contacts.list(BOOK).get(0).conflicted);
@@ -271,7 +272,7 @@ public class PimdirContactsTest {
         assertEquals("etag-remote",
                 stringOf("SELECT base_revision FROM bindings WHERE item IN (SELECT id FROM items WHERE link_id = 'u7')"));
         assertEquals(diverging,
-                stringOf("SELECT base_object FROM bindings WHERE item IN (SELECT id FROM items WHERE link_id = 'u7')"));
+                stringOf("SELECT (SELECT o.hash FROM objects o WHERE o.id = bindings.base_object) FROM bindings WHERE item IN (SELECT id FROM items WHERE link_id = 'u7')"));
         assertEquals(0, scalar("SELECT conflicted FROM bindings WHERE item IN (SELECT id FROM items WHERE link_id = 'u7')"));
         assertFalse(contacts.list(BOOK).get(0).conflicted);
         assertEquals("the body it displaced is released", 0,
@@ -327,11 +328,11 @@ public class PimdirContactsTest {
 
         // NOTE: the standard's typed row (STORAGE Annex A.2): other readers of
         // the store list the card from it.
-        assertEquals("Kim", stringOf("SELECT fn FROM contact_summary WHERE item IN (SELECT id FROM items WHERE link_id = 'u11')"));
-        assertEquals("u11", stringOf("SELECT uid FROM contact_summary WHERE item IN (SELECT id FROM items WHERE link_id = 'u11')"));
+        assertEquals("Kim", stringOf("SELECT title FROM summary WHERE item IN (SELECT id FROM items WHERE link_id = 'u11')"));
+        assertEquals("u11", stringOf("SELECT uid FROM summary WHERE item IN (SELECT id FROM items WHERE link_id = 'u11')"));
         assertEquals(
                 "u11@example.org",
-                stringOf("SELECT address FROM item_address WHERE item IN (SELECT id FROM items WHERE link_id = 'u11')"
+                stringOf("SELECT value FROM summary_value WHERE item IN (SELECT id FROM items WHERE link_id = 'u11')"
                         + " AND role = 'email' AND position = 0"));
 
         // NOTE: ordered by the casefolded name, so two writers cannot
@@ -345,12 +346,12 @@ public class PimdirContactsTest {
 
         // NOTE: what a store written before the kind had a summary table
         // holds; no sync repairs it, the bodies not having changed.
-        db.execSQL("DELETE FROM contact_summary WHERE item IN (SELECT id FROM items WHERE link_id = 'u12')");
+        db.execSQL("DELETE FROM summary WHERE item IN (SELECT id FROM items WHERE link_id = 'u12')");
         db.execSQL("UPDATE items SET sort_key = '' WHERE link_id = 'u12'");
 
         assertEquals(1, contacts.repairSummaries());
 
-        assertEquals("Lena", stringOf("SELECT fn FROM contact_summary WHERE item IN (SELECT id FROM items WHERE link_id = 'u12')"));
+        assertEquals("Lena", stringOf("SELECT title FROM summary WHERE item IN (SELECT id FROM items WHERE link_id = 'u12')"));
         assertEquals("lena", stringOf("SELECT sort_key FROM items WHERE link_id = 'u12'"));
 
         PimdirContacts.Indexed repaired = contacts.list(BOOK).get(0);

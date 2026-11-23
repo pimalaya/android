@@ -27,11 +27,11 @@ public class PimdirSummaryTest {
         JSONObject row =
                 PimdirSummary.mail(
                                 "<abc@host>", "Hello", "Alice", "Alice@Example.ORG",
-                                "bob@example.org", "Mon, 5 Jan 2026 09:00:00 +0000", 1234, true)
-                        .getJSONObject("mail");
+                                "bob@example.org", "Mon, 5 Jan 2026 09:00:00 +0000", 1234, true);
 
-        assertEquals("the Message-ID is stored bare", "abc@host", row.getString("message_id"));
-        assertEquals("Hello", row.getString("subject"));
+        assertEquals("mail", row.getString("component"));
+        assertEquals("the Message-ID is stored bare", "abc@host", row.getString("uid"));
+        assertEquals("Hello", row.getString("title"));
         assertEquals("2026-01-05T09:00:00Z", row.getString("date"));
         assertEquals(1234, row.getInt("size"));
         assertFalse("flags are the item's state, not its summary", row.has("flags"));
@@ -50,8 +50,7 @@ public class PimdirSummaryTest {
                 PimdirSummary.mail(
                                 null, "Hello", "Alice", "alice@example.org", "Bob@Example.org",
                                 "Mon, 5 Jan 2026 09:00:00 +0000", 0, false)
-                        .getJSONObject("mail")
-                        .getJSONArray("addresses");
+                        .getJSONArray("values");
 
         assertEquals(2, addresses.length());
         assertEquals("from", addresses.getJSONObject(0).getString("role"));
@@ -60,7 +59,7 @@ public class PimdirSummaryTest {
         assertEquals("to", addresses.getJSONObject(1).getString("role"));
         assertEquals("each role positions on its own", 0,
                 addresses.getJSONObject(1).getInt("position"));
-        assertEquals("bob@example.org", addresses.getJSONObject(1).getString("address"));
+        assertEquals("bob@example.org", addresses.getJSONObject(1).getString("value"));
     }
 
     @Test
@@ -71,13 +70,12 @@ public class PimdirSummaryTest {
         JSONObject row =
                 PimdirSummary.mail(
                                 null, "Hello", "", "alice@example.org", null,
-                                "Mon, 5 Jan 2026 09:00:00 +0000", 0, false)
-                        .getJSONObject("mail");
+                                "Mon, 5 Jan 2026 09:00:00 +0000", 0, false);
 
-        assertFalse(row.has("message_id"));
+        assertFalse(row.has("uid"));
         assertFalse(row.has("sender_name"));
         assertFalse(row.has("size"));
-        assertEquals("one address, the sender's", 1, row.getJSONArray("addresses").length());
+        assertEquals("one address, the sender's", 1, row.getJSONArray("values").length());
     }
 
     @Test

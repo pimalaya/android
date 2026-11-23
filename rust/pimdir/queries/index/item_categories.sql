@@ -2,6 +2,6 @@
 -- and seq: what load_categories_by_link reads, in the round the item's
 -- summary is read in.
 SELECT t.value FROM store.items i
-JOIN store.task_category t ON t.item = i.id
+JOIN store.summary_value t ON t.item = i.id AND t.role = 'category'
 WHERE i.collection = :collection AND i.seq = :seq AND i.deleted = 0
 ORDER BY t.position;

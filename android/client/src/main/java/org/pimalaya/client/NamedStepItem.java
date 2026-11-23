@@ -19,6 +19,8 @@ import org.json.JSONObject;
  * @param path the file its body was written to
  * @param received reception time in epoch milliseconds; null when unknown
  * @param size the file's size in octets
+ * @param serverObjectId the id Gmail gives its content, its message id
+ *     (pimdir SYNC §4)
  * @param sortKey its summary's sort key, empty when it has none
  * @param summary its summary, opaque (the pimdir persistence format),
  *     read-only by contract; null where it has none
@@ -31,6 +33,7 @@ public record NamedStepItem(
         String path,
         Long received,
         long size,
+        String serverObjectId,
         String sortKey,
         JSONObject summary) {
     static NamedStepItem from(JSONObject item) {
@@ -42,6 +45,7 @@ public record NamedStepItem(
                 Json.string(item, "path"),
                 item.isNull("received") ? null : item.optLong("received"),
                 item.optLong("size"),
+                item.isNull("serverObjectId") ? null : item.optString("serverObjectId", null),
                 item.optString("sortKey"),
                 item.optJSONObject("summary"));
     }

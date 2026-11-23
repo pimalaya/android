@@ -12,7 +12,11 @@ use core::fmt::Display;
 
 use io_pimdir::{
     placement::PimdirLinkId,
-    summary::{PimdirDerivation, PimdirSummary, derive, file, mail::derive_meta},
+    summary::{
+        PimdirDerivation, derive,
+        file::{self, PimdirFileSummary},
+        mail::derive_meta,
+    },
     sync::{PimdirParked, PimdirSyncEvent},
 };
 use jni::{
@@ -332,9 +336,7 @@ impl EventJson {
 /// The derivation a scripted remote names a member by (SYNC §11).
 fn named(kind: &str, stated: StatedJson, body: &[u8]) -> Option<PimdirDerivation> {
     if kind == file::KIND {
-        let PimdirSummary::File(summary) = SummaryJson::File(stated.summary?).into() else {
-            return None;
-        };
+        let summary: PimdirFileSummary = stated.summary?.into();
         return Some(summary.derivation(PimdirLinkId(stated.link_id?)));
     }
 

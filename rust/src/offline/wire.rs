@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 
 use io_pimdir::{
     change::{PimdirChange, PimdirChangeKind, PimdirDropReason, PimdirWriteOp},
+    codec,
     collection::{PimdirCheckpoint, PimdirCursor, PimdirScope},
     mutate::{PimdirMutateError, PimdirMutateReport, PimdirMutation},
     object::{PimdirHash, PimdirHeldObject, PimdirObject},
@@ -103,6 +104,10 @@ pub struct PlacementJson {
     base: Option<BaseJson>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     origin: Option<OriginJson>,
+    /// The id the source's server gives the member's content (SYNC §4,
+    /// `bindings.server_object_id`), absent where it states none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    server_object_id: Option<String>,
     /// A message's `Date` (Annex A.1), on a load carrying no summary.
     ///
     /// What the engine tells a round's scope by (SYNC §5); read only.
@@ -161,6 +166,7 @@ impl From<PlacementJson> for PimdirPlacement {
             conflict_object: wire.conflict_object.map(PimdirHash),
             base: wire.base.map(PimdirBase::from),
             origin: wire.origin.map(PimdirOrigin::from),
+            server_object_id: wire.server_object_id,
         }
     }
 }
@@ -184,6 +190,7 @@ impl From<&PimdirPlacement> for PlacementJson {
                 .map(|hash| hash.as_str().into()),
             base: placement.base.as_ref().map(BaseJson::from),
             origin: placement.origin.as_ref().map(OriginJson::from),
+            server_object_id: placement.server_object_id.clone(),
             date: None,
             subject: None,
             sender: None,
@@ -243,6 +250,28 @@ fn flags_from(flags: Option<Vec<String>>) -> PimdirFlags {
         Some(flags) => PimdirFlags::from_iter(flags),
         None => PimdirFlags::Unknown,
     }
+}
+
+/// A flag set's two columns (STORAGE §13): its system flags as the
+/// `marks` bits and every other flag as the `keywords` text, as io-pimdir
+/// writes them (`codec::marks_to_int`, `codec::keywords_to_text`).
+#[derive(Debug, Eq, PartialEq, Serialize)]
+pub struct FlagColumnsJson {
+    pub marks: i64,
+    pub keywords: String,
+}
+
+/// The columns a whole flag set is written as, a flag the store cannot
+/// hold (empty, a space or a byte outside printable ASCII) refused.
+pub fn flag_columns(flags: Vec<String>) -> Result<FlagColumnsJson, String> {
+    if let Some(flag) = flags.iter().find(|flag| !codec::is_flag(flag)) {
+        return Err(format!("a flag the store cannot hold: {flag:?}"));
+    }
+    let flags = PimdirFlags::from_iter(flags);
+    Ok(FlagColumnsJson {
+        marks: codec::marks_to_int(&flags),
+        keywords: codec::keywords_to_text(&flags),
+    })
 }
 
 /// A pending create's content source on the JSON wire, both directions.
@@ -399,6 +428,19 @@ pub enum WriteOpJson {
         collection: String,
         handle: String,
     },
+    /// Lands a relocation's destination create on the handle the relocation
+    /// stated (pimdir SYNC §4): the provisional binding moves to `landed`,
+    /// based on the item's flags and body and `revision`, unless the source
+    /// binds `landed` there already, which records the create delivered.
+    LandPlacement {
+        collection: String,
+        handle: String,
+        landed: String,
+        /// Absent for mail, and left out then: org.json reads a JSON null
+        /// as the text "null".
+        #[serde(skip_serializing_if = "Option::is_none")]
+        revision: Option<String>,
+    },
     /// Records the refusal of the change keyed `key` pushed for the binding
     /// under `handle` (pimdir SYNC §4, §5), `reason` scrubbed of
     /// credentials (STORAGE §18), after the batch's upserts and stamps.
@@ -503,6 +545,17 @@ impl From<&PimdirWriteOp> for WriteOpJson {
             PimdirWriteOp::DeliverPlacement { collection, handle } => Self::DeliverPlacement {
                 collection: collection.as_str().into(),
                 handle: handle.as_str().into(),
+            },
+            PimdirWriteOp::LandPlacement {
+                collection,
+                handle,
+                landed,
+                revision,
+            } => Self::LandPlacement {
+                collection: collection.as_str().into(),
+                handle: handle.as_str().into(),
+                landed: landed.as_str().into(),
+                revision: revision.clone(),
             },
             PimdirWriteOp::RefusePlacement {
                 collection,
@@ -1046,6 +1099,10 @@ pub struct HeldObjectJson {
     date: Option<String>,
     #[serde(default)]
     sender: Option<String>,
+    /// The id the holder's binding of the asking source states (SYNC §6),
+    /// absent where it states none.
+    #[serde(default)]
+    server_object_id: Option<String>,
 }
 
 impl From<HeldObjectJson> for PimdirHeldObject {
@@ -1058,6 +1115,7 @@ impl From<HeldObjectJson> for PimdirHeldObject {
             subject: wire.subject,
             date: wire.date,
             sender: wire.sender,
+            server_object_id: wire.server_object_id,
         }
     }
 }
@@ -1152,6 +1210,10 @@ struct RemoteItemJson {
     summary: Option<SummaryJson>,
     #[serde(default)]
     sort_key: String,
+    /// The id the server gives the member's content (SYNC §4), absent where
+    /// the connector states none.
+    #[serde(default)]
+    server_object_id: Option<String>,
     #[serde(default)]
     hash: Option<String>,
     #[serde(default)]
@@ -1185,6 +1247,7 @@ impl From<RemoteItemJson> for PimdirRemoteItem {
                 summary: wire.summary.map(Into::into),
                 sort_key: wire.sort_key.into(),
                 body,
+                server_object_id: wire.server_object_id,
             },
             handle: PimdirHandle(wire.handle),
             flags: PimdirFlags::from_iter(wire.flags),
@@ -1262,6 +1325,9 @@ pub enum YieldJson<'a> {
         selection: LoadSelectionJson<'a>,
     },
     Lookup {
+        /// The collection the run last loaded, absent when it loaded none.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        collection: Option<&'a str>,
         links: Vec<&'a str>,
     },
     Write {
@@ -1549,7 +1615,40 @@ pub mod tests {
     };
     use serde_json::from_str;
 
-    use crate::offline::wire::{MutationJson, RoundJson, SnapshotJson, WriteOpJson};
+    use crate::offline::wire::{
+        FlagColumnsJson, MutationJson, RoundJson, SnapshotJson, WriteOpJson, flag_columns,
+    };
+
+    /// A set's system flags are its bits by their exact bytes, and every
+    /// other flag, `\seen` among them, a keyword, sorted bytewise and held
+    /// once.
+    #[test]
+    fn a_flag_set_is_its_marks_and_its_keywords() {
+        let flags = [
+            "work",
+            "\\Seen",
+            "$Forwarded",
+            "\\seen",
+            "work",
+            "\\Flagged",
+        ];
+        assert_eq!(
+            flag_columns(flags.iter().map(|flag| flag.to_string()).collect()),
+            Ok(FlagColumnsJson {
+                marks: 5,
+                keywords: "$Forwarded \\seen work".into(),
+            })
+        );
+        assert_eq!(
+            flag_columns(Vec::new()),
+            Ok(FlagColumnsJson {
+                marks: 0,
+                keywords: String::new(),
+            })
+        );
+        assert!(flag_columns(vec!["two words".into()]).is_err());
+        assert!(flag_columns(vec![String::new()]).is_err());
+    }
 
     /// A connector's JSON page as the engine reads it.
     pub fn enumerated(reply: &str) -> PimdirEnumerated {

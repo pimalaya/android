@@ -461,7 +461,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_setMessageFlag<'local>(
 
 /// `Native.relocateMessage`: moves one message from `mailbox` to `target`.
 ///
-/// pimdir SYNC §4, a `Remove` carrying `to`. Returns `{}`.
+/// pimdir SYNC §4, a `Remove` carrying `to`. Returns `{"assigned"}`, the
+/// handle the server states the message took in `target`, or `{}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_relocateMessage<'local>(
     mut env: EnvUnowned<'local>,
@@ -486,7 +487,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_relocateMessage<'local>(
         let json = match unsafe { bind(handle, &mut client) }
             .and_then(|mut mail| mail.relocate(&transfer))
         {
-            Ok(()) => String::from("{}"),
+            Ok(Some(assigned)) => serde_json::json!({ "assigned": assigned }).to_string(),
+            Ok(None) => String::from("{}"),
             Err(err) => error_json(err),
         };
 

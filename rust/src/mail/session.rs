@@ -303,6 +303,8 @@ pub struct NamedStepItem {
     pub received: Option<i64>,
     /// The file's size in octets.
     pub size: usize,
+    /// The id Gmail gives its content, its message id (pimdir SYNC §4).
+    pub server_object_id: String,
     /// Its summary's sort key, empty when it has none.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub sort_key: String,
@@ -705,8 +707,10 @@ impl<H: Host> Mail<'_, '_, H> {
         }
     }
 
-    /// Relocates one message.
-    pub fn relocate(&mut self, transfer: &MessageTransfer) -> Result<(), BridgeError> {
+    /// Relocates one message, answering the handle the server states it
+    /// took in the target (pimdir SYNC §4: an IMAP `COPYUID`, Graph's new
+    /// id), `None` where it states none or the handle stays the message's.
+    pub fn relocate(&mut self, transfer: &MessageTransfer) -> Result<Option<String>, BridgeError> {
         let MessageTransfer {
             mailbox,
             id,
@@ -729,7 +733,7 @@ impl<H: Host> Mail<'_, '_, H> {
                 // NOTE: as Gmail's below, so the target listed after the
                 // move in this pass replays it and lands the message.
                 self.session.jmap_run().refiled();
-                Ok(())
+                Ok(None)
             }
             MailKind::Graph(_) => {
                 let (_, to) = self.mailbox_ids(mailbox, target)?;
@@ -750,7 +754,7 @@ impl<H: Host> Mail<'_, '_, H> {
                 // same run asks Gmail what the change left, and the target
                 // listed after it lands the message in this pass.
                 self.session.gmail_run().refiled(id);
-                Ok(())
+                Ok(None)
             }
         }
     }
@@ -1067,6 +1071,7 @@ fn gmail_reply(stepped: gmail_step::Stepped, names: &HashMap<String, String>) ->
             path: fetched.path.to_string_lossy().into_owned(),
             received: fetched.received,
             size: fetched.size,
+            server_object_id: fetched.id.clone(),
             sort_key: named.sort_key,
             summary: named.summary,
         });

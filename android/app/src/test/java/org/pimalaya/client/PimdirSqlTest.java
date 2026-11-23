@@ -43,7 +43,7 @@ public class PimdirSqlTest {
         assertTrue("expected the full statement set, got " + all.size(), all.size() >= 50);
         assertNotNull(all.get("LIST_COLLECTIONS_BY_ACCOUNT"));
         assertNotNull(all.get("LIST_LINK_PLACEMENTS"));
-        assertNotNull(all.get("UPSERT_CONTACT_SUMMARY"));
+        assertNotNull(all.get("UPSERT_SUMMARY"));
         // NOTE: migrations are indexed apart from the statements the profiles
         // run.
         assertTrue(PimdirSql.migrations().length >= 1);

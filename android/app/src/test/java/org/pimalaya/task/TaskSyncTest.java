@@ -277,10 +277,10 @@ public class TaskSyncTest {
         // reader lists tasks from (task_summary, Annex A.4).
         assertEquals(
                 "waiting,@home",
-                one("SELECT group_concat(value) FROM (SELECT value FROM task_category"
-                        + " ORDER BY position)"));
-        assertEquals("2", one("SELECT priority FROM task_summary"));
-        assertEquals("Fix the gate", one("SELECT summary FROM task_summary"));
+                one("SELECT group_concat(value) FROM (SELECT value FROM summary_value"
+                        + " WHERE role = 'category' ORDER BY position)"));
+        assertEquals("2", one("SELECT priority FROM summary WHERE component = 'task'"));
+        assertEquals("Fix the gate", one("SELECT title FROM summary WHERE component = 'task'"));
     }
 
     @Test

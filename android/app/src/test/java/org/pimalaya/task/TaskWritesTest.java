@@ -364,8 +364,8 @@ public class TaskWritesTest {
 
         // NOTE: staged with the summary its body derives, so the store lists
         // it as a task (task_summary), and CREATED says when (GUIDE §17).
-        assertEquals("inbox", one("SELECT group_concat(value) FROM task_category"));
-        assertEquals("Call the plumber", one("SELECT summary FROM task_summary"));
+        assertEquals("inbox", one("SELECT group_concat(value) FROM summary_value WHERE role = 'category'"));
+        assertEquals("Call the plumber", one("SELECT title FROM summary WHERE component = 'task'"));
         assertTrue(captured.event.ical().contains("CREATED:"));
         assertEquals(captured.task.created().length(), 16);
     }
@@ -401,15 +401,15 @@ public class TaskWritesTest {
                         "");
         // NOTE: as a store an earlier build wrote, no calendar item carrying
         // a summary row.
-        parts.pimdir().getWritableDatabase().execSQL("DELETE FROM task_summary");
-        parts.pimdir().getWritableDatabase().execSQL("DELETE FROM event_summary");
+        parts.pimdir().getWritableDatabase().execSQL("DELETE FROM summary WHERE component = 'task'");
+        parts.pimdir().getWritableDatabase().execSQL("DELETE FROM summary WHERE component = 'event'");
 
         List<TaskStore.Stored> tasks = store.load(context);
 
         assertEquals(1, tasks.size());
         assertEquals("Renew the passport", tasks.get(0).task.summary());
-        assertEquals("Renew the passport", one("SELECT summary FROM task_summary"));
-        assertEquals("Standup", one("SELECT summary FROM event_summary"));
+        assertEquals("Renew the passport", one("SELECT title FROM summary WHERE component = 'task'"));
+        assertEquals("Standup", one("SELECT title FROM summary WHERE component = 'event'"));
     }
 
     @Test

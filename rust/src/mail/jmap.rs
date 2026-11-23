@@ -952,7 +952,8 @@ fn named(email: JmapEmail, scope: &Scope) -> Option<Named> {
         keyword(&email, JMAP_KEYWORD_ANSWERED),
         keyword(&email, JMAP_KEYWORD_FLAGGED),
     );
-    Some(Named::new(email.id?, flags, summary))
+    let id = email.id?;
+    Some(Named::new(id.clone(), flags, summary).with_server_object_id(id))
 }
 
 /// One mailbox's delta page, projected from the account's changes.

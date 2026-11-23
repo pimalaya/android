@@ -697,8 +697,8 @@ public class MailStoreTest {
     /**
      * A sent mailbox a roster no longer lists stays while a submission is
      * anchored on it, so the replace goes through and the message still waits
-     * (STORAGE section 14, collections_keep_queued); once it is settled, the
-     * next replace takes the mailbox.
+     * (STORAGE section 14, the queue's ON DELETE RESTRICT); once it is
+     * settled, the next replace takes the mailbox.
      */
     @Test
     public void aSentMailboxAnchoringASubmissionOutlivesARosterReplace() {

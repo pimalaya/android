@@ -5,8 +5,10 @@
 -- statements take off an item and its bindings. A superset of what the
 -- release lets go of, read before it, so recount_objects over these
 -- settles every count the release moved.
-SELECT DISTINCT object_hash FROM items
-WHERE collection IN (SELECT value FROM temp.param WHERE slot = 'collections')
-  AND deleted = 0 AND object_hash IS NOT NULL
-  AND sort_key < coalesce(:before, x'')
+-- Each body by its hash.
+SELECT o.hash FROM objects o
+WHERE o.id IN (SELECT object FROM items
+               WHERE collection IN (SELECT value FROM temp.param WHERE slot = 'collections')
+                 AND deleted = 0 AND object IS NOT NULL
+                 AND sort_key < coalesce(:before, x''))
 LIMIT :limit;

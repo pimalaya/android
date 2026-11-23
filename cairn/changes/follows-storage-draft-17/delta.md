@@ -13,12 +13,12 @@ Capability files: cairn/spec/offline-store.md (all entries below), cairn/spec/ma
 When an accepted relocating remove states the handle its member took in the destination (`PimdirPushResult::assigned`: an IMAP `COPYUID`, a Graph move's new id), the store SHALL apply the engine's `LandPlacement` in the batch recording the outcome. The provisional create is dropped `Superseded`, and its binding moves to the stated handle, based on the item's flags, body and revision. When the source already binds that handle in the collection, the store SHALL record the create delivered instead (pimdir SYNC §4).
 
 #### Scenario: A message moved on IMAP
-- GIVEN a message moved into Archive, the server answering `COPYUID` with UID 812
+- GIVEN a message moved into Trash, the server answering `COPYUID` with UID 812
 - WHEN the push's outcome is written
-- THEN Archive's create is bound under 812 at once, and a later listing of another message sharing its `Message-ID` lands nothing on it (SyncVectorsTest, the `LandPlacement` cases)
+- THEN Trash's create is bound under 812 at once, never withdrawn for a later listing to bring (MailMoveTest `aMoveStatingItsCopyUidLandsTheTargetCreateOnIt`)
 
 ### Requirement: A binding keeps the server's object id
-A mail binding SHALL record the id its server gives the message's content, as the source last stated it with the member's meta (`bindings.server_object_id`): Gmail's message id, JMAP's `Email/id`, IMAP's `EMAILID` where the server announces `OBJECTID`, Graph's message id. A load SHALL hand it back. Two bindings of one source stating different ids SHALL never share a body by link id (pimdir SYNC §6).
+A mail binding SHALL record the id its server gives the message's content, as the source last stated it with the member's meta (`bindings.server_object_id`): Gmail's message id, JMAP's `Email/id`, Graph's message id; an IMAP source states none (io-imap reads no `EMAILID`, step F4 parked). A load SHALL hand it back, and a lookup SHALL answer each holder with the id its binding of the asking source states. Two bindings of one source stating different ids SHALL never share a body by link id (pimdir SYNC §6).
 
 #### Scenario: Two messages sharing a Message-ID on Gmail
 - GIVEN two Gmail messages with one `Message-ID`, the same subject, date, sender and size, one of them held in full
@@ -52,7 +52,7 @@ The app SHALL create its store at storage-draft-17 (`store_meta.format_version`,
 #### Scenario: A store a later version wrote
 - GIVEN a store at storage-draft-18 or at a released storage version
 - WHEN the app starts
-- THEN it opens on the reinstall screen, its reason naming the store's version later than the app's, and nothing in the store is written
+- THEN it opens on a screen asking for an update of the app, never for its reinstall, its reason naming the store's version later than the app's, and nothing in the store is written
 
 ### Requirement: The index is the app's own shape over FTS4
 The app SHALL keep a search index, index.db beside the store, in a shape of its own named `pimalaya-android` in `index_meta.shape` (pimdir SEARCH §2), at search-draft-17. It is the canonical index on SQLite 3.18: ordinary FTS4 tables in place of FTS5 over text io-pimdir folded, `unicode61` with `remove_diacritics=0` and prefixes of 2 and 3, a placement naming its body by `object.id`, and no `chunk`, `thread` or `split` table. A snippet SHALL be cut from the body, and a thread's span SHALL be read from the store. The flag table SHALL hold keywords alone; `is:` and a `tag:` naming a system flag SHALL read `items.marks` as the store holds it. The app SHALL serve the index statements its bridge binds and no others. It SHALL record in `index_meta.extraction` the revision of SEARCH §6 io-pimdir extracts under, and in `index_meta.extractor` its own revision, then io-pimdir's. It SHALL refuse and leave as it is an index of another shape or a later version. It SHALL rebuild one of its shape at an earlier version, under another tokenizer or schema, recording another extraction or extractor, or built from another store. The index SHALL be refreshed by io-pimdir's refresh at start, after each engine write batch and at the end of each sync. A run folds at most 200 rows of the store's feed per transaction, each run a deferred transaction that takes no lock of the store.

@@ -1,6 +1,7 @@
 -- The items of every collection of a kind holding a body and no
--- contact_summary row, for a summary repair.
-SELECT i.collection, i.link_id, i.object_hash FROM items i
+-- summary row, for a summary repair.
+SELECT i.collection, i.link_id, o.hash FROM items i
 JOIN collections c ON c.id = i.collection
-LEFT JOIN contact_summary s ON s.item = i.id
-WHERE c.kind = :kind AND i.object_hash IS NOT NULL AND s.item IS NULL;
+JOIN objects o ON o.id = i.object
+LEFT JOIN summary s ON s.item = i.id
+WHERE c.kind = :kind AND s.item IS NULL;

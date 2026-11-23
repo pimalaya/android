@@ -353,10 +353,12 @@ public class PimdirDbTest {
         seed("home/Contacts", "home", "text/vcard", "uid-alice", 1);
         db.execSQL("INSERT INTO objects(hash, size, refcount) VALUES(?, 3, 2)",
                 new Object[] {hash});
-        db.execSQL("UPDATE items SET object_hash = ?", new Object[] {hash});
+        db.execSQL(
+                "UPDATE items SET object = (SELECT id FROM objects WHERE hash = ?)",
+                new Object[] {hash});
 
         try (Cursor cursor =
-                db.rawQuery("SELECT count(*), count(DISTINCT object_hash) FROM items", null)) {
+                db.rawQuery("SELECT count(*), count(DISTINCT object) FROM items", null)) {
             assertTrue(cursor.moveToFirst());
             assertEquals(2, cursor.getInt(0));
             assertEquals(1, cursor.getInt(1));
@@ -520,7 +522,7 @@ public class PimdirDbTest {
                                 + " read_version, produce_version FROM store_meta",
                         null)) {
             assertTrue(cursor.moveToFirst());
-            assertEquals("storage-draft-15", cursor.getString(0));
+            assertEquals("storage-draft-17", cursor.getString(0));
             assertTrue(cursor.getString(1), cursor.getString(1).matches("[0-9a-f]{32}"));
             assertEquals(1, cursor.getInt(2));
             assertEquals(PimdirSql.identity().optLong("derivation"), cursor.getLong(3));
@@ -630,8 +632,8 @@ public class PimdirDbTest {
         canonical.execSQL(
                 "INSERT INTO items(collection, link_id, seq, level) VALUES('INBOX', 'm1', 1, 1)");
         canonical.execSQL(
-                "INSERT INTO mail_summary(item, subject, invitation)"
-                        + " SELECT id, 'one', 'e1' FROM items"
+                "INSERT INTO summary(item, component, title, invitation)"
+                        + " SELECT id, 'mail', 'one', 'e1' FROM items"
                         + " WHERE collection = 'INBOX' AND link_id = 'm1'");
         canonical.setVersion(PimdirSql.version());
         canonical.close();
@@ -642,10 +644,12 @@ public class PimdirDbTest {
         db = store.getWritableDatabase();
         PimdirDb.exec(
                 db,
-                "UPSERT_MAIL_SUMMARY",
-                PimdirSql.values("collection", "INBOX", "link_id", "m1", "subject", "two"));
+                "UPSERT_SUMMARY",
+                PimdirSql.values(
+                        "collection", "INBOX", "link_id", "m1", "component", "mail",
+                        "title", "two"));
         try (Cursor cursor =
-                db.rawQuery("SELECT subject, invitation FROM mail_summary", null)) {
+                db.rawQuery("SELECT title, invitation FROM summary", null)) {
             assertTrue(cursor.moveToFirst());
             assertEquals("two", cursor.getString(0));
             assertEquals("an unknown invitation keeps the known one", "e1", cursor.getString(1));

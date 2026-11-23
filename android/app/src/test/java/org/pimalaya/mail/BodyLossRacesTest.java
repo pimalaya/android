@@ -95,6 +95,9 @@ public class BodyLossRacesTest {
         }
     }
 
+    /** The column an item's body reads as, its hash (STORAGE §5). */
+    private static final String BODY = "(SELECT o.hash FROM objects o WHERE o.id = items.object)";
+
     private String item(String column, String linkId) {
         return text(
                 "SELECT " + column + " FROM items WHERE collection = ? AND link_id = ?",
@@ -112,22 +115,21 @@ public class BodyLossRacesTest {
         storage.applyWrites(new JSONArray().put(listed("m1", unread, flagsBase(unread))));
 
         fixtures.putObject(inbox, "m1", SOURCE);
-        String hash = item("object_hash", "m1");
+        String hash = item(BODY, "m1");
         assertEquals("2", item("level", "m1"));
 
         JSONArray seen = new JSONArray().put(Flags.Marker.SEEN.wire());
         storage.applyWrites(new JSONArray().put(listed("m1", seen, flagsBase(seen))));
 
         assertEquals("still full", "2", item("level", "m1"));
-        assertEquals("the body kept", hash, item("object_hash", "m1"));
+        assertEquals("the body kept", hash, item(BODY, "m1"));
         assertEquals("1", refcount(hash));
         assertTrue("its file kept", blobs.has(hash));
         assertEquals(
                 "the markers written",
                 "\\Seen",
                 text("SELECT trim(CASE WHEN marks & 1 THEN '\\Seen ' ELSE '' END"
-                        + " || coalesce((SELECT group_concat(flag, ' ') FROM placement_flag"
-                        + " WHERE item = items.id), '')) FROM items"
+                        + " || keywords) FROM items"
                         + " WHERE collection = ? AND link_id = ?", inbox, "m1"));
     }
 
@@ -153,9 +155,9 @@ public class BodyLossRacesTest {
         storage.applyWrites(new JSONArray().put(listed("m1", flagged, flagsBase(flagged))));
 
         assertEquals("2", item("level", "m1"));
-        assertEquals(hash, item("object_hash", "m1"));
+        assertEquals(hash, item(BODY, "m1"));
         assertEquals("the base kept", hash,
-                text("SELECT base_object FROM bindings WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = 'm1')",
+                text("SELECT (SELECT o.hash FROM objects o WHERE o.id = bindings.base_object) FROM bindings WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = 'm1')",
                         inbox));
         assertEquals("item, base and the shared body still", "3", refcount(hash));
         assertTrue(blobs.has(hash));
@@ -191,7 +193,7 @@ public class BodyLossRacesTest {
                         .put(listed("m1", none, flagsBase(none)))
                         .put(listed("m2", none, flagsBase(none))));
         fixtures.putObject(inbox, "m1", SOURCE);
-        String hash = item("object_hash", "m1");
+        String hash = item(BODY, "m1");
 
         PimdirItems.pin(pimdir, hash);
         File fetched = File.createTempFile("fetched", ".eml");
@@ -247,7 +249,7 @@ public class BodyLossRacesTest {
         }
 
         assertEquals("still meta", "1", item("level", "m1"));
-        assertNull(item("object_hash", "m1"));
+        assertNull(item(BODY, "m1"));
         assertNull(refcount(hash));
     }
 }

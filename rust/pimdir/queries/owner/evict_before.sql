@@ -1,4 +1,4 @@
--- Fork of EVICT_BEFORE (sha256 763d1eb3bd08b9ee) for SQLite 3.18:
+-- Fork of EVICT_BEFORE (sha256 148355ea2348bdde) for SQLite 3.18:
 -- `RETURNING` (3.35) as a read of the rows, then their delete under the same
 -- predicate, in one transaction.
 --
@@ -10,18 +10,18 @@
 -- pending create), a binding of it is a delivered create's, based under a
 -- provisional handle no listing has named yet (SYNC.md §5), its flags differ
 -- from a binding's base flags, both known (an unpushed flag change), or a
--- person's reference names it, which no relisting restores; such an item
--- stays. The two sets differ by a system flag's bit or by a row either holds
--- and the other lacks, each direction an anti-join on the other's key, so no
--- set is gathered to be compared. An unknown `date` is never older. No
--- tombstone and no push: the remote keeps every member, and a widening
--- relists them. Retained rows are the purge's, not this. The cascade drops
--- pins no statement returns, so recompute_refcounts follows in the same
--- transaction; the delete trigger counts each row in `purges` (§4.5). Returns
--- the seqs evicted.
+-- person's reference names it, or its seq holds a property (§4.3), neither
+-- of which a relisting restores; such an item stays. The two sets differ by
+-- a system flag's bit or by their other flags' texts, which their writers
+-- sort, so no set is gathered to be compared. An unknown `date` is never
+-- older. No tombstone and no push: the remote keeps every member, and a
+-- widening relists them. Retained rows are the purge's, not this. The
+-- cascade drops pins no statement returns, so recompute_refcounts follows in
+-- the same transaction; the delete trigger counts each row in `purges`
+-- (§4.5). Returns the seqs evicted.
 SELECT seq FROM items
 WHERE collection = :collection AND deleted = 0 AND conflicted = 0
-  AND id IN (SELECT item FROM mail_summary WHERE date < :before)
+  AND id IN (SELECT item FROM summary WHERE date < :before)
   AND EXISTS (SELECT 1 FROM bindings b
               WHERE b.item = items.id)
   AND NOT EXISTS (SELECT 1 FROM bindings b
@@ -31,25 +31,15 @@ WHERE collection = :collection AND deleted = 0 AND conflicted = 0
                          OR substr(b.handle, 1, 1) = char(1)
                          OR (items.flags_known = 1 AND b.base_flags_known = 1
                              AND (items.marks != b.base_marks
-                                  OR EXISTS (SELECT 1 FROM placement_flag f
-                                             WHERE f.item = items.id
-                                               AND NOT EXISTS (SELECT 1 FROM binding_base_flag g
-                                                               WHERE g.item = b.item
-                                                                 AND g.source = b.source
-                                                                 AND g.flag = f.flag))
-                                  OR EXISTS (SELECT 1 FROM binding_base_flag g
-                                             WHERE g.item = b.item
-                                               AND g.source = b.source
-                                               AND NOT EXISTS (SELECT 1 FROM placement_flag f
-                                                               WHERE f.item = items.id
-                                                                 AND f.flag = g.flag))))))
+                                  OR items.keywords != b.base_keywords))))
   AND NOT EXISTS (SELECT 1 FROM item_reference r
                   WHERE r.origin = 'user'
                     AND ((r.from_link_id = items.link_id AND r.from_kind = 'message/rfc822')
-                         OR (r.to_link_id = items.link_id AND r.to_kind = 'message/rfc822')));
+                         OR (r.to_link_id = items.link_id AND r.to_kind = 'message/rfc822')))
+  AND NOT EXISTS (SELECT 1 FROM item_property p WHERE p.seq = items.seq);
 DELETE FROM items
 WHERE collection = :collection AND deleted = 0 AND conflicted = 0
-  AND id IN (SELECT item FROM mail_summary WHERE date < :before)
+  AND id IN (SELECT item FROM summary WHERE date < :before)
   AND EXISTS (SELECT 1 FROM bindings b
               WHERE b.item = items.id)
   AND NOT EXISTS (SELECT 1 FROM bindings b
@@ -59,19 +49,9 @@ WHERE collection = :collection AND deleted = 0 AND conflicted = 0
                          OR substr(b.handle, 1, 1) = char(1)
                          OR (items.flags_known = 1 AND b.base_flags_known = 1
                              AND (items.marks != b.base_marks
-                                  OR EXISTS (SELECT 1 FROM placement_flag f
-                                             WHERE f.item = items.id
-                                               AND NOT EXISTS (SELECT 1 FROM binding_base_flag g
-                                                               WHERE g.item = b.item
-                                                                 AND g.source = b.source
-                                                                 AND g.flag = f.flag))
-                                  OR EXISTS (SELECT 1 FROM binding_base_flag g
-                                             WHERE g.item = b.item
-                                               AND g.source = b.source
-                                               AND NOT EXISTS (SELECT 1 FROM placement_flag f
-                                                               WHERE f.item = items.id
-                                                                 AND f.flag = g.flag))))))
+                                  OR items.keywords != b.base_keywords))))
   AND NOT EXISTS (SELECT 1 FROM item_reference r
                   WHERE r.origin = 'user'
                     AND ((r.from_link_id = items.link_id AND r.from_kind = 'message/rfc822')
-                         OR (r.to_link_id = items.link_id AND r.to_kind = 'message/rfc822')));
+                         OR (r.to_link_id = items.link_id AND r.to_kind = 'message/rfc822')))
+  AND NOT EXISTS (SELECT 1 FROM item_property p WHERE p.seq = items.seq);

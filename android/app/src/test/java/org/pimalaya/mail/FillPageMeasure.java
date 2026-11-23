@@ -47,8 +47,7 @@ public class FillPageMeasure {
             List.of(
                     "items_stamp_insert",
                     "items_stamp_update",
-                    "items_stamp_request",
-                    "placement_flag_stamp_insert");
+                    "items_stamp_request");
 
     @Test
     public void aFillPageWithTheStampTriggers() throws Exception {

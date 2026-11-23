@@ -4,6 +4,6 @@
 -- siblings read by a seek (`holding`), read here for every card at once.
 SELECT p.collection, p.seq, o.tel, o.adr, o.bday, o.photo
 FROM placement p
-JOIN object o ON o.hash = p.hash
+JOIN object o ON o.id = p.object
 WHERE p.collection IN (SELECT id FROM store.collections WHERE kind = 'text/vcard')
 ORDER BY p.collection, p.seq;

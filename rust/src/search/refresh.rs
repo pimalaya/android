@@ -7,7 +7,7 @@
 //! opens before and commits after, so a refresh commits in chunks of at
 //! most a batch of the feed and a query waits at most one of them.
 //!
-//! The writes key a body's text, categories and chunks on its hash and a
+//! The writes key a body's text and categories on its hash and a
 //! summary's text on its placement's key rather than on an id a statement
 //! returns, so a run's writes go out in one round.
 
@@ -708,18 +708,6 @@ fn write(batch: &mut Batch, op: PimdirIndexOp) -> Result<(), BridgeError> {
             let mut values = fields(&object.text);
             values.push((":hash", hash.clone()));
             batch.add("PUT_OBJECT_TEXT", &values)?;
-            for (ord, chunk) in object.chunks.iter().enumerate() {
-                batch.add(
-                    "PUT_CHUNK",
-                    &[
-                        (":hash", hash.clone()),
-                        (":ord", (ord as i64).into()),
-                        (":field", chunk.field.into()),
-                        (":start", (chunk.range.start as i64).into()),
-                        (":end", (chunk.range.end as i64).into()),
-                    ],
-                )?;
-            }
         }
         PimdirIndexOp::DropObject(hash) => {
             let values = [(":hash", Value::from(&hash.0))];
@@ -813,25 +801,7 @@ fn write(batch: &mut Batch, op: PimdirIndexOp) -> Result<(), BridgeError> {
             batch.add("UNPARENT_MESSAGES", &values)?;
             batch.add("PRUNE_MESSAGES", &values)?;
         }
-        PimdirIndexOp::PutThread {
-            id,
-            first,
-            last,
-            count,
-        } => {
-            batch.add(
-                "UPSERT_THREAD",
-                &[
-                    (":id", id.into()),
-                    (":first", first.into()),
-                    (":last", last.into()),
-                    (":count", (count as i64).into()),
-                ],
-            )?;
-        }
-        PimdirIndexOp::DropThread(id) => {
-            batch.add("DELETE_THREAD", &[(":id", id.into())])?;
-        }
+        PimdirIndexOp::PutThread { .. } | PimdirIndexOp::DropThread(_) => {}
         PimdirIndexOp::SetCursor {
             store_change,
             store_purges,

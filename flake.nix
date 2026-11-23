@@ -374,15 +374,16 @@
         # The pimdir spec io-pimdir vendors, whose vectors the published
         # crate leaves out: the Rust and Java tests read it from
         # PIMALAYA_IO_PIMDIR_SPEC (rust/src/offline.rs, PimdirVectors.java).
-        # Pinned to the tag of the version rust/Cargo.lock locks; bump both
-        # together, the shell warns while they differ.
-        ioPimdirVersion = "0.19.1";
+        # Pinned to the git revision rust/Cargo.lock locks while the crate
+        # is taken from git (rust/Cargo.toml's patch); bump both together,
+        # the shell warns while they differ.
+        ioPimdirRev = "cc3021bbd0d08506f1ea55b24603dd92f9496b92";
         ioPimdirSpec =
           pkgs.fetchFromGitHub {
             owner = "pimalaya";
             repo = "io-pimdir";
-            rev = "v${ioPimdirVersion}";
-            sha256 = "15vmamm0yf9scva4mi7b6b64i06kfwl6scmfgy1s843i825w8mfv";
+            rev = ioPimdirRev;
+            sha256 = "1vqwid7daad757vfb4fh0iihi8nrqmlbbkiimd978hhz3rph2jjw";
           }
           + "/spec";
         ioPimdirLocked =
@@ -390,10 +391,10 @@
             blocks = builtins.filter builtins.isString (
               builtins.split "\n\n" (builtins.readFile ./rust/Cargo.lock)
             );
-            pattern = "[[][[]package]]\nname = \"io-pimdir\"\nversion = \"([^\"]*)\"(\n.*)?";
+            pattern = "[[][[]package]]\nname = \"io-pimdir\"\nversion = \"[^\"]*\"\nsource = \"git[+][^#\"]*#([0-9a-f]*)\"(\n.*)?";
             found = builtins.filter (m: m != null) (map (builtins.match pattern) blocks);
           in
-          builtins.head (builtins.head found);
+          if found == [ ] then "none" else builtins.head (builtins.head found);
 
       in
       {
@@ -438,13 +439,13 @@
           ''
           + (
             # NOTE: a spec set before entering (a working tree's) wins.
-            if ioPimdirLocked == ioPimdirVersion then
+            if ioPimdirLocked == ioPimdirRev then
               ''
                 export PIMALAYA_IO_PIMDIR_SPEC="''${PIMALAYA_IO_PIMDIR_SPEC:-${ioPimdirSpec}}"
               ''
             else
               ''
-                echo "flake.nix pins io-pimdir ${ioPimdirVersion}, rust/Cargo.lock locks ${ioPimdirLocked}: no spec vectors" >&2
+                echo "flake.nix pins io-pimdir ${ioPimdirRev}, rust/Cargo.lock locks ${ioPimdirLocked}: no spec vectors" >&2
               ''
           );
         };

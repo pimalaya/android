@@ -272,9 +272,10 @@ public class CalendarMirrorTest {
         try (Cursor cursor =
                 items.readable()
                         .rawQuery(
-                                "SELECT link_id, object_hash FROM items"
+                                "SELECT link_id, (SELECT o.hash FROM objects o WHERE o.id = items.object)"
+                                        + " FROM items"
                                         + " WHERE collection = ? AND deleted = 0"
-                                        + " AND retained_at IS NULL AND object_hash IS NOT NULL",
+                                        + " AND retained_at IS NULL AND object IS NOT NULL",
                                 new String[] {COLLECTION})) {
             while (cursor.moveToNext()) {
                 bodies.put(cursor.getString(0), items.body(cursor.getString(1)));

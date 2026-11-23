@@ -1,7 +1,9 @@
 -- A collection's staged removals of cards live elsewhere on its account,
 -- each with every body this source agreed for the card there, and the body
 -- of the create a move superseding it carries.
-SELECT b.handle, b.base_revision, o.base_object FROM items i
+-- Each body by its hash.
+SELECT b.handle, b.base_revision, (SELECT x.hash FROM objects x WHERE x.id = o.base_object)
+FROM items i
 JOIN collections c ON c.id = i.collection
 JOIN bindings b ON b.item = i.id AND b.source = :source AND b.base_present = 1
 JOIN items n ON n.link_id = i.link_id
@@ -16,10 +18,11 @@ WHERE i.collection = :collection AND i.deleted = 1 AND i.retained_at IS NULL
                 AND l.deleted = 0 AND l.retained_at IS NULL
                 AND lc.account = c.account AND lc.kind = c.kind)
 UNION
-SELECT b.handle, b.base_revision, n.object_hash FROM items i
+SELECT b.handle, b.base_revision, (SELECT x.hash FROM objects x WHERE x.id = n.object)
+FROM items i
 JOIN bindings b ON b.item = i.id AND b.source = :source AND b.base_present = 1
 JOIN supersessions s ON s.item = i.id
 JOIN items n ON n.id = s.by_item
 WHERE i.collection = :collection AND i.deleted = 1 AND i.retained_at IS NULL
-  AND n.deleted = 0 AND n.retained_at IS NULL AND n.object_hash IS NOT NULL
+  AND n.deleted = 0 AND n.retained_at IS NULL AND n.object IS NOT NULL
 ORDER BY 1;

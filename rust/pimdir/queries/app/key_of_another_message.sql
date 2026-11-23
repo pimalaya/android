@@ -6,11 +6,11 @@
 -- agreeing with one holding none alone. The body then records no stand-in
 -- and no `attachment` reference. One disagreeing holder is enough.
 SELECT 1 FROM items own
-LEFT JOIN mail_summary mine ON mine.item = own.id
+LEFT JOIN summary mine ON mine.item = own.id AND mine.component = 'mail'
 JOIN items i ON i.link_id = own.link_id AND i.id <> own.id
 JOIN collections c ON c.id = i.collection AND c.account IS :account
-LEFT JOIN mail_summary m ON m.item = i.id
+LEFT JOIN summary m ON m.item = i.id AND m.component = 'mail'
 WHERE own.collection = :collection AND own.link_id = :link_id
-  AND i.object_hash IS NOT NULL AND i.object_hash IS NOT own.object_hash
-  AND NOT (m.subject IS mine.subject AND m.date IS mine.date AND m.sender IS mine.sender)
+  AND i.object IS NOT NULL AND i.object IS NOT own.object
+  AND NOT (m.title IS mine.title AND m.date IS mine.date AND m.sender IS mine.sender)
 LIMIT 1;

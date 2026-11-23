@@ -258,61 +258,61 @@ public class MailClientTest {
     /** The summary each message of the corpus describes to, as text. */
     private static final List<String> SUMMARIES =
             List.of(
-                    "{\"mail\":{\"addresses\":[{\"address\":\"alice@example.org\","
-                            + "\"name\":\"Alice Martin\",\"position\":0,\"role\":\"from\"},{"
-                            + "\"address\":\"bob@example.org\",\"position\":0,\"role\":\"to\""
-                            + "}],\"attachment\":false,\"date\":\"2026-01-06T08:30:00Z\",\"in"
-                            + "_reply_to\":[],\"message_id\":\"plain@example.org\",\"sender\""
-                            + ":\"alice@example.org\",\"sender_name\":\"Alice Martin\",\"size"
-                            + "\":210,\"subject\":\"Lunch\"}}",
-                    "{\"mail\":{\"addresses\":[{\"address\":\"jane@example.org\",\""
-                            + "name\":\"Doe, Jane\",\"position\":0,\"role\":\"from\"},{\"addr"
-                            + "ess\":\"bob@example.org\",\"name\":\"Bob\",\"position\":0,\"ro"
-                            + "le\":\"to\"},{\"address\":\"carol@example.org\",\"position\":1"
-                            + ",\"role\":\"to\"},{\"address\":\"dan@example.org\",\"name\":\""
-                            + "Dan\",\"position\":0,\"role\":\"cc\"}],\"attachment\":false,\""
-                            + "date\":\"2026-01-07T23:00:00Z\",\"in_reply_to\":[],\"sender\":"
-                            + "\"jane@example.org\",\"sender_name\":\"Doe, Jane\",\"size\":39"
-                            + "0,\"subject\":\"Agenda\"}}",
-                    "{\"mail\":{\"addresses\":[{\"address\":\"billing@example.org\""
-                            + ",\"position\":0,\"role\":\"from\"},{\"address\":\"bob@example."
-                            + "org\",\"position\":0,\"role\":\"to\"}],\"attachment\":true,\"d"
-                            + "ate\":\"2026-01-08T10:00:00Z\",\"in_reply_to\":[],\"sender\":"
-                            + "\"billing@example.org\",\"size\":611,\"subject\":\"Invoice\"}}",
-                    "{\"mail\":{\"addresses\":[{\"address\":\"news@example.org\",\""
-                            + "position\":0,\"role\":\"from\"},{\"address\":\"bob@example.org"
-                            + "\",\"position\":0,\"role\":\"to\"}],\"attachment\":false,\"dat"
-                            + "e\":\"2026-01-09T07:00:00Z\",\"in_reply_to\":[],\"sender\":\"n"
-                            + "ews@example.org\",\"size\":378,\"subject\":\"Newsletter\"}}",
-                    "{\"mail\":{\"addresses\":[{\"address\":\"rene@example.fr\",\"n"
-                            + "ame\":\"René Dupré\",\"position\":0,\"role\":\"from\"},{\"addr"
-                            + "ess\":\"elodie@example.fr\",\"name\":\"Élodie\",\"position\":0"
-                            + ",\"role\":\"to\"},{\"address\":\"x@example.fr\",\"position\":1"
-                            + ",\"role\":\"to\"},{\"address\":\"zh@example.ch\",\"name\":\"Zü"
-                            + "rich\",\"position\":0,\"role\":\"cc\"}],\"attachment\":false,"
-                            + "\"date\":\"2026-01-10T10:00:00Z\",\"in_reply_to\":[],\"sender"
-                            + "\":\"rene@example.fr\",\"sender_name\":\"René Dupré\",\"size\""
-                            + ":357,\"subject\":\"Café et crème\"}}",
-                    "{\"mail\":{\"addresses\":[{\"address\":\"alice@example.org\","
-                            + "\"name\":\"Alice\",\"position\":0,\"role\":\"from\"},{\"addres"
-                            + "s\":\"bob@example.org\",\"position\":0,\"role\":\"to\"}],\"att"
-                            + "achment\":true,\"date\":\"2026-01-11T08:00:00Z\",\"in_reply_to"
-                            + "\":[],\"invitation\":\"ev-1\",\"message_id\":\"inv@example.org"
-                            + "\",\"sender\":\"alice@example.org\",\"sender_name\":\"Alice\","
-                            + "\"size\":656,\"subject\":\"Review\"}}",
-                    "{\"mail\":{\"addresses\":[{\"address\":\"bob@example.org\",\"p"
-                            + "osition\":0,\"role\":\"from\"},{\"address\":\"carol@example.or"
-                            + "g\",\"position\":0,\"role\":\"to\"}],\"attachment\":true,\"dat"
-                            + "e\":\"2026-01-12T10:00:00Z\",\"in_reply_to\":[],\"sender\":\"b"
-                            + "ob@example.org\",\"size\":375,\"subject\":\"Fwd: Lunch\"}}",
-                    "{\"mail\":{\"addresses\":[],\"attachment\":false,\"in_reply_to"
-                            + "\":[],\"size\":15,\"subject\":\"\"}}",
-                    "{\"mail\":{\"addresses\":[],\"attachment\":false,\"in_reply_to"
-                            + "\":[],\"size\":133,\"subject\":\"Broken\"}}",
-                    "{\"mail\":{\"addresses\":[],\"attachment\":false,\"in_reply_to"
-                            + "\":[],\"size\":0,\"subject\":\"\"}}",
-                    "{\"mail\":{\"addresses\":[],\"attachment\":false,\"in_reply_to"
-                            + "\":[],\"size\":8,\"subject\":\"\"}}");
+                    "{\"attachment\":false,\"component\":\"mail\",\"date\":\"2026-0"
+                            + "1-06T08:30:00Z\",\"sender\":\"alice@example.org\",\"sender_nam"
+                            + "e\":\"Alice Martin\",\"size\":210,\"title\":\"Lunch\",\"uid\":"
+                            + "\"plain@example.org\",\"values\":[{\"name\":\"Alice Martin\","
+                            + "\"position\":0,\"role\":\"from\",\"value\":\"alice@example.org"
+                            + "\"},{\"position\":0,\"role\":\"to\",\"value\":\"bob@example.org"
+                            + "\"}]}",
+                    "{\"attachment\":false,\"component\":\"mail\",\"date\":\"2026-0"
+                            + "1-07T23:00:00Z\",\"sender\":\"jane@example.org\",\"sender_name"
+                            + "\":\"Doe, Jane\",\"size\":390,\"title\":\"Agenda\",\"values\":"
+                            + "[{\"name\":\"Doe, Jane\",\"position\":0,\"role\":\"from\",\"va"
+                            + "lue\":\"jane@example.org\"},{\"name\":\"Bob\",\"position\":0,"
+                            + "\"role\":\"to\",\"value\":\"bob@example.org\"},{\"position\":1,"
+                            + "\"role\":\"to\",\"value\":\"carol@example.org\"},{\"name\":\"D"
+                            + "an\",\"position\":0,\"role\":\"cc\",\"value\":\"dan@example.or"
+                            + "g\"}]}",
+                    "{\"attachment\":true,\"component\":\"mail\",\"date\":\"2026-01"
+                            + "-08T10:00:00Z\",\"sender\":\"billing@example.org\",\"size\":61"
+                            + "1,\"title\":\"Invoice\",\"values\":[{\"position\":0,\"role\":"
+                            + "\"from\",\"value\":\"billing@example.org\"},{\"position\":0,\"r"
+                            + "ole\":\"to\",\"value\":\"bob@example.org\"}]}",
+                    "{\"attachment\":false,\"component\":\"mail\",\"date\":\"2026-0"
+                            + "1-09T07:00:00Z\",\"sender\":\"news@example.org\",\"size\":378,"
+                            + "\"title\":\"Newsletter\",\"values\":[{\"position\":0,\"role\":"
+                            + "\"from\",\"value\":\"news@example.org\"},{\"position\":0,\"rol"
+                            + "e\":\"to\",\"value\":\"bob@example.org\"}]}",
+                    "{\"attachment\":false,\"component\":\"mail\",\"date\":\"2026-0"
+                            + "1-10T10:00:00Z\",\"sender\":\"rene@example.fr\",\"sender_name"
+                            + "\":\"René Dupré\",\"size\":357,\"title\":\"Café et crème\",\"va"
+                            + "lues\":[{\"name\":\"René Dupré\",\"position\":0,\"role\":\"fro"
+                            + "m\",\"value\":\"rene@example.fr\"},{\"name\":\"Élodie\",\"posi"
+                            + "tion\":0,\"role\":\"to\",\"value\":\"elodie@example.fr\"},{\"p"
+                            + "osition\":1,\"role\":\"to\",\"value\":\"x@example.fr\"},{\"nam"
+                            + "e\":\"Zürich\",\"position\":0,\"role\":\"cc\",\"value\":\"zh@e"
+                            + "xample.ch\"}]}",
+                    "{\"attachment\":true,\"component\":\"mail\",\"date\":\"2026-01"
+                            + "-11T08:00:00Z\",\"invitation\":\"ev-1\",\"sender\":\"alice@exa"
+                            + "mple.org\",\"sender_name\":\"Alice\",\"size\":656,\"title\":\""
+                            + "Review\",\"uid\":\"inv@example.org\",\"values\":[{\"name\":\"A"
+                            + "lice\",\"position\":0,\"role\":\"from\",\"value\":\"alice@exam"
+                            + "ple.org\"},{\"position\":0,\"role\":\"to\",\"value\":\"bob@exa"
+                            + "mple.org\"}]}",
+                    "{\"attachment\":true,\"component\":\"mail\",\"date\":\"2026-01"
+                            + "-12T10:00:00Z\",\"sender\":\"bob@example.org\",\"size\":375,\""
+                            + "title\":\"Fwd: Lunch\",\"values\":[{\"position\":0,\"role\":\""
+                            + "from\",\"value\":\"bob@example.org\"},{\"position\":0,\"role\""
+                            + ":\"to\",\"value\":\"carol@example.org\"}]}",
+                    "{\"attachment\":false,\"component\":\"mail\",\"size\":15,\"tit"
+                            + "le\":\"\",\"values\":[]}",
+                    "{\"attachment\":false,\"component\":\"mail\",\"size\":133,\"ti"
+                            + "tle\":\"Broken\",\"values\":[]}",
+                    "{\"attachment\":false,\"component\":\"mail\",\"size\":0,\"titl"
+                            + "e\":\"\",\"values\":[]}",
+                    "{\"attachment\":false,\"component\":\"mail\",\"size\":8,\"titl"
+                            + "e\":\"\",\"values\":[]}");
 
     private File file(int index) throws Exception {
         File file = folder.newFile();
@@ -723,6 +723,7 @@ public class MailClientTest {
                         + "\"historyId\":\"s42\",\"items\":[{\"flags\":[\"\\\\Seen\"],"
                         + "\"handle\":\"e1\",\"linkId\":\"e1\",\"mailboxes\":[\"INBOX\",\"Clients\"],"
                         + "\"path\":\"/d/e1\",\"received\":1767690000000,\"size\":120,"
+                        + "\"serverObjectId\":\"e1\","
                         + "\"sortKey\":\"2026-01-06T08:30:00Z\",\"summary\":{\"subject\":\"Lunch\"}},"
                         + "{\"flags\":[],\"handle\":\"e2\",\"linkId\":\"e2\",\"mailboxes\":[\"INBOX\"],"
                         + "\"path\":\"/d/e2\",\"received\":null,\"size\":0}]}";
@@ -766,9 +767,9 @@ public class MailClientTest {
     private static final String ROUND =
             "{\"complete\":true,\"cursor\":\"7:8\",\"items\":[{\"flags\":[\"\\\\Seen\"],"
                     + "\"handle\":\"7\",\"linkId\":\"m1@example.org\","
-                    + "\"sortKey\":\"2026-10-01T08:00:00Z\","
-                    + "\"summary\":{\"mail\":{\"addresses\":[],\"date\":\"2026-10-01T08:00:00Z\","
-                    + "\"in_reply_to\":[],\"message_id\":\"m1@example.org\",\"subject\":\"Hi\"}}},"
+                    + "\"serverObjectId\":\"7\",\"sortKey\":\"2026-10-01T08:00:00Z\","
+                    + "\"summary\":{\"component\":\"mail\",\"date\":\"2026-10-01T08:00:00Z\","
+                    + "\"title\":\"Hi\",\"uid\":\"m1@example.org\",\"values\":[]}},"
                     + "{\"flags\":[],\"handle\":\"8\"}],\"last\":false,"
                     + "\"vanished\":[]}";
 
@@ -793,9 +794,8 @@ public class MailClientTest {
         assertEquals("7", named.handle());
         assertEquals("m1@example.org", named.linkId());
         assertEquals("2026-10-01T08:00:00Z", named.sortKey());
-        assertEquals(
-                "m1@example.org",
-                named.summary().getJSONObject("mail").getString("message_id"));
+        assertEquals("7", named.serverObjectId());
+        assertEquals("m1@example.org", named.summary().getString("uid"));
         Named bare = round.items().get(1);
         assertEquals("absent reads empty, as optString did", "", bare.sortKey());
         assertEquals("named by the driver", null, bare.linkId());

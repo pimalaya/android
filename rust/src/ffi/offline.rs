@@ -39,7 +39,7 @@ use crate::{
         blobs::{self, Filed},
         merge, shape, store,
         summary::SummaryJson,
-        wire::sorted,
+        wire::{self, sorted},
     },
 };
 
@@ -317,6 +317,29 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirHash<'local>(
     .resolve::<ErrorReply>()
 }
 
+/// `Native.pimdirFlags`: the columns a whole flag set, a JSON array, is
+/// written as (STORAGE §13), `{"marks", "keywords"}`, or `{"error"}` for a
+/// flag the store cannot hold. Pure.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_pimdirFlags<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    flags: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let flags = read_string(env, &flags);
+        let json = match serde_json::from_str::<Vec<String>>(&flags)
+            .map_err(|err| format!("Invalid flag list: {err}"))
+            .and_then(wire::flag_columns)
+        {
+            Ok(columns) => to_string(&columns).unwrap_or_default(),
+            Err(err) => error_json(err),
+        };
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
 /// `Native.pimdirHashFile`: the name of a file's bytes, read whole a buffer
 /// at a time; answers `{"hash"}`, or `{"error"}` when it cannot be read.
 #[unsafe(no_mangle)]
@@ -367,11 +390,16 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirCheck<'local>(
             Err(err) => error_json(format!("Unreadable store facts: {err}")),
             Ok(facts) => match store::check(&facts) {
                 Ok(()) => "{}".to_string(),
-                Err(refusal) => serde_json::json!({
-                    "refused": refusal.code,
-                    "detail": refusal.detail,
-                })
-                .to_string(),
+                Err(refusal) => {
+                    let mut json = serde_json::json!({
+                        "refused": refusal.code,
+                        "detail": refusal.detail,
+                    });
+                    if let Some(order) = refusal.order {
+                        json["order"] = order.into();
+                    }
+                    json.to_string()
+                }
             },
         };
         Ok(env.new_string(json)?.into())
@@ -636,8 +664,8 @@ mod tests {
                    VALUES('INBOX', 'a', 'message/rfc822', 'INBOX');
                  INSERT INTO items(collection, link_id, seq, level)
                    VALUES('INBOX', 'm1', 1, 1);
-                 INSERT INTO mail_summary(item, subject)
-                   VALUES((SELECT id FROM items WHERE link_id = 'm1'), 'one');",
+                 INSERT INTO summary(item, component, title)
+                   VALUES((SELECT id FROM items WHERE link_id = 'm1'), 'mail', 'one');",
             )
             .unwrap();
         newer
@@ -652,8 +680,8 @@ mod tests {
                  SELECT sqlite_version();
                  PRAGMA journal_mode;
                  SELECT format_version FROM store_meta;
-                 UPDATE mail_summary SET subject = 'two';
-                 SELECT subject FROM mail_summary;
+                 UPDATE summary SET title = 'two';
+                 SELECT title FROM summary;
                  PRAGMA integrity_check;
                  PRAGMA foreign_key_check;",
             )
@@ -666,7 +694,7 @@ mod tests {
         );
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            format!("{FLOOR}\nwal\nstorage-draft-15\ntwo\nok\n"),
+            format!("{FLOOR}\nwal\nstorage-draft-17\ntwo\nok\n"),
         );
     }
 }

@@ -85,6 +85,9 @@ public class MailMoveTest {
         /** The page a mailbox lists, by name, else {@link #listed} as a round. */
         final Map<String, JSONObject> pages = new HashMap<>();
 
+        /** The UID a relocation of a handle states it took ({@code COPYUID}). */
+        final Map<String, String> copyUids = new HashMap<>();
+
         /** The account's driver, on this server. */
         final MailEngine engine;
 
@@ -122,9 +125,10 @@ public class MailMoveTest {
         }
 
         @Override
-        public void relocate(MailSession session, MessageRef message, String target) {
+        public String relocate(MailSession session, MessageRef message, String target) {
             refuseGone(message.id());
             calls.add("relocate " + message.mailbox() + " " + message.id() + " " + target);
+            return copyUids.get(message.id());
         }
 
         @Override
@@ -261,7 +265,7 @@ public class MailMoveTest {
         assertEquals("the target holds it, live", "0",
                 scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '42'", trash));
         assertEquals("with the summary the store holds of it", "Hello",
-                scalar("SELECT subject FROM mail_summary WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = '42')",
+                scalar("SELECT title FROM summary WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = '42')",
                         trash));
 
         List<MailStore.StoredMessage> rows = MailFixtures.merged(store, 10);
@@ -336,7 +340,7 @@ public class MailMoveTest {
                 PimdirSummary.mail(
                         "m9@example.org", "Offset", "", "a@example.org", null,
                         "2026-10-07T08:00:00Z", 12, false);
-        summary.getJSONObject("mail").put("date", "2026-10-07T10:00:00+02:00");
+        summary.put("date", "2026-10-07T10:00:00+02:00");
 
         stager().mutateAdd(
                 sent,
@@ -347,9 +351,9 @@ public class MailMoveTest {
                 "2026-10-07T08:00:00Z");
 
         String row =
-                "FROM mail_summary WHERE item = (SELECT id FROM items"
+                "FROM summary WHERE item = (SELECT id FROM items"
                         + " WHERE collection = ? AND link_id = 'm9@example.org')";
-        assertEquals("Offset", scalar("SELECT subject " + row, sent));
+        assertEquals("Offset", scalar("SELECT title " + row, sent));
         assertNull("no date of another shape", scalar("SELECT date " + row, sent));
     }
 
@@ -385,6 +389,32 @@ public class MailMoveTest {
         assertNull("the target's create is withdrawn, the arrival brings it",
                 scalar("SELECT link_id FROM items WHERE collection = ?", trash));
         assertTrue(MailFixtures.merged(store, 10).isEmpty());
+    }
+
+    /**
+     * A move whose server states the UID the message took in the target
+     * ({@code COPYUID}, pimdir SYNC §4) lands the target's create on it in
+     * the push's own write: bound there at once, never withdrawn for a later
+     * listing to bring, which could land it on another message stating the
+     * same Message-ID.
+     */
+    @Test
+    public void aMoveStatingItsCopyUidLandsTheTargetCreateOnIt() throws Exception {
+        stager().mutateMove(inbox, "42", trash);
+
+        Server server = new Server();
+        server.listed = new JSONArray().put(named("42", "Hello"));
+        server.copyUids.put("42", "812");
+        sync(server, inbox);
+
+        assertEquals(List.of("relocate INBOX 42 Trash"), server.calls);
+        assertEquals(
+                "the target's create bound under the stated UID",
+                "812",
+                scalar("SELECT b.handle FROM bindings b JOIN items i ON i.id = b.item"
+                        + " WHERE i.collection = ?", trash));
+        assertEquals("and live", "0",
+                scalar("SELECT deleted FROM items WHERE collection = ?", trash));
     }
 
     @Test
@@ -695,7 +725,7 @@ public class MailMoveTest {
                 server.calls);
         assertNotNull("still in the trash", rowIn("Trash"));
         assertEquals("with its body", PimdirHash.of(OPENED),
-                scalar("SELECT object_hash FROM items WHERE collection = ? AND link_id = '42'",
+                scalar("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE collection = ? AND link_id = '42'",
                         trash));
     }
 
@@ -717,7 +747,7 @@ public class MailMoveTest {
                 scalar("SELECT handle FROM bindings WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = '42')",
                         trash));
         assertEquals("with its body", PimdirHash.of(OPENED),
-                scalar("SELECT object_hash FROM items WHERE collection = ? AND link_id = '42'",
+                scalar("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE collection = ? AND link_id = '42'",
                         trash));
         assertEquals("relocate INBOX 42 Trash", server.calls.get(0));
         for (String call : server.calls) {
@@ -901,10 +931,10 @@ public class MailMoveTest {
         Server server =
                 new Server(MailWire.session(new Account("google://jane@gmail.com", "", "t", null))) {
                     @Override
-                    public void relocate(MailSession session, MessageRef message, String target) {
-                        super.relocate(session, message, target);
+                    public String relocate(MailSession session, MessageRef message, String target) {
+                        String moved = super.relocate(session, message, target);
                         if (staged[0]) {
-                            return;
+                            return moved;
                         }
                         staged[0] = true;
                         try {
@@ -913,6 +943,7 @@ public class MailMoveTest {
                         } catch (JSONException failure) {
                             throw new AssertionError(failure);
                         }
+                        return moved;
                     }
                 };
         server.pages.put("INBOX", delta(new JSONArray(), "h1"));
@@ -961,7 +992,7 @@ public class MailMoveTest {
                 scalar("SELECT link_id FROM items WHERE collection = ?", sent));
         assertEquals("1", scalar("SELECT count(*) FROM items WHERE collection = ?", sent));
         assertEquals("Hi",
-                scalar("SELECT subject FROM mail_summary WHERE item IN (SELECT id FROM items WHERE collection = ?)", sent));
+                scalar("SELECT title FROM summary WHERE item IN (SELECT id FROM items WHERE collection = ?)", sent));
     }
 
     /** A self-send Gmail delivers unread stays unread, nothing pushed. */

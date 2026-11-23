@@ -78,6 +78,23 @@ public final class PimdirSql {
     }
 
     /**
+     * The columns a whole flag set is written as (STORAGE §13), computed by
+     * io-pimdir: its system flags as {@code marks} bits, every other flag as
+     * the {@code keywords} text, sorted and joined by spaces. No Java reads
+     * which flag is which.
+     *
+     * @throws PimalayaException for a flag the store cannot hold
+     */
+    public static FlagColumns flags(java.util.Collection<String> flags) {
+        JSONObject reply =
+                Replies.object(Native.pimdirFlags(new JSONArray(flags).toString()));
+        return new FlagColumns(reply.optLong("marks"), reply.optString("keywords"));
+    }
+
+    /** A flag set's two columns, {@link #flags}. */
+    public record FlagColumns(long marks, String keywords) {}
+
+    /**
      * A file's {@link #hash}, read whole a buffer at a time.
      *
      * @throws java.io.IOException when the file cannot be read

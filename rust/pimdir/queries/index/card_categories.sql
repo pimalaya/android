@@ -4,7 +4,7 @@
 -- once.
 SELECT p.collection, p.seq, c.value
 FROM placement p
-JOIN object o ON o.hash = p.hash
+JOIN object o ON o.id = p.object
 JOIN object_category c ON c.object = o.id
 WHERE p.collection IN (SELECT id FROM store.collections WHERE kind = 'text/vcard')
 ORDER BY p.collection, p.seq, c.value;

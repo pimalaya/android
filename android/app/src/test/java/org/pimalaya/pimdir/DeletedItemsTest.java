@@ -86,17 +86,18 @@ public class DeletedItemsTest {
     /** Pretends a sync confirmed the card, its base pinning the body. */
     private void bind(String collection, String linkId, String handle) {
         String object = string(
-                "SELECT object_hash FROM items WHERE collection = ? AND link_id = ?",
+                "SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE collection = ? AND link_id = ?",
                 collection, linkId);
         db.execSQL(
-                "UPDATE bindings SET handle = ?, base_object = ?, base_revision = 'etag',"
+                "UPDATE bindings SET handle = ?, base_object = (SELECT id FROM objects WHERE hash = ?), base_revision = 'etag',"
                         + " base_present = 1"
                         + " WHERE item = (SELECT id FROM items WHERE collection = ? AND link_id = ?)"
                         + " AND source = 'server'",
                 new Object[] {handle, object, collection, linkId});
         db.execSQL(
                 "INSERT INTO bindings(item, collection, source, handle, base_object,"
-                        + " base_revision, base_present) SELECT i.id, i.collection, 'server', ?, ?,"
+                        + " base_revision, base_present) SELECT i.id, i.collection, 'server', ?,"
+                        + " (SELECT id FROM objects WHERE hash = ?),"
                         + " 'etag', 1 FROM items i WHERE i.collection = ? AND i.link_id = ?"
                         + " AND NOT EXISTS (SELECT 1 FROM bindings b WHERE b.item = i.id"
                         + " AND b.source = 'server')",
@@ -206,7 +207,7 @@ public class DeletedItemsTest {
         bind(BOOK, "u4", "c4.vcf");
         contacts.stageDelete(BOOK, "u4");
         retainedCard("u5", "Erin");
-        String purgedObject = string("SELECT object_hash FROM items WHERE link_id = 'u5'");
+        String purgedObject = string("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE link_id = 'u5'");
 
         List<DeletedItems.Row> rows = deleted.list();
         assertEquals(2, rows.size());
@@ -342,8 +343,7 @@ public class DeletedItemsTest {
         String flags = string(
                 "SELECT trim(CASE WHEN marks & 1 THEN '\\Seen ' ELSE '' END"
                         + " || CASE WHEN marks & 16 THEN '\\Deleted ' ELSE '' END"
-                        + " || coalesce((SELECT group_concat(flag, ' ') FROM placement_flag"
-                        + " WHERE item = items.id), '')) FROM items WHERE link_id = '42'");
+                        + " || keywords) FROM items WHERE link_id = '42'");
         assertNotNull(flags);
         assertTrue(flags, flags.contains("Seen"));
         assertFalse("restored, no longer marked deleted", flags.contains("Deleted"));
@@ -369,7 +369,7 @@ public class DeletedItemsTest {
         assertEquals(0, scalar("SELECT deleted FROM items WHERE link_id = '43'"));
         assertArrayEquals(source, store.storedSource(inbox, "43"));
         assertEquals(PimdirHash.of(source),
-                string("SELECT object_hash FROM items WHERE link_id = '43'"));
+                string("SELECT (SELECT o.hash FROM objects o WHERE o.id = items.object) FROM items WHERE link_id = '43'"));
         assertTrue(deleted.list().isEmpty());
     }
 }
