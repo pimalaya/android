@@ -21,6 +21,7 @@ import org.pimalaya.account.SyncScope;
 import org.pimalaya.calendar.CalendarRows;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.MailSession;
+import org.pimalaya.client.Transport;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.ContactEngine;
@@ -234,6 +235,10 @@ public final class SyncCoordinator implements MailSync {
         if (!pimdir.locks().takeSync()) {
             return false;
         }
+        // NOTE: no background run holds the lock now, so a stop the system
+        // sent one after it let its waits run again cuts no wait of this
+        // pass.
+        Transport.allowWaits();
         progress.resetSyncPlan();
         setSyncing(true);
         return true;

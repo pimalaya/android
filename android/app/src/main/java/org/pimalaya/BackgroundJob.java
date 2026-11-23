@@ -35,6 +35,7 @@ public class BackgroundJob extends JobService {
 
     @Override
     public boolean onStartJob(JobParameters params) {
+        begin();
         new Thread(
                         () -> {
                             try {
@@ -50,6 +51,21 @@ public class BackgroundJob extends JobService {
                         "background-check")
                 .start();
         return true;
+    }
+
+    /**
+     * Readies a run: the system may reuse this instance after a stop, and a
+     * stop landing between the last run's end and its {@code jobFinished}
+     * left the waits cut, so neither outlives the run it was meant for.
+     */
+    void begin() {
+        stopped = false;
+        Transport.allowWaits();
+    }
+
+    /** Whether the system told this run to stop. */
+    boolean stopped() {
+        return stopped;
     }
 
     @Override
