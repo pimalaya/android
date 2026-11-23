@@ -272,6 +272,20 @@ public final class DeletedItems {
         if (live(target, linkId)) {
             throw new RefusedException(Refusal.PRESENT);
         }
+        // NOTE: into its own collection the row revives (STORAGE §11.1), so
+        // its stored summary takes the body's first: one listed from an
+        // envelope decoded otherwise would name another message and key the
+        // restore apart as a second row.
+        if (home && derived.summary() != null) {
+            SQLiteDatabase db = store.getWritableDatabase();
+            db.beginTransaction();
+            try {
+                PimdirSummary.write(db, row.collection.id, row.linkId, derived.summary());
+                db.setTransactionSuccessful();
+            } finally {
+                db.endTransaction();
+            }
+        }
         String sortKey = derived.sortKey();
         engine.mutateAdd(
                 target,

@@ -350,6 +350,30 @@ public class DeletedItemsTest {
         assertTrue(deleted.list().isEmpty());
     }
 
+    /**
+     * A restore into the message's own mailbox revives its row even when the
+     * stored summary, listed from an envelope decoded otherwise, disagrees
+     * with the body: never a second row.
+     */
+    @Test
+    public void aRestoreHomeOverADisagreeingSummaryRevivesTheRow() throws Exception {
+        String inbox = inbox();
+        retainedMail(inbox, "42", new JSONArray(), "Hello (as the envelope read it)");
+        fixtures.putObject(
+                inbox,
+                "42",
+                ("Message-ID: <m42@example.org>\r\nSubject: Hello\r\n" + BODY_FIELDS + "\r\nbody\r\n")
+                        .getBytes(StandardCharsets.UTF_8));
+        drop(inbox, "42");
+        long seq = scalar("SELECT seq FROM items WHERE link_id = '42'");
+
+        deleted.restore(mailEngine(), only(), inbox);
+
+        assertEquals("one row", 1, scalar("SELECT count(*) FROM items WHERE collection = ?", inbox));
+        assertEquals(seq, scalar("SELECT seq FROM items WHERE link_id = '42'"));
+        assertEquals(0, scalar("SELECT deleted FROM items WHERE link_id = '42'"));
+    }
+
     @Test
     public void aLatin1MailIsRestoredByteForByte() throws Exception {
         String inbox = inbox();
