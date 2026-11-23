@@ -197,11 +197,21 @@ public final class PimdirStorage {
         if ("handles".equals(kind) && (named == null || named.length() == 0)) {
             return reply;
         }
+        // NOTE: a selection naming no link projects nothing, so nothing of
+        // the collection is read (io-pimdir eee1c47): a delta owing nothing,
+        // the common background pass, reads its sync state alone.
+        List<String> owing =
+                "owing".equals(kind) ? owing(db, named, stored, source) : null;
+        JSONArray links = "links".equals(kind) ? scope.optJSONArray("links") : null;
+        if ((owing != null && owing.isEmpty())
+                || ("links".equals(kind) && (links == null || links.length() == 0))) {
+            return reply;
+        }
 
         JSONArray conflicted = new JSONArray();
         JSONArray offered = new JSONArray();
         JSONArray folded = new JSONArray();
-        try (Cursor cursor = PimdirDb.query(db, scoped(db, scope, stored, source))) {
+        try (Cursor cursor = PimdirDb.query(db, scoped(scope, stored, source, owing))) {
             while (cursor.moveToNext()) {
                 // NOTE: one placement per item the source binds, and one
                 // create per item it does not bind but the store holds a body
@@ -534,12 +544,12 @@ public final class PimdirStorage {
      * what may owe the source a push ({@link #owing}).
      */
     private static PimdirSql.Bound scoped(
-            SQLiteDatabase db, JSONObject scope, String collection, String source)
+            JSONObject scope, String collection, String source, List<String> owing)
             throws JSONException {
         Map<String, Object> values = PimdirSql.values("collection", collection, "source", source);
         String kind = scope == null ? "all" : scope.optString("kind", "all");
         if ("owing".equals(kind)) {
-            values.put("links", owing(db, scope.optJSONArray("handles"), collection, source));
+            values.put("links", owing);
             return PimdirSql.bind("LOAD_PLACEMENTS_BY_LINK", values);
         }
         JSONArray named =

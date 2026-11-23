@@ -303,6 +303,31 @@ public class PimdirStorageTest {
         return set;
     }
 
+    /**
+     * A delta's load naming no link, nothing owed, reads its sync state
+     * alone, never the collection's placements nor its supersessions (io-pimdir
+     * eee1c47), and answers no placement.
+     */
+    @Test
+    public void aLoadOwingNothingReadsNoPlacement() throws Exception {
+        storage.applyWrites(batch(synced("q.vcf", "uid-q", null, "quinn")));
+        JSONObject scope =
+                new JSONObject().put("kind", "owing").put("handles", new JSONArray());
+
+        StoreProfile.begin();
+        JSONObject loaded = storage.loadCollection("acct/Contacts", scope);
+        StoreProfile profile = StoreProfile.end();
+
+        assertEquals(0, loaded.getJSONArray("placements").length());
+        Set<String> ran = new HashSet<>();
+        for (java.util.Map.Entry<String, long[]> entry : profile.byName()) {
+            ran.add(entry.getKey());
+        }
+        assertFalse(ran.toString(), ran.contains("LOAD_PLACEMENTS_BY_LINK"));
+        assertFalse(ran.toString(), ran.contains("LIST_SUPERSEDED_BINDINGS"));
+        assertFalse(ran.toString(), ran.contains("LIST_SUPERSEDED_PENDING"));
+    }
+
     @Test
     public void aBodilessRowNeverProjectsAsFull() throws Exception {
         // NOTE: whatever the stored level claims: an item whose body a remote
