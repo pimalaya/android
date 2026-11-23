@@ -377,13 +377,13 @@
         # Pinned to the git revision rust/Cargo.lock locks while the crate
         # is taken from git (rust/Cargo.toml's patch); bump both together,
         # the shell warns while they differ.
-        ioPimdirRev = "2314084b5d8e6b4b9044c9f0351352068d4080db";
+        ioPimdirRev = "17d4ea8008996bc94d014c1ff925a5e609b89722";
         ioPimdirSpec =
           pkgs.fetchFromGitHub {
             owner = "pimalaya";
             repo = "io-pimdir";
             rev = ioPimdirRev;
-            sha256 = "1zgpci0mbvpcazpzbnx27bpap0kssxv21iq1va0pmd3k43lksgm6";
+            sha256 = "0sgl3aknwdywkpgkw05v33vc0xfalcbnfyvy56jmcbm46g5mig17";
           }
           + "/spec";
         ioPimdirLocked =

@@ -96,15 +96,15 @@ Conventions:
 - [x] G6. BackgroundJob.java's `stopped` flag is never reset when the service instance is reused, and a stop between `allowWaits()` and `jobFinished` leaves the waits cut.
 - [x] G7. A5: a test compares the app's `DERIVATION` with a store io-pimdir's `PimdirStore` creates (N3).
 - [x] G8. A body set aside with no network leaves its row saying it is held.
-- [ ] G9. Gate of E to G: R, J, `:app:assembleDebug`, and `:app:assembleRelease` (R8: the new `Native` methods kept). Commit per item.
+- [x] G9. Gate of E to G: R, J, `:app:assembleDebug`, and `:app:assembleRelease` (R8: the new `Native` methods kept). Commit per item.
 
 ## H. Performance (thresholds against H0)
 
-- [ ] H1. First sync: FillPageMeasure at or below 1.10 times H0 per 500-message page.
+- [x] H1. First sync: FillPageMeasure at or below 1.10 times H0 per 500-message page.
 - [ ] H2. Background no-op: a new PIMALAYA_MEASURE test runs a pass over 40 unchanged mailboxes. After F2 it runs 0 engine runs and 0 store writes; record the ms.
-- [ ] H3. Mail list pages: the StorePerformanceTest query plans stay unchanged on 3.18.2.
+- [x] H3. Mail list pages: the StorePerformanceTest query plans stay unchanged on 3.18.2.
 - [ ] H4. Search: a measure of the refresh's µs per message and of an `is:unread`, `from:` and two-word page on 10k messages, at or below the HEAD index.
-- [ ] H5. Port io-pimdir eee1c47 to PimdirStorage.loadCollection: a load naming no link reads no hub. Gate: fewer statements per no-op delta (StoreProfile) and the vectors unchanged.
+- [x] H5. Port io-pimdir eee1c47 to PimdirStorage.loadCollection: a load naming no link reads no hub. Gate: fewer statements per no-op delta (StoreProfile) and the vectors unchanged.
 - [ ] H6. `body_flush`: no port. Write the owner's phone measure of a first sync's body writes (O2) to docs/performance.md.
 
 ## I to L. Docs, tests, release, report
