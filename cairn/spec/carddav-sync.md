@@ -180,3 +180,11 @@ A `sync-collection` drain SHALL follow the token of each truncated page (a `507`
 - GIVEN a CardDAV server answering every `sync-collection` truncated with no token
 - WHEN an initial sync runs
 - THEN one REPORT is sent, the round answers incomplete, and no card is retired
+
+### Requirement: A DAV listing holding a refused member is incomplete
+A `sync-collection` drain, or its `PROPFIND` fallback, of a calendar or an address book SHALL keep every member row the server answered with an error other than 404 and 507 (a 403, a 5xx; io-webdav's `unreadable`), and a round holding one SHALL answer incomplete, so the engine retires no member: the refused member is neither changed nor removed.
+
+#### Scenario: A member the server refuses to show
+- GIVEN a CardDAV server whose initial `sync-collection` lists one card and answers a second one `403`
+- WHEN an initial sync runs
+- THEN the listed card lands, the round answers incomplete, and the refused card, held from an earlier sync, is not retired

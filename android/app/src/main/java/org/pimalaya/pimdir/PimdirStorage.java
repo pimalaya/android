@@ -2110,9 +2110,9 @@ public final class PimdirStorage {
      * stated (pimdir SYNC §4), as io-pimdir's write applies {@code
      * LandPlacement}: a source binding {@code landed} in the collection
      * already records the create delivered; otherwise the binding under the
-     * provisional handle moves to {@code landed}, based on the item's flags
-     * and body and the outcome's revision ({@code land_binding}), its pins
-     * moving with it.
+     * provisional handle moves to {@code landed}, based on the flags the
+     * relocated member carries, the item's body and the outcome's revision
+     * ({@code land_binding}), its pins moving with it.
      */
     private void land(SQLiteDatabase db, JSONObject op) throws JSONException {
         String engine = op.getString("collection");
@@ -2135,6 +2135,13 @@ public final class PimdirStorage {
         values.put("handle", handle);
         values.put("landed", landed);
         values.put("revision", op.has("revision") ? op.getString("revision") : null);
+        List<String> flags = op.optJSONArray("flags") == null
+                ? null
+                : stringsOf(op.getJSONArray("flags"));
+        PimdirSql.FlagColumns columns = PimdirSql.flags(flags == null ? List.of() : flags);
+        values.put("base_flags_known", flags == null ? 0 : 1);
+        values.put("marks", columns.marks());
+        values.put("keywords", columns.keywords());
         if (PimdirDb.exec(db, "LAND_BINDING", values) == 0) {
             return;
         }

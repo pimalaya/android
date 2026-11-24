@@ -583,9 +583,9 @@ dependencies = [
 
 [[package]]
 name = "io-gpeople"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f8a058c6978002a25f1a0d68fd17454a9bf2210e11238f5aca04c9d83a75683"
+checksum = "b61914d69297a5e7d85bcb9e326d2aeed9d681de0ddd83342ea4c84cebfb6142"
 dependencies = [
  "base64-codec",
  "io-http",
@@ -645,9 +645,9 @@ dependencies = [
 
 [[package]]
 name = "io-jmap"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cdbbd260f3ef7a9894d59e19b2a2607cb60c56c41190a5108459068486cbdd5"
+checksum = "a884f979ba07c6cccdcba1b3a73e72f77dc6a3ec8ea8b23257983732f0b22b78"
 dependencies = [
  "ical-rs",
  "io-http",
@@ -662,9 +662,9 @@ dependencies = [
 
 [[package]]
 name = "io-msgraph"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31c4cb2124dedfa3717f994b3db6770793c60cfa373c3ceed40c90f5c26defb7"
+checksum = "86a37b9a68d8d65069fe85dda21ec6d3d478504efbb110022150acabe615fdeb"
 dependencies = [
  "base64-codec",
  "ical-rs",
@@ -718,7 +718,8 @@ dependencies = [
 [[package]]
 name = "io-pimdir"
 version = "0.20.0"
-source = "git+https://github.com/pimalaya/io-pimdir?rev=17d4ea8008996bc94d014c1ff925a5e609b89722#17d4ea8008996bc94d014c1ff925a5e609b89722"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87fcb83227ca3e856dbea7512e5575d610d89e14d14559647c094193a3bf099d"
 dependencies = [
  "blake3",
  "encoding_rs",
@@ -766,9 +767,9 @@ dependencies = [
 
 [[package]]
 name = "io-webdav"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cf4e05eb97fb5c974f872beb03117c43a0dfc4519b4dc87f27ee86fa28ee876"
+checksum = "0d22a84654879a8d8f7dea688fd08a42bb85251f88d2f0f44089981e7869e30a"
 dependencies = [
  "io-http",
  "log",

@@ -583,7 +583,8 @@ impl<H: Host> Contacts<'_, H> {
 }
 
 /// A sync-collection delta as a [`CardDelta`], hrefs as resource names,
-/// complete as far as the listing goes unless the server cut it short.
+/// complete as far as the listing goes unless the server cut it short or
+/// refused a member row.
 ///
 /// The collection's own href, when a server lists it, yields an empty
 /// name and is skipped.
@@ -613,7 +614,7 @@ fn into_card_delta(delta: WebdavSyncDelta) -> CardDelta {
         changed,
         vanished,
         token: delta.sync_token,
-        complete: !delta.truncated,
+        complete: !delta.truncated && delta.unreadable.is_empty(),
     }
 }
 
@@ -621,7 +622,10 @@ fn into_card_delta(delta: WebdavSyncDelta) -> CardDelta {
 mod tests {
     use crate::{
         account::{Account, Backend},
-        client::{Auth, Client, webdav::tests::cutting},
+        client::{
+            Auth, Client,
+            webdav::tests::{cutting, refusing},
+        },
         contact::Contacts,
     };
 
@@ -646,6 +650,29 @@ mod tests {
         .unwrap();
 
         assert!(!delta.complete, "nothing is retired by absence");
+        assert_eq!(delta.changed.len(), 1);
+    }
+
+    /// A first round holding a card the server refused (a `403` row) is
+    /// no complete listing, so the engine does not retire that card.
+    #[test]
+    fn a_first_round_with_a_refused_card_is_not_complete() {
+        let mut client = Client::new(refusing());
+        let account = Account {
+            base_url: "https://dav.example.com/",
+            backend: Backend::Carddav,
+            auth: Auth::Bearer("token"),
+            zone: "",
+        };
+
+        let delta = Contacts {
+            client: &mut client,
+            account: &account,
+        }
+        .sync_cards("https://dav.example.com/book/", None)
+        .unwrap();
+
+        assert!(!delta.complete, "the refused card is not retired");
         assert_eq!(delta.changed.len(), 1);
     }
 }

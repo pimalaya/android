@@ -824,9 +824,7 @@ mod fake {
             .unwrap();
 
         let stored = &account.events["ev1"];
-        // NOTE: Stalwart 0.16 refuses a `version` as an invalid property;
-        // the draft has the server set it.
-        assert!(stored.get("version").is_none(), "{stored}");
+        assert_eq!(stored["version"], "2.0", "{stored}");
         assert!(stored.get("method").is_none(), "{stored}");
         assert_eq!(stored["recurrenceRule"]["frequency"], "weekly", "{stored}");
         assert_eq!(stored["recurrenceRule"]["count"], 4, "{stored}");

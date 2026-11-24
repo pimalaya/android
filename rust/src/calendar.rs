@@ -731,7 +731,8 @@ fn task_lists(
 }
 
 /// One WebDAV sync round as the calendar delta it stands for, complete as
-/// far as the listing goes unless the server cut it short.
+/// far as the listing goes unless the server cut it short or refused a
+/// member row.
 fn into_event_delta(delta: WebdavSyncDelta) -> EventDelta {
     let changed = delta
         .changed
@@ -754,7 +755,7 @@ fn into_event_delta(delta: WebdavSyncDelta) -> EventDelta {
         bodies: Vec::new(),
         vanished,
         token: delta.sync_token,
-        complete: !delta.truncated,
+        complete: !delta.truncated && delta.unreadable.is_empty(),
     }
 }
 
@@ -1161,6 +1162,29 @@ mod tests {
         .unwrap();
 
         assert!(!delta.complete, "nothing is retired by absence");
+        assert_eq!(delta.changed.len(), 1);
+    }
+
+    /// A first round holding an entry the server refused (a `403` row) is
+    /// no complete listing, so the engine does not retire that entry.
+    #[test]
+    fn a_first_round_with_a_refused_entry_is_not_complete() {
+        let mut client = Client::new(crate::client::webdav::tests::refusing());
+        let account = Account {
+            base_url: "https://dav.example.com/",
+            backend: Backend::Carddav,
+            auth: Auth::Bearer("token"),
+            zone: "",
+        };
+
+        let delta = Calendars {
+            client: &mut client,
+            account: &account,
+        }
+        .sync_events("https://dav.example.com/book/", None)
+        .unwrap();
+
+        assert!(!delta.complete, "the refused entry is not retired");
         assert_eq!(delta.changed.len(), 1);
     }
 }

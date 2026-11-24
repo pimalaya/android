@@ -111,12 +111,13 @@ Conventions:
 
 - [ ] I1. Fold delta.md into cairn/spec/offline-store.md and mail.md, and write cairn/log/<date>-follows-storage-draft-17.md. Tick the V0 to V6 lines this change closes in cairn/changes/the-app-follows-neverest-v1/tasks.md:184-190. CHANGELOG.md gets no line: the release has not shipped. Run cairn/verify.sh.
 - [ ] J1. Live, under the owner's grant: `gradle -p android e2eTest -Pe2e.targets=fastmail` (pull-only). No local servers are needed. Cross-app: none, since the store is private; `aStoreTheCanonicalTextWroteOpensAsTheSameStore` passes at draft-17.
-- [ ] K1. Once io-pimdir 0.20.0 is published by its tag workflow:
+- [x] K1. Once io-pimdir 0.20.0 is published by its tag workflow:
   - rust/Cargo.toml takes `version = "0.20.0"` and drops the patch.
   - deny.toml drops `allow-git`.
   - flake.nix pins the spec by tag.
   - Gate: R, J, assembleRelease.
   - The pimdir tags and the app's own release are the owner's.
+  - Done 2026-11-24 with the other releases of that day (cairn/log/2026-11-24-the-bridge-follows-the-releases-of-2026-11-24.md): vector 214 needed `land` to base on the op's `flags`; R 749 passed, J 1,075 + 14 tests and 221 vectors (169 passed, 52 unbound), unsigned assembleRelease green.
 - [ ] L1. Write report.md: counts, measures, parked steps, the owner's checks.
 
 ## O. Owner checks on the phone, one at a time, in order (never driven by adb)

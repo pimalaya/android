@@ -44,7 +44,7 @@ None found. The class that could have lost data silently was the app's statement
 - G4: needs `capped` carried on MailPage.
 - H4: no search baseline was taken at H0.
 - H6: the owner's phone measure.
-- K1: waits for the published 0.20.0.
+- K1: done 2026-11-24 (tasks.md).
 
 ## Decisions beyond the plan's text
 

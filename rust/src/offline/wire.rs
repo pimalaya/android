@@ -436,6 +436,9 @@ pub enum WriteOpJson {
         collection: String,
         handle: String,
         landed: String,
+        /// The flags the relocated member carries, left out when unknown.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        flags: Option<Vec<String>>,
         /// Absent for mail, and left out then: org.json reads a JSON null
         /// as the text "null".
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -550,11 +553,13 @@ impl From<&PimdirWriteOp> for WriteOpJson {
                 collection,
                 handle,
                 landed,
+                flags,
                 revision,
             } => Self::LandPlacement {
                 collection: collection.as_str().into(),
                 handle: handle.as_str().into(),
                 landed: landed.as_str().into(),
+                flags: flags_json(flags),
                 revision: revision.clone(),
             },
             PimdirWriteOp::RefusePlacement {

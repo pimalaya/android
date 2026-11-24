@@ -110,6 +110,8 @@ impl<H: Host> Webdav<'_, H> {
     /// most: a page cut short with no new token, or the last round spent,
     /// ends it, the delta answered `truncated` under the last token known,
     /// so the caller reads it as no complete listing (RFC 6578 section 3.6).
+    /// The member rows the server refused (a 403, a 5xx) are kept as
+    /// unreadable, which the caller reads as no complete listing either.
     ///
     /// Without the REPORT, the token-less `PROPFIND` fallback answers an
     /// initial round, and a round carrying a cursor answers [`None`] for the
@@ -161,6 +163,10 @@ impl<H: Host> Webdav<'_, H> {
 
             delta.changed.extend(page.changed);
             delta.vanished.extend(page.vanished);
+            for entry in &page.unreadable {
+                log::warn!("{url}: member {} unreadable: {:?}", entry.id, entry.status);
+            }
+            delta.unreadable.extend(page.unreadable);
             rounds += 1;
 
             if !page.truncated {
@@ -305,6 +311,51 @@ pub mod tests {
             *reports += 1;
             page(*reports <= 100)
         })
+    }
+
+    /// A server answering every `REPORT` whole, with a token, `c1.vcf`
+    /// changed and `c2.vcf` refused (`403`); a calendar probe (`PROPFIND`
+    /// at Depth 0) finds `sync-collection` advertised.
+    pub fn refusing() -> FakeServer<impl FnMut(&FakeRequest) -> FakeResponse> {
+        FakeServer::new(|request: &FakeRequest| {
+            if request.method == "PROPFIND" {
+                return advertising(&request.path);
+            }
+            assert_eq!(request.method, "REPORT");
+            let body = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\
+                 <d:multistatus xmlns:d=\"DAV:\">\
+                 <d:response><d:href>/book/c1.vcf</d:href><d:propstat><d:prop>\
+                 <d:getetag>\"e1\"</d:getetag></d:prop>\
+                 <d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>\
+                 <d:response><d:href>/book/c2.vcf</d:href>\
+                 <d:status>HTTP/1.1 403 Forbidden</d:status></d:response>\
+                 <d:sync-token>t1</d:sync-token></d:multistatus>";
+            FakeResponse {
+                content_type: "application/xml; charset=utf-8",
+                body: body.as_bytes().to_vec(),
+                ..FakeResponse::empty(207)
+            }
+        })
+    }
+
+    /// A drain keeps the member rows the server refused, so the caller
+    /// knows the listing is not the whole collection.
+    #[test]
+    fn a_drain_keeps_the_rows_it_could_not_read() {
+        let mut client = Client::new(refusing());
+        let url: Url = "https://dav.example.com/book/".parse().unwrap();
+
+        let delta = super::Webdav {
+            client: &mut client,
+            auth: Auth::Bearer("token"),
+        }
+        .sync_collection(&url, None, Default::default())
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(delta.changed.len(), 1);
+        assert_eq!(delta.unreadable.len(), 1, "{:?}", delta.unreadable);
+        assert_eq!(delta.unreadable[0].status, Some(403));
     }
 
     /// A drain over a server cutting every answer short stops within its

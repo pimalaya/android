@@ -20,7 +20,7 @@ A JMAP calendar has no incremental read: draft-ietf-jmap-calendars would answer 
 
 The entry page is the reading screen and the form at once, the way a contact's is. It edits the stored component rather than the occurrence that was tapped, an override with its own `RECURRENCE-ID` being what changing one date of a series means and not being written yet.
 
-Every write is CalDAV or Graph: a JMAP calendar takes `CalendarEvent/set` in JSCalendar, which is the conversion the read path does in the other direction and is not written yet, so it refuses rather than silently doing nothing.
+Every backend takes writes: CalDAV by `PUT` and `DELETE`, Graph and the Google Calendar API through io-msgraph and io-gcal, and a JMAP calendar through `CalendarEvent/set` in JSCalendar 2.0, the conversion the read path does in the other direction (io-jmap's, the entry a top-level object carrying `version: "2.0"`, as Fastmail requires, and no `method`). A JMAP edit SHALL patch only the members that differ between the staged entry and the server copy converted the same way, sent with `ifInState` set to the state the read answered.
 
 ### Requirement: CalDAV enumeration respects collection capabilities
 
