@@ -230,6 +230,50 @@ public final class PimdirCollections {
     }
 
     /**
+     * Records {@code source} as syncing each of {@code collections} of
+     * {@code account} (an account id), answering how many {@code sources}
+     * rows it added: io-pimdir's {@code PimdirSourceStore::register} (pimdir
+     * STORAGE §15.6) over the canonical statements it runs.
+     *
+     * <p>Each collection ensured ({@code ensure_collection}), then a row with
+     * no checkpoint where the source holds none ({@code load_checkpoint},
+     * {@code upsert_checkpoint}): a load reads it as no sync state at all, so
+     * the source's first pass there is a full listing, and a row held keeps
+     * its checkpoint. One write, nested in the caller's transaction if any.
+     */
+    public static int register(
+            SQLiteDatabase db, String account, String source, Iterable<String> collections) {
+        int added = 0;
+        db.beginTransaction();
+        try {
+            for (String collection : collections) {
+                PimdirDb.exec(
+                        db,
+                        "ENSURE_COLLECTION",
+                        PimdirSql.values("collection", collection, "account", account));
+                Map<String, Object> key =
+                        PimdirSql.values("collection", collection, "source", source);
+                PimdirSql.Bound load = PimdirSql.bind("LOAD_CHECKPOINT", key);
+                try (Cursor cursor = PimdirDb.typed(db, load.sql, load.args)) {
+                    if (cursor.moveToFirst()) {
+                        continue;
+                    }
+                }
+                PimdirDb.exec(
+                        db,
+                        "UPSERT_CHECKPOINT",
+                        PimdirSql.values(
+                                "collection", collection, "source", source, "checkpoint", null));
+                added++;
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        return added;
+    }
+
+    /**
      * Restates the source's role and writability of known collections.
      *
      * <p>The role is pimdir's, writability the app's (no pimdir column). Apart

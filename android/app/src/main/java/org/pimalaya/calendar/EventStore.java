@@ -96,7 +96,8 @@ public final class EventStore {
      * restates its own.
      *
      * <p>The server source syncs every calendar it lists, and is recorded as
-     * syncing it from the listing on ({@link #ensureSynced}): a declaration
+     * syncing it from the listing on ({@link PimdirCollections#register}),
+     * its sync state kept when it has one: a declaration
      * counts only for a source syncing the collection ({@code
      * load_capabilities}), and before a first round none would, so nothing
      * would refuse a task there.
@@ -122,35 +123,13 @@ public final class EventStore {
                         refused ? "its supported-calendar-component-set names no VTODO" : null);
                 PimdirSql.Bound bound = PimdirSql.bind("SET_CAPABILITY", values);
                 PimdirDb.changed(db, bound);
-                ensureSynced(db, collection);
+                PimdirCollections.register(
+                        db, account, PimdirStorage.SERVER, List.of(collection));
             }
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
         }
-    }
-
-    /**
-     * Records the server source as syncing {@code collection}, its sync state
-     * kept when it has one.
-     *
-     * <p>A {@code sources} row with no checkpoint, which a load reads as no
-     * state at all, through the canonical {@code load_checkpoint} then
-     * {@code upsert_checkpoint} only when there is no row, in the caller's
-     * transaction: the upsert alone would drop the sync token a round left.
-     */
-    private static void ensureSynced(SQLiteDatabase db, String collection) {
-        Map<String, Object> key = new HashMap<>();
-        key.put("collection", collection);
-        key.put("source", PimdirStorage.SERVER);
-        PimdirSql.Bound load = PimdirSql.bind("LOAD_CHECKPOINT", key);
-        try (Cursor cursor = PimdirDb.typed(db, load.sql, load.args)) {
-            if (cursor.moveToFirst()) {
-                return;
-            }
-        }
-        PimdirSql.Bound upsert = PimdirSql.bind("UPSERT_CHECKPOINT", key);
-        PimdirDb.changed(db, upsert);
     }
 
     /** Whether a calendar address is served over CalDAV (RFC 4791). */

@@ -15,6 +15,8 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.account.MergedFilter;
+import org.pimalaya.account.PimDomain;
 import org.pimalaya.calendar.CalendarEngine;
 import org.pimalaya.calendar.RemoteAccount;
 import org.pimalaya.client.Account;
@@ -36,6 +38,7 @@ import org.pimalaya.client.SyncReport;
 import org.pimalaya.pimdir.HeldActions;
 import org.pimalaya.pimdir.ItemFixtures;
 import org.pimalaya.pimdir.PimdirAccount;
+import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
 import org.pimalaya.pimdir.PimdirStorage;
@@ -97,6 +100,11 @@ public class MailMoveTest {
 
         /** A server whose driver holds {@code session}, null for none. */
         Server(MailSession session) {
+            this(session, accountId);
+        }
+
+        /** A server of {@code account}, its driver holding {@code session}. */
+        Server(MailSession session, String account) {
             engine =
                     new MailEngine(
                             pimdir,
@@ -104,7 +112,7 @@ public class MailMoveTest {
                                     new AccountClient(), new ContactClient(),
                                     new CalendarClient(), this, new OfflineClient()),
                             session,
-                            accountId);
+                            account);
         }
 
         @Override
@@ -274,14 +282,45 @@ public class MailMoveTest {
     }
 
     /**
-     * A move into a mailbox no source syncs is refused, staging nothing
-     * (pimdir SYNC §7, vector 229): no source could push its create.
+     * A move into a mailbox the roster declares and no pass listed is the
+     * server's own (pimdir SYNC §7): the roster registers it as synced by the
+     * server (STORAGE §15.6), so its create carries the origin a server move
+     * needs, the message's body not held.
      */
     @Test
-    public void aBodilessMoveIntoAMailboxNeverSyncedIsRefused() throws Exception {
+    public void aBodilessMoveIntoAMailboxNeverListedIsTheServersOwn() throws Exception {
         String archive = store.collectionOf(EMAIL, "Archive");
+        stager().mutateMove(inbox, "42", archive);
+
+        assertEquals("the target holds it, live", "0",
+                scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '42'",
+                        archive));
+        JSONObject source =
+                new JSONObject(
+                                stager().serve(
+                                        new JSONObject()
+                                                .put("op", "load")
+                                                .put("collection", inbox)
+                                                .toString()))
+                        .getJSONArray("placements")
+                        .getJSONObject(0);
+        assertEquals("tombstone", source.getString("status"));
+        assertEquals(archive, source.getJSONObject("origin").getString("collection"));
+    }
+
+    /**
+     * A move into a collection no source syncs is refused, staging nothing
+     * (pimdir SYNC §7, vector 229): no source could push its create. A
+     * mailbox no roster declared, as one a store held before its roster
+     * registered it.
+     */
+    @Test
+    public void aMoveIntoAMailboxNoSourceSyncsIsRefused() throws Exception {
+        String elsewhere = PimdirAccount.collectionId(accountId, "Elsewhere");
+        new PimdirCollections(pimdir, context)
+                .ensure(elsewhere, EMAIL, PimdirSummary.MAIL, "Elsewhere");
         try {
-            stager().mutateMove(inbox, "42", archive);
+            stager().mutateMove(inbox, "42", elsewhere);
             throw new AssertionError("a move no source could push stages");
         } catch (PimalayaException refused) {
             assertTrue(refused.getMessage(), refused.getMessage().contains("no source syncs"));
@@ -291,7 +330,46 @@ public class MailMoveTest {
                 scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '42'", inbox));
         assertNull("nothing lands in the target",
                 scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '42'",
-                        archive));
+                        elsewhere));
+    }
+
+    /**
+     * A delete into a trash the filter leaves unticked, which no pass ever
+     * listed, is staged as a move and pushed as the server's relocation
+     * (pimdir SYNC §7): the roster registers every mailbox its server
+     * declares as synced by it (STORAGE §15.6), and listing the trash stays
+     * the filter's choice.
+     */
+    @Test
+    public void aDeleteIntoATrashNeverListedIsStagedAndPushed() throws Exception {
+        String email = "joe@example.com";
+        store.replaceMailboxes(
+                email, List.of(new Mailbox("INBOX", "inbox"), new Mailbox("Trash", "trash")));
+        String account = new PimdirAccount(context).idOf(email);
+        String joeInbox = store.collectionOf(email, "INBOX");
+        String joeTrash = store.collectionOf(email, "Trash");
+        file(joeInbox, named("9", "Bye"));
+        assertFalse("the trash is unticked",
+                MergedFilter.of(context, PimDomain.MAIL).chosen(joeTrash));
+
+        MailStore.StoredMessage row = null;
+        for (MailStore.StoredMessage message : MailFixtures.merged(store, 10)) {
+            if (message.collection.equals(joeInbox)) {
+                row = message;
+            }
+        }
+        assertEquals(MailStager.Deletion.MOVED, stager().stageDelete(row));
+        assertEquals("the trash shows it at once", "0",
+                scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '9'",
+                        joeTrash));
+
+        Server server = new Server(null, account);
+        server.listed = new JSONArray().put(named("9", "Bye"));
+        sync(server, joeInbox);
+
+        assertEquals(List.of("relocate INBOX 9 Trash"), server.calls);
+        assertNull("the trash is still never listed",
+                scalar("SELECT checkpoint FROM sources WHERE collection = ?", joeTrash));
     }
 
     /**

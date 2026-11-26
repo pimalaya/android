@@ -133,6 +133,17 @@ public final class MailStore {
             PimdirDb.changed(db, bound);
         }
 
+        // NOTE: every mailbox the server declares is synced by its source,
+        // ticked or not (pimdir STORAGE section 15.6), so a delete into a
+        // trash no pass listed, or a move into any mailbox, is the server's
+        // own (SYNC section 7) rather than refused. What a pass lists stays
+        // the filter's: a row with no checkpoint reads as no sync state.
+        List<String> declared = new ArrayList<>();
+        for (Mailbox mailbox : mailboxes) {
+            declared.add(PimdirAccount.collectionId(account, mailbox.name()));
+        }
+        PimdirCollections.register(db, account, PimdirStorage.SERVER, declared);
+
         // NOTE: the junk and the trash are hidden the first time a roster
         // lists them, so neither shows nor syncs until the user ticks it:
         // Gmail's step leaves both out, and a delete reads as gone. On an

@@ -193,6 +193,11 @@ Deleting SHALL ask first, from the reader and from a selection alike. Where the 
 - WHEN a message outside a trash is deleted
 - THEN the delete is refused saying so, and nothing is staged
 
+#### Scenario: A trash the filter leaves unticked
+- GIVEN an IMAP account whose trash is unticked and was never listed
+- WHEN a message is deleted from the inbox
+- THEN it shows in the trash at once, and the next sync of the inbox moves it into the trash on the server, the trash still not listed (MailMoveTest `aDeleteIntoATrashNeverListedIsStagedAndPushed`)
+
 ### Requirement: A mail account carries where it submits and where its trash is
 A mail connection SHALL carry the endpoint mail is submitted through, beside the one it is read from, chosen in the connection flow from what discovery turned up or from what was entered by hand, and stored with it. Implicit TLS only: this client has no STARTTLS step, and driving a `starttls` endpoint as if it were implicit would hand a message over in the clear rather than fail. Every other domain carries none, and so does a mail account reading over JMAP, or whose sending was switched off. The sending question, headed Submission, SHALL be asked only once mail is read over IMAP, discovered or typed, or over Graph, and its rows SHALL follow that choice: IMAP reading is offered the SMTP servers, one row per server and sign-in method as the reading rows are, those reading the same collapsed and only those signing in the way mail does offered, since sending reuses its credential, and manual entry, Graph reading Graph alone, Gmail reading Gmail alone, and both the row for not sending. A Graph or Gmail account sending SHALL carry its own `msgraph://` or `google://` base as its submit endpoint.
 
