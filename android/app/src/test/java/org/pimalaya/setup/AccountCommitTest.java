@@ -6,10 +6,13 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
+import android.database.Cursor;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -19,10 +22,12 @@ import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SecureStore;
 import org.pimalaya.client.Addressbook;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.OauthGrant;
 import org.pimalaya.client.OauthTokens;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.CardStore;
+import org.pimalaya.contact.ContactStager;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.robolectric.RobolectricTestRunner;
@@ -176,6 +181,63 @@ public class AccountCommitTest {
         entries = byUrl(cards);
         assertTrue(entries.get("https://dav.example.org/work/").phoneSynced);
         assertFalse(entries.get("https://dav.example.org/home/").phoneSynced);
+    }
+
+    /**
+     * A book committed unsubscribed is registered under the server (STORAGE
+     * §15.6), so a card copied into it is the server's own create, never
+     * refused as a copy no source could push (SYNC §7).
+     */
+    @Test
+    public void aBookCommittedUnsubscribedTakesACopy() throws Exception {
+        PimdirDb pimdir = new PimdirDb(context);
+        String work = "https://dav.example.org/work/";
+        String home = "https://dav.example.org/home/";
+        List<Addressbook> books =
+                List.of(
+                        new Addressbook("work", "Work", work, null, null),
+                        new Addressbook("home", "Home", home, null, null));
+        AccountCommit.books(
+                new CardStore(context, pimdir),
+                new PimdirCollections(pimdir, context),
+                new AccountCommit.BookChoice(EMAIL, books, Set.of(work), false));
+
+        String card = "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:u1\r\nFN:Jane\r\nEND:VCARD\r\n";
+        String hash = CardStore.byteHash(card);
+        ContactStager stager = new ContactStager(pimdir, Clients.real());
+        JSONObject placement =
+                new JSONObject()
+                        .put("collection", work)
+                        .put("handle", "c1.vcf")
+                        .put("linkId", "u1")
+                        .put("object", hash)
+                        .put("level", "full")
+                        .put("status", "clean")
+                        .put("flags", new JSONArray())
+                        .put("base", new JSONObject().put("revision", "e1").put("object", hash));
+        JSONArray writes =
+                new JSONArray()
+                        .put(
+                                new JSONObject()
+                                        .put("op", "storeObject")
+                                        .put("hash", hash)
+                                        .put("size", card.length())
+                                        .put("body", card))
+                        .put(new JSONObject().put("op", "upsert").put("placement", placement));
+        assertEquals(
+                "{}",
+                stager.serve(new JSONObject().put("op", "write").put("writes", writes).toString()));
+
+        stager.mutateCopy(work, "c1.vcf", home);
+
+        try (Cursor cursor =
+                pimdir.getReadableDatabase()
+                        .rawQuery(
+                                "SELECT deleted FROM items WHERE collection = ? AND link_id = 'u1'",
+                                new String[] {home})) {
+            assertTrue("Home holds the copy", cursor.moveToFirst());
+            assertEquals(0, cursor.getInt(0));
+        }
     }
 
     private static Map<String, BookEntry> byUrl(CardStore cards) {

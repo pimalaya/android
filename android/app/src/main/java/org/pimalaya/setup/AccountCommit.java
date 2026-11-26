@@ -14,6 +14,7 @@ import org.pimalaya.client.Addressbook;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.sync.FirstSync;
 import org.pimalaya.sync.SignInRefusals;
@@ -212,8 +213,15 @@ final class AccountCommit {
         Set<String> subscribed = choice.subscribed();
         boolean phone = choice.phone();
 
+        // NOTE: every book the server declares is synced by its source,
+        // subscribed or not (pimdir STORAGE section 15.6), so a copy or a move
+        // into one no pass listed is the server's own (SYNC section 7).
         cards.replaceAddressbooks(email, books);
-        collections.replace(email, PimdirSummary.CONTACT, PimdirCollections.of(email, books));
+        collections.replace(
+                email,
+                PimdirSummary.CONTACT,
+                PimdirCollections.of(email, books),
+                PimdirStorage.SERVER);
 
         for (Addressbook book : books) {
             boolean on = subscribed.contains(book.url());

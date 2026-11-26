@@ -50,6 +50,7 @@ import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirEngine;
+import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
 
 /**
@@ -206,7 +207,8 @@ public final class SyncPasses {
                         .replace(
                                 account.email,
                                 PimdirSummary.CONTACT,
-                                PimdirCollections.of(account.email, books));
+                                PimdirCollections.of(account.email, books),
+                                PimdirStorage.SERVER);
             } catch (Exception error) {
                 Log.w("pimalaya", "addressbook recovery failed", error);
             }
@@ -313,7 +315,9 @@ public final class SyncPasses {
      *
      * <p>io-pimdir's engine reconciles each, and the account-level backends
      * list their cards once per pass. The books are listed first for their
-     * roles (default, read only); the roster itself is left as it is.
+     * roles (default, read only), and each one the store holds is registered
+     * under the server, subscribed or not (pimdir STORAGE §15.6); the roster
+     * itself is left as it is.
      */
     private void syncAccount(
             String email, Account account, List<BookEntry> books, Outcome outcome)
@@ -325,6 +329,9 @@ public final class SyncPasses {
             try {
                 new PimdirCollections(pimdir, context)
                         .restate(
+                                email,
+                                PimdirSummary.CONTACT,
+                                PimdirStorage.SERVER,
                                 PimdirCollections.of(
                                         email, clients.contact().listAddressbooks(primary, account)));
             } catch (Exception error) {

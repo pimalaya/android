@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -63,15 +64,31 @@ public final class PimdirCollections {
      * so calendars survive a contacts round.
      */
     public void replace(String accountEmail, String kind, List<Stored> collections) {
+        replace(accountEmail, kind, collections, null);
+    }
+
+    /**
+     * The same, then records {@code source} as syncing every collection
+     * listed ({@link #register}) in the same write; null registers none.
+     *
+     * <p>A roster a server declared: what it lists is synced by that source
+     * from this read on, so a copy or a move into one no pass listed is the
+     * source's own (pimdir STORAGE §15.6, SYNC §7).
+     */
+    public void replace(
+            String accountEmail, String kind, List<Stored> collections, String source) {
         String account = accounts.idOf(accountEmail);
         SQLiteDatabase db = store.getWritableDatabase();
 
         db.beginTransaction();
         try {
-            Set<String> listed = new HashSet<>();
+            Set<String> listed = new LinkedHashSet<>();
             for (Stored collection : collections) {
                 listed.add(collection.id);
                 upsert(db, collection, account, kind);
+            }
+            if (source != null) {
+                register(db, account, source, listed);
             }
 
             for (String stale : idsOf(db, account, kind)) {
@@ -283,23 +300,63 @@ public final class PimdirCollections {
         SQLiteDatabase db = store.getWritableDatabase();
         db.beginTransaction();
         try {
-            // NOTE: the roles left first, so a default moving from one
-            // collection to another is never refused for being held twice.
-            for (Stored collection : collections) {
-                if (collection.role == null) {
-                    setRole(db, collection.id, null);
-                }
-            }
-            for (Stored collection : collections) {
-                if (collection.role != null) {
-                    setRole(db, collection.id, collection.role);
-                }
-            }
+            setRoles(db, collections);
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
         }
+        setWritable(collections);
+    }
 
+    /**
+     * A roster read that leaves the roster as it is: restates the role and
+     * writability of {@code collections} ({@link #restate}) and records
+     * {@code source} as syncing each one the account holds of {@code kind}
+     * ({@link #register}), in one write.
+     *
+     * <p>A collection the store does not hold is left to the next {@link
+     * #replace}, never ensured as a bare row.
+     */
+    public void restate(
+            String accountEmail, String kind, String source, List<Stored> collections) {
+        String account = accounts.idOf(accountEmail);
+        SQLiteDatabase db = store.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            Set<String> held = new HashSet<>(idsOf(db, account, kind));
+            List<String> declared = new ArrayList<>();
+            for (Stored collection : collections) {
+                if (held.contains(collection.id)) {
+                    declared.add(collection.id);
+                }
+            }
+            register(db, account, source, declared);
+            setRoles(db, collections);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        setWritable(collections);
+    }
+
+    /** Writes the roles of {@code collections}, in the caller's write. */
+    private static void setRoles(SQLiteDatabase db, List<Stored> collections) {
+        // NOTE: the roles left first, so a default moving from one
+        // collection to another is never refused for being held twice.
+        for (Stored collection : collections) {
+            if (collection.role == null) {
+                setRole(db, collection.id, null);
+            }
+        }
+        for (Stored collection : collections) {
+            if (collection.role != null) {
+                setRole(db, collection.id, collection.role);
+            }
+        }
+    }
+
+    /** Remembers which of {@code collections} the user may write into. */
+    private void setWritable(List<Stored> collections) {
         Set<String> readOnly = readOnly();
         for (Stored collection : collections) {
             if (collection.writable) {
