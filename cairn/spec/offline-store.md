@@ -1074,7 +1074,7 @@ The attachments the reader lists, and the store records stand-ins from, SHALL be
 - THEN the part is listed as first.csv and opens to what its base64 decodes to
 
 ### Requirement: The sync vectors run through the app's load and write
-The app SHALL run every case of the sync vectors of the io-pimdir it pins (pimdir SYNC §11) in a host test, on a store of its own over Android 8.0's SQLite: the case's rows seeded by the standard's own statements and plain SQL, never through the write under test; its run driven by io-pimdir's engine through the coroutines the bridge's sync, upgrade and mutate exports build, every load, lookup, verification and write served by the app's storage half and the remote scripted from the case on the wire a connector answers; its pushes, events, failure, park and rows compared as §11 says. Under format 7 a binding's `refusal` and `refused_key` are seeded and compared, and a `Refused` outcome is fed back with its reason; under format 8 an object stating `row` false is seeded as its file alone; under format 11 a run's `unlisted` count is compared. A case the app does not pass SHALL be listed beside the test with its reason, as `fails` when the app runs it and departs from it, as `unbound` when the bridge states no such verb, option or mutation or the case binds another kind of owner, and the test SHALL fail when a listed case passes, an unlisted one fails, a case listed unbound binds, an unlisted one cannot be bound, or a listed one is not among the vectors. At io-pimdir 1.0.0, 242 cases (format 11): 174 pass, 58 are unbound, and 10 fail unlisted (114, 115, 222, 223, 227 to 230, 232, 233), the Java owner not yet following io-pimdir 0.20.3 to 1.0.0's owner fixes (cairn/changes/the-store-follows-sync-v1), so the test fails until they are ported. While a case fails, the app's `sync-v1.0.0 engine` statement stands short of SYNC §12 by it.
+The app SHALL run every case of the sync vectors of the io-pimdir it pins (pimdir SYNC §11) in a host test, on a store of its own over Android 8.0's SQLite: the case's rows seeded by the standard's own statements and plain SQL, never through the write under test; its run driven by io-pimdir's engine through the coroutines the bridge's sync, upgrade and mutate exports build, every load, lookup, verification and write served by the app's storage half and the remote scripted from the case on the wire a connector answers; its pushes, events, failure, park and rows compared as §11 says. Under format 7 a binding's `refusal` and `refused_key` are seeded and compared, and a `Refused` outcome is fed back with its reason; under format 8 an object stating `row` false is seeded as its file alone; under format 11 a run's `unlisted` count is compared. A case the app does not pass SHALL be listed beside the test with its reason, as `fails` when the app runs it and departs from it, as `unbound` when the bridge states no such verb, option or mutation or the case binds another kind of owner, and the test SHALL fail when a listed case passes, an unlisted one fails, a case listed unbound binds, an unlisted one cannot be bound, or a listed one is not among the vectors. The counts at io-pimdir 1.0.0 read 242 cases (format 11): 184 pass, none fails, 58 are unbound. While a case fails, the app's `sync-v1.0.0 engine` statement stands short of SYNC §12 by it.
 
 #### Scenario: A rule the Java write lacks
 - GIVEN a vector whose expected rows the Java write does not leave
@@ -1171,3 +1171,16 @@ A mail binding SHALL record the id its server gives the message's content, as th
 - GIVEN two messages with one `Message-ID`, subject, date and sender, each stating its own server id, one held in full
 - WHEN the other is upgraded
 - THEN its body is fetched, never linked from the first (MessageIdNamingTest `twoMessagesStatingTheirServerIdsNeverShareABody`, vectors 199 and 200)
+
+### Requirement: A copy or a move into a collection no source syncs is refused
+A copy or a move SHALL stage its create under the source syncing its target, the run's own where it syncs it (a server-side copy), another otherwise (no origin), and SHALL be refused with `target-unsynced`, staging nothing, when no source syncs the target (SYNC §7).
+
+#### Scenario: A message moved into a mailbox never synced
+- GIVEN a mailbox the account declares and no source has ever synced, holding no binding nor checkpoint
+- WHEN a message is moved or copied into it
+- THEN the move is refused (`target-unsynced`), the message staying where it was and nothing staged in the mailbox (MailMoveTest `aBodilessMoveIntoAMailboxNeverSyncedIsRefused`, vector 229)
+
+#### Scenario: A card copied into a book another source syncs
+- GIVEN a book only another source syncs
+- WHEN a card is copied into it
+- THEN its create is staged under that source, carrying no origin, so that source uploads the body the store holds (vectors 227, 228, 230)

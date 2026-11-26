@@ -280,7 +280,7 @@ final class Native {
      * §9): {@code {policy?, source, item?, bindings, placement, overruling?}}.
      *
      * <p>Returns {@code {object?, conflicted, conflictObject?, sharedObject?,
-     * diverged, keptShared}} or {@code {error}}.
+     * diverged, keptShared, unsummarized, lost?}} or {@code {error}}.
      */
     static native String pimdirMerge(String input);
 

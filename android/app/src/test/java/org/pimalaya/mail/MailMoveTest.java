@@ -273,14 +273,18 @@ public class MailMoveTest {
         assertEquals("Trash", rows.get(0).mailbox);
     }
 
+    /**
+     * A move into a mailbox no source syncs is refused, staging nothing
+     * (pimdir SYNC §7, vector 229): no source could push its create.
+     */
     @Test
     public void aBodilessMoveIntoAMailboxNeverSyncedIsRefused() throws Exception {
         String archive = store.collectionOf(EMAIL, "Archive");
         try {
             stager().mutateMove(inbox, "42", archive);
-            throw new AssertionError("a move no body nor origin could deliver stages");
+            throw new AssertionError("a move no source could push stages");
         } catch (PimalayaException refused) {
-            assertTrue(refused.getMessage(), refused.getMessage().contains("42"));
+            assertTrue(refused.getMessage(), refused.getMessage().contains("no source syncs"));
         }
 
         assertEquals("the source stays live", "0",

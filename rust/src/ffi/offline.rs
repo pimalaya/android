@@ -463,8 +463,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirSubmit<'local>(
 /// `Native.pimdirMerge`: one upsert absorbed into the item it names by
 /// io-pimdir's hub (SYNC §9, [`merge::merge`]): takes `{policy?, source,
 /// item?, bindings, placement, overruling?}`, answers `{object?,
-/// conflicted, conflictObject?, sharedObject?, diverged, keptShared}`, or
-/// `{"error"}` for input it cannot read. Pure.
+/// conflicted, conflictObject?, sharedObject?, diverged, keptShared,
+/// unsummarized, lost?}`, or `{"error"}` for input it cannot read. Pure.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_pimdirMerge<'local>(
     mut env: EnvUnowned<'local>,

@@ -162,7 +162,8 @@ public final class PimdirSql {
      * One upsert of a mutable kind absorbed into the item it names, by
      * io-pimdir's own cross-source merge (SYNC §9): the body the item keeps,
      * its conflict, the source's {@code sharedObject}, whether the upsert
-     * {@code diverged} and whether the item {@code keptShared} its body.
+     * {@code diverged}, whether the item {@code keptShared} its body or
+     * adopted one {@code unsummarized}, and the body a policy {@code lost}.
      *
      * @param input {@code {policy?, source, item?, bindings, placement,
      *     overruling?}}, the item and bindings as stored before the upsert

@@ -821,6 +821,9 @@ pub enum MutationJson {
         /// Whether the placement's source syncs `target` (SYNC §7).
         #[serde(default)]
         syncs_target: bool,
+        /// Whether any source syncs `target`: none refuses the move,
+        /// `target-unsynced` (SYNC §7).
+        target_synced: bool,
     },
     /// A copy into `target`, the source kept.
     Copy {
@@ -829,6 +832,9 @@ pub enum MutationJson {
         /// Whether the placement's source syncs `target` (SYNC §7).
         #[serde(default)]
         syncs_target: bool,
+        /// Whether any source syncs `target`: none refuses the copy,
+        /// `target-unsynced` (SYNC §7).
+        target_synced: bool,
     },
     Edit {
         handle: String,
@@ -880,6 +886,15 @@ impl MutationJson {
         match self {
             Self::Move { syncs_target, .. } | Self::Copy { syncs_target, .. } => *syncs_target,
             _ => false,
+        }
+    }
+
+    /// Whether any source syncs a copy's or a move's target, `true` for
+    /// every other mutation.
+    pub fn target_synced(&self) -> bool {
+        match self {
+            Self::Move { target_synced, .. } | Self::Copy { target_synced, .. } => *target_synced,
+            _ => true,
         }
     }
 }
@@ -1669,7 +1684,9 @@ pub mod tests {
     #[test]
     fn a_move_names_its_target() {
         assert_eq!(
-            mutation(r#"{"op": "move", "handle": "42", "target": "a/Trash"}"#),
+            mutation(
+                r#"{"op": "move", "handle": "42", "target": "a/Trash", "targetSynced": true}"#
+            ),
             PimdirMutation::Move {
                 handle: PimdirHandle("42".into()),
                 target: PimdirCollectionId("a/Trash".into()),
@@ -1680,7 +1697,9 @@ pub mod tests {
     #[test]
     fn a_copy_names_its_target() {
         assert_eq!(
-            mutation(r#"{"op": "copy", "handle": "42", "target": "a/Archive"}"#),
+            mutation(
+                r#"{"op": "copy", "handle": "42", "target": "a/Archive", "targetSynced": true}"#
+            ),
             PimdirMutation::Copy {
                 handle: PimdirHandle("42".into()),
                 target: PimdirCollectionId("a/Archive".into()),

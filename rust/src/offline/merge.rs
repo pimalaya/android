@@ -8,8 +8,9 @@
 //! them, and what the hub settled read back (the body the item keeps, its
 //! conflict, the binding's `shared_object`).
 //!
-//! Whether the upsert recorded a divergence (`Written.conflicted`) and the
-//! body a policy did not adopt (`Written.overruled`) are the hub's own
+//! Whether the upsert recorded a divergence (`Written.conflicted`), the
+//! body a policy did not adopt (`Written.overruled`) and whether the item
+//! adopted a body nobody summarized are the hub's own
 //! verdict, [`PimdirHubItem::reconcile`] run on a copy of the item as
 //! `PimdirHub::absorb` runs it: not for a tombstone, nor for a person's
 //! settle of a conflicted item.
@@ -113,6 +114,9 @@ pub struct MergedJson {
     /// The item kept its own body over the upsert's, so its summary and
     /// sort key stay.
     pub kept_shared: bool,
+    /// The item adopted a body whose summary it does not hold, for the
+    /// owner to derive its summary and sort key from (Annex A.2).
+    pub unsummarized: bool,
     /// The body a policy did not adopt, for the owner to keep as a
     /// retained item (SYNC §9, STORAGE §11).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -206,6 +210,7 @@ pub fn merge(input: MergeJson) -> MergedJson {
         shared_object: shared_object.map(|hash| hash.0),
         diverged: verdict.diverged,
         kept_shared: before.is_some() && after.object != incoming,
+        unsummarized: verdict.unsummarized,
         lost: verdict.lost.map(|lost| LostJson {
             object: lost.object.0,
             side: match lost.side {
@@ -298,6 +303,7 @@ mod tests {
                 shared_object: Some("b1".into()),
                 diverged: true,
                 kept_shared: true,
+                unsummarized: false,
                 lost: None,
             }
         );

@@ -32,6 +32,9 @@ import org.json.JSONObject;
  *     one, which a conflict refuses, and for every other op
  * @param syncsTarget whether the placement's source syncs {@code target}
  *     (SYNC §7), for a copy or a move; null otherwise
+ * @param targetSynced whether any source syncs {@code target}, none
+ *     refusing a copy or a move ({@code target-unsynced}, SYNC §7); null
+ *     otherwise
  * @param base the marker set a flag set was changed from: the change alone
  *     is applied to the set the placement holds, refused over an unknown one
  *     (SYNC §7); null replaces the set whole, and for every other op
@@ -51,6 +54,7 @@ public record Mutation(
         String ifMatch,
         java.util.List<String> resolves,
         Boolean syncsTarget,
+        Boolean targetSynced,
         Flags base) {
     /** The operation of a mutation, as the wire tags it. */
     public enum Op {
@@ -91,7 +95,7 @@ public record Mutation(
      */
     public static Mutation setFlags(String handle, Flags flags, Flags base) {
         return new Mutation(Op.SET_FLAGS, handle, null, null, flags, null, null, null, null, null,
-                null, null, null, null, base);
+                null, null, null, null, null, base);
     }
 
     /** A removal of one placement, which a conflict refuses (SYNC §7). */
@@ -110,19 +114,27 @@ public record Mutation(
             String handle, String ifMatch, java.util.List<String> resolves) {
         return new Mutation(Op.REMOVE, handle, null, null, null, null, null, null, null, null,
                 null, ifMatch, resolves == null ? null : java.util.List.copyOf(resolves), null,
-                null);
+                null, null);
     }
 
-    /** A move of one placement into {@code target}. */
-    public static Mutation move(String handle, String target, boolean syncsTarget) {
+    /**
+     * A move of one placement into {@code target}, refused when no source
+     * syncs it ({@code targetSynced}, SYNC §7).
+     */
+    public static Mutation move(
+            String handle, String target, boolean syncsTarget, boolean targetSynced) {
         return new Mutation(Op.MOVE, handle, null, target, null, null, null, null, null, null,
-                null, null, null, syncsTarget, null);
+                null, null, null, syncsTarget, targetSynced, null);
     }
 
-    /** A copy of one placement into {@code target}. */
-    public static Mutation copy(String handle, String target, boolean syncsTarget) {
+    /**
+     * A copy of one placement into {@code target}, refused when no source
+     * syncs it ({@code targetSynced}, SYNC §7).
+     */
+    public static Mutation copy(
+            String handle, String target, boolean syncsTarget, boolean targetSynced) {
         return new Mutation(Op.COPY, handle, null, target, null, null, null, null, null, null,
-                null, null, null, syncsTarget, null);
+                null, null, null, syncsTarget, targetSynced, null);
     }
 
     /**
@@ -165,6 +177,7 @@ public record Mutation(
                 ifMatch,
                 resolves == null ? null : java.util.List.copyOf(resolves),
                 null,
+                null,
                 null);
     }
 
@@ -183,6 +196,7 @@ public record Mutation(
                 null,
                 summary,
                 sortKey,
+                null,
                 null,
                 null,
                 null,
@@ -208,6 +222,7 @@ public record Mutation(
                 Base64.getEncoder().encodeToString(body),
                 summary,
                 sortKey,
+                null,
                 null,
                 null,
                 null,
@@ -238,6 +253,7 @@ public record Mutation(
                 mutation.put("resolves", new org.json.JSONArray(resolves));
             }
             mutation.put("syncsTarget", syncsTarget);
+            mutation.put("targetSynced", targetSynced);
             // NOTE: an absent key replaces the set whole.
             if (base != null) {
                 mutation.put("base", base.toJson());

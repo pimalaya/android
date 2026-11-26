@@ -327,24 +327,53 @@ public abstract class Stager implements OfflineDriver {
     }
 
     /**
-     * Stages a move into {@code target}, carried out as a server move.
+     * Stages a move into {@code target}, a server move where its source syncs
+     * the target ({@link #mutateInto}).
      *
      * <p>A pending create there and a tombstone here, visible at once (SYNC
      * §3); the next sync of either collection carries it.
      */
     public void mutateMove(String collection, String handle, String target) throws JSONException {
-        mutate(collection, Mutation.move(handle, target, offline.syncsTarget(collection, target)));
-        staged(target);
+        mutateInto(
+                collection,
+                target,
+                Mutation.move(
+                        handle,
+                        target,
+                        offline.syncsTarget(collection, target),
+                        offline.targetSynced(target)));
     }
 
     /**
-     * Stages a copy into {@code target}, carried out as a server copy.
+     * Stages a copy into {@code target}, a server copy where its source syncs
+     * the target ({@link #mutateInto}).
      *
      * <p>A pending create there, the source kept; the next sync of the
-     * target carries it, no body uploaded.
+     * target carries it, a server copy uploading no body.
      */
     public void mutateCopy(String collection, String handle, String target) throws JSONException {
-        mutate(collection, Mutation.copy(handle, target, offline.syncsTarget(collection, target)));
+        mutateInto(
+                collection,
+                target,
+                Mutation.copy(
+                        handle,
+                        target,
+                        offline.syncsTarget(collection, target),
+                        offline.targetSynced(target)));
+    }
+
+    /**
+     * Stages a copy or a move into {@code target}, its create under the
+     * source syncing the target where the placement's does not, with no
+     * origin; refused when no source syncs it (SYNC §7).
+     */
+    private void mutateInto(String collection, String target, Mutation mutation) {
+        offline.stageInto(collection, target);
+        try {
+            mutate(collection, mutation);
+        } finally {
+            offline.unstage();
+        }
         staged(target);
     }
 

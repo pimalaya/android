@@ -167,13 +167,20 @@ pub fn upgrading(collection: &str, handles: Vec<String>, content: bool) -> Pimdi
 }
 
 /// The mutation coroutine of a mutation's wire JSON on `collection`.
+///
+/// A copy or a move into a target its source does not sync is staged by
+/// the Java owner under the source syncing it, with no origin, and one
+/// into a target no source syncs is refused (`target-unsynced`, SYNC §7).
 pub fn mutating(collection: &str, mutation: &str) -> Result<PimdirMutate, String> {
     let mutation: MutationJson =
         from_str(mutation).map_err(|err| format!("Invalid mutation: {err}"))?;
     let syncs_target = mutation.syncs_target();
+    let target_synced = mutation.target_synced();
     let mutation = PimdirMutation::try_from(mutation)?;
 
-    Ok(PimdirMutate::new(collection, mutation).syncs_target(syncs_target))
+    Ok(PimdirMutate::new(collection, mutation)
+        .syncs_target(syncs_target)
+        .target_synced(target_synced))
 }
 
 /// The options every sync of the app runs under, `content` whether it

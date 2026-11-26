@@ -1040,12 +1040,21 @@ public class SyncVectorsTest {
                     ran.failed = true;
                     return ran;
                 }
-                reply =
-                        SyncVectors.mutate(
-                                driver,
-                                run.collection,
-                                mutation,
-                                run.run.getJSONObject("mutation").optBoolean("overrule"));
+                // NOTE: a copy or a move stages its create under the source
+                // syncing its target, as Stager.mutateInto has it (SYNC §7).
+                if (mutation.target() != null) {
+                    driver.offline.stageInto(run.collection, mutation.target());
+                }
+                try {
+                    reply =
+                            SyncVectors.mutate(
+                                    driver,
+                                    run.collection,
+                                    mutation,
+                                    run.run.getJSONObject("mutation").optBoolean("overrule"));
+                } finally {
+                    driver.offline.unstage();
+                }
                 if (!reply.has("events")) {
                     throw new IllegalStateException(reply.optString("error"));
                 }
@@ -1099,10 +1108,11 @@ public class SyncVectorsTest {
             case "Move": {
                 String target = stated.getString("to");
                 boolean syncs = driver.offline.syncsTarget(run.collection, target);
+                boolean synced = driver.offline.targetSynced(target);
                 String handle = handle(store, run, stated);
                 return "Copy".equals(kind)
-                        ? Mutation.copy(handle, target, syncs)
-                        : Mutation.move(handle, target, syncs);
+                        ? Mutation.copy(handle, target, syncs, synced)
+                        : Mutation.move(handle, target, syncs, synced);
             }
             case "Edit": {
                 String hash = run.hash(stated, "object");
