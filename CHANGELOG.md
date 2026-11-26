@@ -18,7 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   Google and Microsoft clients ship with the app; custom and self-registered clients work too.
 - Added a notice before Google's sign-in page, saying which Google data the app accesses.
 - Added signing in again, for an account whose password changed or whose sign-in ended.
-- Added an offline-first store, pimdir, shown at once and written by every action.
+- Added an offline-first store, pimdir v1 (storage-v1.0.0, sync-v1.0.0, search-v1.0.0), shown at once and written by every action.
 - Added incremental sync on every backend, with a three-way merge keeping both sides' edits.
 - Added a conflict page for the contacts, entries and tasks edited on both sides.
 - Added background sync, and a sync dock showing each step.

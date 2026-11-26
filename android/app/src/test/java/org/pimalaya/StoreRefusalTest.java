@@ -52,11 +52,11 @@ public class StoreRefusalTest {
     @Test
     public void aStoreOfAnEarlierDraftAsksForAReinstall() {
         App app = (App) RuntimeEnvironment.getApplication();
-        storeOf(app, "storage-draft-15");
+        storeOf(app, "storage-draft-17");
 
         assertEquals("earlier", app.refusal().optString("order"));
         assertEquals(
-                "storage-draft-15, earlier than this app's storage-draft-17",
+                "storage-draft-17, earlier than this app's storage-v1",
                 app.refusal().optString("detail"));
         StoreRefusedActivity screen =
                 Robolectric.buildActivity(StoreRefusedActivity.class).setup().get();
@@ -75,9 +75,9 @@ public class StoreRefusalTest {
      * for deletion: the reinstall wording is not shown.
      */
     @Test
-    public void aStoreOfALaterDraftAsksForAnUpdate() {
+    public void aStoreOfALaterVersionAsksForAnUpdate() {
         App app = (App) RuntimeEnvironment.getApplication();
-        storeOf(app, "storage-draft-18");
+        storeOf(app, "storage-v2");
 
         assertEquals("later", app.refusal().optString("order"));
         StoreRefusedActivity screen =

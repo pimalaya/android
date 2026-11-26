@@ -24,7 +24,7 @@ use io_pimdir::{
     change::{PimdirChangeKey, PimdirWriteOp},
     collection::{PimdirCheckpoint, PimdirCoverage, PimdirCursor, PimdirRound, PimdirScope},
     coroutine::*,
-    load::{PimdirLoadSelection, PimdirLoaded, PimdirRefusal},
+    load::{PimdirBindingRefusal, PimdirLoadSelection, PimdirLoaded},
     mutate::{PimdirMutate, PimdirMutation},
     object::{PimdirHash, PimdirHeldObject},
     placement::{PimdirHandle, PimdirLinkId, PimdirPlacement},
@@ -435,7 +435,7 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
                     .refused
                     .into_iter()
                     .map(|refusal| {
-                        let held = PimdirRefusal {
+                        let held = PimdirBindingRefusal {
                             key: PimdirChangeKey(refusal.key),
                             reason: refusal.reason,
                         };

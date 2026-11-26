@@ -376,13 +376,13 @@
         # PIMALAYA_IO_PIMDIR_SPEC (rust/src/offline.rs, PimdirVectors.java).
         # Pinned to the tag of the version rust/Cargo.lock locks; bump both
         # together, the shell warns while they differ.
-        ioPimdirVersion = "0.20.2";
+        ioPimdirVersion = "1.0.0";
         ioPimdirSpec =
           pkgs.fetchFromGitHub {
             owner = "pimalaya";
             repo = "io-pimdir";
             rev = "v${ioPimdirVersion}";
-            sha256 = "0m70znbg3z8qk0lgr71cd8lj513sxqvipw5sn160brr5a8w3f9dp";
+            sha256 = "1d7fpxh3fv51js19bdbb45hvrr48v9jflplimdfppagqnxp7wh7m";
           }
           + "/spec";
         ioPimdirLocked =

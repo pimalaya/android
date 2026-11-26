@@ -32,7 +32,7 @@ use io_msgraph::v1::{
 };
 use io_pimdir::{
     change::PimdirChange,
-    client::{PimdirRunError, PimdirSourceStore, PimdirStore, reader::PimdirReader},
+    client::{PimdirSourceStore, PimdirStore, reader::PimdirReader, run::PimdirRunError},
     collection::{PimdirCollectionId, PimdirScope},
     placement::PimdirHandle,
     remote::{
@@ -625,7 +625,7 @@ fn round_open(dir: &Path) -> bool {
 
 /// A store with an empty inbox.
 fn store(dir: &Path) -> PimdirSourceStore {
-    let store = PimdirStore::open(dir).unwrap().for_source(SOURCE);
+    let store = PimdirStore::open(dir).unwrap().for_source(SOURCE).unwrap();
     store.ensure_collection(INBOX, "message/rfc822").unwrap();
     store
 }

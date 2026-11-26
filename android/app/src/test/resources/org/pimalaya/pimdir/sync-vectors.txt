@@ -33,6 +33,8 @@ unbound 210-a-rekey-listing-a-handle-twice-keeps-its-first-entry: the bridge run
 unbound 211-a-rekey-stores-an-arrivals-listed-body: the bridge runs no rekey
 unbound 212-a-rekey-pull-stores-its-listed-body: the bridge runs no rekey
 unbound 213-a-rekey-carries-a-tombstone-taking-the-listed-flags: the bridge runs no rekey
+unbound 235-a-rekey-giving-every-member-its-old-handle-bumps-the-generation: the bridge runs no rekey
+unbound 241-a-rekey-meeting-a-body-its-server-edited-under-the-etag-the-base-holds-carries-a-conflict: the bridge runs no rekey
 unbound 14-both-edited-prefer-remote-pulls: the bridge syncs under the manual policy alone
 unbound 15-both-edited-prefer-local-over-an-unread-body-conflicts: the bridge syncs under the manual policy alone
 unbound 33-an-item-conflict-reports-a-server-edit: the bridge syncs under the manual policy alone
@@ -46,6 +48,10 @@ unbound 181-prefer-remote-over-an-item-another-source-changed-meets-prefer-incom
 unbound 182-prefer-remote-over-an-item-another-source-changed-meets-prefer-existing: the bridge syncs under the manual policy alone
 unbound 183-prefer-remote-over-an-item-another-source-changed-meets-manual: the bridge syncs under the manual policy alone
 unbound 194-a-write-draws-named-members-seqs-before-kept-bodies: the bridge syncs under the manual policy alone
+unbound 224-keep-local-pulls-a-flag-change-the-source-alone-made: the bridge syncs under the manual policy alone
+unbound 225-keep-local-drops-a-member-the-source-alone-deleted: the bridge syncs under the manual policy alone
+unbound 239-prefer-local-keeps-a-body-its-server-edited-under-the-etag-the-base-holds: the bridge syncs under the manual policy alone
+unbound 242-prefer-remote-keeps-the-edit-it-drops-for-a-body-its-server-edited-under-the-etag-the-base-holds: the bridge syncs under the manual policy alone
 unbound 62-a-delta-head-lands-an-arrival-the-round-keeps: the bridge lists no head
 unbound 63-a-removal-a-head-states-applies-at-once: the bridge lists no head
 unbound 64-a-member-a-head-named-and-a-page-lists-is-one: the bridge lists no head

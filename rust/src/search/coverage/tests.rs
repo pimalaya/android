@@ -66,7 +66,8 @@ impl Store {
         let mut owner = PimdirStore::open(self.path())
             .unwrap()
             .for_account(account)
-            .for_source(SERVER);
+            .for_source(SERVER)
+            .unwrap();
         let hash = owner.hash(&raw);
         let mut ops = Vec::new();
         if body {
@@ -113,6 +114,7 @@ impl Store {
             .unwrap()
             .for_account(account)
             .for_source(SERVER)
+            .unwrap()
             .write(ops)
             .unwrap();
     }

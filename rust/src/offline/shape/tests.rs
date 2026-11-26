@@ -26,7 +26,7 @@ fn seed() -> String {
         "INSERT INTO store_meta(id, format, format_version, version, read_version,
                                 produce_version, store_id, incarnation, hash_algo,
                                 created_at, derivation)
-         VALUES (1, 'pimdir', 'storage-draft-17', 1, 1, 1,
+         VALUES (1, 'pimdir', 'storage-v1', 1, 1, 1,
                  '0123456789abcdef0123456789abcdef', 1, 'blake3',
                  '2026-11-01T00:00:00.000Z', 3);
          INSERT INTO collections(id, account, kind, name) VALUES

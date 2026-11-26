@@ -414,12 +414,16 @@ fn build(spec: &Path, dir: &Path) {
                 .unwrap()
                 .for_account(account)
                 .for_source(source["source"].as_str().unwrap())
+                .unwrap()
                 .write(ops)
                 .unwrap();
         }
     }
 
-    let mut owner = PimdirStore::open(dir).unwrap().for_source("vectors");
+    let mut owner = PimdirStore::open(dir)
+        .unwrap()
+        .for_source("vectors")
+        .unwrap();
     for item in store["items"].as_array().unwrap() {
         let collection = item["collection"].as_str().unwrap();
         let link_id = item["link_id"].as_str().unwrap();
@@ -687,7 +691,7 @@ fn the_search_vectors_answer_on_the_floor() {
     let _held = PimdirStore::open(dir.path()).unwrap();
     build(&spec, dir.path());
     let vectors = json(&spec.join("vectors/search/queries.json"));
-    assert_eq!(vectors["v"], 5, "queries.json at another version");
+    assert_eq!(vectors["v"], 6, "queries.json at another version");
     let now = unix(vectors["now"].as_str().unwrap());
 
     let mut floor = index(dir.path());
@@ -701,6 +705,13 @@ fn the_search_vectors_answer_on_the_floor() {
         if let Some(why) = unbound(case) {
             skipped.push(format!("{}: {why}", case["query"]));
             continue;
+        }
+        if case.get("matched").is_some() {
+            skipped.push(format!(
+                "{}: its hits run, its `matched` not, the app reporting no \
+                 match source per hit",
+                case["query"]
+            ));
         }
         if case.get("zone").is_some() {
             zoned.push(case);
@@ -786,7 +797,7 @@ fn message(id: &str, subject: &str, text: &str) -> Vec<u8> {
 /// test forks keeps a released owner lock until its exec, and a reopen
 /// could find the store `Owned`.
 fn file_message(dir: &Path, body: Vec<u8>) {
-    let mut owner = PimdirStore::open(dir).unwrap().for_source("local");
+    let mut owner = PimdirStore::open(dir).unwrap().for_source("local").unwrap();
     owner.ensure_collection("INBOX", "message/rfc822").unwrap();
     let derived = summary::derive("message/rfc822", &body).unwrap();
     let hash = owner.hash(&body);
@@ -846,6 +857,7 @@ fn a_refresh_follows_the_store_in_chunks() {
     PimdirStore::open(dir.path())
         .unwrap()
         .for_source("local")
+        .unwrap()
         .write(vec![PimdirWriteOp::DropPlacement {
             collection: PimdirCollectionId("INBOX".into()),
             handle: PimdirHandle("a@x".into()),
@@ -885,13 +897,8 @@ fn an_index_of_another_shape_is_refused_and_an_older_one_rebuilt() {
         Held::Refused { .. }
     ));
     floor.exec(&format!(
-        "UPDATE index_meta SET shape = '{SHAPE}', format_version = 'search-draft-18'"
+        "UPDATE index_meta SET shape = '{SHAPE}', format_version = 'search-v2'"
     ));
-    assert!(matches!(
-        held::held(&mut floor).unwrap(),
-        Held::Refused { .. }
-    ));
-    floor.exec("UPDATE index_meta SET format_version = 'search-v1'");
     assert!(matches!(
         held::held(&mut floor).unwrap(),
         Held::Refused { .. }
@@ -936,7 +943,17 @@ fn an_index_of_another_shape_is_refused_and_an_older_one_rebuilt() {
         held::held(&mut floor).unwrap(),
         Held::Rebuild { .. }
     ));
-    floor.exec("UPDATE index_meta SET format_version = 'search-draft-17', store_id = 'other'");
+    floor.exec("UPDATE index_meta SET format_version = 'search-draft-17'");
+    assert!(matches!(
+        held::held(&mut floor).unwrap(),
+        Held::Rebuild { .. }
+    ));
+    floor.exec("UPDATE index_meta SET format_version = 'search-draft-19'");
+    assert!(matches!(
+        held::held(&mut floor).unwrap(),
+        Held::Rebuild { .. }
+    ));
+    floor.exec("UPDATE index_meta SET format_version = 'search-v1', store_id = 'other'");
     assert!(matches!(
         held::held(&mut floor).unwrap(),
         Held::Rebuild { .. }
@@ -1139,7 +1156,7 @@ fn index_weight_per_message() {
 
 /// Files a calendar object into `Calendar` as source `local`.
 fn file_entry(dir: &Path, handle: &str, body: &str) {
-    let mut owner = PimdirStore::open(dir).unwrap().for_source("local");
+    let mut owner = PimdirStore::open(dir).unwrap().for_source("local").unwrap();
     owner
         .ensure_collection("Calendar", "text/calendar")
         .unwrap();
@@ -1288,7 +1305,10 @@ fn the_draft_17_query_forms_answer_on_the_floor() {
     assert_eq!(seqs_at(&mut floor, "date:2h", one).len(), 2);
     assert!(seqs_at(&mut floor, "date:2h", one + 3 * 3_600).is_empty());
 
-    let mut store = PimdirStore::open(dir.path()).unwrap().for_source("local");
+    let mut store = PimdirStore::open(dir.path())
+        .unwrap()
+        .for_source("local")
+        .unwrap();
     assert!(
         store
             .add_property(alpha[0], "pimdir/label", "Receipts")

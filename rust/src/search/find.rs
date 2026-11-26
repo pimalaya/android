@@ -457,7 +457,7 @@ fn snippet(blobs: &Path, kind: &str, hash: &PimdirHash, words: &[String]) -> Opt
     let texts: Vec<&str> = ["body", "note"]
         .into_iter()
         .filter_map(|field| extract.field(field))
-        .flat_map(|field| chunk::Chunks::new(field).filter_map(|range| field.get(range)))
+        .flat_map(|field| chunk::PimdirChunks::new(field).filter_map(|range| field.get(range)))
         .collect();
 
     for text in &texts {

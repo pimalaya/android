@@ -498,7 +498,7 @@ mod tests {
             objects,
             meta: Some(MetaFacts {
                 format: Some("pimdir".into()),
-                format_version: Some("storage-draft-17".into()),
+                format_version: Some("storage-v1".into()),
                 version: Some(1),
                 hash_algo: Some("blake3".into()),
                 sync_version: None,
@@ -525,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn a_store_of_this_draft_opens() {
+    fn a_store_of_this_version_opens() {
         assert_eq!(check(&current()), Ok(()));
         assert_eq!(check(&StoreFacts::default()), Ok(()), "a fresh database");
     }
@@ -576,6 +576,10 @@ mod tests {
         assert_eq!(check(&facts).unwrap_err().code, "store-version");
 
         let mut facts = current();
+        facts.meta.as_mut().unwrap().format_version = Some("storage-draft-17".into());
+        assert_eq!(check(&facts).unwrap_err().code, "store-version");
+
+        let mut facts = current();
         facts.meta.as_mut().unwrap().sync_version = Some("sync-draft-11".into());
         assert_eq!(check(&facts).unwrap_err().code, "sync-version");
 
@@ -586,12 +590,16 @@ mod tests {
         let mut facts = current();
         facts.meta.as_mut().unwrap().sync_version = Some("sync-draft-14".into());
         assert_eq!(check(&facts).unwrap_err().code, "sync-version");
+
+        let mut facts = current();
+        facts.meta.as_mut().unwrap().sync_version = Some("sync-draft-15".into());
+        assert_eq!(check(&facts).unwrap_err().code, "sync-version");
     }
 
     /// A store of another format version is refused saying which of the
-    /// two is the earlier (STORAGE §4.2): a draft-15 store an earlier
-    /// build wrote, a later draft's, a release's, and a marker the order
-    /// does not read.
+    /// two is the earlier (STORAGE §4.2): a draft-17 store an earlier
+    /// build wrote, a later release's, and a marker the order does not
+    /// read.
     #[test]
     fn a_refused_store_says_which_is_the_earlier() {
         let detail = |found: Option<&str>| {
@@ -602,21 +610,17 @@ mod tests {
             refusal.detail
         };
 
-        let earlier = "earlier than this app's storage-draft-17";
+        let earlier = "earlier than this app's storage-v1";
         assert_eq!(
-            detail(Some("storage-draft-15")),
-            format!("storage-draft-15, {earlier}")
+            detail(Some("storage-draft-17")),
+            format!("storage-draft-17, {earlier}")
         );
         assert_eq!(detail(None), format!("no format_version, {earlier}"));
-        let later = "later than this app's storage-draft-17";
-        assert_eq!(
-            detail(Some("storage-draft-18")),
-            format!("storage-draft-18, {later}")
-        );
-        assert_eq!(detail(Some("storage-v1")), format!("storage-v1, {later}"));
+        let later = "later than this app's storage-v1";
+        assert_eq!(detail(Some("storage-v2")), format!("storage-v2, {later}"));
         assert_eq!(
             detail(Some("storage-v01")),
-            "storage-v01, of no order beside this app's storage-draft-17"
+            "storage-v01, of no order beside this app's storage-v1"
         );
     }
 

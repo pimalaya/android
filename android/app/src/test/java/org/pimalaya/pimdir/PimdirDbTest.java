@@ -515,14 +515,14 @@ public class PimdirDbTest {
      * §4.2, §4.5), and opens again.
      */
     @Test
-    public void aFreshStoreNamesItsDraftAndItsIdentity() {
+    public void aFreshStoreNamesItsVersionAndItsIdentity() {
         try (Cursor cursor =
                 db.rawQuery(
                         "SELECT format_version, store_id, incarnation, derivation, sync_version,"
                                 + " read_version, produce_version FROM store_meta",
                         null)) {
             assertTrue(cursor.moveToFirst());
-            assertEquals("storage-draft-17", cursor.getString(0));
+            assertEquals("storage-v1", cursor.getString(0));
             assertTrue(cursor.getString(1), cursor.getString(1).matches("[0-9a-f]{32}"));
             assertEquals(1, cursor.getInt(2));
             assertEquals(PimdirSql.identity().optLong("derivation"), cursor.getLong(3));

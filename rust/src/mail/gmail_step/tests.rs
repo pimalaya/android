@@ -692,7 +692,10 @@ struct Harness {
 impl Harness {
     fn new(gmail: &FakeGmail, labels: &[&'static str]) -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let store = PimdirStore::open(dir.path()).unwrap().for_source(SOURCE);
+        let store = PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source(SOURCE)
+            .unwrap();
         for label in labels {
             store.ensure_collection(*label, "message/rfc822").unwrap();
         }
